@@ -26,6 +26,16 @@ def test_heatmap_widget_no_data(qtbot: QtBot) -> None:
     heatmap_widget.close()
 
 
+def test_heatmap_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
+    heatmap_widget = HeatmapWidget()
+    qtbot.addWidget(heatmap_widget)
+
+    heatmap_widget._rebuild_context_menu()
+    action_texts = [action.text() for action in heatmap_widget.context_menu.actions()]
+    assert "Normalization…" in action_texts
+    heatmap_widget.close()
+
+
 @pytest.mark.parametrize(
     "relative_playback_speed", [0.25, 0.66, 1.0, 1.71234, 2.0, 3.0]
 )

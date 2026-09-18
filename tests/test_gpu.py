@@ -66,12 +66,16 @@ def test_torch_gpu_status_cpu_only_gives_install_hint(monkeypatch):
 
 
 def test_torch_gpu_status_torch_missing(monkeypatch):
+    from neuroseq.gpu import INSTALL_GPU_TORCH_HINT
+    from neuroseq.gpu import INSTALL_GPU_TORCH_HINT_PIP
     from neuroseq.gpu import torch_gpu_status
 
     monkeypatch.setitem(sys.modules, "torch", None)  # `import torch` -> ImportError
     available, message = torch_gpu_status()
     assert available is False
-    assert "not available" in message
+    assert "could not be imported" in message
+    assert INSTALL_GPU_TORCH_HINT in message
+    assert INSTALL_GPU_TORCH_HINT_PIP in message
 
 
 def test_warn_if_gpu_unavailable_no_dialog_when_gpu_present(monkeypatch, mocker):

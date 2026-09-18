@@ -73,7 +73,7 @@ def pytest_addoption(parser):
         "--update-screenshot",
         action="store_true",
         default=False,
-        help="Update screenshot.png",
+        help="Update screenshot reference images",
     )
 
 
@@ -85,7 +85,7 @@ def pytest_collection_modifyitems(config, items):
     else:
         for item in items:
             if "screenshot" in item.keywords:
-                item.add_marker(pytest.mark.skip(reason="Skipping screenshot update"))
+                item.add_marker(pytest.mark.skip(reason="Screenshot tests are opt-in"))
 
 
 @pytest.fixture(autouse=True)

@@ -4,6 +4,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.gui_settings import GuiSettings
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.llm import available_backends
 from neuroseq.llm.anthropic_backend import AnthropicBackend
 from neuroseq.llm.backend import LLMBackend
@@ -14,11 +15,16 @@ from neuroseq.llm.secrets import delete_api_key
 from neuroseq.llm.secrets import set_api_key
 
 
-class LLMSettingsDialog(QtWidgets.QDialog):
+class LLMSettingsDialog(_SelfRaisingDialog):
+    """Non-modal dialog, so no Qt parent (see _SelfRaisingDialog's
+    docstring): a parent sets WM_TRANSIENT_FOR, and on X11/KWin a transient
+    dialog can end up sharing its owner's "raise group" so clicking it
+    never brings it above another sibling popup."""
+
     settings_changed = QtCore.Signal()
 
-    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(parent)
+    def __init__(self) -> None:
+        super().__init__()
         self.setModal(False)
         self.setWindowTitle("LLM assistant settings")
         self._loading = False

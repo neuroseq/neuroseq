@@ -476,7 +476,7 @@ def test_custom_mapping_duplicate_stimulus_ids_error(tmp_path, qtbot, monkeypatc
 
     dialog.import_data()
 
-    assert "Custom mapping would assign stimulus ID 3" in captured.get("text", "")
+    assert "Custom mapping would assign input ID 3" in captured.get("text", "")
     dialog.close()
 
 

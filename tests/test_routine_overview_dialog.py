@@ -24,6 +24,14 @@ def test_routine_overview_unknown_routine_returns_none() -> None:
     assert routine_overview("not a routine") is None
 
 
+def test_selector_has_no_qt_parent(qtbot: QtBot) -> None:
+    """No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front."""
+    dialog = RoutineSelectorDialog(list(StimEditor.DYNAMIC_INPUT_ROUTINES))
+    qtbot.addWidget(dialog)
+    assert dialog.parent() is None
+
+
 def test_selector_shows_preview_for_initial_selection(qtbot: QtBot) -> None:
     dialog = RoutineSelectorDialog(list(StimEditor.DYNAMIC_INPUT_ROUTINES))
     qtbot.addWidget(dialog)

@@ -4,6 +4,8 @@ import pylinalg
 from fastplotlib import Graphic
 
 DTYPE = "f4"
+_DEFAULT_GRID_COLOR = (0.3, 0.3, 0.3, 0.4)
+_DEFAULT_SHADING_COLOR = (0.0, 0.0, 0.0, 0.05)
 
 
 def _normalize_dt_ms(dt_ms: float) -> float:
@@ -28,14 +30,19 @@ def _gridline_coords(n_neurons: int, time_ms: float, dt_ms: float) -> np.ndarray
 
 
 def generate_gridlines(
-    n_neurons: int, time_ms: float, dt_ms: float, thickness: float
+    n_neurons: int,
+    time_ms: float,
+    dt_ms: float,
+    thickness: float,
+    color: tuple[float, float, float, float] = _DEFAULT_GRID_COLOR,
 ) -> pygfx.Line:
     """Generate vertical gridlines for a timeseries plot."""
     coords = _gridline_coords(n_neurons, time_ms, dt_ms)
 
-    color = pygfx.Color((0.3, 0.3, 0.3, 0.4))
     geometry = pygfx.Geometry(positions=coords)
-    material = pygfx.LineSegmentMaterial(thickness=thickness, aa=True, color=color)
+    material = pygfx.LineSegmentMaterial(
+        thickness=thickness, aa=True, color=pygfx.Color(color)
+    )
     return pygfx.Line(geometry, material)
 
 
@@ -43,10 +50,13 @@ def _stripe_geometry(time_ms: float) -> pygfx.Geometry:
     return pygfx.plane_geometry(time_ms, 1)
 
 
-def generate_stripes(n_neurons: int, time_ms: float) -> pygfx.InstancedMesh:
+def generate_stripes(
+    n_neurons: int,
+    time_ms: float,
+    color: tuple[float, float, float, float] = _DEFAULT_SHADING_COLOR,
+) -> pygfx.InstancedMesh:
     """Generate horizontal zebra-stripes for a timeseries plot."""
-    color = pygfx.Color((0.0, 0.0, 0.0, 0.05))
-    material = pygfx.MeshBasicMaterial(color=color)
+    material = pygfx.MeshBasicMaterial(color=pygfx.Color(color))
     geometry = _stripe_geometry(time_ms)
     n_stripes = n_neurons // 2
     # create an instanced mesh with an instance for each stripe
@@ -61,35 +71,64 @@ def generate_stripes(n_neurons: int, time_ms: float) -> pygfx.InstancedMesh:
 
 
 class GridLines(Graphic):
-    def __init__(self, n_neurons: int, time_ms: float, dt_ms: float = 1.0):
+    def __init__(
+        self,
+        n_neurons: int,
+        time_ms: float,
+        dt_ms: float = 1.0,
+        grid_color: tuple[float, float, float, float] = _DEFAULT_GRID_COLOR,
+        shading_color: tuple[float, float, float, float] = _DEFAULT_SHADING_COLOR,
+    ):
         """Create gridlines for a timeseries plot."""
         super().__init__()
         self.n_neurons = int(n_neurons)
         self.time_ms = float(time_ms)
         self.dt_ms = _normalize_dt_ms(dt_ms)
+        self.grid_color = grid_color
+        self.shading_color = shading_color
         self._group = pygfx.Group()
         self._stripes = None
         if n_neurons > 1:
-            self._stripes = generate_stripes(n_neurons, self.time_ms)
+            self._stripes = generate_stripes(
+                n_neurons, self.time_ms, self.shading_color
+            )
             self._group.add(self._stripes)
         self.gridline_1sample = generate_gridlines(
-            n_neurons, self.time_ms, self.dt_ms, 0.2
+            n_neurons, self.time_ms, self.dt_ms, 0.2, self.grid_color
         )
         self._group.add(self.gridline_1sample)
         self.gridline_10samples = generate_gridlines(
-            n_neurons, self.time_ms, 10.0 * self.dt_ms, 1
+            n_neurons, self.time_ms, 10.0 * self.dt_ms, 1, self.grid_color
         )
         self._group.add(self.gridline_10samples)
         self.gridline_100samples = generate_gridlines(
-            n_neurons, self.time_ms, 100.0 * self.dt_ms, 2
+            n_neurons, self.time_ms, 100.0 * self.dt_ms, 2, self.grid_color
         )
         self._group.add(self.gridline_100samples)
         self.gridline_1000samples = generate_gridlines(
-            n_neurons, self.time_ms, 1000.0 * self.dt_ms, 3
+            n_neurons, self.time_ms, 1000.0 * self.dt_ms, 3, self.grid_color
         )
         self._group.add(self.gridline_1000samples)
         self._set_world_object(self._group)
         self.set_current_time_extent(time_ms)
+
+    def set_colors(
+        self,
+        grid_color: tuple[float, float, float, float],
+        shading_color: tuple[float, float, float, float],
+    ) -> None:
+        """Recolor grid lines and alternating row shading in place."""
+        self.grid_color = grid_color
+        self.shading_color = shading_color
+        for graphic in (
+            self.gridline_1sample,
+            self.gridline_10samples,
+            self.gridline_100samples,
+            self.gridline_1000samples,
+        ):
+            graphic.material.color = pygfx.Color(grid_color)
+        if self._stripes is not None:
+            self._stripes.material.color = pygfx.Color(shading_color)
 
     def _update_gridline_geometries(self) -> None:
         self.gridline_1sample.geometry = pygfx.Geometry(
@@ -136,7 +175,9 @@ class GridLines(Graphic):
             self._group.remove(self._stripes)
             self._stripes = None
         if self.n_neurons > 1:
-            self._stripes = generate_stripes(self.n_neurons, self.time_ms)
+            self._stripes = generate_stripes(
+                self.n_neurons, self.time_ms, self.shading_color
+            )
             self._group.add(self._stripes)
         self._update_gridline_geometries()
 

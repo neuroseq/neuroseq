@@ -373,7 +373,88 @@ def test_plots_open_in_separate_window(qtbot) -> None:
 
     assert dialog.plot_window is not dialog
     assert dialog.plot_window.isWindow()
-    assert dialog.window_plot.parent() is dialog.plot_window
+    assert dialog.window_plot.window() is dialog.plot_window
+
+
+def test_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
+    assert dialog.stim_heatmap_window.isWindow()
+
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
+
+
+def test_updates_stim_heatmap_as_blocks_are_appended(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    stim = editor.current_stim_modifier.stim_array
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+
+def test_stim_heatmap_shows_only_targeted_neurons_and_traces(
+    qtbot, monkeypatch
+) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _patch_directional_measurement(monkeypatch, dialog)
+    stim = editor.current_stim_modifier.stim_array
+    # a much bigger, unrelated pulse on neuron 2 (not targeted by this
+    # sweep, which targets the default presynaptic=0/postsynaptic=1) must
+    # not wash out the targeted neurons' own pulses in the heatmap's color
+    # scale.
+    stim.values[0, 2] = 1000.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
+    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
+    assert labels == ["0", "1"]
+    # every one of the targeted neurons' own nonzero samples is fully
+    # opaque, regardless of the much bigger unrelated pulse on neuron 2
+    # (alpha is no longer proportional to magnitude at all)
+    own_values = stim.values[:, [0, 1]].T
+    assert np.array_equal(array[..., 3] > 0, own_values != 0)
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 2
+
+
+def test_forwards_theme_to_stim_heatmap(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
+def test_weight_readout_mode_leaves_stim_heatmap_traces_empty(qtbot) -> None:
+    """In weight-readout mode there's no voltage trace selected (cmb_trace
+    is hidden) - the relevant readout is synaptic weight, not a per-neuron
+    voltage trace, so the popup's trace panel should stay empty rather than
+    plot a stale/irrelevant trace."""
+    project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    _use_weight_readout(project, dialog)
+
+    dialog._update_stim_heatmap()
+
+    assert len(dialog.stim_heatmap_window.trace_axes.lines) == 0
+    # the heatmap itself still shows the targeted neurons' input pattern
+    assert dialog.stim_heatmap_window._image is not None
 
 
 def test_matplotlib_plots_follow_theme(qtbot) -> None:
@@ -538,3 +619,27 @@ def test_wheel_over_field_does_not_change_value(qtbot) -> None:
     assert dialog._wheel_filter.eventFilter(spin, wheel) is True
     QtWidgets.QApplication.sendEvent(spin, wheel)
     assert spin.value() == before
+
+
+def test_stdp_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.75)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.75
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.75]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"

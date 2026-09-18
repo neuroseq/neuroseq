@@ -125,6 +125,19 @@ def init_brian2_logging(log_level: str = "ERROR") -> None:
     b2.prefs["logging"]["file_log"] = False
     b2.prefs["logging"]["save_script"] = False
     b2.prefs["logging"]["std_redirection"] = False
+    # The numpy codegen target's special functions (e.g. exprel, used by this
+    # project's HH-neuron rate equations) register their numpy implementation
+    # lazily, on the network's first assembly - and with the default
+    # discard_units=False, every call thereafter routes through a
+    # unit-checking wrapper that is roughly an order of magnitude slower than
+    # the raw numpy call. That's invisible for a single one-off "Simulate"
+    # click, but devastating for a dynamic-input routine's closed loop, which
+    # can call run() hundreds of times in a row after that one rebuild.
+    # discard_units=True only skips the redundant runtime unit-consistency
+    # check inside these special-function wrappers - Brian2 always converts
+    # to plain (already-unit-correct) floats before calling into numpy-target
+    # generated code regardless of this setting, so it changes no results.
+    b2.prefs["codegen.runtime.numpy.discard_units"] = True
     b2.BrianLogger.initialize()
 
 

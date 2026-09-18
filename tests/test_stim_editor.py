@@ -26,9 +26,24 @@ from neuroseq.utils import InteractMode
 
 class MockStimIntensityDialog:
     draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
+    draw_stim_length = 1
+    # Set by __init__ each time the dialog is constructed, so a test can
+    # assert what choose_stim_intensity() passed in without keeping a
+    # reference to the (never-stored) dialog instance itself.
+    received_draw_stim_length: int | None = None
+    received_dt_seconds: float | None = None
 
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(
+        self,
+        draw_stim,
+        stim_units,
+        stim_type,
+        draw_stim_length,
+        dt_seconds,
+        parent=None,
+    ):
+        MockStimIntensityDialog.received_draw_stim_length = draw_stim_length
+        MockStimIntensityDialog.received_dt_seconds = dt_seconds
 
     def exec(self) -> bool:
         return True
@@ -45,9 +60,63 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     stim_editor.close()
 
 
-def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
+def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> None:
+    """Draw-mode and select-mode actions take toolbar/menu space only in their
+
+    own mode, rather than merely greying out (issue #535 space optimization).
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    # default mode is DRAW
+    assert all(action.isVisible() for action in stim_editor.actions_draw)
+    assert all(not action.isVisible() for action in stim_editor.actions_edit)
+
+    stim_editor.set_mode(InteractMode.SELECT)
+    assert all(not action.isVisible() for action in stim_editor.actions_draw)
+    assert all(action.isVisible() for action in stim_editor.actions_edit)
+
+    stim_editor.set_mode(InteractMode.DRAW)
+    assert all(action.isVisible() for action in stim_editor.actions_draw)
+    assert all(not action.isVisible() for action in stim_editor.actions_edit)
+    stim_editor.close()
+
+
+def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> None:
+    """Draw input / Erase input / Set input value/length… are specific to Draw
+
+    mode, so they sit right after the Draw mode toggle - between it and
+    Select mode - rather than far below near Undo/Redo (issue #535).
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    texts = [a.text() for a in toolbar.actions()]
+    draw_mode_index = texts.index("Draw mode (1)")
+    select_mode_index = texts.index("Select mode (2)")
+    assert texts[draw_mode_index + 1 : select_mode_index] == [
+        "Draw input",
+        "Erase input",
+        "Set input value/length…",
+    ]
+    stim_editor.close()
+
+
+def test_selection_actions_sit_directly_under_select_mode_button(
     qtbot: QtBot,
 ) -> None:
+    """Select all / Copy / Cut / Paste / etc. are specific to Select mode, so
+
+    they sit right after the Select mode toggle - the mirror image of the
+    drawing tools under Draw mode - rather than far below near Undo/Redo
+    (issue #535).
+    """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -55,12 +124,114 @@ def test_trim_to_mapped_neurons_action_sits_right_after_clear_stim_array(
     qtbot.addWidget(stim_editor)
 
     actions = toolbar.actions()
-    clear_index = next(
-        i for i, action in enumerate(actions) if action.text() == "Clear stim array"
-    )
+    texts = [a.text() for a in actions]
+    select_mode_index = texts.index("Select mode (2)")
+    # Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons, Pad/Trim/
+    # Loop stim array, Design static/dynamic input, and Show all stim arrays
+    # all moved out of this toolbar (issue #535), so the next thing here
+    # after the selection actions is Undo.
+    undo_index = texts.index("Undo (Ctrl+Z)")
+    assert actions[undo_index - 1].isSeparator()
+    assert texts[select_mode_index + 1 : undo_index - 1] == [
+        "Set amplitude",
+        "Select all (Ctrl+A)",
+        "Copy (Ctrl+C)",
+        "Cut (Ctrl+X)",
+        "Paste (Ctrl+V)",
+        "Paste inverted (Ctrl+Shift+V)",
+        "Save to file",
+        "Load from file",
+        "Delete selected input region",
+    ]
+    stim_editor.close()
 
-    assert actions[clear_index + 1] is stim_editor.action_trim_to_mapped_neurons
+
+def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
+    qtbot: QtBot,
+) -> None:
+    """Create/Edit/Delete/Clear input array and Trim to Mapped Neurons moved
+
+    to a dropdown in the top Data toolbar next to the stim data combobox
+    (issue #535) - Gui._add_stim_array_ops_button_to_data_toolbar() adds
+    them there. They stay registered on the "Actions" context menu, in the
+    same order, but no longer duplicate onto this left toolbar.
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    array_op_names = [
+        "Create input array",
+        "Edit input array",
+        "Delete input array",
+        "Clear input array",
+        "Trim to Mapped Neurons…",
+    ]
+    toolbar_texts = {a.text() for a in toolbar.actions()}
+    assert toolbar_texts.isdisjoint(array_op_names)
+
+    context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
+    assert [t for t in context_menu_texts if t in array_op_names] == array_op_names
     assert not stim_editor.action_trim_to_mapped_neurons.isEnabled()
+    stim_editor.close()
+
+
+def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None:
+    """Pad/Trim/Loop stim array moved to the stim array ops dropdown in the
+
+    top Data toolbar too (issue #535), alongside the array lifecycle
+    actions. They stay registered on the "Actions" context menu, in the
+    same order, but no longer duplicate onto this left toolbar.
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    time_op_names = [
+        "Pad input array (Ctrl+Shift+Plus)",
+        "Trim input array (Ctrl+Shift+Minus)",
+        "Loop input array",
+    ]
+    toolbar_texts = {a.text() for a in toolbar.actions()}
+    assert toolbar_texts.isdisjoint(time_op_names)
+
+    context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
+    assert [t for t in context_menu_texts if t in time_op_names] == time_op_names
+    stim_editor.close()
+
+
+def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
+    qtbot: QtBot,
+) -> None:
+    """Design static input / Design dynamic input / Show all input arrays
+
+    moved to the top View toolbar (issue #535) -
+    Gui._add_stim_design_buttons_to_view_toolbar and the Show all stim
+    arrays action reused directly in Gui._create_actions_view. They stay
+    registered on the "Actions" context menu, in the same order, but no
+    longer duplicate onto this left toolbar.
+    """
+    cmb_stim = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    controller = ConstrainedPanZoomController()
+    stim_editor = StimEditor(controller, cmb_stim, toolbar)
+    qtbot.addWidget(stim_editor)
+
+    design_op_names = [
+        "Design static input",
+        "Design dynamic input",
+        "Show all input arrays",
+    ]
+    toolbar_texts = {a.text() for a in toolbar.actions()}
+    assert toolbar_texts.isdisjoint(design_op_names)
+
+    context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
+    assert [t for t in context_menu_texts if t in design_op_names] == design_op_names
+    assert stim_editor.action_show_all_stim_arrays.isChecked()
     stim_editor.close()
 
 
@@ -460,7 +631,7 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
         qtbot.waitUntil(lambda s=selector: not s.isVisible())
         dialog = getattr(stim_editor, attr)
         assert dialog is not None
-        assert dialog.btn_reset.text() == "Reset stim array"
+        assert dialog.btn_reset.text() == "Reset input array"
         dialog.close()
         qtbot.waitUntil(lambda d=dialog: not d.isVisible())
     stim_editor.close()
@@ -649,9 +820,19 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     stim_editor.close()
 
 
-def test_choose_stim_length_snaps_to_selected_stim_dt(
+def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
+    """ "Draw designer stimuli" and "Modify stimulus length" were merged into
+
+    one "Set input value/length…" dialog/action (issue #535); choose_stim_intensity
+    now carries the stim length through StimIntensityDialog too.
+    """
+    monkeypatch.setattr(
+        neuroseq.stim_editor,
+        "StimIntensityDialog",
+        MockStimIntensityDialog,
+    )
     project = Project()
     project.add_stim_array(
         StimArray(
@@ -670,45 +851,32 @@ def test_choose_stim_length_snaps_to_selected_stim_dt(
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
     stim_editor.set_project(project)
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
+    stim_editor.draw_stim_length = 5
 
-    stim_editor.choose_stim_length()
+    MockStimIntensityDialog.draw_stim_length = 9
+    stim_editor.choose_stim_intensity()
 
-    assert stim_editor.draw_stim_length == 2
-    assert stim_editor._draw_stim_length_milliseconds() == approx(1.041625)
+    # the dialog is constructed with the editor's current length/dt...
+    assert MockStimIntensityDialog.received_draw_stim_length == 5
+    assert MockStimIntensityDialog.received_dt_seconds == approx(0.0005208125)
+    # ...and the editor adopts whatever the dialog reports back on accept.
+    assert stim_editor.draw_stim_length == 9
     stim_editor.close()
 
 
-def test_choose_stim_length_rejects_non_finite_input(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list[dict[str, str]]
+def test_stim_editor_left_toolbar_has_one_design_stimulus_action(
+    qtbot: QtBot,
 ) -> None:
-    project = Project()
-    project.add_stim_array(
-        StimArray(
-            "a",
-            neuroseq.stim.StimType.Excitation,
-            np.zeros((10, 2), dtype=np.float32),
-            "mV",
-            0.001,
-        )
-    )
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
-    stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
-    stim_editor.set_project(project)
-    stim_editor.draw_stim_length = 3
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("inf", True))
 
-    stim_editor.choose_stim_length()
-
-    assert stim_editor.draw_stim_length == 3
-    assert qmessagebox_calls[-1]["name"] == "critical"
-    assert qmessagebox_calls[-1]["title"] == "Invalid input"
-    assert "positive number of milliseconds" in qmessagebox_calls[-1]["text"]
+    texts = [a.text() for a in toolbar.actions()]
+    assert texts.count("Set input value/length…") == 1
+    assert "Draw designer stimuli" not in texts
+    assert "Modify stimulus length" not in texts
     stim_editor.close()
 
 
@@ -944,12 +1112,17 @@ def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> Non
             time_slice,
         )
     )
+    fake_editor._stim_data_modified = lambda: StimEditor._stim_data_modified(
+        fake_editor
+    )
 
+    project.dirty = False  # reset after the add_stim_array() setup above
     StimEditor.draw_stim_region(fake_editor, slice(0, 1), slice(1, 2))
 
     assert project.stim_arrays["igor_wave"].values.shape == (2, 1)
     assert project.stim_arrays["igor_wave"].values[1, 0] == approx(2.5)
     assert draw_calls == [(slice(0, 1), slice(1, 2), 2.5)]
+    assert project.dirty is True
 
 
 def test_create_stim_array_defaults_to_one_millisecond_without_selection(
@@ -1231,7 +1404,7 @@ def test_open_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     assert selector.windowTitle() == "Design dynamic input"
     assert _routine_combo_items(selector) == [
         "Targeted STDP synaptic strength",
-        "Minimal stimulus for spiking (rheobase)",
+        "Minimal input for spiking (rheobase)",
         "STDP timing window (LTP/LTD vs Δt)",
     ]
     # The preview is always on: the initial selection already shows goal text
@@ -1274,6 +1447,24 @@ def test_open_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
 
     assert stim_editor._rheobase_dialog is not None
     assert stim_editor._rheobase_dialog.isVisible()
+    stim_editor.close()
+
+
+def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
+    """A parent sets WM_TRANSIENT_FOR on X11; on KWin the routine dialog and
+    its own two popups (also parentless) would then all share one owner and
+    get treated as a single "raise group" that can't be reordered by
+    clicking any individual member - not even this dialog itself."""
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    stim_editor.open_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector._on_continue()
+
+    assert stim_editor._rheobase_dialog is not None
+    assert stim_editor._rheobase_dialog.parent() is None
     stim_editor.close()
 
 

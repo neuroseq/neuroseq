@@ -15,8 +15,11 @@ from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
+from neuroseq.input_designer_dialog import StimHeatmapWindow
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.input_designer_dialog import _set_native_minimized_position
 from neuroseq.input_designer_dialog import _WheelToScrollFilter
+from neuroseq.input_designer_dialog import _wrap_in_scroll_area
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
 from neuroseq.stdp_window import classify_window
@@ -41,7 +44,7 @@ class _NoEpspDetected(ValueError):
     """
 
 
-class StdpWindowDialog(QtWidgets.QDialog):
+class StdpWindowDialog(_SelfRaisingDialog):
     """Sweep spike timing to measure the functional STDP timing window."""
 
     simulation_requested = QtCore.Signal(float)
@@ -70,6 +73,8 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self.project = editor.project
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
         self._delta_ts: list[float] = []
         self._index = 0
@@ -102,7 +107,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self.lbl_stim_units = QtWidgets.QLabel("-", self)
         self.lbl_stim_dt = QtWidgets.QLabel("-", self)
         self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
-        info_form.addRow("Stim array:", self.lbl_stim_name)
+        info_form.addRow("Input array:", self.lbl_stim_name)
         info_form.addRow("Units:", self.lbl_stim_units)
         info_form.addRow("dt:", self.lbl_stim_dt)
         info_form.addRow("Neurons:", self.lbl_stim_neurons)
@@ -256,7 +261,11 @@ class StdpWindowDialog(QtWidgets.QDialog):
             lambda _index: self._update_estimate()
         )
 
-        self.plot_window = QtWidgets.QDialog(self)
+        # No Qt parent for the popups - see StimHeatmapWindow's construction
+        # in input_designer_dialog.py for why (KWin/X11 groups a whole chain
+        # of transient windows sharing one owner, so clicking one never
+        # brings it above a sibling in the same chain).
+        self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -264,13 +273,20 @@ class StdpWindowDialog(QtWidgets.QDialog):
         plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
         plot_layout.setContentsMargins(2, 2, 2, 2)
         self.window_plot = MatplotlibWidget(self.plot_window)
-        self.window_plot.setMinimumHeight(500)
+        self.window_plot.setMinimumSize(680, 500)
         figure = self.window_plot.getFigure()
         grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.18)
         self.window_axes = figure.add_subplot(grid[0, 0])
         self.trajectory_axes = figure.add_subplot(grid[1, 0])
-        plot_layout.addWidget(self.window_plot)
+        plot_layout.addWidget(_wrap_in_scroll_area(self.window_plot, self.plot_window))
         self.plot_window.resize(720, 560)
+
+        # A third popup: a live, whole-history heatmap of the input pattern
+        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
+        self.stim_heatmap_window = StimHeatmapWindow(
+            "STDP timing window (LTP/LTD vs Δt) — stimulation pattern"
+        )
+        self._stim_heatmap_window_positioned = False
 
         self.lbl_status = QtWidgets.QLabel("STDP window: waiting for baseline", self)
         layout.addWidget(self.lbl_status)
@@ -294,25 +310,33 @@ class StdpWindowDialog(QtWidgets.QDialog):
             QtWidgets.QPushButton,
             buttons.addButton("Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole),
         )
+        self.btn_pause = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Pause", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+            ),
+        )
         self.btn_clear = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Clear input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Reset input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset.setToolTip(
-            "Trim the stim array back to the simulation head so the routine does "
+            "Trim the input array back to the simulation head so the routine does "
             "not run a long empty tail."
         )
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
+        self.btn_pause.clicked.connect(self.toggle_pause)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
         self.btn_reset.clicked.connect(self.editor.reset_stim_array)
         buttons.rejected.connect(self.close)
@@ -355,12 +379,36 @@ class StdpWindowDialog(QtWidgets.QDialog):
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
+        self.stim_heatmap_window.show()
+        if not self._stim_heatmap_window_positioned:
+            self._stim_heatmap_window_positioned = True
+            self.stim_heatmap_window.position_below(self.plot_window)
+        self.stim_heatmap_window.raise_()
+        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
+        self.stim_heatmap_window.close()
         super().closeEvent(event)
+
+    def _update_stim_heatmap(self) -> None:
+        modifier = self.editor.current_stim_modifier
+        stim = modifier.stim_array if modifier is not None else None
+        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
+        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
+
+    def _heatmap_trace(self) -> TraceData | None:
+        # In weight-readout mode there's no voltage trace selected (cmb_trace
+        # is hidden) - the relevant readout is synaptic weight, not a
+        # per-neuron voltage trace, so leave the popup's trace panel empty.
+        if self.project is None or self._weight_mode():
+            return None
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
+            return None
+        return self.project.get_data(trace_name, TraceData)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)
@@ -492,10 +540,10 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def start(self) -> None:
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
-            self._append_log("No stimulation array is selected.")
+            self._append_log("No input array is selected.")
             return
         if not self._confirm_start_over_existing_input():
-            self._append_log("Routine cancelled; existing stimulation input kept.")
+            self._append_log("Routine cancelled; existing input kept.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -522,6 +570,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             )
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
+            self.btn_pause.setEnabled(True)
             self._append_log(
                 "Running an initial 0.001 s simulation to create monitors."
             )
@@ -553,6 +602,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._checkpoint = None
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        self.btn_pause.setEnabled(True)
         if clear_log:
             self.log.clear()
         self._append_log(
@@ -592,10 +642,23 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def stop(self) -> None:
         self._finish("Routine stopped.")
 
+    def toggle_pause(self) -> None:
+        self._paused = not self._paused
+        self.btn_pause.setText("Resume" if self._paused else "Pause")
+        if self._paused:
+            self._append_log("Paused - the routine will hold after its current step.")
+            return
+        self._append_log("Resumed.")
+        if self._pending_simulation_seconds is not None:
+            seconds = self._pending_simulation_seconds
+            self._pending_simulation_seconds = None
+            self._awaiting_simulation = True
+            self.simulation_requested.emit(seconds)
+
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
         if modifier is None:
-            raise RuntimeError("No stimulation array is selected.")
+            raise RuntimeError("No input array is selected.")
         return modifier.stim_array
 
     def _require_project(self) -> Project:
@@ -696,6 +759,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             self.editor.focus_time_range(
                 history_start * stim.dt, history_stop * stim.dt
             )
+        self._update_stim_heatmap()
         return start
 
     def _run_to_sample(self, stop_sample: int) -> None:
@@ -705,6 +769,12 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._request_simulation(run_seconds)
 
     def _request_simulation(self, seconds: float) -> None:
+        if self._paused:
+            self._pending_simulation_seconds = seconds
+            self._append_log(
+                "Paused - next iteration queued; click Resume to continue."
+            )
+            return
         self._awaiting_simulation = True
         self.simulation_requested.emit(seconds)
 
@@ -984,7 +1054,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
             return
         self._resolution_warning_logged = True
         self._append_log(
-            f"Stim dt is {one_sample_ms:.6g} ms; Δt values are snapped to that "
+            f"Input dt is {one_sample_ms:.6g} ms; Δt values are snapped to that "
             "grid, so finer spacing cannot be resolved."
         )
 
@@ -1104,6 +1174,7 @@ class StdpWindowDialog(QtWidgets.QDialog):
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.window_plot.draw()
+        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
@@ -1112,9 +1183,13 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _finish(self, message: str) -> None:
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds = None
         self._phase = "idle"
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.setText("Pause")
         self._append_log(message)
 
     def _append_log(self, message: str) -> None:
@@ -1133,19 +1208,18 @@ class StdpWindowDialog(QtWidgets.QDialog):
     def _prompt_existing_input_choice(self, names: list[str]) -> str:
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        box.setWindowTitle("Existing stimulation input")
+        box.setWindowTitle("Existing input")
         listed = "\n".join(f"  • {name}" for name in names)
         box.setText(
             "The routine appends its pairing and probe pulses after any existing "
-            "input, which lengthens every simulation. These stimulation arrays "
+            "input, which lengthens every simulation. These input arrays "
             f"already contain input:\n\n{listed}"
         )
         box.setInformativeText(
-            "Clear all stimulation arrays first, append after the existing input, "
-            "or cancel."
+            "Clear all input arrays first, append after the existing input, or cancel."
         )
         clear_button = box.addButton(
-            "Clear all stim arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+            "Clear all input arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
         )
         box.addButton("Append anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
         cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
@@ -1168,5 +1242,5 @@ class StdpWindowDialog(QtWidgets.QDialog):
         if choice == "clear":
             self.editor.clear_all_stim_arrays()
             self.refresh()
-            self._append_log("Cleared all stimulation arrays before starting.")
+            self._append_log("Cleared all input arrays before starting.")
         return True

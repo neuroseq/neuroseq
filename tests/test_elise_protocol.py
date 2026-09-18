@@ -228,7 +228,11 @@ def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
     qtbot.addWidget(gui)
     try:
         assert hasattr(gui, "elise_protocol_action")
-        # Default project is not an ELiSe project → disabled.
+        # Default project is not an ELiSe project → hidden, not just disabled
+        # (issue #535: these buttons shouldn't clutter the toolbar for every
+        # other kind of project).
+        assert not gui.elise_protocol_action.isVisible()
+        assert not gui.elise_replay_action.isVisible()
         assert not gui.elise_protocol_action.isEnabled()
         assert gui._elise_protocol_inputs() is None
 
@@ -254,6 +258,8 @@ def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
         )
         gui._refresh_elise_replay_action()
 
+        assert gui.elise_protocol_action.isVisible()
+        assert gui.elise_replay_action.isVisible()
         assert gui.elise_protocol_action.isEnabled()
         inputs = gui._elise_protocol_inputs()
         assert inputs is not None

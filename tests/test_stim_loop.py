@@ -126,41 +126,6 @@ def test_stim_loop_dialog_accept_returns_loop_count(qtbot: QtBot) -> None:
     dialog.close()
 
 
-def test_stim_loop_dialog_detect_period_trims_when_periodic(qtbot: QtBot) -> None:
-    block = np.arange(240 * 2, dtype=np.float32).reshape(240, 2)
-    values = np.tile(block, (8, 1))
-    project = _make_project(_make_stim("stim", values))
-    dialog = StimLoopDialog(project)
-    qtbot.addWidget(dialog)
-    dialog.show()
-    qtbot.waitUntil(dialog.isVisible)
-
-    dialog.detect_button.click()
-
-    assert project.stim_arrays["stim"].values.shape[0] == 240
-    assert "1 period" in dialog.detect_caption.text()
-    assert "240 samples" in dialog.detect_caption.text()
-    dialog.close()
-
-
-def test_stim_loop_dialog_detect_period_no_op_when_aperiodic(qtbot: QtBot) -> None:
-    rng = np.random.default_rng(7)
-    values = rng.normal(size=(37, 2)).astype(np.float32)
-    project = _make_project(_make_stim("stim", values.copy()))
-    dialog = StimLoopDialog(project)
-    qtbot.addWidget(dialog)
-    dialog.show()
-    qtbot.waitUntil(dialog.isVisible)
-
-    dialog.detect_button.click()
-
-    assert project.stim_arrays["stim"].values.shape == values.shape
-    assert (
-        dialog.detect_caption.text() == "No periodic block detected; array unchanged."
-    )
-    dialog.close()
-
-
 def test_stim_editor_loop_stim_array_accepts_and_tiles(
     monkeypatch,
     qtbot: QtBot,

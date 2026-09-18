@@ -441,7 +441,7 @@ def load_igor_csv_file(path: str | Path) -> IgorWave:
             ) from exc
 
     if not values:
-        raise ValueError("No numeric stimulation samples found in CSV file")
+        raise ValueError("No numeric input samples found in CSV file")
 
     return IgorWave(
         name=wave_name,
@@ -564,13 +564,13 @@ def import_igor_wave_into_stim_array(
     extend_to_fit: bool = True,
 ) -> IgorImportReport:
     if stim_array.values.ndim != 2:
-        raise ValueError("Target StimArray must be 2-dimensional")
+        raise ValueError("Target Input Array must be 2-dimensional")
     if (
         abs(float(stim_array.dt) - float(prepared_wave.target_dt))
         > _DT_TOLERANCE_SECONDS
     ):
         raise ValueError(
-            "Target StimArray dt must match the imported wave target dt "
+            "Target Input Array dt must match the imported wave target dt "
             f"({float(stim_array.dt):.9f}s != {float(prepared_wave.target_dt):.9f}s)"
         )
 

@@ -59,7 +59,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.project = project
         self.output_folder: pathlib.Path | None = None
 
-        self.setWindowTitle("Stimulation Script Generator")
+        self.setWindowTitle("Input Script Generator")
         self.setModal(True)
         self.resize(600, 500)
 
@@ -68,19 +68,19 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         # Header description
         description_label = QtWidgets.QLabel(
-            "Generate SysCon2 stimulation scripts from stim arrays and Cellpose segmentation."
+            "Generate SysCon2 input scripts from input arrays and Cellpose segmentation."
         )
         description_label.setWordWrap(True)
         main_layout.addWidget(description_label)
 
         # Stimulation selection group
-        stim_group = QtWidgets.QGroupBox("Stimulation Selection")
+        stim_group = QtWidgets.QGroupBox("Input Selection")
         stim_layout = QtWidgets.QVBoxLayout()
 
         stim_select_layout = QtWidgets.QHBoxLayout()
-        stim_label = QtWidgets.QLabel("Stimulation array:")
+        stim_label = QtWidgets.QLabel("Input array:")
         self.stim_combo = QtWidgets.QComboBox()
-        self.stim_combo.setToolTip("Select a stimulation array from the project")
+        self.stim_combo.setToolTip("Select an input array from the project")
 
         # Populate with stimulation arrays from project
         stim_names = list(self.project.stim_arrays.keys())
@@ -88,7 +88,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             for name in stim_names:
                 self.stim_combo.addItem(name)
         else:
-            self.stim_combo.addItem("(No stimulation arrays available)")
+            self.stim_combo.addItem("(No input arrays available)")
             self.stim_combo.setEnabled(False)
 
         stim_select_layout.addWidget(stim_label)
@@ -148,8 +148,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         self.binary_mode_checkbox.setChecked(True)
         self.binary_mode_checkbox.setToolTip(
-            "When unchecked, export preprocessing preserves input stim amplitudes "
-            "(clipped to [0, 1]) instead of normalizing ON samples to 1.0."
+            "When unchecked, export preprocessing preserves the array's original "
+            "amplitudes (clipped to [0, 1]) instead of normalizing ON samples to 1.0."
         )
         config_layout.addWidget(self.binary_mode_checkbox)
 
@@ -166,11 +166,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         config_layout.addWidget(self.spiralling_checkbox)
 
         self.ten_spots_per_roi_checkbox = QtWidgets.QCheckBox(
-            "Use 10 stimulation spots per ROI"
+            "Use 10 input spots per ROI"
         )
         self.ten_spots_per_roi_checkbox.setChecked(False)
         self.ten_spots_per_roi_checkbox.setToolTip(
-            "Place 10 evenly distributed stimulation spots inside each Cellpose mask."
+            "Place 10 evenly distributed input spots inside each Cellpose mask."
         )
         config_layout.addWidget(self.ten_spots_per_roi_checkbox)
 
@@ -202,7 +202,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.laser_combo.addItem("1100 nm digital", 1100)
         self.laser_combo.setCurrentIndex(self.laser_combo.findData(940))
         self.laser_combo.setToolTip(
-            "Select which fixed laser timeline receives stimulation TTLPulses."
+            "Select which fixed laser timeline receives input TTLPulses."
         )
         laser_layout.addWidget(laser_label)
         laser_layout.addWidget(self.laser_combo)
@@ -242,7 +242,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         self.config_data_edit = QtWidgets.QPlainTextEdit()
         self.config_data_edit.setMaximumHeight(150)
-        self.config_data_edit.setToolTip("HOLO4D sequence configuration data")
+        self.config_data_edit.setToolTip(
+            "HOLO4D sequence configuration data. Note: the laser/lightsource "
+            "ID and the invertedportcnt/inverted0 fields are always "
+            "recomputed from the laser selected above, overriding whatever "
+            "is typed here for those specific fields."
+        )
         default_config = self._default_syscon2_config_text()
         self.config_data_edit.setPlainText(default_config)
         config_layout.addWidget(self.config_data_edit)
@@ -312,7 +317,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
     def _update_stim_info(self) -> None:
         """Update the stimulation info label based on current selection."""
         stim_name = self.stim_combo.currentText()
-        if not stim_name or stim_name == "(No stimulation arrays available)":
+        if not stim_name or stim_name == "(No input arrays available)":
             self.stim_info_label.setText("")
             return
 
@@ -357,11 +362,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             return
 
         stim_name = self.stim_combo.currentText()
-        if not stim_name or stim_name == "(No stimulation arrays available)":
+        if not stim_name or stim_name == "(No input arrays available)":
             QtWidgets.QMessageBox.warning(
                 self,
-                "No Stimulation Selected",
-                "Please select a valid stimulation array.",
+                "No Input Selected",
+                "Please select a valid input array.",
             )
             return
 
@@ -370,9 +375,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
             # Get stimulation array
             if stim_name not in self.project.stim_arrays:
-                raise ValueError(
-                    f"Stimulation array '{stim_name}' not found in project"
-                )
+                raise ValueError(f"Input array '{stim_name}' not found in project")
 
             stim_array = self.project.stim_arrays[stim_name]
             hardware_type = self.hardware_combo.currentText()
@@ -470,18 +473,18 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
     def _check_input_sanity(self) -> None:
         """Run sanity check using the fixed 17ms->16.666ms export model."""
         stim_name = self.stim_combo.currentText()
-        if not stim_name or stim_name == "(No stimulation arrays available)":
+        if not stim_name or stim_name == "(No input arrays available)":
             QtWidgets.QMessageBox.warning(
                 self,
-                "No Stimulation Selected",
-                "Please select a valid stimulation array.",
+                "No Input Selected",
+                "Please select a valid input array.",
             )
             return
         if stim_name not in self.project.stim_arrays:
             QtWidgets.QMessageBox.critical(
                 self,
                 "Sanity Check Failed",
-                f"Stimulation array '{stim_name}' not found in project.",
+                f"Input array '{stim_name}' not found in project.",
             )
             return
 
@@ -517,8 +520,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                     "dt Updated — Array Cleared",
                     f"dt has been set to {_SYSCON2_TTL_PULSE_QUANTUM_S} s "
                     f"({_SYSCON2_TTL_PULSE_QUANTUM_S * 1e6:.4f} µs per tick).\n\n"
-                    "The stimulation array has been cleared.\n"
-                    "Please redraw your stimuli.",
+                    "The input array has been cleared.\n"
+                    "Please redraw your inputs.",
                 )
                 self._log_status(
                     "Set dt of '%s' to %s s and cleared all stimuli — please redraw.",
@@ -635,7 +638,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 self,
                 "Apply Sanity Fixes",
                 "Sanity check inserted blank load window(s) by shifting the timeline.\n"
-                "Apply the shift to the selected stimulation array now?",
+                "Apply the shift to the selected input array now?",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.Yes,
@@ -807,7 +810,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         text_lines = [
             (
-                "Detected stimulation transitions that violate the SLM load-time rule "
+                "Detected input transitions that violate the SLM load-time rule "
                 "(minimum 16.66 ms whenever a new neuron target appears)."
             ),
             "",
@@ -861,8 +864,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         text_lines = [
             (
-                "Detected simultaneous stimulation events with unequal durations. "
-                "All neurons stimulated together must have equal duration."
+                "Detected simultaneous input events with unequal durations. "
+                "All neurons activated together must have equal duration."
             ),
             "",
             f"Violations detected: {len(violations)}",
@@ -901,12 +904,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         shift_ms = required_start_ms
         text_lines = [
             (
-                "Detected stimulation too close to experiment start. "
-                "SysCon2 requires at least 16.66 ms before first stimulation "
+                "Detected input too close to experiment start. "
+                "SysCon2 requires at least 16.66 ms before first input "
                 "for initial SLM load-up."
             ),
             "",
-            f"First stimulation starts at: {first_start_ms:.2f}ms",
+            f"First input starts at: {first_start_ms:.2f}ms",
             f"Required minimum start: {required_start_ms:.2f}ms",
             "",
             "Choose how to resolve:",
@@ -939,7 +942,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Sanity Check Failed",
-                f"Stimulation array '{stim_name}' not found in project.",
+                f"Input array '{stim_name}' not found in project.",
             )
             return False
 
@@ -958,7 +961,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 target = self.project.stim_arrays[stim_name]
                 if target.values.shape != new_values.shape:
                     raise ValueError(
-                        "Automatic sanity fixes require matching stim-array shape."
+                        "Automatic sanity fixes require matching input-array shape."
                     )
                 target.values[:, :] = new_values
             return True

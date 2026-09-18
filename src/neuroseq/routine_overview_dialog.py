@@ -23,6 +23,7 @@ from qtpy import QtWidgets
 from qtpy.QtSvg import QSvgRenderer
 
 from neuroseq import theme as theme_module
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 
 _RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 
@@ -90,10 +91,10 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
         plot_title="Drive the EPSP to a target",
         plot=_plot_targeted_stdp,
     ),
-    "Minimal stimulus for spiking (rheobase)": RoutineOverview(
-        title="Minimal stimulus for spiking (rheobase)",
+    "Minimal input for spiking (rheobase)": RoutineOverview(
+        title="Minimal input for spiking (rheobase)",
         goal=(
-            "Find the smallest stimulus that makes a neuron fire — its rheobase. "
+            "Find the smallest input that makes a neuron fire — its rheobase. "
             "The routine sweeps the pulse amplitude (or duration) with a bisection "
             "search, checking after each probe whether the neuron crossed the "
             "spike threshold, and reports the minimal value that elicits a spike."
@@ -164,7 +165,7 @@ class _SvgImageWidget(QtWidgets.QWidget):
         self._renderer.render(painter, rect)
 
 
-class RoutineSelectorDialog(QtWidgets.QDialog):
+class RoutineSelectorDialog(_SelfRaisingDialog):
     """Pick a dynamic-input routine with its preview always shown below.
 
     A single window holds the routine dropdown and, beneath it, a live preview
@@ -172,6 +173,11 @@ class RoutineSelectorDialog(QtWidgets.QDialog):
     always on and updates as the selection changes, rather than living in a
     separate step. Emits :attr:`routine_chosen` with the selected routine name
     when the user clicks Continue; the caller opens the real routine dialog.
+
+    No Qt parent (see _SelfRaisingDialog's docstring): a parent sets
+    WM_TRANSIENT_FOR, and on X11/KWin a transient dialog can end up sharing
+    its owner's "raise group" so clicking it never brings it above another
+    sibling popup (e.g. a routine dialog still open from a previous choice).
     """
 
     routine_chosen = QtCore.Signal(str)
@@ -180,9 +186,8 @@ class RoutineSelectorDialog(QtWidgets.QDialog):
         self,
         routines: list[str],
         theme: str = theme_module.LIGHT,
-        parent: QtWidgets.QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__()
         self._theme = theme
         self.setWindowTitle("Design dynamic input")
         self.resize(520, 600)

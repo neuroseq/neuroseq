@@ -21,6 +21,7 @@ from neuroseq import __version__
 from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
@@ -50,6 +51,7 @@ from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
+from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
@@ -325,7 +327,10 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.setToolButtonStyle(QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly)
         toolbar.setStyleSheet("QToolButton { margin: 0px; padding: 2px 1px; }")
 
-    def __init__(self, filename: pathlib.Path | str | None = None) -> None:
+    def __init__(
+        self,
+        filename: pathlib.Path | str | Project | None = None,
+    ) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
@@ -371,6 +376,16 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
+        # The calcium video now lives in the second tab of the imaging panel;
+        # keep this attribute as a compatibility handle for timeline and
+        # project synchronization code.
+        self.calcium_video_widget = self.spatial_footprint_widget.calcium_video_widget
+        self.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+        self.calcium_video_widget.remove_requested.connect(
+            self._on_calcium_video_remove_requested
+        )
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         self.tab_bar = QtWidgets.QTabBar()
@@ -389,10 +404,8 @@ class Gui(QtWidgets.QMainWindow):
         self.toolbar_stim_editor.setOrientation(QtCore.Qt.Orientation.Vertical)
         self._configure_toolbar_icon_style(self.toolbar_stim_editor)
         main_horizontal_layout.addWidget(self.toolbar_stim_editor)
-        # left/right splitters between heatmap and console
+        # left/right splitters between custom analysis and console
         split_left_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
-        split_left_right.addWidget(self.heatmap_widget)
-        split_left_right.addWidget(self.spatial_footprint_widget)
         self.custom_analysis_widget = CustomAnalysisWidget(parent=self)
         split_left_right.addWidget(self.custom_analysis_widget)
         self.console_widget = ConsoleWidget(parent=self)
@@ -401,11 +414,26 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000, 1000, 1000])
+        split_left_right.setSizes([1000, 1000, 1000])
+        # synapses (heatmap) and cell segmentation (spatial footprint) stacked
+        # to the right of the stim editor
+        self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        self.split_stim_right.addWidget(self.heatmap_widget)
+        self.split_stim_right.addWidget(self.spatial_footprint_widget)
+        self.split_stim_right.setSizes([1000, 1400])
+        self.split_stim_right.setHandleWidth(3)
+        self._apply_right_splitter_style(self.settings.theme)
         # main vertical splitter layout
         split_vertical = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
         split_vertical.setHandleWidth(0)
         split_vertical.setChildrenCollapsible(False)
+        # The timeseries panels and the time slider all share one column, so
+        # they are always exactly as wide as each other and their time axes
+        # line up: a sample at a given x in the stim editor sits at the same x
+        # in the traces, the spikes and under the slider handle.
+        split_timeseries = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
+        split_timeseries.setHandleWidth(0)
+        split_timeseries.setChildrenCollapsible(False)
         self.stim_editor = StimEditor(
             controller=self.controller,
             cmb_stim=self.cmb_stim,
@@ -428,12 +456,13 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.neuron_hovered.connect(
             self._spatial_footprint_state.set_hovered_stim_id
         )
-        split_vertical.addWidget(self.stim_editor)
+        self._add_stim_array_ops_button_to_data_toolbar()
+        split_timeseries.addWidget(self.stim_editor)
         self.trace_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.trace_widget)
+        split_timeseries.addWidget(self.trace_widget)
         self.spike_widget = SpikeWidget(
             self.spike_controller,
             parent=self,
@@ -444,25 +473,36 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.spike_widget)
+        split_timeseries.addWidget(self.spike_widget)
         self.data_widget = DataWidget(self.controller, parent=self)
         self.data_widget.set_default_scroll_bars(
             self.stim_editor.x_scrollbar,
             self.stim_editor.y_scrollbar,
         )
-        split_vertical.addWidget(self.data_widget)
+        split_timeseries.addWidget(self.data_widget)
         self.time_slider = TimeSliderWidget(self)
-        self.plot_widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = [
+        self.plot_widgets: list[
+            TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
+        ] = [
             self.stim_editor.stim_widget,
             self.trace_widget,
             self.spike_widget,
             self.data_widget,
             self.heatmap_widget,
+            self.calcium_video_widget,
         ]
         for widget in self.plot_widgets:
             self.time_slider.connect_widget(widget)
         self.time_slider.time_changed.connect(self._on_time_changed)
-        split_vertical.addWidget(self.time_slider)
+        split_timeseries.addWidget(self.time_slider)
+        # Synapses / cell segmentation sit beside the whole timeseries column,
+        # not just beside the stim editor, so narrowing them widens every
+        # timeseries panel together.
+        split_timeseries_row = QtWidgets.QSplitter(QtCore.Qt.Orientation.Horizontal)
+        split_timeseries_row.addWidget(split_timeseries)
+        split_timeseries_row.addWidget(self.split_stim_right)
+        split_timeseries_row.setSizes([3000, 1000])
+        split_vertical.addWidget(split_timeseries_row)
         self.data_widget.setVisible(False)
         self.trace_widget.setVisible(False)
         self.spike_widget.setVisible(False)
@@ -663,6 +703,11 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+            self.calcium_video_widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
 
     def _update_combo_box(
         self,
@@ -708,7 +753,13 @@ class Gui(QtWidgets.QMainWindow):
         runs ``proceed`` only after the save completes; if the user backs out
         of the save dialog, ``proceed`` never runs and the current project is
         left untouched.
+
+        Skipped entirely (``proceed`` runs right away) when the active
+        project has no unsaved changes - see ``Project.dirty``.
         """
+        if not self.project.dirty:
+            proceed()
+            return
         answer = QtWidgets.QMessageBox.warning(
             self,
             title,
@@ -731,7 +782,14 @@ class Gui(QtWidgets.QMainWindow):
         self._create_new_project()
 
     def _prompt_save_before_close(self) -> bool:
-        """Return True when the current close event may continue immediately."""
+        """Return True when the current close event may continue immediately.
+
+        Skipped (returns True right away) when none of the open tabs have
+        unsaved changes - see ``Project.dirty``.
+        """
+        if not any(project.dirty for project in self.tabs):
+            self._close_confirmed = True
+            return True
         message = (
             "Closing NeuroSeq will discard any unsaved changes to the "
             "current project.\n\nSave the current project first?"
@@ -902,6 +960,7 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_saved(result: object) -> None:
             self.logger.info(f"Project saved to '{result}'.")
+            self.settings.add_recent_project(str(result))
             self._update_window_title()
             if on_success is not None:
                 on_success(result)
@@ -933,8 +992,8 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting.",
+                "No input entities",
+                "No input data entities available. Create one before exporting.",
             )
             return
 
@@ -943,7 +1002,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                "No stimulation array is currently selected for export.",
+                "No input array is currently selected for export.",
             )
             return
 
@@ -952,7 +1011,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Export error",
-                "The selected stimulation array has no neurons to export.",
+                "The selected input array has no neurons to export.",
             )
             return
 
@@ -1033,7 +1092,7 @@ class Gui(QtWidgets.QMainWindow):
             self,
             "Export Successful",
             f"Exported {fmt_label} for "
-            f"stimulus '{stim_name}', neuron {export_report.neuron_index}, "
+            f"input '{stim_name}', neuron {export_report.neuron_index}, "
             f"{export_report.sample_count} samples.{sweep_note}",
         )
 
@@ -1041,8 +1100,8 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before exporting.",
+                "No input entities",
+                "No input data entities available. Create one before exporting.",
             )
             return
 
@@ -1055,7 +1114,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Nothing selected",
-                "No stim arrays were selected for export.",
+                "No input arrays were selected for export.",
             )
             return
 
@@ -1100,6 +1159,7 @@ class Gui(QtWidgets.QMainWindow):
             self.project.b2_model, parent=self, project=self.project
         )
         if mdiag.exec():
+            self.project.mark_dirty()
             if mdiag.external_simulate_params is not None:
                 self.project.external_simulate_params = mdiag.external_simulate_params
             else:
@@ -1165,6 +1225,7 @@ class Gui(QtWidgets.QMainWindow):
             if not isinstance(result, Project):
                 return
             self.logger.info(f"Project loaded from {filename}")
+            self.settings.add_recent_project(str(filename))
             self.last_cellpose_import = clone_cellpose_result(result.cellpose_data)
             result.cellpose_data = self.last_cellpose_import
             _place(result)
@@ -1232,6 +1293,11 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+            self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+            self.calcium_video_widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
         # active project's position happened to be).
@@ -1262,7 +1328,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"The model has {model_count} neuron(s) but the Cellpose "
                 f"segmentation has {cellpose_count} cell(s).\n\n"
                 "These counts should match so that model neurons map one-to-one "
-                "onto segmented cells (e.g. for holographic stimulation export).",
+                "onto segmented cells (e.g. for holographic input export).",
             )
 
     def _expand_stim_arrays_to_neuron_count(
@@ -1318,11 +1384,11 @@ class Gui(QtWidgets.QMainWindow):
             if detected_neurons > current_max_neurons:
                 resize_reply = QtWidgets.QMessageBox.question(
                     self,
-                    "Resize Stim Arrays",
+                    "Resize Input Arrays",
                     "The imported Cellpose segmentation contains "
-                    f"{detected_neurons} cells, but the largest existing stimulation "
+                    f"{detected_neurons} cells, but the largest existing input "
                     f"array has {current_max_neurons} neurons.\n\n"
-                    "Expand all existing stimulation arrays to match the Cellpose "
+                    "Expand all existing input arrays to match the Cellpose "
                     "cell count?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
@@ -1418,6 +1484,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
         self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        self.spike_widget.set_neurons_greyed(newly_hidden, newly_shown)
 
     def _current_stim_array(self) -> StimArray | None:
         modifier = self.stim_editor.current_stim_modifier
@@ -1571,7 +1638,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Data import error",
-                f"Could not import data to Stim IDs: {e}",
+                f"Could not import data to Input IDs: {e}",
             )
             self.logger.exception(e)
             return
@@ -2126,6 +2193,48 @@ class Gui(QtWidgets.QMainWindow):
                 self._apply_cellpose_import_result(dialog.new_cellpose_result)
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.spatial_footprint_widget)
+            if dialog.imported_tif_paths:
+                self.project.set_calcium_video(
+                    dialog.imported_tif_paths, dialog.imported_fps
+                )
+                self.calcium_video_widget.set_video_paths(
+                    dialog.imported_tif_paths, dialog.imported_fps
+                )
+                if hasattr(self, "_auto_show_widget"):
+                    self._auto_show_widget(self.calcium_video_widget)
+
+    def _on_calcium_video_import_requested(self) -> None:
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
+            self,
+            "Select raw calcium video file(s)",
+            "",
+            "Video files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+            "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
+            "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
+        )
+        if not paths:
+            return
+        fps, ok = QtWidgets.QInputDialog.getDouble(
+            self, "Frame rate", "Frames per second:", DEFAULT_FS, 0.001, 10000.0, 3
+        )
+        if not ok:
+            return
+        tif_paths = [pathlib.Path(path) for path in paths]
+        self.project.set_calcium_video(tif_paths, fps)
+        self._refresh_calcium_video_widgets()
+        self._auto_show_widget(self.calcium_video_widget)
+
+    def _on_calcium_video_remove_requested(self) -> None:
+        self.project.set_calcium_video([], None)
+        self._refresh_calcium_video_widgets()
+
+    def _refresh_calcium_video_widgets(self) -> None:
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_cellpose_data(self.project.cellpose_data)
+            widget.set_stim_arrays(self.project.stim_arrays)
+            widget.set_video_paths(
+                self.project.calcium_video_paths, self.project.calcium_video_fps
+            )
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -2163,7 +2272,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
                 message += (
                     "\n\nExpanded "
-                    f"{len(resized_names)} stimulation array(s) to {detected_neurons} neurons."
+                    f"{len(resized_names)} input array(s) to {detected_neurons} neurons."
                 )
             QtWidgets.QMessageBox.information(
                 self,
@@ -2176,13 +2285,14 @@ class Gui(QtWidgets.QMainWindow):
         if not self.project.stim_arrays:
             QtWidgets.QMessageBox.information(
                 self,
-                "No stimulation entities",
-                "No stimulation data entities available. Create one before importing a SysCon2 sequence.",
+                "No input entities",
+                "No input data entities available. Create one before importing a SysCon2 sequence.",
             )
             return
 
         dialog = Syscon2ImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
@@ -2190,6 +2300,7 @@ class Gui(QtWidgets.QMainWindow):
     def btn_import_igor2_wave_clicked(self) -> None:
         dialog = IgorImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
@@ -2199,6 +2310,7 @@ class Gui(QtWidgets.QMainWindow):
 
         dialog = IgorTraceImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_trace_name:
                 combo_label = (
@@ -2217,6 +2329,7 @@ class Gui(QtWidgets.QMainWindow):
             self.project.cellpose_data = None
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
+            self.calcium_video_widget.set_cellpose_data(None)
 
     def _on_spatial_footprint_data_changed_for_trim_action(self) -> None:
         """Keep the left toolbar's "Trim to Mapped Neurons…" action enabled
@@ -2241,7 +2354,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Nothing to trim",
-                "No Cellpose stimulus mapping is set, so there is nothing to trim to.",
+                "No Cellpose input mapping is set, so there is nothing to trim to.",
             )
             return
         n_kept = len(mapping)
@@ -2259,7 +2372,7 @@ class Gui(QtWidgets.QMainWindow):
             "Trim to Cellpose-mapped neurons",
             f"This will permanently remove {n_removed} neuron(s) with no "
             f"Cellpose cell mapped to them, keeping the {n_kept} that do, "
-            "from every stim array and every experiment's trace/spike/synapse "
+            "from every input array and every experiment's trace/spike/synapse "
             "data in this project.\n\n"
             "This cannot be undone. You will be asked to save the result "
             "under a new file name.\n\n"
@@ -2358,7 +2471,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then import a light stimulus waveform."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Import light stimulus",
+            "Import light input",
             "Import from:",
             ["SysCon2"],
             0,
@@ -2373,11 +2486,11 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then import a patch-clamp stimulus waveform."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Import patch clamp stimulus",
+            "Import patch clamp input",
             (
                 "Patch-clamp convention:\n"
-                "  • Current Clamp (CC): the injected CURRENT is the stimulus\n"
-                "  • Voltage Clamp (VC): the commanded VOLTAGE is the stimulus\n"
+                "  • Current Clamp (CC): the injected CURRENT is the input\n"
+                "  • Voltage Clamp (VC): the commanded VOLTAGE is the input\n"
                 "\n"
                 "Import from:"
             ),
@@ -2426,7 +2539,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then export patch-clamp stimulus CSV."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Export patch clamp stimulus",
+            "Export patch clamp input",
             "Export for:",
             ["Igor2 - single array (.ibw / .csv)", "Igor2 - all arrays (.pxp)"],
             0,
@@ -2443,7 +2556,7 @@ class Gui(QtWidgets.QMainWindow):
         """Pre-dialog: choose software, then open the corresponding export flow."""
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
-            "Export light stimulus",
+            "Export light input",
             "Export for:",
             [
                 "SysCon2",
@@ -2636,8 +2749,8 @@ class Gui(QtWidgets.QMainWindow):
     def choose_stim_padding_secs(self) -> None:
         new_padding_secs, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Stimulus padding",
-            "Number of seconds of padding for stimuli beyond simulation time",
+            "Input padding",
+            "Number of seconds of padding for inputs beyond simulation time",
             QtWidgets.QLineEdit.EchoMode.Normal,
             f"{self.settings.stim_padding_secs}",
         )
@@ -2657,23 +2770,37 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def apply_theme(self, theme: str) -> None:
-        """Apply a light/dark theme to the whole application and all plots."""
+        """Apply a light/dark/retro theme to the whole application and all plots."""
         theme = theme_module.normalize_theme(theme)
         self.logger.info(f"Applying {theme} theme")
         theme_module.apply_app_theme(QtWidgets.QApplication.instance(), theme)
+        self._apply_right_splitter_style(theme)
         icons.apply_theme(theme)
         for widget in self.plot_widgets:
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
+        self.spatial_footprint_widget.apply_theme(theme)
         self.stim_editor.apply_input_designer_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
             action.setChecked(True)
         self.settings.theme = theme
 
+    def _apply_right_splitter_style(self, theme: str) -> None:
+        colors = {
+            theme_module.LIGHT: "#b8b8b8",
+            theme_module.DARK: "#555555",
+            theme_module.RETRO: "#7d8b9d",
+        }
+        if hasattr(self, "split_stim_right"):
+            color = colors.get(theme_module.normalize_theme(theme), "#b8b8b8")
+            self.split_stim_right.setStyleSheet(
+                f"QSplitter::handle {{ background-color: {color}; }}"
+            )
+
     def open_llm_settings(self) -> None:
         if self._llm_settings_dialog is None:
-            self._llm_settings_dialog = LLMSettingsDialog(self)
+            self._llm_settings_dialog = LLMSettingsDialog()
             self._llm_settings_dialog.settings_changed.connect(
                 self.chat_widget.reload_backend
             )
@@ -2687,6 +2814,44 @@ class Gui(QtWidgets.QMainWindow):
             "About neuroseq",
             f"NeuroSeq\n\nVersion {__version__}\n\n"
             + "https://github.com/ssciwr/neuroseq",
+        )
+
+    def _add_stim_array_ops_button_to_data_toolbar(self) -> None:
+        """Add a single dropdown button for the stim array lifecycle actions.
+
+        Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons, and
+        Pad/Trim/Loop stim array used to be eight separate buttons on the
+        stim editor's left toolbar (issue #535). They now live in one
+        dropdown next to the stim array combobox instead, reusing the
+        StimEditor QActions directly rather than duplicating them, so state
+        like Trim to Mapped Neurons' enabled/disabled status stays in sync
+        automatically no matter which menu shows it.
+        """
+        self.btn_stim_array_ops = QtWidgets.QToolButton(self.toolbar_data)
+        self.btn_stim_array_ops.setToolTip("Input array operations")
+        icons.set_widget_icon(self.btn_stim_array_ops, "mdi6.text-box-multiple-outline")
+        self.btn_stim_array_ops.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonIconOnly
+        )
+        self.btn_stim_array_ops.setPopupMode(
+            QtWidgets.QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self.stim_array_ops_menu = QtWidgets.QMenu(self.btn_stim_array_ops)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_create_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_edit_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_delete_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_clear_stim_array)
+        self.stim_array_ops_menu.addSeparator()
+        self.stim_array_ops_menu.addAction(
+            self.stim_editor.action_trim_to_mapped_neurons
+        )
+        self.stim_array_ops_menu.addSeparator()
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_pad_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_trim_stim_array)
+        self.stim_array_ops_menu.addAction(self.stim_editor.action_loop_stim_array)
+        self.btn_stim_array_ops.setMenu(self.stim_array_ops_menu)
+        self.toolbar_data.insertWidget(
+            self._stim_array_ops_anchor_action, self.btn_stim_array_ops
         )
 
     def _create_progressbar(self) -> None:
@@ -2726,14 +2891,13 @@ class Gui(QtWidgets.QMainWindow):
 
         self.menu_experiment = menu.addMenu("&Experiment")
         assert self.menu_experiment is not None
-        self.toolbar_experiment = QtWidgets.QToolBar("Experiment")
-        self._configure_toolbar_icon_style(self.toolbar_experiment)
-        self.addToolBar(self.toolbar_experiment)
         self.addToolBarBreak()
         self.addToolBar(self.toolbar_view)
 
         self.menu_settings = menu.addMenu("Se&ttings")
         assert self.menu_settings is not None
+        self.menu_tools = menu.addMenu("&Tools")
+        assert self.menu_tools is not None
         self.menu_help = menu.addMenu("&Help")
         assert self.menu_help is not None
         self._create_actions_data(toolbar=self.toolbar_data, menu=None)
@@ -2744,6 +2908,7 @@ class Gui(QtWidgets.QMainWindow):
         assert self.menu_playback is not None
         assert self.menu_view is not None
         assert self.menu_settings is not None
+        assert self.menu_tools is not None
         assert self.menu_help is not None
         assert self.menu_experiment is not None
         self._create_actions_file(self.menu_file, self.toolbar_file)
@@ -2751,8 +2916,9 @@ class Gui(QtWidgets.QMainWindow):
         self._create_actions_playback(self.menu_playback, self.toolbar_playback)
         self._create_actions_view(self.menu_view, self.toolbar_view)
         self._create_actions_settings(menu=self.menu_settings, toolbar=None)
+        self._create_actions_tools(menu=self.menu_tools)
         self._create_actions_help(menu=self.menu_help, toolbar=None)
-        self._create_action_experiment(self.menu_experiment, self.toolbar_experiment)
+        self._create_action_experiment(self.menu_experiment, toolbar=None)
         self._create_actions_replay_analysis()
 
     def _create_actions_file(
@@ -2804,6 +2970,7 @@ class Gui(QtWidgets.QMainWindow):
             None,
             icon="mdi6.image-edit-outline",
         )
+        toolbar.addSeparator()
         add_action(
             "&Save Project",
             self.btn_save_clicked,
@@ -2823,7 +2990,7 @@ class Gui(QtWidgets.QMainWindow):
         import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
 
-        import_stimulus_menu = import_data_menu.addMenu("&Stimulus")
+        import_stimulus_menu = import_data_menu.addMenu("&Input")
         assert import_stimulus_menu is not None
         add_action(
             "&Optogenetics",
@@ -2868,14 +3035,14 @@ class Gui(QtWidgets.QMainWindow):
         assert export_data_menu is not None
 
         add_action(
-            "&Patch Clamp sStimulus",
+            "&Patch Clamp Input",
             self.btn_export_patch_clamp_stim_clicked,
             export_data_menu,
             None,
             icon="mdi6.waveform",
         )
         add_action(
-            "&Optogenetic Stimulus",
+            "&Optogenetic Input",
             self.btn_export_light_stimulus_clicked,
             export_data_menu,
             None,
@@ -2891,6 +3058,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.content-save-move",
         )
 
+        toolbar.addSeparator()
         add_action(
             "&Edit Model",
             self.btn_edit_clicked,
@@ -2900,6 +3068,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="ph.polygon-light",
         )
         menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "Generate Synthetic &Data...",
             self.btn_generate_synthetic_data_clicked,
@@ -2909,6 +3078,14 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.microsoft-xbox-controller-view"
             if hasattr(qta, "icon")
             else None,
+        )
+        add_action(
+            "&Manage Experiments",
+            self.btn_manage_experiments_clicked,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.beaker",
         )
         menu.addSeparator()
         add_action(
@@ -2959,6 +3136,8 @@ class Gui(QtWidgets.QMainWindow):
             shortcut=None,
             icon="mdi6.speedometer",
         )
+        menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "&Skip to Start",
             self.time_slider.skip_to_start,
@@ -2997,7 +3176,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         self._view_actions: dict[QtWidgets.QWidget, QtWidgets.QAction] = {}
         for name, widget, icon, is_checked in [
-            ("&Stimuli", self.stim_editor, "mdi6.chart-timeline", True),
+            ("&Input", self.stim_editor, "mdi6.chart-timeline", True),
             ("&Traces", self.trace_widget, "mdi.waves", False),
             ("&Spikes", self.spike_widget, "ph.barcode-light", False),
             ("&Data", self.data_widget, "mdi6.chart-donut", False),
@@ -3005,7 +3184,7 @@ class Gui(QtWidgets.QMainWindow):
             (
                 "&Spatial Footprints",
                 self.spatial_footprint_widget,
-                "mdi6.map-marker-radius",
+                "mdi6.movie-open",
                 True,
             ),
             (
@@ -3027,6 +3206,13 @@ class Gui(QtWidgets.QMainWindow):
                 checkable=True,
                 is_checked=is_checked,
             )
+        # Keep the child handle addressable for existing integrations and
+        # detach requests; both imaging tabs belong to the same panel action.
+        self._view_actions[self.calcium_video_widget] = self._view_actions[
+            self.spatial_footprint_widget
+        ]
+        menu.addSeparator()
+        toolbar.addSeparator()
         add_action(
             "Toggle Selection Text",
             self.toggle_selection_text,
@@ -3046,7 +3232,7 @@ class Gui(QtWidgets.QMainWindow):
             is_checked=True,
         )
         add_action(
-            "Keep Short Stimuli Visible (4 px)",
+            "Keep Short Inputs Visible (4 px)",
             self.toggle_minimum_stimulus_size,
             menu,
             toolbar,
@@ -3054,6 +3240,45 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=True,
         )
+        menu.addSeparator()
+        toolbar.addSeparator()
+        # A genuine toggle, so it joins the other view actions directly
+        # (reused by reference - see stim_editor.py's comment on the action).
+        menu.addAction(self.stim_editor.action_show_all_stim_arrays)
+        toolbar.addAction(self.stim_editor.action_show_all_stim_arrays)
+        self._add_stim_design_buttons_to_view_toolbar(toolbar)
+
+    def _add_stim_design_buttons_to_view_toolbar(
+        self, toolbar: QtWidgets.QToolBar
+    ) -> None:
+        """Add the Design static/dynamic input buttons here (issue #535).
+
+        Unlike every other button in this toolbar, these carry a text label
+        beside their icon: a plain icon glyph for "start designing a
+        stimulus" isn't self-explanatory the way e.g. a grid icon is for
+        "toggle grid", so they stay rectangular QPushButtons instead of
+        collapsing to icon-only QToolButtons like their neighbors.
+        """
+        self.btn_design_static_input = QtWidgets.QPushButton("Design static input")
+        self.btn_design_static_input.setToolTip(
+            "Draw a static input pattern across neurons and time"
+        )
+        icons.set_widget_icon(self.btn_design_static_input, "mdi6.pencil-box-outline")
+        self.btn_design_static_input.clicked.connect(
+            self.stim_editor.open_pattern_designer
+        )
+        toolbar.addWidget(self.btn_design_static_input)
+        self.btn_design_dynamic_input = QtWidgets.QPushButton("Design dynamic input")
+        self.btn_design_dynamic_input.setToolTip(
+            "Design a dynamic input routine (e.g. STDP, rheobase)"
+        )
+        icons.set_widget_icon(
+            self.btn_design_dynamic_input, "mdi6.pencil-box-multiple-outline"
+        )
+        self.btn_design_dynamic_input.clicked.connect(
+            self.stim_editor.open_input_designer
+        )
+        toolbar.addWidget(self.btn_design_dynamic_input)
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
         if toggled:
@@ -3069,6 +3294,10 @@ class Gui(QtWidgets.QMainWindow):
             self.set_data(self.cmb_data.currentText())
 
     def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
+        if widget is self.calcium_video_widget:
+            self.spatial_footprint_widget.tabs.setCurrentWidget(widget)
+        elif widget is self.spatial_footprint_widget:
+            self.spatial_footprint_widget.tabs.setCurrentIndex(0)
         action = getattr(self, "_view_actions", {}).get(widget)
         if action is not None and not action.isChecked():
             action.trigger()
@@ -3086,6 +3315,9 @@ class Gui(QtWidgets.QMainWindow):
                 self.spatial_footprint_widget,
                 self.spatial_footprint_widget.empty_state_widget,
                 self.spatial_footprint_widget.overlay_widget,
+                self.calcium_video_widget,
+                self.calcium_video_widget.widget,
+                self.calcium_video_widget.empty_state_widget,
                 # Deliberately excludes overlay_view/overlay_view.widget: a
                 # right click there is the panel's own lasso-select gesture
                 # (see SpatialFootprintWidget), not a request to detach.
@@ -3143,6 +3375,12 @@ class Gui(QtWidgets.QMainWindow):
             self.data_widget.heatmap_widget,
         ):
             return self.data_widget
+        if widget in (
+            self.calcium_video_widget,
+            self.calcium_video_widget.widget,
+            self.calcium_video_widget.empty_state_widget,
+        ):
+            return self.spatial_footprint_widget
         return widget
 
     def _current_data_selection(self) -> TraceData | SpikeData | SynapseData | None:
@@ -3196,6 +3434,12 @@ class Gui(QtWidgets.QMainWindow):
                 self._detached_panel_windows.remove(window)
             if self._plain_detached_windows.get(source) is window:
                 del self._plain_detached_windows[source]
+            if (
+                source is self.spatial_footprint_widget
+                and isinstance(widget, SpatialFootprintWidget)
+                and widget.calcium_video_widget in self.time_slider.widgets
+            ):
+                self.time_slider.widgets.remove(widget.calcium_video_widget)
 
         window = DetachedPanelWindow(
             widget,
@@ -3203,6 +3447,9 @@ class Gui(QtWidgets.QMainWindow):
             on_close=_forget_window,
             parent=self,
         )
+        if isinstance(widget, SpatialFootprintWidget):
+            self.time_slider.connect_widget(widget.calcium_video_widget)
+            widget.calcium_video_widget.set_time_ms(self.time_slider.t_ms)
         # A widget's own embedded "close" control (e.g. ConsoleWidget's
         # close_requested) should close the detached window it's actually
         # in, not reach back and toggle the original docked panel.
@@ -3262,6 +3509,19 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.calcium_video_widget.import_requested.connect(
+            self._on_calcium_video_import_requested
+        )
+        widget.calcium_video_widget.remove_requested.connect(
+            self._on_calcium_video_remove_requested
+        )
+        widget.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
+        widget.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
+        widget.calcium_video_widget.set_video_paths(
+            self.project.calcium_video_paths,
+            self.project.calcium_video_fps,
+            warn_if_missing_cellpose=False,
+        )
         return widget
 
     def _build_fresh_custom_analysis_widget(self) -> CustomAnalysisWidget | None:
@@ -3294,13 +3554,12 @@ class Gui(QtWidgets.QMainWindow):
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action("&Brian2 Simulation Backend", self.choose_brian2_backend, menu)
-        add_action("&Stimulus Automatic Padding", self.choose_stim_padding_secs, menu)
+        add_action("&Input Automatic Padding", self.choose_stim_padding_secs, menu)
         add_action("&LLM Assistant", self.open_llm_settings, menu)
         add_action(
             "&Synapse Matrix RAM Limit", self.choose_max_ram_synapse_plot_matrix, menu
         )
         add_action("&Trace Plot RAM Limit", self.choose_max_ram_trace_plot_matrix, menu)
-        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
         self._create_theme_menu(menu)
 
     def _create_theme_menu(self, menu: QtWidgets.QMenu) -> None:
@@ -3313,6 +3572,7 @@ class Gui(QtWidgets.QMainWindow):
         for label, name in (
             ("&Light", theme_module.LIGHT),
             ("&Dark", theme_module.DARK),
+            ("&Retro light theme (beta)", theme_module.RETRO),
         ):
             action = add_action(
                 label,
@@ -3324,6 +3584,22 @@ class Gui(QtWidgets.QMainWindow):
             self._theme_action_group.addAction(action)
             self._theme_actions[name] = action
 
+    def _create_actions_tools(self, menu: QtWidgets.QMenu) -> None:
+        add_action(
+            "&Open Fiji",
+            self.btn_open_fiji_clicked,
+            menu,
+            icon="mdi6.microscope",
+        )
+        add_action(
+            "Open &Cellpose",
+            self.btn_open_cellpose_clicked,
+            menu,
+            icon="mdi6.dots-hexagon",
+        )
+        menu.addSeparator()
+        add_action("&Change Fiji Path…", self.choose_fiji_path, menu)
+
     def _create_actions_help(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
@@ -3334,32 +3610,17 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         if toolbar is None:
             return
-        self.btn_open_fiji = QtWidgets.QPushButton("Open Fiji")
-        self.btn_open_fiji.setToolTip("Launch Fiji/ImageJ")
-        icons.set_widget_icon(self.btn_open_fiji, "mdi6.microscope")
-        self.btn_open_fiji.clicked.connect(self.btn_open_fiji_clicked)
-        toolbar.addWidget(self.btn_open_fiji)
-        self.btn_open_cellpose = QtWidgets.QPushButton("Open Cellpose")
-        self.btn_open_cellpose.setToolTip("Launch the Cellpose GUI")
-        icons.set_widget_icon(self.btn_open_cellpose, "mdi6.dots-hexagon")
-        self.btn_open_cellpose.clicked.connect(self.btn_open_cellpose_clicked)
-        toolbar.addWidget(self.btn_open_cellpose)
-        toolbar.addSeparator()
         self.cmb_stim = QtWidgets.QComboBox()
-        toolbar.addWidget(QtWidgets.QLabel("  Stim data: "))
+        toolbar.addWidget(QtWidgets.QLabel("  Input data: "))
         toolbar.addWidget(self.cmb_stim)
-        toolbar.addWidget(QtWidgets.QLabel("  Neuron data: "))
-        toolbar.addWidget(self.cmb_trace)
-        add_action(
-            "&Trace normalization",
-            self.trace_widget.trace_norm_dialog,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.arrow-expand-vertical",
+        # The stim array ops button is inserted here once self.stim_editor
+        # exists - see _add_stim_array_ops_button_to_data_toolbar().
+        self._stim_array_ops_anchor_action = toolbar.addWidget(
+            QtWidgets.QLabel("  Neuron data: ")
         )
+        toolbar.addWidget(self.cmb_trace)
         self.action_overlay_stim_on_traces = add_action(
-            "Overlay stim on traces",
+            "Overlay input on traces",
             self._toggle_stim_trace_overlay,
             menu,
             toolbar,
@@ -3368,35 +3629,20 @@ class Gui(QtWidgets.QMainWindow):
             checkable=True,
             is_checked=False,
         )
+        toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  Spike data: "))
         toolbar.addWidget(self.cmb_spike)
         toolbar.addWidget(QtWidgets.QLabel("  Synapse data: "))
         toolbar.addWidget(self.cmb_synapse)
-        add_action(
-            "&Synapse normalization",
-            self.heatmap_widget.heatmap_norm_dialog,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.arrow-expand-vertical",
-        )
+        toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
 
     def _create_action_experiment(
-        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar
+        self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
         add_action(
-            "&Manage Experiments",
-            self.btn_manage_experiments_clicked,
-            menu,
-            toolbar,
-            shortcut=None,
-            icon="mdi6.beaker",
-        )
-        menu.addSeparator()
-        add_action(
-            "&Connect External Stimulation Function",
+            "&Connect External Input Function",
             self.connect_external_simulation_function,
             menu,
             toolbar,
@@ -3404,7 +3650,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.code-braces",
         )
         add_action(
-            "&Connect Brian2 External Stimulation Function",
+            "&Connect Brian2 External Input Function",
             self.connect_external_simulation_function_with_brian2,
             menu,
             toolbar,
@@ -3412,7 +3658,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.function",
         )
         self._do_external_simulation_action = add_action(
-            "&Run External Stimulation Function",
+            "&Run External Input Function",
             self.btn_do_external_simulation_clicked,
             menu,
             toolbar,
@@ -3447,17 +3693,25 @@ class Gui(QtWidgets.QMainWindow):
             "Train the ELiSe network on the teaching pattern and measure the "
             "paper's train + replay learning curves (Kriener et al. 2024, "
             "Fig. 2b/c). Requires an ELiSe project with 'opsin_exc' and "
-            "'opsin_inh' stims."
+            "'opsin_inh' inputs."
         )
         self._refresh_elise_replay_action()
 
     def _refresh_elise_replay_action(self) -> None:
-        """Enable the ELiSe toolbar actions when the project supports them."""
+        """Show the ELiSe toolbar actions only for ELiSe projects.
+
+        Neither button is relevant to any other project, so they're hidden
+        entirely rather than merely disabled (issue #535) - enabled only
+        once their specific inputs are actually ready.
+        """
+        is_elise_project = self.project.external_simulate_path == "neuroseq:elise"
         replay_action = getattr(self, "elise_replay_action", None)
         if replay_action is not None:
+            replay_action.setVisible(is_elise_project)
             replay_action.setEnabled(self._elise_replay_inputs() is not None)
         protocol_action = getattr(self, "elise_protocol_action", None)
         if protocol_action is not None:
+            protocol_action.setVisible(is_elise_project)
             protocol_action.setEnabled(
                 self._elise_protocol_inputs() is not None
                 and self._elise_protocol_worker is None
@@ -3494,7 +3748,7 @@ class Gui(QtWidgets.QMainWindow):
                 "ELiSe replay analysis",
                 "This action requires an ELiSe project with a completed "
                 "simulation (needs the 'firing_rate_r' trace and an "
-                "'opsin_exc' stim).",
+                "'opsin_exc' input).",
             )
             return
         trace, opsin_exc, stim_dt_s = inputs
@@ -3529,7 +3783,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "ELiSe replay analysis",
-                f"Stim dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
+                f"Input dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
                 f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms); "
                 "cannot align target.",
             )
@@ -3542,7 +3796,7 @@ class Gui(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(
                 self,
                 "ELiSe replay analysis",
-                f"Opsin stim has {num_vis} pitches but the trace only "
+                f"Opsin input has {num_vis} pitches but the trace only "
                 f"covers {n_total_neurons} neurons.",
             )
             return
@@ -3650,7 +3904,7 @@ class Gui(QtWidgets.QMainWindow):
                 self,
                 "Run ELiSe protocol",
                 "This action requires an ELiSe project with 'opsin_exc' and "
-                "'opsin_inh' stim arrays.",
+                "'opsin_inh' input arrays.",
             )
             return
         if self._elise_protocol_worker is not None:

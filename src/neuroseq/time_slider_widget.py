@@ -4,6 +4,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.data_widget import DataWidget
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -52,7 +53,9 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_ms = 0
         self.t_max_ms = 0
         self.t_playback_start_ms = 0
-        self.widgets: list[TimeseriesWidget | HeatmapWidget | DataWidget] = []
+        self.widgets: list[
+            TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
+        ] = []
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 9, 0, 9)
         self.slider = HandleTooltipSlider(self)
@@ -68,7 +71,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.setMaximumHeight(32)
 
     def connect_widget(
-        self, widget: TimeseriesWidget | HeatmapWidget | DataWidget
+        self, widget: TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
     ) -> None:
         self.widgets.append(widget)
 

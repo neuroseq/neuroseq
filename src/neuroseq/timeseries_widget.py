@@ -11,6 +11,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
@@ -84,7 +85,11 @@ class TimeseriesWidget(FPLWidget):
         self.background_graphics: list[fpl.Graphic] = []
         self.show_background_graphics = True
         self.mode = InteractMode.SELECT
-        self.roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+        overlay_colors = theme_module.plot_overlay_colors(self._theme)
+        self.roi = RegionOfInterest(
+            fill_color=overlay_colors["roi_fill"],
+            text_color=overlay_colors["roi_text"],
+        )
         self._greyed_neuron_ids: set[int] = set()
         self._all_neuron_ids: list[int] = []
         self._visible_neuron_ids: list[int] = []
@@ -123,7 +128,16 @@ class TimeseriesWidget(FPLWidget):
         self.figure.renderer.add_event_handler(self.pointer_down, "pointer_down")
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.figure.renderer.add_event_handler(self.pointer_up, "pointer_up")
+        self.figure.renderer.add_event_handler(self.pointer_leave, "pointer_leave")
         self.figure.renderer.add_event_handler(self.key_down, "key_down")
+
+    def apply_theme(self, theme: str) -> None:
+        """Recolor the canvas and independent plot overlays."""
+        super().apply_theme(theme)
+        colors = theme_module.plot_overlay_colors(self._theme)
+        self.roi.set_colors(colors["roi_fill"], colors["roi_text"])
+        if self.grid_lines is not None:
+            self.grid_lines.set_colors(colors["grid"], colors["shading"])
 
     def _setup_axis_link_controls(self) -> None:
         if not self._has_axis_link_controls:
@@ -154,12 +168,14 @@ class TimeseriesWidget(FPLWidget):
 
         self.y_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.y_btn_zoom_in.setFixedSize(14, 24)
+        self.y_btn_zoom_in.setStyleSheet("QPushButton { padding: 0px; }")
         self.y_btn_zoom_in.setToolTip("Zoom in (Shift + Mouse Wheel Up)")
         self.y_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.0, 0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_in, 1, 1)
 
         self.y_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.y_btn_zoom_out.setFixedSize(14, 24)
+        self.y_btn_zoom_out.setStyleSheet("QPushButton { padding: 0px; }")
         self.y_btn_zoom_out.setToolTip("Zoom out (Shift + Mouse Wheel Down)")
         self.y_btn_zoom_out.clicked.connect(lambda: controller.zoom((0.0, -0.5), ()))
         container_layout.addWidget(self.y_btn_zoom_out, 2, 1)
@@ -181,12 +197,14 @@ class TimeseriesWidget(FPLWidget):
 
         self.x_btn_zoom_out = QtWidgets.QPushButton("-", self.plot_container)
         self.x_btn_zoom_out.setFixedSize(24, 14)
+        self.x_btn_zoom_out.setStyleSheet("QPushButton { padding: 0px; }")
         self.x_btn_zoom_out.setToolTip("Zoom out (Ctrl + Mouse Wheel Down)")
         self.x_btn_zoom_out.clicked.connect(lambda: controller.zoom((-0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_out)
 
         self.x_btn_zoom_in = QtWidgets.QPushButton("+", self.plot_container)
         self.x_btn_zoom_in.setFixedSize(24, 14)
+        self.x_btn_zoom_in.setStyleSheet("QPushButton { padding: 0px; }")
         self.x_btn_zoom_in.setToolTip("Zoom in (Ctrl + Mouse Wheel Up)")
         self.x_btn_zoom_in.clicked.connect(lambda: controller.zoom((0.5, 0.0), ()))
         self.x_controls_layout.addWidget(self.x_btn_zoom_in)
@@ -416,6 +434,16 @@ class TimeseriesWidget(FPLWidget):
         if self.grid_lines is not None:
             self.grid_lines.visible = is_visible
 
+    def _display_row_for_tick_y(self, y: float) -> int:
+        """Map a y-axis tick candidate position to a display row.
+
+        The base implementation assumes the default one-unit-per-row
+        spacing; subclasses with non-uniform row spacing (e.g. TraceWidget's
+        auto-extend-vertical-space mode) override this to look up the row
+        that actually occupies that position instead.
+        """
+        return int(round(y))
+
     def _create_y_tick_formatter(self):
         # """Create a y-axis tick formatter that prevents label repetition."""
         state = {"last_label": None}
@@ -433,7 +461,7 @@ class TimeseriesWidget(FPLWidget):
             # position has no real neuron behind it at all: fabricating a
             # label from the raw row index there would draw a "ghost" tick
             # number with no corresponding grid line or data underneath it.
-            display_row = int(round(y))
+            display_row = self._display_row_for_tick_y(y)
             if not (0 <= display_row < len(self._visible_neuron_ids)):
                 return ""
             neuron_id = self._visible_neuron_ids[display_row]
@@ -550,7 +578,14 @@ class TimeseriesWidget(FPLWidget):
         if self.controller is not None:
             max_time_ms = max(max_time_ms, float(self.controller.max_width))
             max_neurons = max(max_neurons, int(self.controller.max_height))
-        self.grid_lines = GridLines(max_neurons, max_time_ms, dt_ms=self.dt_ms)
+        overlay_colors = theme_module.plot_overlay_colors(self._theme)
+        self.grid_lines = GridLines(
+            max_neurons,
+            max_time_ms,
+            dt_ms=self.dt_ms,
+            grid_color=overlay_colors["grid"],
+            shading_color=overlay_colors["shading"],
+        )
         self.subplot.add_graphic(self.grid_lines, center=False)
         self.grid_lines.visible = self.show_grid
         self.controller.add_grid_lines(self.grid_lines)
@@ -610,6 +645,18 @@ class TimeseriesWidget(FPLWidget):
             self.grid_lines.update_neuron_extent(self.n_neurons)
         if self.controller is not None and self.n_neurons > 0:
             self.controller.focus_neuron_range(0, self.n_neurons)
+
+    def _display_row_for_mouse_y(self, y: float) -> int:
+        """Map a pointer's world y position to a display row, clamped to the
+        currently visible row range. See _display_row_for_tick_y()."""
+        return int(np.clip(math.floor(y + 0.5), 0, self.n_neurons - 1))
+
+    def _neuron_slice_from_y_range(self, y_a: float, y_b: float) -> slice:
+        """Map an ROI drag's two endpoint y positions to a display-row slice.
+        See _display_row_for_tick_y()."""
+        y_min = min(y_a, y_b) + 0.5
+        y_max = max(y_a, y_b) + 0.5
+        return slice(math.floor(y_min), math.ceil(y_max))
 
     def set_neuron_greyed(self, neuron_index: int, greyed: bool) -> None:
         """Hide (or restore) one neuron's row, compacting the remaining visible
@@ -718,13 +765,20 @@ class TimeseriesWidget(FPLWidget):
         self._last_hovered_neuron_id = neuron_id
         self.neuron_hovered.emit(neuron_id)
 
+    def _clear_hover(self) -> None:
+        self.mouse_pos = None
+        self.text.visible = False
+        if self.hover_slice_graphic is not None:
+            self.hover_slice_graphic.visible = False
+        self._set_hovered_neuron_id(None)
+
+    def pointer_leave(self, ev: pygfx.PointerEvent) -> None:
+        self._clear_hover()
+
     def pointer_move(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_pos = self.subplot.map_screen_to_world(ev)
         if self.mouse_pos is None:
-            self.text.visible = False
-            if self.hover_slice_graphic is not None:
-                self.hover_slice_graphic.visible = False
-            self._set_hovered_neuron_id(None)
+            self._clear_hover()
             return
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
@@ -736,10 +790,8 @@ class TimeseriesWidget(FPLWidget):
                 0,
                 self.data_values.shape[0] - 1,
             )
-            display_row = np.clip(
-                math.floor(self.mouse_pos[1] + 0.5), 0, self.n_neurons - 1
-            )
-            neuron_id = self._visible_neuron_ids[int(display_row)]
+            display_row = self._display_row_for_mouse_y(self.mouse_pos[1])
+            neuron_id = self._visible_neuron_ids[display_row]
             hovered_neuron_id = neuron_id
             hover_value = (
                 self.data_values[time_index, neuron_id] * self.data_values_scale
@@ -755,12 +807,12 @@ class TimeseriesWidget(FPLWidget):
         if self.mode == InteractMode.SELECT and self.selection_in_progress:
             x0 = min(self.mouse_pos[0], self.mouse_press_pos[0])
             x1 = max(self.mouse_pos[0], self.mouse_press_pos[0])
-            y0 = min(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
-            y1 = max(self.mouse_pos[1] + 0.5, self.mouse_press_pos[1] + 0.5)
             time_slice = slice(
                 max(0, math.floor(x0 / self.dt_ms)), math.ceil(x1 / self.dt_ms)
             )
-            neuron_slice = slice(math.floor(y0), math.ceil(y1))
+            neuron_slice = self._neuron_slice_from_y_range(
+                self.mouse_pos[1], self.mouse_press_pos[1]
+            )
             self.select_neurons(neuron_slice, time_slice)
             return
         elif self.mode == InteractMode.DRAW:

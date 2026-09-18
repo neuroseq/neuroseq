@@ -271,8 +271,8 @@ def test_patchclamp_pre_dialogs_include_cc_vc_convention(
     stim_label, trace_label = captured_labels
     assert "Current Clamp (CC)" in stim_label
     assert "Voltage Clamp (VC)" in stim_label
-    assert "CURRENT is the stimulus" in stim_label
-    assert "VOLTAGE is the stimulus" in stim_label
+    assert "CURRENT is the input" in stim_label
+    assert "VOLTAGE is the input" in stim_label
     assert "Current Clamp (CC)" in trace_label
     assert "Voltage Clamp (VC)" in trace_label
     assert "VOLTAGE is the trace" in trace_label
@@ -289,6 +289,10 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
     gui.close()
 
 
+def _find_action(menu: QtWidgets.QMenu, text: str) -> QtWidgets.QAction:
+    return next(a for a in menu.actions() if a.text().replace("&", "") == text)
+
+
 def test_gui_open_fiji_and_cellpose_buttons(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
@@ -297,8 +301,8 @@ def test_gui_open_fiji_and_cellpose_buttons(
     gui = Gui()
     qtbot.addWidget(gui)
 
-    assert gui.btn_open_fiji.text() == "Open Fiji"
-    assert gui.btn_open_cellpose.text() == "Open Cellpose"
+    fiji_action = _find_action(gui.menu_tools, "Open Fiji")
+    cellpose_action = _find_action(gui.menu_tools, "Open Cellpose")
 
     fiji_calls: list[object] = []
     cellpose_calls: list[object] = []
@@ -309,10 +313,211 @@ def test_gui_open_fiji_and_cellpose_buttons(
         external_tools, "launch_cellpose", lambda parent: cellpose_calls.append(parent)
     )
 
-    gui.btn_open_fiji.click()
-    gui.btn_open_cellpose.click()
+    fiji_action.trigger()
+    cellpose_action.trigger()
     assert fiji_calls == [gui]
     assert cellpose_calls == [gui]
+    gui.close()
+
+
+def test_tools_menu_holds_fiji_cellpose_and_change_fiji_path(
+    qtbot: QtBot,
+) -> None:
+    """Open Fiji / Open Cellpose / Change Fiji Path moved out of the Data
+
+    toolbar and Settings menu into their own Tools menu, between Settings
+    and Help (issue #535).
+    """
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    menu_bar = gui.menuBar()
+    assert menu_bar is not None
+    top_level_menus = [a.menu() for a in menu_bar.actions()]
+    settings_index = top_level_menus.index(gui.menu_settings)
+    tools_index = top_level_menus.index(gui.menu_tools)
+    help_index = top_level_menus.index(gui.menu_help)
+    assert settings_index < tools_index < help_index
+
+    texts = [a.text().replace("&", "") for a in gui.menu_tools.actions()]
+    assert texts[0] == "Open Fiji"
+    assert texts[1] == "Open Cellpose"
+    assert gui.menu_tools.actions()[2].isSeparator()
+    assert texts[3] == "Change Fiji Path…"
+
+    settings_texts = [a.text().replace("&", "") for a in gui.menu_settings.actions()]
+    assert "Change Fiji Path…" not in settings_texts
+    gui.close()
+
+
+def test_stim_array_ops_button_sits_next_to_stim_data_combobox_with_full_menu(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_data.actions()
+    stim_combo_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.cmb_stim
+    )
+    ops_button_index = next(
+        i
+        for i, action in enumerate(actions)
+        if gui.toolbar_data.widgetForAction(action) is gui.btn_stim_array_ops
+    )
+    assert ops_button_index == stim_combo_index + 1
+
+    menu_actions = gui.stim_array_ops_menu.actions()
+    assert menu_actions[0] is gui.stim_editor.action_create_stim_array
+    assert menu_actions[1] is gui.stim_editor.action_edit_stim_array
+    assert menu_actions[2] is gui.stim_editor.action_delete_stim_array
+    assert menu_actions[3] is gui.stim_editor.action_clear_stim_array
+    assert menu_actions[4].isSeparator()
+    assert menu_actions[5] is gui.stim_editor.action_trim_to_mapped_neurons
+    assert menu_actions[6].isSeparator()
+    assert menu_actions[7] is gui.stim_editor.action_pad_stim_array
+    assert menu_actions[8] is gui.stim_editor.action_trim_stim_array
+    assert menu_actions[9] is gui.stim_editor.action_loop_stim_array
+    gui.close()
+
+
+def test_view_toolbar_has_separator_before_toggle_selection_text(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_view.actions()
+    index = next(
+        i
+        for i, action in enumerate(actions)
+        if action.text() == "Toggle Selection Text"
+    )
+    assert actions[index - 1].isSeparator()
+    gui.close()
+
+
+def test_show_all_stim_arrays_action_is_in_the_view_toolbar(qtbot: QtBot) -> None:
+    """Moved out of the stim editor's left toolbar (issue #535); reused by
+
+    reference rather than duplicated, so it stays the same QAction that
+    toggle_show_all_stim_arrays() checks/toggles.
+    """
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    action = gui.stim_editor.action_show_all_stim_arrays
+    assert action in gui.toolbar_view.actions()
+    assert action in gui.menu_view.actions()
+    assert action.isChecked()
+    gui.close()
+
+
+def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Moved out of the stim editor's left toolbar (issue #535); unlike their
+
+    icon-only neighbors, these carry a text label beside their icon.
+    """
+    static_calls: list[int] = []
+    dynamic_calls: list[int] = []
+    # Patched on the class before the button's clicked signal connects to a
+    # bound method of it, so the connection picks up the patched version.
+    monkeypatch.setattr(
+        StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
+    )
+    monkeypatch.setattr(
+        StimEditor, "open_input_designer", lambda self: dynamic_calls.append(1)
+    )
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    for button in (gui.btn_design_static_input, gui.btn_design_dynamic_input):
+        assert button.parentWidget() is gui.toolbar_view
+        assert not button.icon().isNull()
+        assert button.text()
+
+    assert gui.btn_design_static_input.text() == "Design static input"
+    assert gui.btn_design_dynamic_input.text() == "Design dynamic input"
+
+    gui.btn_design_static_input.click()
+    gui.btn_design_dynamic_input.click()
+    assert static_calls == [1]
+    assert dynamic_calls == [1]
+    gui.close()
+
+
+def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_file.actions()
+    texts = [a.text().replace("&", "") for a in actions]
+
+    def index_of(text: str) -> int:
+        return texts.index(text)
+
+    # {New, Open Project, Import from Project} | {Save Project} |
+    # {Edit Model} | {Generate Synthetic Data, Manage Experiments}
+    assert actions[index_of("Save Project") - 1].isSeparator()
+    assert actions[index_of("Edit Model") - 1].isSeparator()
+    assert actions[index_of("Generate Synthetic Data...") - 1].isSeparator()
+    assert texts[index_of("Generate Synthetic Data...") + 1] == "Manage Experiments"
+    gui.close()
+
+
+def test_playback_toolbar_separates_speed_from_transport_controls(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.toolbar_playback.actions()
+    index = next(
+        i for i, a in enumerate(actions) if a.text().replace("&", "") == "Skip to Start"
+    )
+    assert actions[index - 1].isSeparator()
+    gui.close()
+
+
+def test_data_toolbar_groups_dataset_pairs_with_separators(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    toolbar = gui.toolbar_data
+    actions = toolbar.actions()
+
+    def label_indices(text: str) -> list[int]:
+        return [
+            i
+            for i, a in enumerate(actions)
+            if isinstance(toolbar.widgetForAction(a), QtWidgets.QLabel)
+            and toolbar.widgetForAction(a).text().strip() == text
+        ]
+
+    spike_index = label_indices("Spike data:")[0]
+    all_data_index = label_indices("All data:")[0]
+    assert actions[spike_index - 1].isSeparator()
+    assert actions[all_data_index - 1].isSeparator()
+    gui.close()
+
+
+def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
+    qtbot: QtBot,
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    actions = gui.menu_file.actions()
+    generate_index = next(
+        i
+        for i, action in enumerate(actions)
+        if action.text().replace("&", "") == "Generate Synthetic Data..."
+    )
+    assert actions[generate_index + 1].text().replace("&", "") == "Manage Experiments"
     gui.close()
 
 
@@ -338,16 +543,17 @@ def _make_gui_cellpose_result(
     )
 
 
-def test_trim_to_mapped_neurons_action_lives_in_the_stim_toolbar(
+def test_trim_to_mapped_neurons_action_lives_in_the_stim_array_ops_menu(
     qtbot: QtBot,
 ) -> None:
     """The action moved out of the Spatial Footprints panel and into the
-    left-side stim editor toolbar, disabled until there's an actual
-    mapping to trim to."""
+
+    stim array ops dropdown next to the stim data combobox (issue #535),
+    disabled until there's an actual mapping to trim to."""
     gui = Gui()
     qtbot.addWidget(gui)
     action = gui.stim_editor.action_trim_to_mapped_neurons
-    assert action in gui.toolbar_stim_editor.actions()
+    assert action in gui.stim_array_ops_menu.actions()
     assert not action.isEnabled()
 
     project = Project()
@@ -1011,18 +1217,24 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
         units="mV",
         dt=0.001,
     )
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 1, 2], dtype=np.uint32),
+        spike_times=np.array([0.001, 0.002, 0.003], dtype=np.float32),
+    )
     project.add_experiment(
         Experiment(
             name="Experiment",
             duration=0.01,
             timepoints=[0.01],
-            data=[trace_data],
+            data=[trace_data, spike_data],
         )
     )
     project.cellpose_data = _make_gui_cellpose_result(mapping={0: 2, 1: 1, 2: 0})
 
     gui.update_project(project)
     gui._apply_trace_selection("Experiment :: traces")
+    gui._apply_spike_selection("Experiment :: spikes")
     original_traces = trace_data.traces.copy()
     original_stim_values = project.stim_arrays["stim"].values.copy()
 
@@ -1034,9 +1246,14 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     assert gui.trace_widget.is_neuron_greyed(2)
     assert gui.stim_editor.stim_widget.is_neuron_greyed(1)
     assert gui.stim_editor.stim_widget.is_neuron_greyed(2)
-    # the greyed rows are actually hidden, and the remaining row compacts
+    assert gui.spike_widget.is_neuron_greyed(1)
+    assert gui.spike_widget.is_neuron_greyed(2)
+    # the greyed rows are actually hidden, and the remaining row compacts -
+    # the same way, and on the same rows, in every panel that stacks neurons
+    # on its y-axis, so a given row still means the same neuron everywhere
     assert gui.trace_widget.n_neurons == 1
     assert gui.stim_editor.stim_widget.n_neurons == 1
+    assert gui.spike_widget.n_neurons == 1
     assert gui.trace_widget.graphic is not None
     assert gui.trace_widget.graphic.graphics[0].visible
     # underlying project data is never touched by hiding
@@ -1052,8 +1269,11 @@ def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     assert not gui.trace_widget.is_neuron_greyed(2)
     assert not gui.stim_editor.stim_widget.is_neuron_greyed(1)
     assert not gui.stim_editor.stim_widget.is_neuron_greyed(2)
+    assert not gui.spike_widget.is_neuron_greyed(1)
+    assert not gui.spike_widget.is_neuron_greyed(2)
     assert gui.trace_widget.n_neurons == 3
     assert gui.stim_editor.stim_widget.n_neurons == 3
+    assert gui.spike_widget.n_neurons == 3
     gui.close()
 
 
@@ -1227,6 +1447,8 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
         experiment_duration = 1.0
         imported_data: list[Any] = []
         new_cellpose_result = imported
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1260,6 +1482,8 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         experiment_duration = 1.0
         imported_data: list[Any] = []
         new_cellpose_result = None
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1387,7 +1611,7 @@ def test_gui_theme_menu_toggles_theme_and_persists(
     )
     assert theme_menu is not None
     labels = {action.text().replace("&", ""): action for action in theme_menu.actions()}
-    assert set(labels) == {"Light", "Dark"}
+    assert set(labels) == {"Light", "Dark", "Retro light theme (beta)"}
 
     labels["Dark"].trigger()
     assert gui.settings.theme == theme_module.DARK
@@ -1395,7 +1619,18 @@ def test_gui_theme_menu_toggles_theme_and_persists(
     assert gui.data_widget.spike_widget._theme == theme_module.DARK
     assert labels["Dark"].isChecked()
 
+    app = QtWidgets.QApplication.instance()
+    labels["Retro light theme (beta)"].trigger()
+    assert gui.settings.theme == theme_module.RETRO
+    assert gui.trace_widget._theme == theme_module.RETRO
+    assert labels["Retro light theme (beta)"].isChecked()
+    # the retro skin is driven by an application-wide stylesheet
+    assert app is not None
+    assert app.styleSheet() == theme_module.app_stylesheet(theme_module.RETRO)
+
     labels["Light"].trigger()
+    # ... which is cleared again when leaving the retro skin
+    assert app.styleSheet() == ""
     assert gui.settings.theme == theme_module.LIGHT
     assert gui.trace_widget._theme == theme_module.LIGHT
     assert labels["Light"].isChecked()
@@ -1418,6 +1653,70 @@ def test_gui_applies_persisted_theme_on_startup(qtbot: QtBot, tmp_config_dir) ->
     assert gui.trace_widget._theme == theme_module.DARK
     assert gui._theme_actions[theme_module.DARK].isChecked()
     gui.close()
+
+
+def test_gui_starts_in_retro_theme_without_config(qtbot: QtBot, tmp_config_dir) -> None:
+    from neuroseq import theme as theme_module
+
+    # No config has been written, so the GUI must come up in the default theme.
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+
+    assert theme_module.DEFAULT == theme_module.RETRO
+    assert gui.settings.theme == theme_module.RETRO
+    assert gui.trace_widget._theme == theme_module.RETRO
+    assert gui._theme_actions[theme_module.RETRO].isChecked()
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert app.styleSheet() == theme_module.app_stylesheet(theme_module.RETRO)
+    gui.close()
+    # leave the shared QApplication unskinned for the rest of the suite
+    theme_module.apply_app_theme(app, theme_module.LIGHT)
+
+
+def test_timeseries_panels_and_slider_share_one_width(qtbot: QtBot) -> None:
+    """Stim editor, traces, spikes and the time slider must line up exactly.
+
+    They share a time axis, so a sample at a given x in one panel has to sit
+    at the same x in the others and under the slider handle. They live in one
+    vertical splitter for that reason; the synapse / cell-segmentation column
+    sits beside the whole stack rather than beside the stim editor alone.
+    """
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    gui.trace_widget.setVisible(True)
+    gui.spike_widget.setVisible(True)
+    gui.data_widget.setVisible(True)
+    qtbot.waitUntil(lambda: gui.spike_widget.isVisible())
+
+    panels: list[QtWidgets.QWidget] = [
+        gui.stim_editor,
+        gui.trace_widget,
+        gui.spike_widget,
+        gui.data_widget,
+        gui.time_slider,
+    ]
+    widths = {panel.width() for panel in panels}
+    lefts = {panel.mapTo(gui, QtCore.QPoint(0, 0)).x() for panel in panels}
+    assert len(widths) == 1, f"panels have differing widths: {widths}"
+    assert len(lefts) == 1, f"panels have differing left edges: {lefts}"
+    # ...and they are genuinely narrower than the window, i.e. the right-hand
+    # column is beside them rather than below.
+    assert next(iter(widths)) < gui.width()
+    gui.close()
+
+
+def test_retro_time_slider_elapsed_side_is_green(qtbot: QtBot) -> None:
+    from neuroseq import theme as theme_module
+
+    stylesheet = theme_module.app_stylesheet(theme_module.RETRO)
+    sub_page = stylesheet.split("QSlider::sub-page:horizontal")[1].split("}")[0]
+    # The elapsed side of the groove is lit LCD green, not the dim groove color.
+    assert theme_module._RETRO_LCD_FG in sub_page
 
 
 def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
@@ -1590,7 +1889,11 @@ def test_gui_simulate_and_cancel(
 
     assert gui.project.b2_model.cancel_requested is True
     assert gui._io_worker is None
-    assert not gui.progress_dialog.isVisible()
+    # isHidden() (this widget's own state) is the reliable signal that
+    # cancel()/hide() worked - see the comment in
+    # test_simulation_progress_is_embedded_in_view_toolbar for why
+    # isVisible() isn't asserted here.
+    assert gui.progress_dialog.isHidden()
     assert QtWidgets.QApplication.overrideCursor() is None
     gui.close()
 
@@ -1616,19 +1919,21 @@ def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
     gui.progress_dialog.setCancelButtonText("Cancel")
     gui.progress_dialog.setValue(42)
     gui.progress_dialog.show()
-    # Let the deferred show settle before toggling visibility again. Under the
-    # offscreen QPA plugin used in tests, calling reset()/hide() while this
-    # show is still pending leaves isVisible() stuck True (isHidden() is already
-    # True) and pumping events afterwards does not recover it.
-    qtbot.wait(10)
+    # show() is deferred under the offscreen QPA plugin used in tests, so
+    # wait for it to actually land before asserting on it.
+    qtbot.waitUntil(gui.progress_dialog.isVisible, timeout=2000)
 
     assert gui.progress_dialog.isVisible()
     assert gui.progress_dialog.value() == 42
     assert gui.progress_dialog.cancel_button.isVisible()
 
     gui.progress_dialog.reset()
+    # isHidden() (this widget's own state) is the reliable signal that
+    # reset()/hide() worked. isVisible() also asks whether every ancestor is
+    # visible, and for a widget embedded via QWidgetAction in a QToolBar that
+    # composite state can lag isHidden() under the offscreen QPA plugin used
+    # in tests - not something reset() controls, so it isn't asserted here.
     assert gui.progress_dialog.isHidden()
-    assert not gui.progress_dialog.isVisible()
     gui.close()
 
 
@@ -1692,7 +1997,9 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
                 on_success(None)
             return True
 
-        return SimpleNamespace(_save_project=fake_save)
+        project = Project()
+        project.dirty = True
+        return SimpleNamespace(_save_project=fake_save, project=project)
 
     def proceed() -> None:
         proceeded[0] += 1
@@ -1715,6 +2022,30 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     assert proceeded[0] == 2
 
 
+def test_prompt_save_before_action_skips_prompt_when_not_dirty(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """No unsaved changes -> proceed right away, no Save/Discard/Cancel
+
+    prompt at all (issue #535)."""
+    warning_calls: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        warning_calls.append(a)
+        return QtWidgets.QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    fake_gui: Any = SimpleNamespace(project=Project())  # dirty=False by default
+    proceeded = [0]
+
+    Gui._prompt_save_before_action(
+        fake_gui, "T", "M", lambda: proceeded.__setitem__(0, 1)
+    )
+
+    assert warning_calls == []
+    assert proceeded == [1]
+
+
 def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     save_callbacks: list[Any] = []
     closed = [0]
@@ -1728,11 +2059,13 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
         save_callbacks.append(on_success)
         return True
 
+    dirty_project = Project()
+    dirty_project.dirty = True
     fake_gui: Any = SimpleNamespace(
         _close_confirmed=False,
         _save_project=fake_save,
         close=lambda: closed.__setitem__(0, closed[0] + 1),
-        tabs=[Project()],
+        tabs=[dirty_project],
     )
 
     # Cancel: keep the app open.
@@ -1759,6 +2092,31 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     save_callbacks[0](None)
     assert fake_gui._close_confirmed
     assert closed == [1]
+
+
+def test_prompt_save_before_close_skips_prompt_when_no_tab_is_dirty(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """No open tab has unsaved changes -> close proceeds right away, no
+
+    Save/Discard/Cancel prompt at all (issue #535)."""
+    warning_calls: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        warning_calls.append(a)
+        return QtWidgets.QMessageBox.StandardButton.Cancel
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    # Two clean tabs; neither is dirty.
+    fake_gui: Any = SimpleNamespace(
+        _close_confirmed=False,
+        tabs=[Project(), Project()],
+    )
+
+    assert Gui._prompt_save_before_close(fake_gui)
+
+    assert warning_calls == []
+    assert fake_gui._close_confirmed
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
@@ -1825,6 +2183,57 @@ def test_gui_open(
     assert list(gui.project.b2_model.monitors.keys()) == list(
         project.b2_model.monitors.keys()
     )
+    gui.close()
+
+
+def test_gui_open_adds_to_recent_projects(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    project_path = tmp_path / "model.nseq"
+    test_project.save(
+        project_path,
+        SaveLoadOptions(
+            include_stim_arrays=True,
+            include_model=True,
+            include_simulation_data=False,
+            include_experimental_data=False,
+        ),
+    )
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        lambda *args: (f"{project_path}", True),
+    )
+    gui.btn_open_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+
+    assert gui.settings.recent_projects[0] == str(project_path.resolve())
+    gui.close()
+
+
+def test_gui_save_adds_to_recent_projects(
+    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
+) -> None:
+    gui = Gui()
+    gui.show()
+    qtbot.addWidget(gui)
+    qtbot.waitUntil(lambda: gui.isVisible())
+    gui.update_project(project_ornstein)
+    filename_without_extension = tmp_path / "saved"
+    filename = filename_without_extension.with_suffix(".nseq")
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getSaveFileName",
+        lambda *args: (f"{filename_without_extension}", True),
+    )
+    gui.btn_save_clicked()
+    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+
+    assert gui.settings.recent_projects[0] == str(filename.resolve())
     gui.close()
 
 
@@ -2329,7 +2738,7 @@ def test_gui_export_igor2_single_wave_requires_stim_data(
 
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
-    assert "no stimulation entities" in qmessagebox_calls[0]["title"].lower()
+    assert "no input entities" in qmessagebox_calls[0]["title"].lower()
 
 
 def test_gui_export_igor2_pxp_stim(

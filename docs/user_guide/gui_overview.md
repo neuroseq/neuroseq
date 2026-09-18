@@ -131,13 +131,20 @@ running, so you can scrub manually at any time.
 The **Settings** menu groups preferences that affect the rest of the
 application:
 
-| Setting                    | What it does                                                                                                                           |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Brian2 simulation backend  | Pick `cython` (default) or `numpy` (see [Simulations](simulations.md#choosing-a-brian2-backend)).                                      |
-| Stimulus automatic padding | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                        |
-| LLM assistant              | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                              |
-| Synapse matrix RAM limit   | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode. |
-| Theme                      | Switch between a **Light** and **Dark** appearance. The choice is remembered and re-applied on the next launch.                        |
+| Setting                    | What it does                                                                                                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Brian2 simulation backend  | Pick `cython` (default) or `numpy` (see [Simulations](simulations.md#choosing-a-brian2-backend)).                                                           |
+| Stimulus automatic padding | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
+| LLM assistant              | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
+| Synapse matrix RAM limit   | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |
+| Theme                      | Switch between a **Light**, **Dark** and **Retro light theme (beta)** (the default) appearance. The choice is remembered and re-applied on the next launch. |
+
+The **Retro light theme (beta)** is the default on a fresh install. It is a
+skin in the spirit of the classic Winamp light skins: brushed-metal chrome
+with bevelled buttons, and dark LCD read-outs for the plot canvases, the
+console and the status bar. It is still marked beta — some dialogs are less
+polished than under the light and dark themes — and switching to **Light**
+or **Dark** is remembered like any other theme choice.
 
 ## Analysis widget
 

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from qtpy import QtWidgets
 
+from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.stim import DrawStimType
 from neuroseq.stim_patterns import generate_fuer_elise
 from neuroseq.stim_patterns import generate_per_neuron
@@ -26,13 +27,14 @@ class StimPatternContext:
     n_neurons: int
 
 
-class StimPatternDialog(QtWidgets.QDialog):
-    def __init__(
-        self,
-        editor: StimEditor,
-        parent: QtWidgets.QWidget | None = None,
-    ) -> None:
-        super().__init__(parent)
+class StimPatternDialog(_SelfRaisingDialog):
+    """Non-modal dialog, so no Qt parent (see _SelfRaisingDialog's
+    docstring): a parent sets WM_TRANSIENT_FOR, and on X11/KWin a transient
+    dialog can end up sharing its owner's "raise group" so clicking it
+    never brings it above another sibling popup."""
+
+    def __init__(self, editor: StimEditor) -> None:
+        super().__init__()
         self.editor = editor
         self._context: StimPatternContext | None = None
         self.setModal(False)
@@ -45,7 +47,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.lbl_stim_name = QtWidgets.QLabel("-", self)
         self.lbl_units = QtWidgets.QLabel("-", self)
         self.lbl_dt_ms = QtWidgets.QLabel("-", self)
-        target_form.addRow("Stim array:", self.lbl_stim_name)
+        target_form.addRow("Input array:", self.lbl_stim_name)
         target_form.addRow("Units:", self.lbl_units)
         target_form.addRow("dt:", self.lbl_dt_ms)
         layout.addLayout(target_form)
@@ -76,7 +78,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         self.radio_fuer_elise = QtWidgets.QRadioButton("Für Elise", self)
         self.radio_constant = QtWidgets.QRadioButton("Constant", self)
         self.radio_linear = QtWidgets.QRadioButton("Linear gradient", self)
-        self.radio_ramp = QtWidgets.QRadioButton("Ramp stimulus", self)
+        self.radio_ramp = QtWidgets.QRadioButton("Ramp input", self)
         for widget in [
             self.radio_sequential,
             self.radio_simultaneous,
@@ -127,7 +129,7 @@ class StimPatternDialog(QtWidgets.QDialog):
         button_layout = QtWidgets.QHBoxLayout()
         self.btn_apply = QtWidgets.QPushButton("Apply", self)
         self.btn_reset_start = QtWidgets.QPushButton("Reset start time", self)
-        self.btn_clear = QtWidgets.QPushButton("Clear stim array", self)
+        self.btn_clear = QtWidgets.QPushButton("Clear input array", self)
         self.btn_close = QtWidgets.QPushButton("Close", self)
         button_layout.addWidget(self.btn_apply)
         button_layout.addWidget(self.btn_reset_start)

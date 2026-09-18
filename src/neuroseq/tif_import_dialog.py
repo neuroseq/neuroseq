@@ -29,6 +29,7 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
 from neuroseq.stim import StimArray
@@ -316,6 +317,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_arrays = dict(stim_arrays or {})
         self._pipeline_result: TifPipelineResult | None = None
         self.new_cellpose_result: CellposeImportResult | None = None
+        self.imported_tif_paths: list[Path] = []
+        self.imported_fps: float = DEFAULT_FS
         self._propagate_new_segmentation: bool = False
         self._new_segmentation_path: Path | None = None
 
@@ -508,11 +511,11 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Spike threshold:", self._spike_threshold_spin)
 
         self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
-            "Stimulation artefact suppression"
+            "Input artefact suppression"
         )
         self._suppress_stimulation_artefact_checkbox.setChecked(True)
         self._suppress_stimulation_artefact_checkbox.setToolTip(
-            "Replace fluorescence in frames overlapping active stimulation with "
+            "Replace fluorescence in frames overlapping active input with "
             "the mean of the nearest clean values before and after the artefact."
         )
         params_layout.addRow(self._suppress_stimulation_artefact_checkbox)
@@ -520,12 +523,12 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_array_combo = QtWidgets.QComboBox()
         for name, stim_array in self._stim_arrays.items():
             self._stim_array_combo.addItem(name, stim_array)
-        params_layout.addRow("Stim array:", self._stim_array_combo)
+        params_layout.addRow("Input array:", self._stim_array_combo)
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
         if not has_stim_arrays:
             self._suppress_stimulation_artefact_checkbox.setToolTip(
-                "No stimulation arrays are available in the current project."
+                "No input arrays are available in the current project."
             )
         self._suppress_stimulation_artefact_checkbox.toggled.connect(
             self._update_pipeline_fields
@@ -880,6 +883,8 @@ class TifImportDialog(QtWidgets.QDialog):
         dt = 1.0 / fs
         n_neurons, n_timepoints = result.F.shape
         self.experiment_duration = n_timepoints * dt
+        self.imported_tif_paths = list(self._tif_paths)
+        self.imported_fps = fs
 
         if self._propagate_new_segmentation:
             self.new_cellpose_result = _build_cellpose_result_from_pipeline(

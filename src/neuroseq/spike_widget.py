@@ -31,7 +31,6 @@ class SpikeWidget(TimeseriesWidget):
             default_controller=default_controller,
             show_axis_link_controls=show_axis_link_controls,
         )
-        self.subplot.title = "Spikes"
 
     def _rebuild_custom_analysis_menu(self) -> None:
         super()._rebuild_custom_analysis_menu()
@@ -100,12 +99,22 @@ class SpikeWidget(TimeseriesWidget):
     def set_data(self, data: SpikeData | None) -> None:
         self.clear_data()
         if data is None or data.spike_times.shape[0] == 0:
-            self.subplot.title = "Spikes"
             return
-        self.subplot.title = f"Spikes: {data.name}"
         self.data = data
-        self.n_neurons = max(data.spike_indices) + 1
-        self._all_neuron_ids = list(range(self.n_neurons))
+        n_neurons_with_spikes = int(max(data.spike_indices)) + 1
+        controller_neuron_count = (
+            int(self.controller.max_height) if self.controller is not None else 0
+        )
+        # SpikeData only records neurons that actually fired, so the highest
+        # spiking index alone would undercount any silent neurons above it.
+        # Falling back to the shared controller's neuron limit (kept in sync
+        # with the rest of the project via Gui.update_limits()) keeps this
+        # panel's row count - and therefore its y-axis tick labels and its
+        # alignment with the Traces/Stimuli panels - correct even when some
+        # neurons never spike.
+        total_neurons = max(n_neurons_with_spikes, controller_neuron_count)
+        self.n_neurons = total_neurons
+        self._all_neuron_ids = list(range(total_neurons))
         self._rebuild_visible_neuron_mapping()
         self.logger.info(
             f"{data.spike_indices.shape} spikes with {self.n_neurons} neurons"

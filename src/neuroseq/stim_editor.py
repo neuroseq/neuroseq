@@ -33,7 +33,6 @@ from neuroseq.stim_pattern_dialog import StimPatternContext
 from neuroseq.stim_pattern_dialog import StimPatternDialog
 from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import milliseconds_to_samples_nearest
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import samples_to_seconds
 from neuroseq.stim_timing import seconds_to_samples_ceil
@@ -67,7 +66,7 @@ class StimEditor(QtWidgets.QWidget):
 
     # Dynamic-input routines offered when the user opens the designer.
     TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
-    RHEOBASE_ROUTINE = "Minimal stimulus for spiking (rheobase)"
+    RHEOBASE_ROUTINE = "Minimal input for spiking (rheobase)"
     STDP_WINDOW_ROUTINE = "STDP timing window (LTP/LTD vs Δt)"
     DYNAMIC_INPUT_ROUTINES = (
         TARGETED_STDP_ROUTINE,
@@ -154,6 +153,13 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.escape_pressed.connect(self.cancel_paste_selected_stim)
         self.resize(800, 600)
 
+    def closeEvent(self, event):
+        # explicitly close the fastplotlib figure to avoid the renderer trying
+        # to access it after Qt has destroyed this container (same pattern as
+        # Gui.closeEvent, DataWidget.closeEvent, CellOverlayWidget.closeEvent).
+        self.stim_widget.close()
+        super().closeEvent(event)
+
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
@@ -213,15 +219,15 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         """Replace one stim array content via the undoable modifier pathway."""
         if stim_name not in self.stims_dict:
-            raise ValueError(f"Stimulus '{stim_name}' not found in stim editor.")
+            raise ValueError(f"Input '{stim_name}' not found in stim editor.")
         if self.project is None or stim_name not in self.project.stim_arrays:
-            raise ValueError(f"Stimulus '{stim_name}' not found in project.")
+            raise ValueError(f"Input '{stim_name}' not found in project.")
 
         modifier = self.stims_dict[stim_name]
         target_values = modifier.stim_array.values
         if target_values.shape != new_values.shape:
             raise ValueError(
-                "Stimulus replacement requires matching shape for undo support: "
+                "Input replacement requires matching shape for undo support: "
                 f"current={target_values.shape}, new={new_values.shape}"
             )
 
@@ -229,7 +235,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is not modifier:
             self.cmb_stim.setCurrentText(stim_name)
         if self.current_stim_modifier is None:
-            raise ValueError("No selected stimulus is available for modification.")
+            raise ValueError("No selected input is available for modification.")
 
         n_timepoints, n_neurons = target_values.shape
         self.current_stim_modifier.do(
@@ -237,7 +243,7 @@ class StimEditor(QtWidgets.QWidget):
             slice(0, n_timepoints),
             np.array(new_values, copy=True),
         )
-        self._stim_values_updated()
+        self._stim_data_modified()
 
         if (
             previous_selected_stim
@@ -251,8 +257,8 @@ class StimEditor(QtWidgets.QWidget):
             return
         padding_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Pad stim arrays",
-            "Padding to add to stim arrays in seconds",
+            "Pad input arrays",
+            "Padding to add to input arrays in seconds",
             QtWidgets.QLineEdit.EchoMode.Normal,
             f"{self.pad_stim_array_secs}",
         )
@@ -283,7 +289,7 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Error",
-                f"Error padding stim arrays: '{e}'",
+                f"Error padding input arrays: '{e}'",
             )
             return
 
@@ -310,8 +316,8 @@ class StimEditor(QtWidgets.QWidget):
             return
         trim_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
-            "Trim stimulation arrays",
-            "Seconds to trim from the stim arrays",
+            "Trim input arrays",
+            "Seconds to trim from the input arrays",
             QtWidgets.QLineEdit.EchoMode.Normal,
             "5.0",
         )
@@ -340,12 +346,12 @@ class StimEditor(QtWidgets.QWidget):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Invalid input",
-                f"Trim seconds {trim_seconds_as_float} is greater than or equal to current stim length {current_length_secs}.",
+                f"Trim seconds {trim_seconds_as_float} is greater than or equal to current input length {current_length_secs}.",
             )
             return
         caveats: list[str] = []
         if self.project.trim_stim_array_would_delete_data(new_length_secs):
-            caveats.append("• Trimming would delete non-zero stimulus data.")
+            caveats.append("• Trimming would delete non-zero input data.")
         if self.project.b2_model.get_sim_time_secs() > new_length_secs:
             # The trim cuts into the recorded simulation. Trimming only windows
             # the traces (see Project.get_data); it does not shorten the run,
@@ -355,12 +361,12 @@ class StimEditor(QtWidgets.QWidget):
                 "hides the simulated data beyond it (undo restores it) — it does "
                 "not shorten the simulation. Continuing the simulation resumes "
                 "from the full, untrimmed end of the last run, not the trimmed "
-                "point, and re-extends the stim so the hidden data reappears."
+                "point, and re-extends the input so the hidden data reappears."
             )
         if caveats:
             continue_with_trim = QtWidgets.QMessageBox.question(
                 self,
-                "Trim stim arrays",
+                "Trim input arrays",
                 "Trim anyway?\n\n" + "\n\n".join(caveats),
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
@@ -440,7 +446,7 @@ class StimEditor(QtWidgets.QWidget):
             max(1, int(self.project.max_neurons)),
         )
         self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def loop_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
@@ -456,7 +462,7 @@ class StimEditor(QtWidgets.QWidget):
                 QtWidgets.QMessageBox.critical(
                     self,
                     "Error",
-                    f"Error looping stim arrays: '{e}'",
+                    f"Error looping input arrays: '{e}'",
                 )
                 return
         self.set_project(self.project, keep_undo_history=False)
@@ -468,6 +474,17 @@ class StimEditor(QtWidgets.QWidget):
             return
         self.action_undo.setEnabled(self.current_stim_modifier.can_undo())
         self.action_redo.setEnabled(self.current_stim_modifier.can_redo())
+
+    def _stim_data_modified(self) -> None:
+        """Call after any real edit to the current stim array's values -
+
+        draw/erase/paste/delete/pad/trim/loop/undo/redo - as opposed to
+        _stim_values_updated() alone, which also runs on a plain stim
+        *selection* change and must not mark the project dirty.
+        """
+        if self.project is not None:
+            self.project.mark_dirty()
+        self._stim_values_updated()
 
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
@@ -567,9 +584,9 @@ class StimEditor(QtWidgets.QWidget):
             self.action_select_mode.setChecked(True)
             self.stim_widget.set_hover_slice(None)
         for action in self.actions_draw:
-            action.setEnabled(self.mode == InteractMode.DRAW)
+            action.setVisible(self.mode == InteractMode.DRAW)
         for action in self.actions_edit:
-            action.setEnabled(self.mode == InteractMode.SELECT)
+            action.setVisible(self.mode == InteractMode.SELECT)
 
     def set_draw_mode(self, draw_mode: DrawMode) -> None:
         self.draw_mode = draw_mode
@@ -616,7 +633,7 @@ class StimEditor(QtWidgets.QWidget):
             erase=erase, length=slice_length, reverse=reverse
         )
         self.current_stim_modifier.do(neuron_slice, time_slice, values)
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def stim_widget_mouse_clicked(
         self, neuron_index: int, time_index: int, button_index: int
@@ -790,7 +807,7 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_widget.set_hover_slice(None)
         self.stim_widget.set_mode(InteractMode.SELECT)
         self.select_mode = SelectMode.SELECT
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def undo(self) -> None:
         if self.current_stim_modifier is None:
@@ -802,7 +819,7 @@ class StimEditor(QtWidgets.QWidget):
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def redo(self) -> None:
         if self.current_stim_modifier is None:
@@ -814,7 +831,7 @@ class StimEditor(QtWidgets.QWidget):
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def save_selected_stim(self) -> None:
         if (
@@ -825,7 +842,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         filename, _ = getsavefilename(
             self,
-            "Save stim selection",
+            "Save input selection",
             "stim.npy",
             "NumPy npy file (*.npy)",
         )
@@ -847,7 +864,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         filename, _ = getopenfilename(
             self,
-            "Load stim selection",
+            "Load input selection",
             "stim.npy",
             "NumPy npy file (*.npy)",
         )
@@ -923,43 +940,7 @@ class StimEditor(QtWidgets.QWidget):
             self.stim_widget.selected_time_slice,
             0,
         )
-        self._stim_values_updated()
-
-    def choose_stim_length(self) -> None:
-        dt_ms = format_milliseconds(self._current_stim_dt_seconds() * 1000.0)
-        new_stim_length, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Stimulus length",
-            "Length of stimulus in milliseconds "
-            f"(rounded to nearest multiple of selected stim dt = {dt_ms} ms)",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            format_milliseconds(self._draw_stim_length_milliseconds()),
-        )
-        if not ok:
-            return
-        try:
-            duration_ms = float(new_stim_length)
-            if not math.isfinite(duration_ms) or duration_ms <= 0.0:
-                raise ValueError
-            self.draw_stim_length = max(
-                1,
-                milliseconds_to_samples_nearest(
-                    duration_ms, self._current_stim_dt_seconds()
-                ),
-            )
-            self.set_mode(self.mode)  # Reset mode to update hover slice
-        except (OverflowError, ValueError):
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse '{new_stim_length}' as a positive number of milliseconds.",
-            )
-            return
-        self.logger.debug(
-            "Setting draw stim length to %s samples (%sms)",
-            self.draw_stim_length,
-            format_milliseconds(self._draw_stim_length_milliseconds()),
-        )
+        self._stim_data_modified()
 
     def toggle_show_all_stim_arrays(self) -> None:
         self.stim_widget.set_background_data_visible(
@@ -968,10 +949,21 @@ class StimEditor(QtWidgets.QWidget):
 
     def choose_stim_intensity(self) -> None:
         dialog = StimIntensityDialog(
-            self.draw_stim, self.stim_widget.units, self.stim_type, self
+            self.draw_stim,
+            self.stim_widget.units,
+            self.stim_type,
+            self.draw_stim_length,
+            self._current_stim_dt_seconds(),
+            self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.draw_stim = dialog.draw_stim
+            self.draw_stim_length = dialog.draw_stim_length
+            self.logger.debug(
+                "Setting draw stim length to %s samples (%sms)",
+                self.draw_stim_length,
+                format_milliseconds(self._draw_stim_length_milliseconds()),
+            )
             self.set_mode(self.mode)  # Reset mode to update hover slice
 
     def _is_valid_slice(self, neuron_slice: slice, time_slice: slice) -> bool:
@@ -1055,7 +1047,7 @@ class StimEditor(QtWidgets.QWidget):
                 continue_with_remap = QtWidgets.QMessageBox.question(
                     self,
                     "Change project sample interval",
-                    f"Changing the stimulation timestep will remap stimulus array "
+                    f"Changing the input timestep will remap input array "
                     f"'{old_name}' from "
                     f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
                     f"to {format_milliseconds(dialog.dt * 1000.0)} ms."
@@ -1088,8 +1080,8 @@ class StimEditor(QtWidgets.QWidget):
         if (
             QtWidgets.QMessageBox.question(
                 self,
-                "Delete stim array",
-                f"Are you sure you want to delete stim array '{self.current_stim_modifier.stim_array.name}'? (This action cannot be undone.)",
+                "Delete input array",
+                f"Are you sure you want to delete input array '{self.current_stim_modifier.stim_array.name}'? (This action cannot be undone.)",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
             )
@@ -1105,7 +1097,7 @@ class StimEditor(QtWidgets.QWidget):
         if (
             QtWidgets.QMessageBox.question(
                 self,
-                "Clear stim array",
+                "Clear input array",
                 f"Set all values in '{name}' to zero?",
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
@@ -1144,7 +1136,7 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is None or self.project is None:
             return
         if self._pattern_dialog is None:
-            self._pattern_dialog = StimPatternDialog(self, self)
+            self._pattern_dialog = StimPatternDialog(self)
         self._pattern_dialog.set_context(self._current_pattern_context())
         self._pattern_dialog.show()
         self._pattern_dialog.raise_()
@@ -1157,7 +1149,7 @@ class StimEditor(QtWidgets.QWidget):
         # preview (goal, parameters, sample plot) beneath it; the real routine
         # dialog opens only when the user clicks Continue.
         dialog = RoutineSelectorDialog(
-            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme, self
+            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme
         )
         dialog.routine_chosen.connect(self._open_routine_dialog_for)
         dialog.finished.connect(dialog.deleteLater)
@@ -1183,7 +1175,15 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         dialog = getattr(self, attr_name)
         if dialog is None:
-            dialog = cls(self, self)
+            # No Qt parent: a parent sets WM_TRANSIENT_FOR to the main
+            # window, and on X11/KWin the routine dialog and its own two
+            # popups (also parentless - see StimHeatmapWindow's
+            # construction in input_designer_dialog.py) would then all
+            # share one owner. KWin can treat that whole chain as a single
+            # "raise group" tied to the app's own foreground status, so
+            # none of them can be individually brought to the front of the
+            # others by clicking - not even this one.
+            dialog = cls(self, None)
             dialog.simulation_requested.connect(self.simulation_requested)
             setattr(self, attr_name, dialog)
         dialog.apply_theme(self._input_designer_theme)
@@ -1273,7 +1273,7 @@ class StimEditor(QtWidgets.QWidget):
             max(1, int(self.project.max_neurons)),
         )
         self.limits_modified.emit()
-        self._stim_values_updated()
+        self._stim_data_modified()
 
     def _add_actions(self, toolbar: QtWidgets.QToolBar, menu: QtWidgets.QMenu) -> None:
         self.action_draw_mode = add_action(
@@ -1287,145 +1287,13 @@ class StimEditor(QtWidgets.QWidget):
             checkable=True,
             is_checked=True,
         )
-        self.action_select_mode = add_action(
-            "Select mode (2)",
-            lambda: self.set_mode(InteractMode.SELECT),
-            menu,
-            toolbar,
-            self,
-            shortcut="2",
-            icon="mdi6.select",
-            checkable=True,
-            is_checked=False,
-        )
-        self.toolbar.addSeparator()
-        self.action_undo = add_action(
-            "Create stim array",
-            self.create_stim_array,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.text-box-plus",
-        )
-        self.action_undo = add_action(
-            "Edit stim array",
-            self.edit_stim_array,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.text-box-edit",
-        )
-        self.action_undo = add_action(
-            "Delete stim array",
-            self.delete_stim_array,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.text-box-remove",
-        )
-        add_action(
-            "Clear stim array",
-            self.clear_stim_array,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.text-box-minus",
-        )
-        self.action_trim_to_mapped_neurons = add_action(
-            "Trim to Mapped Neurons…",
-            self.trim_to_mapped_neurons_requested.emit,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.content-cut",
-        )
-        self.action_trim_to_mapped_neurons.setEnabled(False)
-        self.action_trim_to_mapped_neurons.setToolTip(
-            "Permanently keep only the neurons with a Cellpose cell mapped to "
-            "them, removing the rest from every stim array and experiment in "
-            "this project."
-        )
-        add_action(
-            "Pad stim array (Ctrl+Shift+Plus)",
-            self.pad_stim_array,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl++",
-            icon="mdi6.timeline-plus",
-        )
-        add_action(
-            "Trim stim array (Ctrl+Shift+Minus)",
-            self.trim_stim_array,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Shift+-",
-            icon="mdi6.timeline-minus",
-        )
-        add_action(
-            "Loop stim array",
-            self.loop_stim_array,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.repeat-variant",
-        )
-        # Static and dynamic input design are a matched pair: the same
-        # pencil-box glyph, single vs stacked (a static block vs a dynamic
-        # sequence of inputs).
-        add_action(
-            "Design static input",
-            self.open_pattern_designer,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.pencil-box-outline",
-        )
-        add_action(
-            "Design dynamic input",
-            self.open_input_designer,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.pencil-box-multiple-outline",
-        )
-        add_action(
-            "Show all stim arrays",
-            self.toggle_show_all_stim_arrays,
-            menu,
-            toolbar,
-            self,
-            icon="mdi6.view-list",
-            checkable=True,
-            is_checked=True,
-        )
-        self.toolbar.addSeparator()
-        self.action_undo = add_action(
-            "Undo (Ctrl+Z)",
-            self.undo,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Z",
-            icon="mdi6.undo",
-        )
-        self.action_undo.setEnabled(False)
-        self.action_redo = add_action(
-            "Redo (Ctrl+Shift+Z)",
-            self.redo,
-            menu,
-            toolbar,
-            self,
-            shortcut="Ctrl+Shift+Z",
-            icon="mdi6.redo",
-        )
-        self.action_redo.setEnabled(False)
-        self.toolbar.addSeparator()
+        # Drawing tools are specific to Draw mode, so they sit right under its
+        # toggle and are hidden (not just greyed out - see set_mode) whenever
+        # Select mode is active instead.
         self.actions_draw = []
         self.actions_draw.append(
             add_action(
-                "Draw stimulus",
+                "Draw input",
                 lambda: self.set_draw_mode(DrawMode.DRAW),
                 menu,
                 toolbar,
@@ -1437,7 +1305,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Erase stimulus",
+                "Erase input",
                 lambda: self.set_draw_mode(DrawMode.ERASE),
                 menu,
                 toolbar,
@@ -1449,7 +1317,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_draw.append(
             add_action(
-                "Draw designer stimuli",
+                "Set input value/length…",
                 self.choose_stim_intensity,
                 menu,
                 toolbar,
@@ -1457,21 +1325,24 @@ class StimEditor(QtWidgets.QWidget):
                 icon="mdi6.network-strength-3",
             )
         )
-        self.actions_draw.append(
-            add_action(
-                "Modify stimulus length",
-                self.choose_stim_length,
-                menu,
-                toolbar,
-                self,
-                icon="mdi6.arrow-expand-horizontal",
-            )
-        )
         self.actions_draw_group = QtWidgets.QActionGroup(self)
         self.actions_draw_group.setExclusive(True)
-        self.toolbar.addSeparator()
         for action in self.actions_draw:
             self.actions_draw_group.addAction(action)
+        self.action_select_mode = add_action(
+            "Select mode (2)",
+            lambda: self.set_mode(InteractMode.SELECT),
+            menu,
+            toolbar,
+            self,
+            shortcut="2",
+            icon="mdi6.select",
+            checkable=True,
+            is_checked=False,
+        )
+        # Selection editing is specific to Select mode, so it sits right
+        # under its toggle - the mirror image of the drawing tools above -
+        # and is hidden whenever Draw mode is active instead.
         self.actions_edit = []
         self.action_set_amplitude = add_action(
             "Set amplitude",
@@ -1559,7 +1430,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         self.actions_edit.append(
             add_action(
-                "Delete selected stim region",
+                "Delete selected input region",
                 self.delete_selected_stim,
                 menu,
                 toolbar,
@@ -1569,4 +1440,139 @@ class StimEditor(QtWidgets.QWidget):
             )
         )
         for action in self.actions_edit:
-            action.setEnabled(False)
+            action.setVisible(False)
+        # Stim array lifecycle operations moved to a single dropdown button
+        # next to the stim array combobox in the top Data toolbar (issue
+        # #535) - see Gui._add_stim_array_ops_button_to_data_toolbar(), which
+        # adds these same actions into that button's menu. They stay
+        # registered on `menu` (the "Actions" context menu) and on `self`
+        # (for their keyboard shortcuts, where applicable) but not on the
+        # left toolbar.
+        self.action_create_stim_array = add_action(
+            "Create input array",
+            self.create_stim_array,
+            menu,
+            None,
+            self,
+            icon="mdi6.text-box-plus",
+        )
+        self.action_edit_stim_array = add_action(
+            "Edit input array",
+            self.edit_stim_array,
+            menu,
+            None,
+            self,
+            icon="mdi6.text-box-edit",
+        )
+        self.action_delete_stim_array = add_action(
+            "Delete input array",
+            self.delete_stim_array,
+            menu,
+            None,
+            self,
+            icon="mdi6.text-box-remove",
+        )
+        self.action_clear_stim_array = add_action(
+            "Clear input array",
+            self.clear_stim_array,
+            menu,
+            None,
+            self,
+            icon="mdi6.text-box-minus",
+        )
+        self.action_trim_to_mapped_neurons = add_action(
+            "Trim to Mapped Neurons…",
+            self.trim_to_mapped_neurons_requested.emit,
+            menu,
+            None,
+            self,
+            icon="mdi6.content-cut",
+        )
+        self.action_trim_to_mapped_neurons.setEnabled(False)
+        self.action_trim_to_mapped_neurons.setToolTip(
+            "Permanently keep only the neurons with a Cellpose cell mapped to "
+            "them, removing the rest from every input array and experiment in "
+            "this project."
+        )
+        # Pad/Trim/Loop stim array also moved to the stim array ops dropdown
+        # in the top Data toolbar (issue #535) - see
+        # Gui._add_stim_array_ops_button_to_data_toolbar().
+        self.action_pad_stim_array = add_action(
+            "Pad input array (Ctrl+Shift+Plus)",
+            self.pad_stim_array,
+            menu,
+            None,
+            self,
+            shortcut="Ctrl++",
+            icon="mdi6.timeline-plus",
+        )
+        self.action_trim_stim_array = add_action(
+            "Trim input array (Ctrl+Shift+Minus)",
+            self.trim_stim_array,
+            menu,
+            None,
+            self,
+            shortcut="Ctrl+Shift+-",
+            icon="mdi6.timeline-minus",
+        )
+        self.action_loop_stim_array = add_action(
+            "Loop input array",
+            self.loop_stim_array,
+            menu,
+            None,
+            self,
+            icon="mdi6.repeat-variant",
+        )
+        # Design static/dynamic input and Show all stim arrays also moved out
+        # of this toolbar (issue #535): the Design buttons become rectangular
+        # icon+text QPushButtons in the top View toolbar
+        # (Gui._add_stim_design_buttons_to_view_toolbar), and Show all stim
+        # arrays - a genuine toggle - joins the other view-toggle QActions
+        # there directly (Gui._create_actions_view).
+        add_action(
+            "Design static input",
+            self.open_pattern_designer,
+            menu,
+            None,
+            self,
+            icon="mdi6.pencil-box-outline",
+        )
+        add_action(
+            "Design dynamic input",
+            self.open_input_designer,
+            menu,
+            None,
+            self,
+            icon="mdi6.pencil-box-multiple-outline",
+        )
+        self.action_show_all_stim_arrays = add_action(
+            "Show all input arrays",
+            self.toggle_show_all_stim_arrays,
+            menu,
+            None,
+            self,
+            icon="mdi6.view-list",
+            checkable=True,
+            is_checked=True,
+        )
+        self.toolbar.addSeparator()
+        self.action_undo = add_action(
+            "Undo (Ctrl+Z)",
+            self.undo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Z",
+            icon="mdi6.undo",
+        )
+        self.action_undo.setEnabled(False)
+        self.action_redo = add_action(
+            "Redo (Ctrl+Shift+Z)",
+            self.redo,
+            menu,
+            toolbar,
+            self,
+            shortcut="Ctrl+Shift+Z",
+            icon="mdi6.redo",
+        )
+        self.action_redo.setEnabled(False)

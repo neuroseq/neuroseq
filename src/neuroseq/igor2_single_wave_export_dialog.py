@@ -33,7 +33,7 @@ class Igor2SingleWaveExportDialog(QtWidgets.QDialog):
         stim_name_label.setTextInteractionFlags(
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        form.addRow("Stimulus array:", stim_name_label)
+        form.addRow("Input array:", stim_name_label)
 
         self.neuron_combo = QtWidgets.QComboBox()
         for neuron_index in range(int(self.stim_array.values.shape[1])):

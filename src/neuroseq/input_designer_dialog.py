@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
+from matplotlib.image import AxesImage
 from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
@@ -17,7 +19,9 @@ from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.stim import StimType
 from neuroseq.stim_timing import snap_milliseconds_to_dt
+from neuroseq.utils import get_cmap
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -86,7 +90,247 @@ class _WheelToScrollFilter(QtCore.QObject):
         return super().eventFilter(obj, event)
 
 
-class InputDesignerDialog(QtWidgets.QDialog):
+class _SelfRaisingDialog(QtWidgets.QDialog):
+    """A non-modal QDialog that raises itself above its siblings whenever it
+    is activated (clicked into focus).
+
+    Several window managers raise an entire transient-dialog chain as one
+    unit on click, rather than reordering siblings within it - so clicking
+    one of several sibling popups (all transient for the same parent
+    routine dialog: the parameters dialog, its plots window, and its
+    stim-pattern heatmap window) does not bring it in front of the others;
+    the whole group just moves together, at whatever relative order the
+    window manager already had. Explicitly re-raising on ActivationChange
+    bypasses that window-manager heuristic and enforces the expected
+    last-clicked-is-on-top order.
+    """
+
+    def changeEvent(self, event: QtCore.QEvent | None) -> None:
+        super().changeEvent(event)
+        if (
+            event is not None
+            and event.type() == QtCore.QEvent.Type.ActivationChange
+            and self.isActiveWindow()
+        ):
+            self.raise_()
+
+
+def _wrap_in_scroll_area(
+    widget: QtWidgets.QWidget, parent: QtWidgets.QWidget | None = None
+) -> QtWidgets.QScrollArea:
+    """Wrap a plot widget (already given its own minimum size) in a
+    QScrollArea, shared by every routine dialog's plots window and by
+    StimHeatmapWindow.
+
+    setWidgetResizable(True) still lets the widget fill extra space when
+    the window is larger than its minimum - but Qt never shrinks it below
+    that minimum, so a window made smaller than the plot needs (e.g. a
+    short screen) scrolls the content instead of squeezing the figure
+    until axis labels overlap or get clipped off, which is what putting
+    the widget directly in a layout does.
+    """
+    scroll = QtWidgets.QScrollArea(parent)
+    scroll.setWidget(widget)
+    scroll.setWidgetResizable(True)
+    return scroll
+
+
+def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
+    """Render nonzero samples as stable, saturated RGBA stimulus colors.
+
+    Magnitude must not make a real pulse fade toward white or transparency:
+    the heatmap is for locating input events, not comparing amplitudes. Zero
+    samples remain transparent. External inputs retain separate colors for
+    positive and negative values.
+    """
+    cmap = get_cmap(stim_type).to_mpl()
+    rgba = np.zeros((*values.shape, 4), dtype=np.float32)
+    if stim_type == StimType.External:
+        rgba[values > 0] = cmap(1.0)
+        rgba[values < 0] = cmap(0.0)
+    else:
+        rgba[values != 0] = cmap(1.0)
+    return rgba
+
+
+class StimHeatmapWindow(_SelfRaisingDialog):
+    """A live, whole-history view (neuron ID x time) of the input pattern,
+    and below it the recorded trace(s) of the neuron(s) it targets - shared
+    by every closed-loop routine dialog (Input Designer, Rheobase, STDP
+    timing window).
+
+    Only the neuron(s) the running routine actually targets are shown, not
+    every neuron in the input array: an unrelated neuron elsewhere in the
+    array could otherwise dominate the heatmap's shared color scale,
+    fading the routine's own pulses to near-invisible even though their
+    values never changed. See _stim_pulse_rgba() for the other half of
+    that fix - decoupling color opacity from magnitude altogether.
+
+    Each of those dialogs already has its own live-follow view that pans a
+    fixed-width window and fully rebuilds its GPU image graphic on every
+    appended block - which makes it hard to visually track how the pattern
+    evolves, since it jumps and re-flashes each iteration. This window never
+    pans or rebuilds: update_view() only calls set_data/set_extent/set_clim
+    on the same Matplotlib image artist, so old blocks stay exactly where
+    they were and only the timeline extends.
+    """
+
+    def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(2, 2, 2, 2)
+        self.plot = MatplotlibWidget(self)
+        self.plot.setMinimumSize(680, 320)
+        figure = self.plot.getFigure()
+        grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.12)
+        self.axes = figure.add_subplot(grid[0, 0])
+        self.trace_axes = figure.add_subplot(grid[1, 0], sharex=self.axes)
+        self._image: AxesImage | None = None
+        self._image_row_ids: list[int] = []
+        layout.addWidget(_wrap_in_scroll_area(self.plot, self))
+        self.resize(720, 480)
+        self._theme = theme_module.LIGHT
+        self._style_axes()
+
+    def update_view(
+        self,
+        stim: StimArray | None,
+        stim_neuron_ids: Iterable[int],
+        trace: TraceData | None = None,
+        trace_neuron_ids: Iterable[int] | None = None,
+    ) -> None:
+        stim_ids = list(stim_neuron_ids)
+        duration_ms = self._update_heatmap(stim, stim_ids)
+        self._update_traces(
+            trace,
+            stim_ids if trace_neuron_ids is None else list(trace_neuron_ids),
+            duration_ms,
+        )
+        self.plot.draw()
+
+    def _update_heatmap(self, stim: StimArray | None, neuron_ids: list[int]) -> float:
+        axes = self.axes
+        ids = sorted({int(i) for i in neuron_ids})
+        if stim is None or not ids:
+            return 0.0
+        values = stim.values  # (n_time, n_neurons)
+        ids = [i for i in ids if 0 <= i < values.shape[1]]
+        if values.shape[0] == 0 or not ids:
+            return 0.0
+        selected = values[:, ids]
+        dt_ms = float(stim.dt) * 1000.0
+        duration_ms = values.shape[0] * dt_ms
+        n_rows = len(ids)
+        rgba = _stim_pulse_rgba(selected.T, stim.stim_type)
+        extent = (0.0, duration_ms, -0.5, n_rows - 0.5)
+        if self._image is None or self._image_row_ids != ids:
+            if self._image is not None:
+                self._image.remove()
+            self._image = axes.imshow(
+                rgba,
+                aspect="auto",
+                origin="lower",
+                extent=extent,
+                interpolation="nearest",
+            )
+            self._image_row_ids = ids
+            axes.set_yticks(range(n_rows))
+            axes.set_yticklabels([str(i) for i in ids])
+            self._style_heatmap_axes()
+        image = self._image
+        assert image is not None
+        image.set_data(rgba)
+        image.set_extent(extent)
+        axes.set_xlim(0.0, duration_ms)
+        axes.set_ylim(-0.5, n_rows - 0.5)
+        return duration_ms
+
+    def _update_traces(
+        self, trace: TraceData | None, neuron_ids: list[int], window_ms: float
+    ) -> None:
+        axes = self.trace_axes
+        axes.clear()
+        ids = sorted({int(i) for i in neuron_ids})
+        if trace is not None and ids and window_ms > 0.0:
+            dt_ms = float(trace.dt) * 1000.0
+            n_samples = trace.traces.shape[1]
+            window_samples = min(n_samples, max(1, round(window_ms / dt_ms)))
+            start = n_samples - window_samples
+            # Align to the same relative timeline as the heatmap (both end
+            # at "now"), rather than plotting the trace's own full absolute
+            # history: a StateMonitor keeps recording from whenever it was
+            # created, which can be far longer than this routine's own
+            # stim array (reset_stim_array() trims that back to a fresh,
+            # much shorter start) - showing the full trace then squeezed
+            # the routine's own pulses into a sliver of the shared x-axis.
+            time_ms = (np.arange(start, n_samples, dtype=np.float64) - start) * dt_ms
+            for neuron_id in ids:
+                matches = np.flatnonzero(trace.indices == neuron_id)
+                if matches.size == 0:
+                    continue
+                axes.plot(
+                    time_ms,
+                    trace.traces[int(matches[0]), start:],
+                    label=f"Neuron {neuron_id}",
+                    linewidth=1.2,
+                )
+            if axes.lines:
+                axes.legend(loc="upper right", fontsize=8, frameon=False)
+        self._style_trace_axes(units=trace.units if trace is not None else "")
+
+    def position_below(self, reference: QtWidgets.QWidget) -> None:
+        """Place this window just under `reference`, clamped to the
+        available screen so stacking windows vertically can't push this one
+        off-screen (it was originally placed unconditionally below the
+        plots window, which landed past the bottom edge on shorter
+        displays)."""
+        x = reference.x()
+        y = reference.y() + reference.height() + 20
+        screen = reference.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            x = min(max(x, available.left()), available.right() - self.width())
+            y = min(max(y, available.top()), available.bottom() - self.height())
+        self.move(x, y)
+
+    def apply_theme(self, theme: str) -> None:
+        self._theme = theme_module.normalize_theme(theme)
+        self._style_axes()
+        self.plot.draw()
+
+    def _style_axes(self) -> None:
+        self._style_heatmap_axes()
+        self._style_trace_axes()
+        face, _text = theme_module.mpl_colors(self._theme)
+        figure = self.plot.getFigure()
+        figure.set_facecolor(face)
+        figure.subplots_adjust(
+            left=0.09, right=0.98, bottom=0.11, top=0.97, hspace=0.12
+        )
+
+    def _style_heatmap_axes(self) -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        axes = self.axes
+        axes.set_facecolor(face)
+        axes.set_ylabel("Neuron ID", color=text)
+        axes.tick_params(colors=text, labelbottom=False)
+        for spine in axes.spines.values():
+            spine.set_color(text)
+
+    def _style_trace_axes(self, units: str = "") -> None:
+        face, text = theme_module.mpl_colors(self._theme)
+        axes = self.trace_axes
+        axes.set_facecolor(face)
+        axes.set_xlabel("Time (ms)", color=text)
+        axes.set_ylabel(units or "Trace", color=text)
+        axes.tick_params(colors=text)
+        for spine in axes.spines.values():
+            spine.set_color(text)
+
+
+class InputDesignerDialog(_SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
@@ -109,6 +353,8 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.project = editor.project
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
         self._iteration = 0
         self._view_block_samples: int | None = None
@@ -134,7 +380,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.lbl_stim_units = QtWidgets.QLabel("-", self)
         self.lbl_stim_dt = QtWidgets.QLabel("-", self)
         self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
-        info_form.addRow("Stim array:", self.lbl_stim_name)
+        info_form.addRow("Input array:", self.lbl_stim_name)
         info_form.addRow("Units:", self.lbl_stim_units)
         info_form.addRow("dt:", self.lbl_stim_dt)
         info_form.addRow("Neurons:", self.lbl_stim_neurons)
@@ -288,7 +534,16 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
         # The plots live in their own window so the controls and the plots each
         # get room, and the controls stay compact on small screens.
-        self.plot_window = QtWidgets.QDialog(self)
+        # No Qt parent for the popups (this differs from most of the app's
+        # other detached windows): a parent sets WM_TRANSIENT_FOR, and some
+        # window managers (observed on KWin/X11) then treat the whole chain
+        # of transient windows sharing one owner as a single "raise group" -
+        # clicking any one of them just re-asserts the group's foreground
+        # status without ever reordering members relative to each other, so
+        # a popup can stay stuck behind its sibling no matter which is
+        # clicked. Each is still closed explicitly in closeEvent() below, so
+        # nothing leaks by skipping Qt's parent-child ownership here.
+        self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("Design dynamic input — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -297,7 +552,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         plot_layout = QtWidgets.QVBoxLayout(self.plot_window)
         plot_layout.setContentsMargins(2, 2, 2, 2)
         self.epsp_plot = MatplotlibWidget(self.plot_window)
-        self.epsp_plot.setMinimumHeight(500)
+        self.epsp_plot.setMinimumSize(680, 500)
         figure = self.epsp_plot.getFigure()
         grid = figure.add_gridspec(3, 1, height_ratios=(3, 2, 2), hspace=0.14)
         self.epsp_axes = figure.add_subplot(grid[0, 0])
@@ -307,8 +562,16 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plots())
         # Compatibility alias: both axes now share one tightly packed canvas.
         self.difference_plot = self.epsp_plot
-        plot_layout.addWidget(self.epsp_plot)
+        plot_layout.addWidget(_wrap_in_scroll_area(self.epsp_plot, self.plot_window))
         self.plot_window.resize(720, 640)
+
+        # A third popup: a live, whole-history heatmap of the input pattern
+        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
+        self.stim_heatmap_window = StimHeatmapWindow(
+            "Design dynamic input — stimulation pattern"
+        )
+        self._stim_heatmap_window_positioned = False
+
         self.lbl_relative_difference = QtWidgets.QLabel(
             "Relative difference from target: waiting for baseline", self
         )
@@ -330,25 +593,33 @@ class InputDesignerDialog(QtWidgets.QDialog):
             QtWidgets.QPushButton,
             buttons.addButton("Stop", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole),
         )
+        self.btn_pause = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Pause", QtWidgets.QDialogButtonBox.ButtonRole.ActionRole
+            ),
+        )
         self.btn_clear = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Clear stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Clear input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset = cast(
             QtWidgets.QPushButton,
             buttons.addButton(
-                "Reset stim array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
+                "Reset input array", QtWidgets.QDialogButtonBox.ButtonRole.ResetRole
             ),
         )
         self.btn_reset.setToolTip(
-            "Trim the stim array back to the simulation head so the routine does "
+            "Trim the input array back to the simulation head so the routine does "
             "not run a long empty tail."
         )
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
         self.btn_stop.clicked.connect(self.stop)
+        self.btn_pause.clicked.connect(self.toggle_pause)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
         self.btn_reset.clicked.connect(self.editor.reset_stim_array)
         buttons.rejected.connect(self.close)
@@ -401,12 +672,18 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def showEvent(self, event: QtGui.QShowEvent | None) -> None:
         super().showEvent(event)
-        # The plots live in a separate window; bring it up alongside the dialog.
+        # The plots live in separate windows; bring them up alongside the dialog.
         self.plot_window.show()
         if not self._plot_window_positioned:
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
+        self.stim_heatmap_window.show()
+        if not self._stim_heatmap_window_positioned:
+            self._stim_heatmap_window_positioned = True
+            self.stim_heatmap_window.position_below(self.plot_window)
+        self.stim_heatmap_window.raise_()
+        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any
@@ -415,6 +692,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
+        self.stim_heatmap_window.close()
         super().closeEvent(event)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
@@ -498,7 +776,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
     def start(self) -> None:
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
-            self._append_log("No stimulation array is selected.")
+            self._append_log("No input array is selected.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -509,6 +787,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
+            self.btn_pause.setEnabled(True)
             self._append_log(
                 f"Running an initial {duration:.3f} s simulation to create "
                 "trace monitors."
@@ -531,18 +810,33 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
+        self.btn_pause.setEnabled(True)
         if clear_log:
             self.log.clear()
         self._update_plots()
+        self._update_stim_heatmap()
         self._append_probe()
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
 
+    def toggle_pause(self) -> None:
+        self._paused = not self._paused
+        self.btn_pause.setText("Resume" if self._paused else "Pause")
+        if self._paused:
+            self._append_log("Paused - the routine will hold after its current step.")
+            return
+        self._append_log("Resumed.")
+        if self._pending_simulation_seconds is not None:
+            seconds = self._pending_simulation_seconds
+            self._pending_simulation_seconds = None
+            self._awaiting_simulation = True
+            self.simulation_requested.emit(seconds)
+
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
         if modifier is None:
-            raise RuntimeError("No stimulation array is selected.")
+            raise RuntimeError("No input array is selected.")
         return modifier.stim_array
 
     def _require_project(self) -> Project:
@@ -655,7 +949,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             return
         self._resolution_warning_logged = True
         self._append_log(
-            f"Stim dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
+            f"Input dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
             "that grid, so finer adaptive increments cannot be resolved."
         )
 
@@ -682,6 +976,7 @@ class InputDesignerDialog(QtWidgets.QDialog):
             self.editor.focus_time_range(
                 history_start * stim.dt, history_stop * stim.dt
             )
+        self._update_stim_heatmap()
         return start
 
     def _run_to_sample(self, stop_sample: int) -> None:
@@ -692,7 +987,14 @@ class InputDesignerDialog(QtWidgets.QDialog):
 
     def _request_simulation(self, seconds: float) -> None:
         """Ask the host to run a simulation, recording that the designer is now
-        waiting for its result so it reacts only to its own run."""
+        waiting for its result so it reacts only to its own run. If paused,
+        defer the request until the user resumes the routine."""
+        if self._paused:
+            self._pending_simulation_seconds = seconds
+            self._append_log(
+                "Paused - next iteration queued; click Resume to continue."
+            )
+            return
         self._awaiting_simulation = True
         self.simulation_requested.emit(seconds)
 
@@ -898,11 +1200,26 @@ class InputDesignerDialog(QtWidgets.QDialog):
         self.difference_axes.set_xlabel("")
         self.pairing_time_axes.set_xlabel("Measurement / iteration", color=text)
 
+    def _update_stim_heatmap(self) -> None:
+        modifier = self.editor.current_stim_modifier
+        stim = modifier.stim_array if modifier is not None else None
+        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
+        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
+
+    def _heatmap_trace(self) -> TraceData | None:
+        if self.project is None:
+            return None
+        trace_name = self.cmb_trace.currentText()
+        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
+            return None
+        return self.project.get_data(trace_name, TraceData)
+
     def apply_theme(self, theme: str) -> None:
-        """Recolor both Matplotlib canvases for the application theme."""
+        """Recolor every Matplotlib canvas for the application theme."""
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.epsp_plot.draw()
+        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
@@ -911,9 +1228,13 @@ class InputDesignerDialog(QtWidgets.QDialog):
     def _finish(self, message: str) -> None:
         self._running = False
         self._awaiting_simulation = False
+        self._paused = False
+        self._pending_simulation_seconds = None
         self._phase = "idle"
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.setText("Pause")
         self._append_log(message)
 
     def _append_log(self, message: str) -> None:

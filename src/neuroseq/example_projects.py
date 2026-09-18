@@ -29,6 +29,11 @@ def register_example_project(name: str, section: str):
             project = func()
             project.project_name = name
             project.project_section = section
+            # Built up via Project's own mutating API (add_stim_array, etc.),
+            # which marks dirty as a side effect - but nobody has actually
+            # edited anything yet, so this shouldn't trigger a save prompt
+            # the moment it's opened (issue #535).
+            project.dirty = False
             return project
 
         example_projects.setdefault(section, {})[name] = wrapped

@@ -675,8 +675,17 @@ def test_export_seq_lightsource_id_matches_syscon_v3_template(
     shape_objs = [obj for obj in sequence.objects if obj.object_type == "Shape"]
     assert len(shape_objs) >= 1
     for shape in shape_objs:
-        assert shape.properties["TimelineInfo0_LightsourceID_0"] == "dummy_2_0"
+        # A spot's Shape block must claim the same laser as its TTLPulse
+        # block - RAPP reported SysCon2 needing the laser picked manually
+        # after import whenever these two disagreed (issue #535 follow-up).
+        assert (
+            shape.properties["TimelineInfo0_LightsourceID_0"] == expected_lightsource_id
+        )
         assert shape.properties["TimelineInfo0_Intensity_0"] == "0"
+
+    header_lines = seq_text.splitlines()
+    inverted_line = next(line for line in header_lines if line.startswith("inverted0="))
+    assert inverted_line == f"inverted0={expected_lightsource_id} RMI In"
 
 
 def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -> None:
@@ -1053,8 +1062,7 @@ def test_check_syscon2_input_sanity_fails_without_active_samples() -> None:
     assert not sanity.is_valid
     assert sanity.export_report is None
     assert any(
-        "no active stimulation samples found" in error.lower()
-        for error in sanity.errors
+        "no active input samples found" in error.lower() for error in sanity.errors
     )
 
 
@@ -1690,7 +1698,7 @@ def test_generate_syscon2_sequence_text_raises_when_no_active_stimulation() -> N
         units="1",
         dt=_DT_S,
     )
-    with pytest.raises(ValueError, match="No active stimulation"):
+    with pytest.raises(ValueError, match="No active input"):
         generate_syscon2_sequence_text(
             stim,
             _cellpose_result(mapping={0: 0}),

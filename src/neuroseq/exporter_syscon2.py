@@ -63,7 +63,6 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
     1030: "dummy_0_0",
     1100: "dummy_2_0",
 }
-_SHAPE_LIGHTSOURCE_ID = "dummy_2_0"
 
 _SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
@@ -401,8 +400,8 @@ def _build_pulse_window_state(
 
     if len(mapped_segments) == 0:
         raise ValueError(
-            "No mapped active stimulation segments to export. "
-            "Check Cellpose mapping and stim activity."
+            "No mapped active input segments to export. "
+            "Check Cellpose mapping and input activity."
         )
 
     max_pulse_tick = sanitized.window_values.shape[0] * _SYSCON2_WINDOW_TICKS
@@ -470,7 +469,7 @@ def _build_pulse_window_state(
                 )
 
     if len(entity_windows) == 0:
-        raise ValueError("No shape windows could be generated for mapped stimulation.")
+        raise ValueError("No shape windows could be generated for mapped input.")
 
     lane_count = _max_simultaneous_entity_windows(entity_windows)
     scheduled_windows = _assign_entity_lanes(entity_windows, lane_count)
@@ -522,7 +521,7 @@ def generate_syscon2_sequence_text(
     mapping stats and a debug CSV.
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     if tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
     if force_binary_intensity and (binary_intensity < 0 or binary_intensity > 1):
@@ -561,6 +560,14 @@ def generate_syscon2_sequence_text(
         if lightsource_id in template_lightsource_port
         else f"{lightsource_id} RMI In"
     )
+    # The template's own inverted0/invertedportcnt (or the hardcoded fallback
+    # in _build_header_lines) has no way to know which laser this particular
+    # export actually uses - it's whatever was last baked into the template
+    # text. Point inversion at the laser port actually selected here instead,
+    # so the exported file never asks SysCon2 to invert a port this sequence
+    # doesn't even use (issue reported by RAPP: pulses had to be manually
+    # re-inverted after every import because of this mismatch).
+    header_lines = _apply_inversion_header(header_lines, lightsource_port)
 
     sanitized = _sanitize_stim_array_for_export(
         stim_array,
@@ -570,9 +577,7 @@ def generate_syscon2_sequence_text(
     )
 
     if len(sanitized.sanitized_segments) == 0:
-        raise ValueError(
-            "No active stimulation remained after sanity quantization/fixes."
-        )
+        raise ValueError("No active input remained after sanity quantization/fixes.")
 
     segmentation = cellpose_data.segmentation_array
     centroids = _compute_cell_centroids(segmentation)
@@ -661,7 +666,7 @@ def generate_syscon2_sequence_text(
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
                     ),
                     ("TimelineInfo0_LightsourceCount", "1"),
-                    ("TimelineInfo0_LightsourceID_0", _SHAPE_LIGHTSOURCE_ID),
+                    ("TimelineInfo0_LightsourceID_0", lightsource_id),
                     (
                         "TimelineInfo0_Intensity_0",
                         _shape_intensity_for_window(
@@ -1644,7 +1649,7 @@ def _build_debug_csv_text(
                 ),
                 timeline_index=_shape_lane_to_timeline_index(window.lane),
                 lane_index=window.lane,
-                lightsource_id=_SHAPE_LIGHTSOURCE_ID,
+                lightsource_id=lightsource_id,
                 laser_nm=active_laser_wavelength_nm,
                 start_sys_tick=window.start_tick,
                 duration_sys_tick=window.end_tick - window.start_tick,
@@ -1930,14 +1935,14 @@ def check_syscon2_input_sanity(
 
     values = np.asarray(stim_array.values)
     if values.ndim != 2:
-        errors.append("Stim array values must be 2D (timepoints x neurons).")
+        errors.append("Input array values must be 2D (timepoints x neurons).")
     elif values.shape[0] == 0 or values.shape[1] == 0:
-        errors.append("Stim array must contain at least one timepoint and one neuron.")
+        errors.append("Input array must contain at least one timepoint and one neuron.")
 
     if stim_array.dt <= 0:
-        errors.append("Stim array dt must be positive.")
+        errors.append("Input array dt must be positive.")
     if values.size > 0 and not np.all(np.isfinite(values)):
-        errors.append("Stim array contains non-finite values (NaN/Inf).")
+        errors.append("Input array contains non-finite values (NaN/Inf).")
 
     if errors:
         return SysconInputSanityReport(
@@ -1987,7 +1992,7 @@ def check_syscon2_input_sanity(
         force_binary_intensity=force_binary_intensity,
     )
     if len(sanitized.raw_segments) == 0:
-        errors.append("No active stimulation samples found above the active threshold.")
+        errors.append("No active input samples found above the active threshold.")
         return SysconInputSanityReport(
             is_valid=False,
             errors=errors,
@@ -2151,9 +2156,9 @@ def find_slm_gap_violations(
     `min_gap_us` apart to satisfy SLM hologram loading constraints.
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
+        raise ValueError("Input array dt must be positive")
     if min_gap_us <= 0:
         raise ValueError("min_gap_us must be positive")
 
@@ -2200,9 +2205,9 @@ def find_slm_off_on_overlap_violations(
     not overlap the ON interval of any other neuron's object.
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
+        raise ValueError("Input array dt must be positive")
     if min_gap_us <= 0:
         raise ValueError("min_gap_us must be positive")
 
@@ -2306,9 +2311,9 @@ def find_initial_slm_load_violation(
 ) -> InitialSlmLoadViolation | None:
     """Check whether first active stimulation starts before SLM load-up window."""
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
+        raise ValueError("Input array dt must be positive")
     if min_start_us <= 0:
         raise ValueError("min_start_us must be positive")
 
@@ -2340,9 +2345,9 @@ def shift_stim_values_right_for_initial_slm_load(
       (new_values, truncated_tail_timepoints)
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     if stim_array.dt <= 0:
-        raise ValueError("Stim array dt must be positive")
+        raise ValueError("Input array dt must be positive")
     if min_start_us <= 0:
         raise ValueError("min_start_us must be positive")
 
@@ -2371,7 +2376,7 @@ def space_out_stim_values_for_slm(
       (new_values, truncated_tail_samples)
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
     truncated_tail_samples = 0
@@ -2422,7 +2427,7 @@ def align_stim_values_left_for_slm(
       (new_values, moved_run_count)
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
     moved_run_count = 0
@@ -2478,7 +2483,7 @@ def space_out_stim_values_for_slm_off_on_overlap(
       (new_values, truncated_tail_samples)
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
     truncated_tail_samples = 0
@@ -2524,7 +2529,7 @@ def find_simultaneous_duration_violations(
 ) -> list[SimultaneousDurationViolation]:
     """Find simultaneous stimulation starts with unequal per-neuron durations."""
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
 
     segments = _extract_active_segments(stim_array.values, active_threshold)
     segments_by_start: dict[int, list[_StimSegment]] = defaultdict(list)
@@ -2568,7 +2573,7 @@ def equalize_simultaneous_durations_to_min(
       (new_values, trimmed_timepoints)
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
 
     values = np.array(stim_array.values, copy=True)
     violations = find_simultaneous_duration_violations(
@@ -2611,7 +2616,7 @@ def find_overlapping_pulse_group_violations(
     (leftmost start, shortest duration).
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
 
     segments = _extract_active_segments(stim_array.values, active_threshold)
     n = len(segments)
@@ -2688,7 +2693,7 @@ def align_overlapping_pulses_to_shortest(
         total number of sample positions whose value changed.
     """
     if stim_array.values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
 
     violations = find_overlapping_pulse_group_violations(
         stim_array, active_threshold=active_threshold
@@ -2751,7 +2756,7 @@ def _build_active_set_runs(
     active_threshold: float,
 ) -> list[_ActiveSetRun]:
     if values.ndim != 2:
-        raise ValueError("Stim array values must be 2D (timepoints x neurons)")
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
     n_timepoints = values.shape[0]
     if n_timepoints == 0:
         return []
@@ -3184,7 +3189,7 @@ def _validate_no_off_on_overlap(
             overlap_start = max(off_start, on_start)
             overlap_end = min(off_end, on_end)
             raise ValueError(
-                "Invalid stimulation for SysCon2 export: an SLM off-state interval "
+                "Invalid input for SysCon2 export: an SLM off-state interval "
                 "overlaps with another neuron's ON interval "
                 f"(off neuron={off_window.neuron_index}, "
                 f"on neuron={on_window.neuron_index}, "
@@ -3209,7 +3214,7 @@ def _validate_pulse_bounds_within_entity_windows(
         expected_stimulation_start = window.start_tick + lead_ticks + pulse_guard_ticks
         if window.stimulation_start_tick != expected_stimulation_start:
             raise ValueError(
-                "Invalid stimulation for SysCon2 export: first associated laser pulse "
+                "Invalid input for SysCon2 export: first associated laser pulse "
                 "must start exactly after lead-in + guard interval "
                 f"(neuron={window.neuron_index}, "
                 f"stimulation_start_tick={window.stimulation_start_tick}, "
@@ -3218,7 +3223,7 @@ def _validate_pulse_bounds_within_entity_windows(
         max_stimulation_end = window.end_tick - pulse_guard_ticks
         if window.stimulation_end_tick > max_stimulation_end:
             raise ValueError(
-                "Invalid stimulation for SysCon2 export: laser pulse end is too "
+                "Invalid input for SysCon2 export: laser pulse end is too "
                 "close to the end of the associated shape object "
                 f"(neuron={window.neuron_index}, "
                 f"stimulation_end_tick={window.stimulation_end_tick}, "
@@ -3280,14 +3285,14 @@ def _validate_laser_pulse_end_before_overlapping_shapes(
         return
     if len(scheduled_windows) == 0:
         raise ValueError(
-            "Invalid stimulation for SysCon2 export: laser pulses exist but no shape "
+            "Invalid input for SysCon2 export: laser pulses exist but no shape "
             "windows were scheduled."
         )
 
     for pulse_start_tick, pulse_end_tick in pulse_intervals:
         if pulse_end_tick <= pulse_start_tick:
             raise ValueError(
-                "Invalid stimulation for SysCon2 export: encountered non-positive "
+                "Invalid input for SysCon2 export: encountered non-positive "
                 f"laser pulse interval [{pulse_start_tick}, {pulse_end_tick})."
             )
 
@@ -3301,7 +3306,7 @@ def _validate_laser_pulse_end_before_overlapping_shapes(
         ]
         if len(overlapping_windows) == 0:
             raise ValueError(
-                "Invalid stimulation for SysCon2 export: laser pulse interval does not "
+                "Invalid input for SysCon2 export: laser pulse interval does not "
                 "overlap any shape object "
                 f"(pulse_ticks=[{pulse_start_tick}, {pulse_end_tick}))."
             )
@@ -3310,7 +3315,7 @@ def _validate_laser_pulse_end_before_overlapping_shapes(
             latest_allowed_end_tick = window.end_tick - pulse_guard_ticks
             if pulse_end_tick > latest_allowed_end_tick:
                 raise ValueError(
-                    "Invalid stimulation for SysCon2 export: laser pulse end exceeds "
+                    "Invalid input for SysCon2 export: laser pulse end exceeds "
                     "the allowed end for an overlapping shape object "
                     f"(pulse_ticks=[{pulse_start_tick}, {pulse_end_tick}), "
                     f"shape_lane={window.lane}, neuron={window.neuron_index}, "
@@ -3347,7 +3352,7 @@ def _assign_entity_lanes(
         if len(available_lanes) == 0:
             raise ValueError(
                 "Could not schedule entity objects within the configured lane count. "
-                "The stimulation pattern is too dense for the computed simultaneous-neuron count."
+                "The input pattern is too dense for the computed simultaneous-neuron count."
             )
 
         lane = heapq.heappop(available_lanes)
@@ -3440,6 +3445,28 @@ def _build_header_lines(template_text: str) -> list[str]:
     lines = [first_line]
     lines.extend([f"{key}={value}" for key, value in ordered_header.items()])
     return lines
+
+
+def _apply_inversion_header(
+    header_lines: list[str], lightsource_port: str
+) -> list[str]:
+    """Overwrite invertedportcnt/inverted0 to invert exactly the laser port
+    this export actually uses, replacing whatever _build_header_lines set
+    from the template (which has no way to know that port)."""
+    updated: list[str] = []
+    replaced_inverted0 = False
+    for line in header_lines:
+        key = line.split("=", 1)[0] if "=" in line else line
+        if key == "invertedportcnt":
+            updated.append("invertedportcnt=1")
+        elif key == "inverted0":
+            updated.append(f"inverted0={lightsource_port}")
+            replaced_inverted0 = True
+        else:
+            updated.append(line)
+    if not replaced_inverted0:
+        updated.append(f"inverted0={lightsource_port}")
+    return updated
 
 
 def _detect_port_info(

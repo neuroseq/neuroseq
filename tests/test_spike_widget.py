@@ -101,6 +101,55 @@ def test_spike_widget(qtbot: QtBot, make_spike_data) -> None:
     spike_widget.close()
 
 
+def test_spike_widget_populates_visible_neuron_ids_for_y_axis_labels(
+    qtbot: QtBot, make_spike_data
+) -> None:
+    """Every row needs a real neuron id behind it so the y-axis tick
+    formatter (which looks up ``_visible_neuron_ids``) can label it -
+    otherwise the Spikes panel silently draws no neuron numbers at all."""
+    controller = ConstrainedPanZoomController()
+    spike_widget = SpikeWidget(controller=controller)
+    qtbot.addWidget(spike_widget)
+    spike_widget.show()
+    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    spike_data = make_spike_data(n_neurons=10, n_spikes=50, max_time_secs=1.0)
+    spike_widget.set_data(spike_data)
+    assert spike_widget._all_neuron_ids == list(range(spike_widget.n_neurons))
+    assert spike_widget._visible_neuron_ids == list(range(spike_widget.n_neurons))
+    spike_widget.close()
+
+
+def test_spike_widget_neuron_count_falls_back_to_controller_limit(
+    qtbot: QtBot,
+) -> None:
+    """A neuron that never spikes has no entry in spike_indices at all, so
+    the highest spiking index alone would undercount it - and any trailing
+    silent neurons above it. Since the shared controller already knows the
+    project's true neuron count (kept in sync by Gui.update_limits()), it
+    is used as a floor so this panel's rows stay aligned with the
+    Traces/Stimuli panels even when some neurons never fire."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 10)
+    spike_widget = SpikeWidget(controller=controller)
+    qtbot.addWidget(spike_widget)
+    spike_widget.show()
+    qtbot.waitUntil(lambda: spike_widget.isVisible())
+
+    import brian2.numpy_ as np
+
+    from neuroseq.data import SpikeData
+
+    spike_data = SpikeData(
+        name="spikes",
+        spike_indices=np.array([0, 2, 4], dtype=np.uint32),
+        spike_times=np.array([0.001, 0.002, 0.003], dtype=np.float32),
+    )
+    spike_widget.set_data(spike_data)
+    assert spike_widget.n_neurons == 10
+    assert spike_widget._all_neuron_ids == list(range(10))
+    spike_widget.close()
+
+
 def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
     qtbot: QtBot,
 ) -> None:

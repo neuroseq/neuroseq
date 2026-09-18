@@ -98,7 +98,7 @@ COMMON_PARAM_DESCRIPTIONS: dict[str, str] = {
     "Eiopto": "Inhibitory opsin (e.g. GtACR) reversal potential.",
     "g_exc": "Maximal excitatory opsin photocurrent conductance.",
     "g_inh": "Maximal inhibitory opsin photocurrent conductance.",
-    "opto_units": "Unit-carrying scale factor for the optogenetic stimulus (power density).",
+    "opto_units": "Unit-carrying scale factor for the optogenetic input (power density).",
     "phi_m": "Photon flux at which the opsin activation half-saturates.",
     "phy": "Photon flux / illumination level driving the opsin.",
     # channelrhodopsin (multi-state opsin) kinetics

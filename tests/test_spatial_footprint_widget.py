@@ -32,6 +32,8 @@ from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 
 
 def _right_click_event() -> SimpleNamespace:
@@ -40,6 +42,15 @@ def _right_click_event() -> SimpleNamespace:
     map_screen_to_world (which would read x/y) is monkeypatched in these
     tests to ignore the event object entirely."""
     return SimpleNamespace(button=2)
+
+
+def _up_event(time_stamp: float = 0.0) -> SimpleNamespace:
+    """A stand-in pointer event for _cell_selection_pointer_up - only
+
+    .time_stamp is read (for double-click detection on a background click);
+    map_screen_to_world (which would read x/y) is monkeypatched in these
+    tests to ignore the event object entirely."""
+    return SimpleNamespace(time_stamp=time_stamp)
 
 
 def _cellpose_result(
@@ -1334,7 +1345,45 @@ def test_overlay_view_context_menu_event_does_not_bubble_to_parent(
     assert requests == []
 
 
-def test_overlay_view_background_click_emits_background_clicked(
+def test_overlay_view_background_double_click_emits_background_clicked(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A single click on empty space is an easy accidental miss while aiming
+
+    for a cell, so background_clicked only fires on the second click of a
+    double-click - not the first (issue #535).
+    """
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.segmentation = np.array([[-1]], dtype=np.int32)
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    clicked: list[int] = []
+    overlay_view.neuron_clicked.connect(clicked.append)
+    background_clicks: list[None] = []
+    overlay_view.background_clicked.connect(lambda: background_clicks.append(None))
+
+    # First click: no signal yet.
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(0.0))
+    assert background_clicks == []
+
+    # Second click, well within the double-click interval: fires now.
+    interval_s = QtWidgets.QApplication.doubleClickInterval() / 1000.0
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(interval_s / 2))
+    assert background_clicks == [None]
+
+    assert clicked == []
+    overlay_view.close()
+
+
+def test_overlay_view_background_single_click_does_not_clear_selection(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -1347,14 +1396,43 @@ def test_overlay_view_background_click_emits_background_clicked(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 0.0, 0.0]),
     )
-    clicked: list[int] = []
-    overlay_view.neuron_clicked.connect(clicked.append)
+    background_clicks: list[None] = []
+    overlay_view.background_clicked.connect(lambda: background_clicks.append(None))
 
-    with qtbot.waitSignal(overlay_view.background_clicked):
-        overlay_view._cell_selection_pointer_down(_right_click_event())
-        overlay_view._cell_selection_pointer_up(None)
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(0.0))
 
-    assert clicked == []
+    assert background_clicks == []
+    overlay_view.close()
+
+
+def test_overlay_view_background_click_outside_double_click_interval_resets(
+    qtbot: QtBot,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    overlay_view = OverlayView()
+    qtbot.addWidget(overlay_view)
+    overlay_view.enable_cell_selection = True
+    overlay_view.segmentation = np.array([[-1]], dtype=np.int32)
+    monkeypatch.setattr(
+        overlay_view.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    background_clicks: list[None] = []
+    overlay_view.background_clicked.connect(lambda: background_clicks.append(None))
+
+    interval_s = QtWidgets.QApplication.doubleClickInterval() / 1000.0
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(0.0))
+    # Second click arrives too late to count as a double-click...
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(interval_s * 2))
+    assert background_clicks == []
+    # ...but it restarts the counter, so a third click right after does count.
+    overlay_view._cell_selection_pointer_down(_right_click_event())
+    overlay_view._cell_selection_pointer_up(_up_event(interval_s * 2 + interval_s / 2))
+    assert background_clicks == [None]
     overlay_view.close()
 
 
@@ -1647,3 +1725,37 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
     assert state.receivers(state.selection_changed) == baseline_selection
     assert state.receivers(state.neuron_greyed_out_changed) == baseline_greyed
     view_a.close()
+
+
+def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+
+    assert [widget.tabs.tabText(i) for i in range(widget.tabs.count())] == [
+        "Cell segmentation",
+        "Video",
+    ]
+    assert widget.calcium_video_widget.video_actions_widget.height() == 44
+    assert widget.calcium_video_widget.remove_button.text() == "Remove imaging data"
+
+
+def test_video_none_stim_source_disables_stimulation_crosses(qtbot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    video = widget.calcium_video_widget
+    video._fps = 10.0
+    video.set_stim_arrays(
+        {
+            "stim": StimArray(
+                "stim",
+                StimType.Excitation,
+                np.ones((3, 1)),
+                "mV",
+                0.1,
+            )
+        }
+    )
+
+    video.stim_combo.setCurrentText("None")
+
+    assert video._stimulated_cellpose_ids_at(0) == set()

@@ -30,8 +30,16 @@ def torch_gpu_status() -> tuple[bool, str]:
     """
     try:
         import torch
-    except Exception:
-        return False, "PyTorch is not available in this environment."
+    except Exception as exc:
+        return False, (
+            "PyTorch could not be imported in this environment.\n"
+            f"Import error: {exc}\n\n"
+            "Install or repair it before using Cellpose annotation:\n\n"
+            f"    {INSTALL_GPU_TORCH_HINT}\n\n"
+            "Not using uv (e.g. NeuroSeq is installed into a conda environment)? "
+            "Install directly with pip instead:\n"
+            f"    {INSTALL_GPU_TORCH_HINT_PIP}"
+        )
 
     version = str(getattr(torch, "__version__", "unknown"))
     try:

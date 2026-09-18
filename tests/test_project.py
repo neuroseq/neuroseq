@@ -1295,7 +1295,7 @@ def test_remappable_data_description_counts_correctly() -> None:
     project.add_experiment(Experiment("exp1", 0.004, [], [trace]))
 
     desc = project.remappable_data_description(0.0005)
-    assert "2 stim array(s)" in desc
+    assert "2 input array(s)" in desc
     assert "1 trace dataset(s)" in desc
 
     assert project.remappable_data_description(0.001) == ""
@@ -1426,3 +1426,74 @@ def test_trim_to_mapped_neurons_is_a_noop_when_already_fully_mapped() -> None:
     project.trim_to_mapped_neurons()
 
     assert np.allclose(project.stim_arrays["stim"].values, original_values)
+
+
+def test_fresh_and_loaded_projects_start_clean() -> None:
+    """No unsaved-changes prompt should fire for a project nobody has
+
+    touched yet (issue #535)."""
+    assert Project().dirty is False
+    assert default_project().dirty is False
+
+
+def test_mark_dirty_and_save_roundtrip(tmp_path: Path) -> None:
+    project = default_project()
+    assert project.dirty is False
+
+    project.mark_dirty()
+    assert project.dirty is True
+
+    project.save(tmp_path / "project.nseq", SaveLoadOptions(True, True, True, True))
+    assert project.dirty is False
+
+    reloaded = Project(tmp_path / "project.nseq")
+    assert reloaded.dirty is False
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.add_stim_array(
+            StimArray("s", StimType.Excitation, np.zeros((10, 2)), "mV", dt=0.001)
+        ),
+        lambda p: p.pad_stim_arrays(1.0),
+        lambda p: p.pad_stim_arrays_to_neuron_count(5),
+        lambda p: p.resize_stim_arrays_to_neuron_count(5),
+        lambda p: p.trim_stim_arrays(0.0),
+        lambda p: p.loop_stim_arrays(2),
+        lambda p: p.tile_stim_arrays_to_length(0.5),
+        lambda p: p.add_experiment(
+            Experiment(
+                "e",
+                1.0,
+                [],
+                [TraceData("e_trace", np.zeros((1, 10)), np.array([0]), "mV", 0.1)],
+            )
+        ),
+        lambda p: p.run_simulation(0.01),
+    ],
+)
+def test_mutating_methods_mark_the_project_dirty(mutate) -> None:
+    project = default_project()
+    project.stim_arrays["stim"] = StimArray(
+        "stim", StimType.Excitation, np.zeros((10, 2)), "mV", dt=0.001
+    )
+    assert project.dirty is False
+
+    mutate(project)
+
+    assert project.dirty is True
+
+
+def test_import_project_marks_dirty(tmp_path: Path) -> None:
+    saved = default_project()
+    saved.add_stim_array(
+        StimArray("s", StimType.Excitation, np.zeros((10, 2)), "mV", dt=0.001)
+    )
+    tmp_file = tmp_path / "source.nseq"
+    saved.save(tmp_file, SaveLoadOptions(True, True, True, True))
+
+    project = default_project()
+    assert project.dirty is False
+    project.import_project(tmp_file, SaveLoadOptions(True, True, True, True))
+    assert project.dirty is True

@@ -271,8 +271,8 @@ def test_rheobase_plot_marks_converged_rheobase(qtbot, monkeypatch) -> None:
         np.allclose(line.get_ydata(), 2.0 * dialog._rheobase) for line in guide_lines
     )
     assert dialog.rheobase_axes.lines[0].get_color() == "#000000"
-    assert dialog.rheobase_axes.get_xlabel() == "Stimulus duration (ms)"
-    assert dialog.rheobase_axes.get_ylabel() == "Stimulus strength\n(mwatt / um2)"
+    assert dialog.rheobase_axes.get_xlabel() == "Input duration (ms)"
+    assert dialog.rheobase_axes.get_ylabel() == "Input strength\n(mwatt / um2)"
     assert dialog.rheobase_axes.get_title() == ""
     assert dialog.search_axes.get_title() == ""
     assert "Rheobase ~=" in dialog.lbl_status.text()
@@ -397,7 +397,76 @@ def test_rheobase_plots_open_in_separate_window(qtbot) -> None:
 
     assert dialog.plot_window is not dialog
     assert dialog.plot_window.isWindow()
-    assert dialog.rheobase_plot.parent() is dialog.plot_window
+    assert dialog.rheobase_plot.window() is dialog.plot_window
+
+
+def test_rheobase_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
+    assert dialog.stim_heatmap_window.isWindow()
+
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
+
+
+def test_rheobase_updates_stim_heatmap_as_blocks_are_appended(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+
+    dialog.start()
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    stim = editor.current_stim_modifier.stim_array
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+    _finish_search(dialog)
+    # the same image artist is reused (updated in place), not rebuilt, and
+    # reflects the array's final, grown length
+    assert dialog.stim_heatmap_window._image is image
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+
+def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
+    qtbot, monkeypatch
+) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    stim = editor.current_stim_modifier.stim_array
+    # a much bigger, unrelated pulse on neuron 1 (not targeted by this
+    # search, which targets neuron 0) must not wash out neuron 0's own,
+    # much smaller pulses in the heatmap's color scale.
+    stim.values[0, 1] = 1000.0
+    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
+    assert dialog.spn_neuron.value() == 0
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 1  # only the targeted neuron's row
+    assert dialog.stim_heatmap_window.axes.get_yticklabels()[0].get_text() == "0"
+    # every one of neuron 0's own nonzero samples is fully opaque, regardless
+    # of the much bigger unrelated pulse on neuron 1 (alpha is no longer
+    # proportional to magnitude at all - see _stim_pulse_rgba())
+    own_values = stim.values[:, [0]].T
+    assert np.array_equal(array[..., 3] > 0, own_values != 0)
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 1
+    assert np.all(np.asarray(trace_lines[0].get_ydata()) == -70.0)
+
+
+def test_rheobase_forwards_theme_to_stim_heatmap(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
 
 
 def test_rheobase_initializes_missing_trace_then_starts_search(
@@ -477,7 +546,7 @@ def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     assert not dialog._running
     assert editor.calls == []
     assert editor.cleared_all == 0
-    assert "existing stimulation input kept" in dialog.log.toPlainText()
+    assert "existing input kept" in dialog.log.toPlainText()
 
 
 def test_rheobase_clear_all_before_start(qtbot, monkeypatch) -> None:
@@ -586,3 +655,27 @@ def test_duration_bisection_stops_at_one_sample(qtbot, monkeypatch) -> None:
     threshold_durations = {duration for duration, _threshold in dialog._thresholds}
     assert threshold_durations <= {10.0, 11.0, 12.0}
     assert "durations are snapped" in dialog.log.toPlainText()
+
+
+def test_rheobase_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.5)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.5
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.5]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"

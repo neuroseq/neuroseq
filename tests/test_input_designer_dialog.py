@@ -11,6 +11,7 @@ from neuroseq import theme
 from neuroseq.data import TraceData
 from neuroseq.input_designer_dialog import EPSPMeasurement
 from neuroseq.input_designer_dialog import InputDesignerDialog
+from neuroseq.input_designer_dialog import _stim_pulse_rgba
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -693,8 +694,8 @@ def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
     assert dialog.lbl_stim_dt.text() == "1 ms"  # dt = 0.001 s
     assert dialog.lbl_stim_neurons.text() == "2"
 
-    # The Clear stim array button delegates to the editor.
-    assert dialog.btn_clear.text() == "Clear stim array"
+    # The Clear input array button delegates to the editor.
+    assert dialog.btn_clear.text() == "Clear input array"
     dialog.btn_clear.click()
     assert editor.cleared == 1
 
@@ -740,3 +741,146 @@ def test_input_designer_pairing_time_recorded_as_effective_grid_value(
 
     assert dialog._pairing_times_ms == [10.0, -10.0]
     assert "pairing times are snapped" in dialog.log.toPlainText()
+
+
+def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.stim_heatmap_window)
+
+    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
+    assert dialog.stim_heatmap_window.isWindow()
+    assert dialog.stim_heatmap_window.plot.window() is dialog.stim_heatmap_window
+
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
+    # See test_stim_heatmap_window.py for the off-screen clamping this relies on.
+    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
+    available = screen.availableGeometry()
+    pos = dialog.stim_heatmap_window.pos()
+    assert available.left() <= pos.x() <= available.right()
+    assert available.top() <= pos.y() <= available.bottom()
+    dialog.close()
+    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
+
+
+def test_input_designer_updates_stim_heatmap_as_blocks_are_appended(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    stim = editor.current_stim_modifier.stim_array
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+    dialog.simulation_finished()  # appends a pairing block, growing the array
+    # the same image artist is reused (updated in place), not rebuilt/replaced
+    assert dialog.stim_heatmap_window._image is image
+    assert image.get_array().shape[1] == stim.values.shape[0]
+
+
+def test_input_designer_stim_heatmap_shows_only_targeted_neurons_and_traces(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+    # Widen the input array to 3 neurons and seed a much bigger, unrelated
+    # pulse on neuron 2 (not targeted by this routine, which targets the
+    # default presynaptic=0/postsynaptic=1) - it must not wash out the
+    # targeted neurons' own pulses in the heatmap's color scale.
+    stim = editor.current_stim_modifier.stim_array
+    stim.values = np.zeros((stim.values.shape[0], 3), dtype=np.float32)
+    stim.values[0, 2] = 1000.0
+    project.trace.traces = np.zeros(
+        (3, project.trace.traces.shape[1]), dtype=np.float32
+    )
+    project.trace.traces[1, :] = -55.0
+    project.trace.indices = np.array([0, 1, 2])
+    dialog.refresh()
+
+    dialog.start()
+
+    image = dialog.stim_heatmap_window._image
+    assert image is not None
+    array = image.get_array()
+    assert array is not None
+    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
+    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
+    assert labels == ["0", "1"]
+    # every one of the targeted neurons' own nonzero samples is fully
+    # opaque, regardless of the much bigger unrelated pulse on neuron 2
+    # (alpha is no longer proportional to magnitude at all)
+    own_values = stim.values[:, [0, 1]].T
+    assert np.array_equal(array[..., 3] > 0, own_values != 0)
+
+    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
+    assert len(trace_lines) == 2
+    plotted = {tuple(np.unique(line.get_ydata())) for line in trace_lines}
+    assert plotted == {(0.0,), (-55.0,)}
+
+
+def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+
+    dialog.apply_theme(theme.DARK)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
+    dialog.apply_theme(theme.LIGHT)
+    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
+
+
+def test_stim_heatmap_colors_do_not_fade_with_pulse_magnitude() -> None:
+    values = np.array([[0.0, 0.01, 1.0, -2.0]])
+
+    rgba = _stim_pulse_rgba(values, StimType.Excitation)
+
+    assert np.array_equal(rgba[0, 0], [0.0, 0.0, 0.0, 0.0])
+    assert np.array_equal(rgba[0, 1], rgba[0, 2])
+    assert rgba[0, 1, 3] == 1.0
+    assert rgba[0, 3, 3] == 1.0
+
+
+def test_input_designer_pause_defers_next_simulation_and_resets_on_finish(
+    qtbot,
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    requested: list[float] = []
+    dialog.simulation_requested.connect(requested.append)
+    dialog._running = True
+    dialog.btn_pause.setEnabled(True)
+
+    dialog.toggle_pause()
+    dialog._request_simulation(0.25)
+    assert dialog._paused
+    assert dialog._pending_simulation_seconds == 0.25
+    assert not dialog._awaiting_simulation
+    assert requested == []
+
+    dialog.toggle_pause()
+    assert requested == [0.25]
+    assert dialog._awaiting_simulation
+    dialog._finish("done")
+    assert not dialog._paused
+    assert dialog._pending_simulation_seconds is None
+    assert not dialog.btn_pause.isEnabled()
+    assert dialog.btn_pause.text() == "Pause"
