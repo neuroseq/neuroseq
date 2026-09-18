@@ -26,17 +26,31 @@ def test_brain_art_is_ascii_and_rectangular_enough_to_align() -> None:
         assert line == line.rstrip()
 
 
-def test_brain_art_has_two_hemispheres_and_a_stem() -> None:
+_TEXTURE_CHARS = "01()"
+
+
+def test_base_spans_are_a_sagittal_profile_not_a_mirrored_blob() -> None:
+    # The silhouette is a single-sided side view (frontal pole, vertex,
+    # occipital pole, cerebellum notch, temporal lobe), not two hemispheres
+    # mirrored across a fissure - so it must not be symmetric about the
+    # midline, and its bounds must stay within the character grid.
+    mirrored = tuple(
+        (console_art._BRAIN_WIDTH - 1 - right, console_art._BRAIN_WIDTH - 1 - left)
+        for left, right in console_art._BASE_SPANS
+    )
+    assert mirrored != console_art._BASE_SPANS
+    for left, right in console_art._BASE_SPANS:
+        assert 0 <= left < right < console_art._BRAIN_WIDTH
+
+
+def test_brain_art_has_a_profile_and_a_stem() -> None:
     art = console_art.brain_art(random.Random(4))
     # The stem hangs off the underside as the last two rows.
     assert art[-1].strip() == "\\|/"
     assert "|" in art[-2]
-    # The fold pattern is mirrored, so both hemispheres carry gyri characters.
+    # Gyri texture (binary digits) is present.
     body = art[:-2]
-    midpoint = console_art._BRAIN_WIDTH // 2
-    left = sum(line[:midpoint].count("~") for line in body)
-    right = sum(line[midpoint:].count("~") for line in body)
-    assert left > 0 and right > 0
+    assert any(c in line for line in body for c in _TEXTURE_CHARS)
 
 
 def test_brain_art_differs_between_runs() -> None:
@@ -53,7 +67,7 @@ def test_brain_art_is_stable_across_many_seeds() -> None:
     for seed in range(50):
         art = console_art.brain_art(random.Random(seed))
         assert len(art) >= 6
-        assert sum(line.count("~") for line in art) > 0
+        assert sum(1 for line in art for c in line if c in _TEXTURE_CHARS) > 0
 
 
 def test_console_splash_stacks_banner_over_brain() -> None:
@@ -64,7 +78,7 @@ def test_console_splash_stacks_banner_over_brain() -> None:
     assert [line.rstrip() for line in lines[1 : 1 + len(banner)]] == banner
     assert splash.endswith("\n")
     assert splash.isascii()
-    brain_rows = [line for line in lines if "~" in line]
+    brain_rows = [line for line in lines if any(c in line for c in _TEXTURE_CHARS)]
     assert brain_rows
 
 

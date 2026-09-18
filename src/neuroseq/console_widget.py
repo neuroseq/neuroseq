@@ -89,6 +89,11 @@ class ConsoleWidget(ReplWidget):
             "b2": b2,
             "project": None,
         }
+        # Word-wrap would reflow the fixed character grid of the splash art
+        # (and any wide array repr) into garbage whenever the panel is
+        # narrower than the content - scroll horizontally instead, like a
+        # terminal does.
+        self.output.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
         self._print_intro()
 
         # Create button layout

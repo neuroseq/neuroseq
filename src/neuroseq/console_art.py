@@ -35,7 +35,31 @@ _BANNER_TEXT = "WELCOME TO NEUROSEQ"
 # Character grid the brain is drawn on. Cells are about twice as tall as they
 # are wide, which the aspect corrections below account for.
 _BRAIN_WIDTH = 46
-_BRAIN_HEIGHT = 13
+
+# Hand-tuned (left, right) column bounds per row for a right-facing sagittal
+# (side) profile: frontal pole at the top right, curving back over the vertex
+# to the occipital pole at the top left, narrowing at the back for the
+# cerebellum and brainstem notch, then the temporal lobe bulging back out at
+# the front before tapering to a point underneath. Randomizing this directly
+# (rather than a smooth radius-vs-angle formula) is what keeps it reading as
+# a brain at this resolution - a couple of concave notches (cerebellum,
+# sylvian fissure) are too sharp for a low row count to render smoothly.
+_BASE_SPANS: tuple[tuple[int, int], ...] = (
+    (19, 30),
+    (14, 34),
+    (10, 37),
+    (7, 40),
+    (5, 42),
+    (4, 42),
+    (4, 39),
+    (5, 36),
+    (7, 32),
+    (9, 35),
+    (11, 33),
+    (13, 31),
+    (16, 28),
+    (19, 25),
+)
 
 
 def _render_line(text: str) -> list[str]:
@@ -57,66 +81,61 @@ def welcome_banner() -> list[str]:
 
 
 def brain_art(rng: random.Random | None = None) -> list[str]:
-    """Draw a brain, with a fold pattern and outline that vary per call.
+    """Draw a sagittal (side-view) brain, its sulci, size, and outline all
+    varying per call, so no two sessions grow quite the same one.
 
-    The silhouette is only mildly perturbed so it always reads as a brain; the
-    gyri are what really change, as concentric ripples mirrored across the
-    longitudinal fissure.
+    The silhouette is a hand-tuned base shape, lightly rescaled and jittered
+    row by row for the size/shape variation; the gyri inside it are a fresh
+    set of concentric ripples every time, rendered as 0s and 1s for a
+    "digital" looking brain.
     """
     rng = rng if rng is not None else random.Random()
-    lumps = [(rng.uniform(0.0, math.tau), rng.uniform(0.02, 0.05), k) for k in (4, 6)]
     ring_spacing = rng.uniform(5.0, 7.5)
     swirl = rng.uniform(0.9, 1.7)
     lobes = rng.choice((2.0, 3.0, 4.0))
     phase = rng.uniform(0.0, math.tau)
 
-    def radius(theta: float) -> float:
-        return 1.0 + sum(amp * math.sin(k * theta + p) for p, amp, k in lumps)
+    # Rescale the silhouette (brain "size") and jitter each row's bounds a
+    # little (sulci/shape variation) without breaking the smooth left/right
+    # progression the outline stitching below relies on.
+    scale = rng.uniform(0.92, 1.08)
+    mid = (_BRAIN_WIDTH - 1) / 2
+    spans = []
+    for base_left, base_right in _BASE_SPANS:
+        left = mid + (base_left - mid) * scale + rng.uniform(-0.8, 0.8)
+        right = mid + (base_right - mid) * scale + rng.uniform(-0.8, 0.8)
+        left_column = max(0, min(_BRAIN_WIDTH - 2, round(left)))
+        right_column = max(left_column + 1, min(_BRAIN_WIDTH - 1, round(right)))
+        spans.append((left_column, right_column))
+    height = len(spans)
 
-    def inside(x: float, y: float) -> bool:
-        # Squash vertically, and flatten the underside a little more than the
-        # crown, so the silhouette sits somewhere between a circle and a brain.
-        adjusted_y = y * 1.05 * (1.25 if y > 0 else 1.0)
-        distance = math.hypot(x, adjusted_y)
-        if distance == 0.0:
-            return True
-        return distance <= radius(math.atan2(adjusted_y, x))
+    half_width = (_BRAIN_WIDTH - 1) / 2
+    half_height = (height - 1) / 2
+    xs = [(column - half_width) / half_width for column in range(_BRAIN_WIDTH)]
+    ys = [(row - half_height) / half_height for row in range(height)]
 
     def fold(x: float, y: float) -> float:
-        mirrored_x = abs(x) + 0.12
-        distance = math.hypot(mirrored_x, y * 1.15)
-        theta = math.atan2(y, mirrored_x)
+        # Cells are about twice as tall as they are wide, hence the y stretch.
+        adjusted_y = y * 1.1
+        shifted_x = x + 0.15
+        distance = math.hypot(shifted_x, adjusted_y)
+        theta = math.atan2(adjusted_y, shifted_x)
         return math.sin(
             ring_spacing * distance + swirl * math.sin(lobes * theta + phase) + phase
         )
 
-    half_width = (_BRAIN_WIDTH - 1) / 2
-    half_height = (_BRAIN_HEIGHT - 1) / 2
-    xs = [(column - half_width) / half_width for column in range(_BRAIN_WIDTH)]
-    ys = [(row - half_height) / half_height for row in range(_BRAIN_HEIGHT)]
-
-    spans: list[tuple[int, int] | None] = []
-    for y in ys:
-        columns = [column for column, x in enumerate(xs) if inside(x, y)]
-        spans.append((columns[0], columns[-1]) if columns else None)
-
-    grid = [[" "] * _BRAIN_WIDTH for _ in range(_BRAIN_HEIGHT)]
-    for row, span in enumerate(spans):
-        if span is None:
-            continue
-        left, right = span
+    grid = [[" "] * _BRAIN_WIDTH for _ in range(height)]
+    for row, (left, right) in enumerate(spans):
         above = spans[row - 1] if row else None
-        below = spans[row + 1] if row + 1 < _BRAIN_HEIGHT else None
+        below = spans[row + 1] if row + 1 < height else None
         for column in range(left + 1, right):
             x = xs[column]
-            if abs(x) < 0.05:
-                continue  # the longitudinal fissure between the hemispheres
             value = fold(x, ys[row])
             if abs(value) < 0.58:
-                if abs(value) < 0.24:
-                    grid[row][column] = "~"
+                if abs(value) < 0.22:
+                    grid[row][column] = rng.choice("01")
                 else:
-                    grid[row][column] = "(" if x < 0 else ")"
+                    grid[row][column] = "0" if value < 0 else "1"
         if above is None or below is None:
             for column in range(left, right + 1):
                 grid[row][column] = "_"
@@ -148,23 +167,16 @@ def brain_art(rng: random.Random | None = None) -> list[str]:
                 "\\" if right > above[1] else "/" if right < above[1] else ")"
             )
 
-    # Strip the empty grid rows before adding the stem, so it always hangs
-    # directly off the underside rather than floating below a gap.
-    lines = _strip_blank_edges(["".join(row).rstrip() for row in grid])
-    stem_column = _BRAIN_WIDTH // 2
+    lines = ["".join(row).rstrip() for row in grid]
+
+    # The brainstem hangs from underneath the cerebellum notch at the back of
+    # the last row, not dead center - there's no bilateral fissure to center on.
+    last_left, last_right = spans[-1]
+    stem_column = round((last_left + last_right) / 2) - 4
+    stem_column = max(6, min(_BRAIN_WIDTH - 6, stem_column))
     lines.append(" " * (stem_column - 3) + "\\__ | __/")
     lines.append(" " * (stem_column - 1) + "\\|/")
     return lines
-
-
-def _strip_blank_edges(lines: list[str]) -> list[str]:
-    start = 0
-    end = len(lines)
-    while start < end and not lines[start].strip():
-        start += 1
-    while end > start and not lines[end - 1].strip():
-        end -= 1
-    return lines[start:end]
 
 
 def _center(lines: list[str], width: int) -> list[str]:
