@@ -683,9 +683,34 @@ def test_export_seq_lightsource_id_matches_syscon_v3_template(
         )
         assert shape.properties["TimelineInfo0_Intensity_0"] == "0"
 
+
+def test_export_seq_never_inverts_pulses() -> None:
+    """Inverted pulses are never wanted, regardless of what the template
+    says: invertedportcnt is always forced to 0 and inverted0 is dropped
+    entirely, even though the template used here (_template_header()) has
+    invertedportcnt=1/inverted0=... of its own."""
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+    )
+
     header_lines = seq_text.splitlines()
-    inverted_line = next(line for line in header_lines if line.startswith("inverted0="))
-    assert inverted_line == f"inverted0={expected_lightsource_id} RMI In"
+    assert "invertedportcnt=0" in header_lines
+    assert not any(line.startswith("inverted0=") for line in header_lines)
 
 
 def test_export_seq_roundtrip_preserves_burst_timing_at_exact_tick_positions() -> None:
