@@ -3649,6 +3649,75 @@ def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
     assert focus_calls == [1]
 
 
+def test_apply_spike_selection_does_not_auto_show_for_a_never_simulated_monitor() -> (
+    None
+):
+    # A model that defines a spike monitor but was never simulated yields a
+    # real (non-None) SpikeData with zero spikes - SpikeWidget.set_data()
+    # itself treats that as empty and leaves .data unset. Auto-show must key
+    # off that, not off get_data()'s non-None return, or every such project
+    # pops the panel open with nothing in it.
+    empty_spike_data = SpikeData(
+        name="P",
+        spike_indices=np.array([], dtype=np.int32),
+        spike_times=np.array([], dtype=np.float32),
+    )
+    auto_show_calls: list[Any] = []
+    spike_widget = SimpleNamespace(data=None, n_neurons=0)
+
+    def _set_spike_data(data: SpikeData | None) -> None:
+        spike_widget.data = (
+            None if data is None or data.spike_times.shape[0] == 0 else data
+        )
+
+    spike_widget.set_data = _set_spike_data
+    fake_gui: Any = SimpleNamespace(
+        project=SimpleNamespace(get_data=lambda name, data_type: empty_spike_data),
+        spike_widget=spike_widget,
+        _focus_neuron_range=lambda n_neurons: None,
+        _auto_show_widget=lambda widget: auto_show_calls.append(widget),
+    )
+
+    Gui._apply_spike_selection(fake_gui, "Simulation :: P")
+
+    assert spike_widget.data is None
+    assert auto_show_calls == []
+
+
+def test_set_synapse_does_not_auto_show_for_a_never_simulated_monitor() -> None:
+    empty_synapse_data = SynapseData(
+        name="Ce / we",
+        values=np.zeros((0, 0, 0), dtype=np.float32),
+        timestamps=np.array([], dtype=np.float32),
+    )
+    auto_show_calls: list[Any] = []
+    heatmap_widget = SimpleNamespace(data=None)
+
+    def _set_heatmap_data(data: SynapseData | None) -> None:
+        heatmap_widget.data = (
+            None if data is None or data.values.shape[0] == 0 else data
+        )
+
+    heatmap_widget.set_data = _set_heatmap_data
+    fake_gui: Any = SimpleNamespace(
+        settings=SimpleNamespace(max_ram_synapse_plot_matrix=0),
+        project=SimpleNamespace(
+            max_ram_synapse_plot_matrix=0,
+            get_data=lambda name, data_type: empty_synapse_data,
+        ),
+        heatmap_widget=heatmap_widget,
+        _auto_show_widget=lambda widget: auto_show_calls.append(widget),
+    )
+
+    # set_synapse is @with_wait_cursor-wrapped, which touches the live
+    # QApplication cursor - call the unwrapped function so this test doesn't
+    # need a real Qt application.
+    Gui.set_synapse.__wrapped__(fake_gui, "Simulation :: Ce / we")  # type: ignore[attr-defined]
+
+    assert heatmap_widget.data is None
+    assert auto_show_calls == []
+
+
 def test_gui_set_data_refocuses_combined_trace_view() -> None:
     trace_data = TraceData(
         name="cellpose traces",

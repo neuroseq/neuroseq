@@ -1474,7 +1474,13 @@ class Gui(QtWidgets.QMainWindow):
         )
         data = self.project.get_data(cmb_name, SynapseData)
         self.heatmap_widget.set_data(data)
-        if data is not None and hasattr(self, "_auto_show_widget"):
+        # set_data() itself treats a shapeless/zero-length SynapseData (e.g. a
+        # model that defines synapses but was never simulated) as empty and
+        # leaves self.data unset - check that, not the pre-fetch value, so an
+        # empty result doesn't pop the panel open with nothing to show.
+        if getattr(self.heatmap_widget, "data", None) is not None and hasattr(
+            self, "_auto_show_widget"
+        ):
             self._auto_show_widget(self.heatmap_widget)
 
     def _on_neurons_greyed_out_changed(
@@ -1536,7 +1542,13 @@ class Gui(QtWidgets.QMainWindow):
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
-        if data is not None and hasattr(self, "_auto_show_widget"):
+        # set_data() itself treats a spike-less SpikeData (e.g. a model that
+        # defines a spike monitor but was never simulated) as empty and
+        # leaves self.data unset - check that, not the pre-fetch value, so an
+        # empty result doesn't pop the panel open with nothing to show.
+        if getattr(self.spike_widget, "data", None) is not None and hasattr(
+            self, "_auto_show_widget"
+        ):
             self._auto_show_widget(self.spike_widget)
         self._focus_neuron_range(self.spike_widget.n_neurons)
 
