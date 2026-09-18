@@ -1343,6 +1343,17 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.striped_cell_ids: set[int] = set()
         self._aoi_config: AreasOfInterestConfig | None = None
         self._show_aoi = True
+        if not title:
+            # An empty title means this instance is meant to blend in as a
+            # plain content widget (e.g. the Cell segmentation tab next to a
+            # borderless video canvas), not read as a titled group - but
+            # QGroupBox still paints a border/title-reserved margin by
+            # default (Fusion, the app's style, always does; the retro theme
+            # additionally styles QGroupBox with its own explicit border).
+            # A local stylesheet beats both, since a widget's own stylesheet
+            # always wins over an ancestor/app one for the same selector.
+            self.setFlat(True)
+            self.setStyleSheet("QGroupBox { border: none; margin: 0; padding: 0; }")
         self._setup_ui()
 
     def _setup_ui(self) -> None:

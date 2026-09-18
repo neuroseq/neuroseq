@@ -364,6 +364,26 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
     widget.close()
 
 
+def test_untitled_overlay_widget_has_no_group_box_border(qtbot: QtBot) -> None:
+    """Regression: CellOverlayWidget is a QGroupBox, which paints a border
+    (and the retro theme styles one in explicitly) even with an empty title.
+    Embedded borderless next to the Video tab's canvas (SpatialFootprintWidget
+    passes ""), that border showed up as an edge the Video tab doesn't have.
+    A widget with a real title (e.g. the patch-clamp import dialog's "Cellpose
+    Preview") must still get the normal, visible group box chrome."""
+    untitled = CellOverlayWidget("")
+    qtbot.addWidget(untitled)
+    assert untitled.isFlat()
+    assert "border: none" in untitled.styleSheet()
+
+    titled = CellOverlayWidget("Cellpose Preview")
+    qtbot.addWidget(titled)
+    assert not titled.isFlat()
+    assert titled.styleSheet() == ""
+    titled.close()
+    untitled.close()
+
+
 def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
     qtbot: QtBot,
 ) -> None:
