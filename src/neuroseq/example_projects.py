@@ -1,10 +1,15 @@
 import copy
 from collections.abc import Callable
 from functools import wraps
+from importlib import resources
+from pathlib import Path
 
 import brian2 as b2
 import brian2.numpy_ as np
 
+from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -42,8 +47,40 @@ def register_example_project(name: str, section: str):
     return decorator
 
 
-@register_example_project("Getting Started Project", section="Basics")
+def _getting_started_cellpose_data(n_neurons: int) -> CellposeImportResult:
+    """Load the bundled 2-photon FOV + Cellpose segmentation and map the
+    first ``n_neurons`` detected cells to the model's neurons, so the
+    Getting Started project has real spatial footprints to show off rather
+    than opening with an empty Cell segmentation tab."""
+    resource_root = resources.files("neuroseq.resources").joinpath("example_data")
+    image_path = Path(str(resource_root.joinpath("2p_imaging_FOV.png")))
+    segmentation_path = Path(str(resource_root.joinpath("2p_imaging_FOV_seg.npy")))
+
+    importer = CellPoseImporter()
+    importer.load_image_file(image_path)
+    importer.load_segmentation_file(segmentation_path)
+    importer.generate_overlay()
+
+    assert importer.segmentation_data is not None
+    unique_ids = np.unique(importer.segmentation_data)
+    original_ids = unique_ids[unique_ids >= 0]
+    full_mapping = generate_linear_stimulus_mapping(original_ids, offset=0)
+    mapping = {stim_id: full_mapping[stim_id] for stim_id in range(n_neurons)}
+
+    return importer.create_result(
+        image_path,
+        mapping,
+        mapping_strategy="Linear",
+        segmentation_path=segmentation_path,
+    )
+
+
 def default_project() -> Project:
+    """The network used both by the "Getting Started Project" example and,
+    bare, as the app's blank "New Project" template (gui.py) - so it must
+    stay usable without the Cellpose demo imagery getting_started_project()
+    adds on top; a real 2-photon FOV has no business appearing in a project
+    the user didn't ask for any imaging data in."""
     project = Project()
 
     # define Brian2 model
@@ -76,9 +113,9 @@ def default_project() -> Project:
 
     ### optogenetics parameters
     b2_model.define_parameter("Eeopto", 0 * b2.mV)
-    b2_model.define_parameter("Eiopto", -80 * b2.mV)
-    b2_model.define_parameter("g_exc", 0.25 * b2.nS)
-    b2_model.define_parameter("g_inh", 0.25 * b2.nS)
+    b2_model.define_parameter(
+        "g_exc", (2e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
+    )
 
     b2_model.define_parameter("we", 6 * b2.nS)
     b2_model.define_parameter("wi", 67 * b2.nS)
@@ -87,13 +124,12 @@ def default_project() -> Project:
     b2_model.define_parameter("dApre", 6.0 * b2.nsiemens)
 
     eqs = """
-dv/dt = (gl*(El-v)+ge*(Ee-v)+geopto*(Eeopto-v)+gi*(Ei-v)+giopto*(Eiopto-v)-g_na*(m*m*m)*h*(v-ENa)-g_kd*(n*n*n*n)*(v-EK))/Cm : volt
+dv/dt = (gl*(El-v)+ge*(Ee-v)+geopto*(Eeopto-v)+gi*(Ei-v)-g_na*(m*m*m)*h*(v-ENa)-g_kd*(n*n*n*n)*(v-EK))/Cm : volt
 dm/dt = alpha_m*(1-m)-beta_m*m : 1
 dn/dt = alpha_n*(1-n)-beta_n*n : 1
 dh/dt = alpha_h*(1-h)-beta_h*h : 1
 dge/dt = -ge*(1./taue) : siemens
 dgi/dt = -gi*(1./taui) : siemens
-giopto = g_inh * stimulus_inh(t, i): siemens
 geopto = g_exc * stimulus(t, i): siemens
 alpha_m = 0.32*(mV**-1)*4*mV/exprel((13*mV-v+VT)/(4*mV))/ms : Hz
 beta_m = 0.28*(mV**-1)*5*mV/exprel((v-VT-40*mV)/(5*mV))/ms : Hz
@@ -193,18 +229,21 @@ we= clip(we + Apre, -gmax, gmax)
         dt=stim_dt,
     )
     project.add_stim_array(stim_array)
+    # Mirrors register_example_project()'s own post-build reset: built up
+    # via Project's mutating API, which marks dirty as a side effect, but
+    # a freshly built starting point (example or blank "New Project" alike)
+    # shouldn't already look unsaved the moment it opens.
+    project.dirty = False
 
-    stim_inh = np.zeros((int(tfinal / b2.ms), nneurons), dtype="float")
-    stim_inh[800:802, :nneurons_exc] = 1
-    stim_array_inh = StimArray(
-        name="stimulus_inh",
-        stim_type=StimType.Inhibition,
-        values=stim_inh,
-        units="1",
-        dt=0.001,
+    return project
+
+
+@register_example_project("Getting Started Project", section="Basics")
+def getting_started_project() -> Project:
+    project = default_project()
+    project.cellpose_data = _getting_started_cellpose_data(
+        project.b2_model.get_defined_neuron_count()
     )
-    project.add_stim_array(stim_array_inh)
-
     return project
 
 

@@ -6,7 +6,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.example_projects import default_project
+from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
 
@@ -68,7 +68,7 @@ class StartupDialog(QtWidgets.QDialog):
             layout.addWidget(self.recent_list)
 
     def _choose_example(self) -> None:
-        self.chosen_project = default_project()
+        self.chosen_project = getting_started_project()
         self.accept()
 
     def _choose_load(self) -> None:

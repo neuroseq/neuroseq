@@ -403,7 +403,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         right_layout.addWidget(self.mapping_group)
         guidance_path = (
             Path(__file__).resolve().parents[2]
-            / "examplary_data"
+            / "example_data"
             / "cellpose_guidance.png"
         )
         self.guidance_label = QtWidgets.QLabel()
