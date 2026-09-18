@@ -456,6 +456,34 @@ def test_checkbox_row_has_no_outer_padding_and_is_not_clipped(qtbot: QtBot) -> N
     widget.close()
 
 
+def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> None:
+    """Regression: QTabWidget bases its size hint on the current page alone,
+    and the checkbox row (visible only on the Cell segmentation tab) isn't
+    counted at all while hidden - together these made the whole panel's
+    preferred size change on every tab switch, bouncing it around in its
+    splitter. Both the size hint and the actual on-screen geometry must stay
+    fixed regardless of which tab is showing."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.resize(400, 400)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    assert widget.tabs.currentIndex() == 0
+    size_hint_on_cell_tab = widget.sizeHint()
+    min_size_hint_on_cell_tab = widget.minimumSizeHint()
+    geometry_on_cell_tab = widget.tabs.geometry()
+
+    widget.tabs.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1)
+
+    assert widget.sizeHint() == size_hint_on_cell_tab
+    assert widget.minimumSizeHint() == min_size_hint_on_cell_tab
+    assert widget.tabs.geometry() == geometry_on_cell_tab
+    widget.close()
+
+
 def test_clicking_a_cell_selects_it_and_greys_the_rest(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)

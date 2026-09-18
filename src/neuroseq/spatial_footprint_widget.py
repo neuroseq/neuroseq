@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -52,6 +53,41 @@ class _PanelLayout(QtWidgets.QVBoxLayout):
         return -1
 
 
+class _StableSizeTabWidget(QtWidgets.QTabWidget):
+    """A QTabWidget whose size hint doesn't change when switching tabs.
+
+    QTabWidget bases sizeHint()/minimumSizeHint() on the *current* page
+    alone, so an enclosing QSplitter reflows every time the user switches to
+    a tab whose content has a different natural size - here, the Cell
+    segmentation and Video tabs visibly bounced around on every switch.
+    Basing it on the largest page instead keeps the splitter's allocation
+    stable regardless of which tab is showing.
+    """
+
+    def _combined_page_size(
+        self, hint_of: Callable[[QtWidgets.QWidget], QtCore.QSize]
+    ) -> QtCore.QSize:
+        width = 0
+        height = 0
+        for index in range(self.count()):
+            page = self.widget(index)
+            if page is None:
+                continue
+            size = hint_of(page)
+            width = max(width, size.width())
+            height = max(height, size.height())
+        bar = self.tabBar()
+        bar_size = bar.sizeHint() if bar is not None else QtCore.QSize(0, 0)
+        # The default (North) tab position stacks the bar above the pages.
+        return QtCore.QSize(max(width, bar_size.width()), height + bar_size.height())
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.sizeHint())
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.minimumSizeHint())
+
+
 class SpatialFootprintWidget(QtWidgets.QWidget):
     """Show cell spatial footprints and calcium video in a tabbed panel.
 
@@ -94,7 +130,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._state = state if state is not None else SpatialFootprintState()
         root_layout = _PanelLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        self.tabs = QtWidgets.QTabWidget(self)
+        self.tabs = _StableSizeTabWidget(self)
         self.tabs.setDocumentMode(True)
         self.tabs.currentChanged.connect(self._on_tab_changed)
         cell_tab = QtWidgets.QWidget(self.tabs)
@@ -198,6 +234,28 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         root_layout.insertWidget(0, self.checkbox_container)
         root_layout.addWidget(self.tabs)
         self._on_state_data_changed()
+
+    def _combined_size(
+        self, hint_of: Callable[[QtWidgets.QWidget], QtCore.QSize]
+    ) -> QtCore.QSize:
+        # A QWidget's sizeHint()/minimumSizeHint() don't depend on its own
+        # current visibility, so summing checkbox_container's and self.tabs'
+        # (a _StableSizeTabWidget) here stays the same whether the checkbox
+        # row is currently shown (Cell segmentation tab) or hidden (Video
+        # tab), and regardless of which tab is current - keeping this panel
+        # from bouncing around in its splitter on every tab switch.
+        checkbox_size = hint_of(self.checkbox_container)
+        tabs_size = hint_of(self.tabs)
+        return QtCore.QSize(
+            max(checkbox_size.width(), tabs_size.width()),
+            checkbox_size.height() + tabs_size.height(),
+        )
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._combined_size(lambda w: w.sizeHint())
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._combined_size(lambda w: w.minimumSizeHint())
 
     def apply_theme(self, theme: str) -> None:
         """Forward the theme to both imaging tabs."""
