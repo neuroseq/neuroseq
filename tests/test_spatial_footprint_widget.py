@@ -416,43 +416,55 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
     widget.close()
 
 
-def test_checkbox_row_sits_at_the_top_of_the_widget(qtbot: QtBot) -> None:
-    """The display-toggle checkboxes are the first thing in the layout, so
-    they read as a fixed toolbar above the view rather than floating below
-    it."""
+def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
+    """The display-toggle checkboxes are the last thing in the Cell
+    segmentation tab, in a bar the same size as the Video tab's bottom
+    action bar (Save video.../Remove imaging data) - matching shapes for
+    both tabs keeps switching between them from bouncing the panel around."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    layout = widget.layout()
-    assert layout is not None
-    assert layout.indexOf(widget.checkbox_container) == 0
-    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+    cell_tab = widget.tabs.widget(0)
+    assert cell_tab is not None
+    cell_tab_layout = cell_tab.layout()
+    assert cell_tab_layout is not None
+    assert cell_tab_layout.indexOf(widget.checkbox_container) > cell_tab_layout.indexOf(
         widget.empty_state_widget
     )
-    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+    assert cell_tab_layout.indexOf(widget.checkbox_container) > cell_tab_layout.indexOf(
         widget.overlay_widget
+    )
+    assert (
+        widget.checkbox_container.height()
+        == widget.calcium_video_widget.video_actions_widget.height()
+        == 44
     )
     widget.close()
 
 
-def test_checkbox_row_has_no_outer_padding_and_is_not_clipped(qtbot: QtBot) -> None:
-    """Regression: forcing the row to a fixed height half its natural size
-    clipped the checkboxes' own text/indicator. Shrinking only the outer
-    layout margins (not the checkboxes themselves) keeps the row compact
-    without cutting anything off."""
+def test_checkbox_row_margins_match_the_video_tabs_action_bar(qtbot: QtBot) -> None:
+    """The two tabs' bottom bars must look identical, margins included, or
+    switching between them still reads as a (smaller) layout shift even once
+    their overall sizes match."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
     checkbox_layout = widget.checkbox_container.layout()
+    actions_layout = widget.calcium_video_widget.video_actions_widget.layout()
     assert checkbox_layout is not None
-    assert checkbox_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+    assert actions_layout is not None
+    assert checkbox_layout.contentsMargins() == actions_layout.contentsMargins()
 
     tallest_checkbox_height = max(
         widget.show_labels_checkbox.sizeHint().height(),
         widget.show_segmentation_checkbox.sizeHint().height(),
         widget.show_shapes_checkbox.sizeHint().height(),
     )
-    assert widget.checkbox_container.sizeHint().height() >= tallest_checkbox_height
+    margins = checkbox_layout.contentsMargins()
+    available_height = (
+        widget.checkbox_container.height() - margins.top() - margins.bottom()
+    )
+    assert available_height >= tallest_checkbox_height
     widget.close()
 
 
