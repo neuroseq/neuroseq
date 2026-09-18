@@ -1358,7 +1358,13 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
 
     def _setup_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 10)
+        # A titled group box (e.g. the patch-clamp import dialog's "Cellpose
+        # Preview") keeps a little breathing room below its content; an
+        # untitled one is a plain, borderless container embedded elsewhere
+        # (see __init__) and must not reserve extra space its neighbor
+        # doesn't - SpatialFootprintWidget's Video tab canvas goes flush to
+        # its own bottom action bar, with no such margin.
+        layout.setContentsMargins(0, 0, 0, 10 if self.title() else 0)
 
         self.overlay_view = OverlayView(self)
         self.overlay_view.setSizePolicy(

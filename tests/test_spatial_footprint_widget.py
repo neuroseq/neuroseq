@@ -384,6 +384,28 @@ def test_untitled_overlay_widget_has_no_group_box_border(qtbot: QtBot) -> None:
     untitled.close()
 
 
+def test_untitled_overlay_widget_has_no_bottom_margin(qtbot: QtBot) -> None:
+    """Regression: the group box's own layout reserved 10px below its
+    content regardless of title - for the untitled, embedded-in-a-tab case
+    that stacked on top of the checkbox row's own height, making the Cell
+    segmentation tab's bottom bar visibly thicker than the Video tab's fixed
+    44px action bar. A titled group box (a real dialog preview) still gets
+    that breathing room."""
+    untitled = CellOverlayWidget("")
+    qtbot.addWidget(untitled)
+    layout = untitled.layout()
+    assert layout is not None
+    assert layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+
+    titled = CellOverlayWidget("Cellpose Preview")
+    qtbot.addWidget(titled)
+    titled_layout = titled.layout()
+    assert titled_layout is not None
+    assert titled_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 10)
+    titled.close()
+    untitled.close()
+
+
 def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
     qtbot: QtBot,
 ) -> None:
