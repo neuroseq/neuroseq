@@ -441,8 +441,23 @@ class TimeseriesWidget(FPLWidget):
         spacing; subclasses with non-uniform row spacing (e.g. TraceWidget's
         auto-extend-vertical-space mode) override this to look up the row
         that actually occupies that position instead.
+
+        When there isn't enough vertical room to fit a tick per row, pygfx's
+        ruler halves its step (e.g. to 0.5) rather than skipping rows, so it
+        asks for labels at half-integer y's too. Naively rounding those to
+        the nearest row (Python's round() included, since it rounds .5 to
+        the nearest *even* integer) draws that row's label at the half-step
+        position instead of centered on the row itself, off by up to half a
+        row - and every other integer row's own on-row candidate then gets
+        skipped as a same-label duplicate, hiding it entirely. Answering
+        "invalid" for any non-integer y instead makes the formatter fall
+        back to its normal "no real row here" blank, so a crowded axis shows
+        fewer labels rather than misplaced ones.
         """
-        return int(round(y))
+        row = round(y)
+        if abs(y - row) > 1e-6:
+            return -1
+        return int(row)
 
     def _create_y_tick_formatter(self):
         # """Create a y-axis tick formatter that prevents label repetition."""
