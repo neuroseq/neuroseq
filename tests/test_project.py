@@ -954,6 +954,38 @@ def test_update_limits_include_cellpose_neuron_count() -> None:
     assert project.max_neurons == 100
 
 
+def test_update_limits_uses_mapping_size_once_cellpose_ids_are_mapped() -> None:
+    # A mapping picks a subset of segmented ROIs to actually be neurons - the
+    # rest of the segmentation is only ever addressed by Cellpose id, never
+    # by neuron index, so it must not inflate max_neurons (issue: trace/stim
+    # plots showed a big empty region above the real neurons, hover-labeled
+    # as the last real neuron, because the camera was sized to the full
+    # segmentation instead of the mapping).
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stim",
+            StimType.Excitation,
+            np.zeros((10, 3), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    project.cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(100, dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 5, 1: 7, 2: 9},
+    )
+
+    project.update_limits()
+
+    assert project.max_neurons == 3
+
+
 def _cellpose_data_with_mapping(
     mapping: dict[int, int] | None,
 ) -> CellposeImportResult:

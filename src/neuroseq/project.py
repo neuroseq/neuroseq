@@ -105,8 +105,21 @@ def _experiment_data_neuron_count(
 
 
 def _cellpose_neuron_count(cellpose_data: CellposeImportResult | None) -> int:
+    """Neuron/stimulus-index-space count implied by ``cellpose_data`` alone.
+
+    Before a stimulus-to-Cellpose mapping is chosen, every segmented ROI is
+    assumed to become its own neuron (1:1), so the full segmentation count
+    applies. Once a mapping picks a subset of ROIs to actually be neurons
+    (e.g. "Custom with areas of interest"), the neuron/stimulus index space
+    is the mapping's size, not the total number of segmented ROIs - the rest
+    of the segmentation is only ever addressed by Cellpose id, never by
+    neuron index, so counting it here would inflate every neuron-indexed
+    plot (trace/stim/spike) with empty rows the mapping deliberately dropped.
+    """
     if cellpose_data is None:
         return 0
+    if cellpose_data.stimulus_to_cellpose_mapping is not None:
+        return len(cellpose_data.stimulus_to_cellpose_mapping)
     if cellpose_data.original_cellpose_ids is not None:
         return int(np.asarray(cellpose_data.original_cellpose_ids).size)
     if cellpose_data.segmentation_array is None:
