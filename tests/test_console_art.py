@@ -25,6 +25,25 @@ def test_brain_image_path_points_at_a_real_bundled_file() -> None:
     assert path.suffix == ".png"
 
 
+def test_coronal_brain_image_path_points_at_a_different_real_bundled_file() -> None:
+    path = console_art.coronal_brain_image_path()
+    assert path.exists()
+    assert path.suffix == ".png"
+    assert path != console_art.brain_image_path()
+
+
+def test_tinted_brain_image_bytes_can_tint_the_coronal_image_too() -> None:
+    coronal_path = console_art.coronal_brain_image_path()
+    original = Image.open(coronal_path).convert("RGBA")
+    tinted_bytes = console_art.tinted_brain_image_bytes(random.Random(0), coronal_path)
+    tinted = Image.open(io.BytesIO(tinted_bytes))
+
+    assert tinted.size == original.size
+    assert tinted.split()[3].tobytes() == original.split()[3].tobytes()
+    # Sanity check it didn't silently fall back to the sagittal default.
+    assert tinted_bytes != console_art.tinted_brain_image_bytes(random.Random(0))
+
+
 def test_tinted_brain_image_is_a_recolored_copy_of_the_bundled_png() -> None:
     original = Image.open(console_art.brain_image_path()).convert("RGBA")
     tinted_bytes = console_art.tinted_brain_image_bytes(random.Random(0))
