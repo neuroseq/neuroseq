@@ -182,6 +182,7 @@ class ConsoleWidget(ReplWidget):
         cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
         centered = QtGui.QTextBlockFormat()
         centered.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        centered.setTopMargin(16)
         cursor.setBlockFormat(centered)
         cursor.insertImage(_BRAIN_RESOURCE_URL.toString())
         cursor.insertBlock()
