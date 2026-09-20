@@ -67,6 +67,18 @@ def test_stim_heatmap_window_shows_whole_history_without_panning(qtbot) -> None:
     assert array.shape[1] == 15
 
 
+def test_stim_heatmap_window_plot_is_scrollable(qtbot) -> None:
+    """So a short screen scrolls the plot instead of squeezing the figure
+    until axis labels overlap or get clipped off."""
+    window = StimHeatmapWindow("Test — stimulation pattern")
+    qtbot.addWidget(window)
+
+    scroll_areas = window.findChildren(QtWidgets.QScrollArea)
+    assert len(scroll_areas) == 1
+    assert scroll_areas[0].widget() is window.plot
+    assert scroll_areas[0].widgetResizable()
+
+
 def test_stim_heatmap_window_ignores_absent_or_empty_stim(qtbot) -> None:
     window = StimHeatmapWindow("Test — stimulation pattern")
     qtbot.addWidget(window)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pytestqt.qtbot import QtBot
+from qtpy import QtWidgets
 
 from neuroseq.routine_overview_dialog import ROUTINE_OVERVIEWS
 from neuroseq.routine_overview_dialog import RoutineSelectorDialog
@@ -104,4 +105,36 @@ def test_selector_apply_theme_runs(qtbot: QtBot) -> None:
     # Recoloring for either theme must not raise.
     dialog.apply_theme("dark")
     dialog.apply_theme("light")
+    dialog.close()
+
+
+def test_selector_plot_background_stays_white_across_themes(qtbot: QtBot) -> None:
+    dialog = RoutineSelectorDialog(list(ROUTINE_OVERVIEWS))
+    qtbot.addWidget(dialog)
+    for theme in ("dark", "light", "retro"):
+        dialog.apply_theme(theme)
+        assert dialog.plot_widget.getFigure().get_facecolor() == (1.0, 1.0, 1.0, 1.0)
+        assert dialog._axes.get_facecolor() == (1.0, 1.0, 1.0, 1.0)
+    dialog.close()
+
+
+def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
+    """A small screen must scroll the preview (info + plot) rather than
+    clip or squeeze it - the routine selector and the buttons stay fixed,
+    out of the scroll area."""
+    dialog = RoutineSelectorDialog(list(ROUTINE_OVERVIEWS))
+    qtbot.addWidget(dialog)
+    dialog.show()
+    dialog.resize(dialog.width(), 200)
+    qtbot.waitUntil(lambda: dialog.isVisible())
+
+    scroll_areas = dialog.findChildren(QtWidgets.QScrollArea)
+    assert len(scroll_areas) == 1
+    scroll = scroll_areas[0]
+    assert scroll.widgetResizable()
+    preview = scroll.widget()
+    assert preview is not None
+    # The preview content is taller than the shrunk dialog, so there is
+    # something to scroll.
+    assert preview.sizeHint().height() > scroll.height()
     dialog.close()
