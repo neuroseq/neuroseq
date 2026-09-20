@@ -112,7 +112,7 @@ class DataWidget(QtWidgets.QWidget):
         button = QtWidgets.QToolButton(self)
         button.setCheckable(True)
         button.setChecked(True)
-        button.setFixedSize(18, 18)
+        button.setFixedSize(14, 14)
         button.setAutoRaise(True)
         button.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Fixed,
@@ -129,25 +129,29 @@ class DataWidget(QtWidgets.QWidget):
         self._update_lock_button(button, axis, True)
         return button
 
-    def _make_chain_icon(self, linked: bool) -> QtGui.QIcon:
-        pixmap = QtGui.QPixmap(14, 14)
+    def _make_lock_icon(self, locked: bool) -> QtGui.QIcon:
+        pixmap = QtGui.QPixmap(12, 12)
         pixmap.fill(QtCore.Qt.GlobalColor.transparent)
 
         painter = QtGui.QPainter(pixmap)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
 
         pen = QtGui.QPen(self.palette().buttonText().color())
-        pen.setWidth(2)
+        pen.setWidthF(1.4)
         pen.setCapStyle(QtCore.Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(QtCore.Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
 
-        painter.drawEllipse(QtCore.QRectF(1.5, 4.0, 5.5, 6.0))
-        painter.drawEllipse(QtCore.QRectF(7.0, 4.0, 5.5, 6.0))
-        painter.drawLine(QtCore.QPointF(5.5, 7.0), QtCore.QPointF(8.5, 7.0))
-
-        if not linked:
-            painter.drawLine(QtCore.QPointF(3.0, 11.0), QtCore.QPointF(11.0, 3.0))
+        shackle = QtGui.QPainterPath()
+        if locked:
+            shackle.moveTo(3.2, 5.8)
+            shackle.arcTo(QtCore.QRectF(3.2, 1.0, 5.6, 6.4), 180, 180)
+        else:
+            shackle.moveTo(8.8, 5.8)
+            shackle.arcTo(QtCore.QRectF(3.2, -1.4, 5.6, 6.4), 0, 180)
+        painter.drawPath(shackle)
+        painter.drawRoundedRect(QtCore.QRectF(2.2, 5.8, 7.6, 5.2), 1.2, 1.2)
 
         painter.end()
         return QtGui.QIcon(pixmap)
@@ -159,8 +163,8 @@ class DataWidget(QtWidgets.QWidget):
         checked: bool,
     ) -> None:
         button.setText("")
-        button.setIcon(self._make_chain_icon(checked))
-        button.setIconSize(QtCore.QSize(14, 14))
+        button.setIcon(self._make_lock_icon(checked))
+        button.setIconSize(QtCore.QSize(12, 12))
         state = "linked" if checked else "independent"
         button.setToolTip(f"{axis} axis {state}")
         button.setStatusTip(f"{axis} axis {state}")
