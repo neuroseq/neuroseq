@@ -532,7 +532,9 @@ def test_trace_read_budget_downsamples_time_to_fit_ram() -> None:
 
     # Raising the budget again returns the full-resolution trace.
     project.max_ram_trace_plot_matrix = 0
-    assert project.get_data(trace_name, TraceData).traces.shape[1] == n_time
+    restored = project.get_data(trace_name, TraceData)
+    assert restored is not None
+    assert restored.traces.shape[1] == n_time
 
 
 def test_pad_stim_arrays_to_neuron_count() -> None:
