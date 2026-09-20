@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import brian2 as b2
@@ -118,9 +119,11 @@ class ConsoleWidget(ReplWidget):
         self.layout.addLayout(btn_layout)
 
     def _print_intro(self) -> None:
-        # A fresh brain is grown for every launch, so the splash is never
-        # quite the same twice.
-        self._insert_centered(console_art.console_splash())
+        banner = console_art.welcome_banner()
+        width = max(len(line) for line in banner)
+        self._insert_centered("\n" + "\n".join(banner) + "\n")
+        self._insert_centered_image(console_art.brain_image_path())
+        self._insert_centered("\n" + "-" * width + "\n")
         self.output.insertPlainText(
             "This is a Python console where you can interact directly with the Model using the 'project' object.\n"
         )
@@ -150,9 +153,9 @@ class ConsoleWidget(ReplWidget):
         """Insert ``text`` as horizontally centered blocks, then go back to left.
 
         Qt centers each line on its own, so this only preserves ASCII art when
-        every line is the same length - which ``console_splash`` guarantees.
-        Centering is done per block rather than by padding with spaces so it
-        stays correct when the console is resized.
+        every line is the same length - which ``welcome_banner()``'s block
+        font guarantees. Centering is done per block rather than by padding
+        with spaces so it stays correct when the console is resized.
         """
         cursor = self.output.textCursor()
         cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
@@ -160,6 +163,20 @@ class ConsoleWidget(ReplWidget):
         centered.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
         cursor.setBlockFormat(centered)
         cursor.insertText(text)
+        left = QtGui.QTextBlockFormat()
+        left.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        cursor.setBlockFormat(left)
+        self.output.setTextCursor(cursor)
+
+    def _insert_centered_image(self, image_path: Path) -> None:
+        """Insert the image at ``image_path`` as its own centered block."""
+        cursor = self.output.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        centered = QtGui.QTextBlockFormat()
+        centered.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        cursor.setBlockFormat(centered)
+        cursor.insertImage(QtGui.QImage(str(image_path)))
+        cursor.insertBlock()
         left = QtGui.QTextBlockFormat()
         left.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         cursor.setBlockFormat(left)

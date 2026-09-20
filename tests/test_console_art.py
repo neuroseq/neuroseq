@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import random
-
 from neuroseq import console_art
 
 
@@ -16,81 +14,7 @@ def test_welcome_banner_spells_the_greeting_on_one_line() -> None:
     assert max(len(line) for line in banner) == expected_width
 
 
-def test_brain_art_is_ascii_and_rectangular_enough_to_align() -> None:
-    art = console_art.brain_art(random.Random(0))
-    assert art, "brain art must not be empty"
-    assert art[0].strip() and art[-1].strip(), "no blank rows at the edges"
-    for line in art:
-        assert line.isascii()
-        assert len(line) <= console_art._BRAIN_WIDTH
-        assert line == line.rstrip()
-
-
-_TEXTURE_CHARS = "01()"
-
-
-def test_base_spans_are_a_sagittal_profile_not_a_mirrored_blob() -> None:
-    # The silhouette is a single-sided side view (frontal pole, vertex,
-    # occipital pole, cerebellum notch, temporal lobe), not two hemispheres
-    # mirrored across a fissure - so it must not be symmetric about the
-    # midline, and its bounds must stay within the character grid.
-    mirrored = tuple(
-        (console_art._BRAIN_WIDTH - 1 - right, console_art._BRAIN_WIDTH - 1 - left)
-        for left, right in console_art._BASE_SPANS
-    )
-    assert mirrored != console_art._BASE_SPANS
-    for left, right in console_art._BASE_SPANS:
-        assert 0 <= left < right < console_art._BRAIN_WIDTH
-
-
-def test_brain_art_has_a_profile_and_a_stem() -> None:
-    art = console_art.brain_art(random.Random(4))
-    # The stem hangs off the underside as the last two rows.
-    assert art[-1].strip() == "\\|/"
-    assert "|" in art[-2]
-    # Gyri texture (binary digits) is present.
-    body = art[:-2]
-    assert any(c in line for line in body for c in _TEXTURE_CHARS)
-
-
-def test_brain_art_differs_between_runs() -> None:
-    # A different seed must grow a different brain; the same seed must not.
-    first = console_art.brain_art(random.Random(1))
-    second = console_art.brain_art(random.Random(2))
-    assert first != second
-    assert first == console_art.brain_art(random.Random(1))
-
-
-def test_brain_art_is_stable_across_many_seeds() -> None:
-    # Guards the silhouette maths against seeds that would produce an empty or
-    # broken shape.
-    for seed in range(50):
-        art = console_art.brain_art(random.Random(seed))
-        assert len(art) >= 6
-        assert sum(1 for line in art for c in line if c in _TEXTURE_CHARS) > 0
-
-
-def test_console_splash_stacks_banner_over_brain() -> None:
-    splash = console_art.console_splash(random.Random(3))
-    lines = splash.split("\n")
-    banner = console_art.welcome_banner()
-    assert lines[0].strip() == ""
-    assert [line.rstrip() for line in lines[1 : 1 + len(banner)]] == banner
-    assert splash.endswith("\n")
-    assert splash.isascii()
-    brain_rows = [line for line in lines if any(c in line for c in _TEXTURE_CHARS)]
-    assert brain_rows
-
-
-def test_console_splash_lines_are_equal_length_for_centering() -> None:
-    # The console centers each block independently, so lines of unequal length
-    # would shear the art. Padding to a common width is what prevents that.
-    splash = console_art.console_splash(random.Random(5))
-    lines = splash.split("\n")[:-1]  # trailing newline leaves an empty tail
-    widths = {len(line) for line in lines}
-    assert len(widths) == 1
-    assert next(iter(widths)) == max(len(line) for line in console_art.welcome_banner())
-
-
-def test_console_splash_uses_a_fresh_brain_without_a_seed() -> None:
-    assert console_art.console_splash() != console_art.console_splash()
+def test_brain_image_path_points_at_a_real_bundled_file() -> None:
+    path = console_art.brain_image_path()
+    assert path.exists()
+    assert path.suffix == ".png"
