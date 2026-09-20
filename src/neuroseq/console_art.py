@@ -55,18 +55,16 @@ def welcome_banner() -> list[str]:
 
 
 def brain_image_path() -> Path:
-    """Path to the bundled sagittal (side-view) pixel-art brain shown under
-    the console's welcome banner."""
+    """Path to the bundled pixel-art brain shown under the console's welcome
+    banner."""
     resource = resources.files("neuroseq.resources").joinpath("console_brain.png")
     return Path(str(resource))
 
 
-def coronal_brain_image_path() -> Path:
-    """Path to the bundled coronal (front-view) pixel-art brain flanking the
-    startup screen's welcome title."""
-    resource = resources.files("neuroseq.resources").joinpath(
-        "startup_brain_coronal.png"
-    )
+def startup_brain_image_path() -> Path:
+    """Path to the bundled pixel-art brain flanking the startup screen's
+    welcome title."""
+    resource = resources.files("neuroseq.resources").joinpath("startup_brain.png")
     return Path(str(resource))
 
 
@@ -80,8 +78,7 @@ def tinted_brain_image_bytes(
     shade in the image - outline, fill, and highlight alike - by the same
     amount, so the existing shading/depth is preserved and it just reads as
     the same brain in a slightly different light. Defaults to the console's
-    sagittal brain; pass ``coronal_brain_image_path()`` for the startup
-    screen's front-view one.
+    brain; pass ``startup_brain_image_path()`` for the startup screen's one.
     """
     rng = rng if rng is not None else random.Random()
     shift = int(round(rng.uniform(-_MAX_HUE_SHIFT, _MAX_HUE_SHIFT) * 255))

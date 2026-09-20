@@ -14,13 +14,14 @@ from neuroseq.startup_dialog import StartupDialog
 
 
 def _asymmetric_test_image_bytes() -> bytes:
-    """A tiny image that is trivially distinguishable from its own mirror -
-    unlike the real (left-right symmetric) coronal art, so the mirroring
-    itself can be tested without depending on scaling/mirroring commuting
-    exactly at pixel level for a complex image."""
-    image = Image.new("RGBA", (4, 2), (0, 0, 0, 0))
+    """An image already at ``_BRAIN_ICON_HEIGHT``, so ``scaledToHeight()`` is
+    a no-op and mirroring can be tested via exact pixel equality, without
+    smooth-resampling artifacts that could make mirror-then-scale and
+    scale-then-mirror differ by a pixel or two for the real bundled art."""
+    height = startup_dialog._BRAIN_ICON_HEIGHT
+    image = Image.new("RGBA", (height * 2, height), (0, 0, 0, 0))
     image.putpixel((0, 0), (255, 0, 0, 255))
-    image.putpixel((3, 0), (0, 0, 255, 255))
+    image.putpixel((image.width - 1, 0), (0, 0, 255, 255))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
