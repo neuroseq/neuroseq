@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import io
+import random
+
+from PIL import Image
+
 from neuroseq import console_art
 
 
@@ -18,3 +23,54 @@ def test_brain_image_path_points_at_a_real_bundled_file() -> None:
     path = console_art.brain_image_path()
     assert path.exists()
     assert path.suffix == ".png"
+
+
+def test_tinted_brain_image_is_a_recolored_copy_of_the_bundled_png() -> None:
+    original = Image.open(console_art.brain_image_path()).convert("RGBA")
+    tinted_bytes = console_art.tinted_brain_image_bytes(random.Random(0))
+    tinted = Image.open(io.BytesIO(tinted_bytes))
+
+    assert tinted.mode == "RGBA"
+    assert tinted.size == original.size
+    # Transparency (the shape's silhouette) is untouched by the hue shift.
+    assert tinted.split()[3].tobytes() == original.split()[3].tobytes()
+
+
+def test_tinted_brain_image_varies_with_the_rng_but_is_deterministic() -> None:
+    first = console_art.tinted_brain_image_bytes(random.Random(1))
+    second = console_art.tinted_brain_image_bytes(random.Random(2))
+    assert first != second
+    assert first == console_art.tinted_brain_image_bytes(random.Random(1))
+
+
+def test_tinted_brain_image_shift_stays_slight() -> None:
+    # A wildly different hue would defeat the point of a "slight" retint -
+    # measure the actual hue delta on a real pixel, not just the RNG range.
+    original = Image.open(console_art.brain_image_path()).convert("RGBA")
+    # The most saturated pixel is the one where a hue shift is most visible.
+    original_hue_band, saturation_band, _ = (
+        original.convert("RGB").convert("HSV").split()
+    )
+    saturation_bytes = saturation_band.tobytes()
+    peak_index = saturation_bytes.index(max(saturation_bytes))
+    x, y = peak_index % original.width, peak_index // original.width
+    original_hue = original_hue_band.getpixel((x, y))
+    assert isinstance(original_hue, int)
+
+    max_delta = 0
+    for seed in range(20):
+        tinted_bytes = console_art.tinted_brain_image_bytes(random.Random(seed))
+        tinted_hue_band = (
+            Image.open(io.BytesIO(tinted_bytes))
+            .convert("RGB")
+            .convert("HSV")
+            .split()[0]
+        )
+        tinted_hue = tinted_hue_band.getpixel((x, y))
+        assert isinstance(tinted_hue, int)
+        delta = min(
+            (tinted_hue - original_hue) % 256, (original_hue - tinted_hue) % 256
+        )
+        max_delta = max(max_delta, delta)
+
+    assert 0 < max_delta <= round(console_art._MAX_HUE_SHIFT * 255) + 1

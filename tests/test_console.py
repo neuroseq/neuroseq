@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import random
+
 import brian2.numpy_ as np
+import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
+from neuroseq import console_art
 from neuroseq.console_widget import SAMPLE_CODE
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.project import Project
@@ -45,6 +49,37 @@ def test_console_scrolls_back_to_welcome_splash_on_startup(qtbot: QtBot) -> None
     # it's inserted - it must land back at the top so the "Welcome to
     # NeuroSeq" splash (the very first line) is what's actually visible.
     qtbot.waitUntil(lambda: console.output.verticalScrollBar().value() == 0)
+
+
+def test_console_retints_the_brain_image_on_construction_and_every_show(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The brain should get a freshly randomized tint at launch, and again
+    every time the console is closed and reopened - not just once."""
+    calls: list[int] = []
+    original = console_art.tinted_brain_image_bytes
+
+    def _tracked(rng: random.Random | None = None) -> bytes:
+        calls.append(1)
+        return original(rng)
+
+    monkeypatch.setattr(console_art, "tinted_brain_image_bytes", _tracked)
+
+    console = ConsoleWidget()
+    qtbot.addWidget(console)
+    # __init__ (_print_intro) already retints once, before the widget is
+    # ever shown.
+    assert len(calls) == 1
+
+    console.show()
+    qtbot.waitUntil(lambda: console.isVisible())
+    after_first_show = len(calls)
+    assert after_first_show > 1
+
+    console.hide()
+    console.show()
+    qtbot.waitUntil(lambda: console.isVisible())
+    assert len(calls) > after_first_show
 
 
 def test_sample_code_mentions_sequential_pulse_snippet() -> None:

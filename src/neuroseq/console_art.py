@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import io
+import random
 from importlib import resources
 from pathlib import Path
+
+from PIL import Image
+
+# How far the brain's hue can drift from its bundled pink, as a fraction of
+# the full hue circle - kept small so it always reads as a slight retint
+# (lavender...pink...peach), never a jarring color change.
+_MAX_HUE_SHIFT = 0.15
 
 # 5-row block font, only the glyphs the banner needs. Every glyph is 5 columns
 # wide and is joined with a single space.
@@ -49,3 +58,28 @@ def brain_image_path() -> Path:
     """Path to the bundled pixel-art brain shown under the welcome banner."""
     resource = resources.files("neuroseq.resources").joinpath("console_brain.png")
     return Path(str(resource))
+
+
+def tinted_brain_image_bytes(rng: random.Random | None = None) -> bytes:
+    """The bundled brain image, hue-shifted by a small random amount, as
+    PNG-encoded bytes ready for ``QImage.loadFromData()``.
+
+    Rotating hue (rather than picking new colors outright) shifts every
+    shade in the image - outline, fill, and highlight alike - by the same
+    amount, so the existing shading/depth is preserved and it just reads as
+    the same brain in a slightly different light.
+    """
+    rng = rng if rng is not None else random.Random()
+    shift = int(round(rng.uniform(-_MAX_HUE_SHIFT, _MAX_HUE_SHIFT) * 255))
+    with Image.open(brain_image_path()) as source:
+        image = source.convert("RGBA")
+    red, green, blue, alpha = image.split()
+    hue, saturation, value = (
+        Image.merge("RGB", (red, green, blue)).convert("HSV").split()
+    )
+    hue = hue.point(lambda p: (p + shift) % 256)
+    tinted_rgb = Image.merge("HSV", (hue, saturation, value)).convert("RGB")
+    tinted = Image.merge("RGBA", (*tinted_rgb.split(), alpha))
+    buffer = io.BytesIO()
+    tinted.save(buffer, format="PNG")
+    return buffer.getvalue()
