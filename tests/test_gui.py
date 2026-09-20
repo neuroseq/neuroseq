@@ -1806,7 +1806,7 @@ def test_gui_has_no_export_graphics_menu(qtbot: QtBot) -> None:
 
 
 def test_gui_simulate_and_playback(
-    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project, tmp_config_dir
 ) -> None:
     gui = Gui()
     gui.load_project(test_project)

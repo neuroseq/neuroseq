@@ -639,15 +639,24 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     mouse_click_and_drag(qtbot, stim_widget, start, end)
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
-    assert 0.15 * n_neurons < stim_widget.selected_neuron_slice.start < 0.35 * n_neurons
-    assert 0.65 * n_neurons < stim_widget.selected_neuron_slice.stop < 0.90 * n_neurons
+    # A quarter-to-three-quarters drag should land roughly in the middle
+    # neuron/time band - bounds are inclusive since pixel-to-index rounding
+    # can legitimately land exactly on a boundary (e.g. 0.35 * 20 == 7).
     assert (
-        0.15 * n_timestamps
-        < stim_widget.selected_time_slice.start
-        < 0.35 * n_timestamps
+        0.15 * n_neurons <= stim_widget.selected_neuron_slice.start <= 0.35 * n_neurons
     )
     assert (
-        0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.90 * n_timestamps
+        0.65 * n_neurons <= stim_widget.selected_neuron_slice.stop <= 0.90 * n_neurons
+    )
+    assert (
+        0.15 * n_timestamps
+        <= stim_widget.selected_time_slice.start
+        <= 0.35 * n_timestamps
+    )
+    assert (
+        0.65 * n_timestamps
+        <= stim_widget.selected_time_slice.stop
+        <= 0.90 * n_timestamps
     )
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
