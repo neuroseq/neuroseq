@@ -679,3 +679,14 @@ def test_rheobase_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> No
     assert dialog._pending_simulation_seconds is None
     assert not dialog.btn_pause.isEnabled()
     assert dialog.btn_pause.text() == "Pause"
+
+
+def test_rheobase_plot_window_is_scrollable(qtbot) -> None:
+    """So a short screen scrolls the plots instead of squeezing the figure
+    until axis labels overlap or get clipped off."""
+    _, _, dialog = _make_dialog(qtbot)
+
+    scroll_areas = dialog.plot_window.findChildren(QtWidgets.QScrollArea)
+    assert len(scroll_areas) == 1
+    assert scroll_areas[0].widget() is dialog.rheobase_plot
+    assert scroll_areas[0].widgetResizable()

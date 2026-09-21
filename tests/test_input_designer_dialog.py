@@ -675,6 +675,13 @@ def test_input_designer_plots_open_in_separate_window(qtbot) -> None:
     assert dialog.plot_window.isWindow()
     assert dialog.epsp_plot.window() is dialog.plot_window
 
+    # So a short screen scrolls the plots instead of squeezing the figure
+    # until axis labels overlap or get clipped off.
+    scroll_areas = dialog.plot_window.findChildren(QtWidgets.QScrollArea)
+    assert len(scroll_areas) == 1
+    assert scroll_areas[0].widget() is dialog.epsp_plot
+    assert scroll_areas[0].widgetResizable()
+
     # Showing the dialog brings up the plot window; closing it hides the plots.
     dialog.show()
     qtbot.waitUntil(lambda: dialog.plot_window.isVisible())

@@ -77,10 +77,9 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
     "Targeted STDP synaptic strength": RoutineOverview(
         title="Targeted STDP synaptic strength",
         goal=(
-            "Closed-loop tuning of a single synapse's strength. The routine "
-            "repeatedly measures the postsynaptic EPSP with five-pulse probes "
-            "and applies pre/post STDP induction pairings, adapting the pairing "
-            "until the EPSP settles at your chosen target."
+            "Closed-loop tuning of one synapse's strength: probe the EPSP, "
+            "pair pre/post spikes via STDP, and adapt until the EPSP reaches "
+            "your target."
         ),
         parameters=(
             ("Pre- and postsynaptic neurons", "the synapse to probe and drive"),
@@ -94,10 +93,9 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
     "Minimal input for spiking (rheobase)": RoutineOverview(
         title="Minimal input for spiking (rheobase)",
         goal=(
-            "Find the smallest input that makes a neuron fire — its rheobase. "
-            "The routine sweeps the pulse amplitude (or duration) with a bisection "
-            "search, checking after each probe whether the neuron crossed the "
-            "spike threshold, and reports the minimal value that elicits a spike."
+            "Find a neuron's rheobase, the smallest input that makes it fire. "
+            "Bisection-searches pulse amplitude or duration for the minimal "
+            "value that triggers a spike."
         ),
         parameters=(
             ("Neuron & trace", "the cell to probe and the voltage read back"),
@@ -112,10 +110,9 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
     "STDP timing window (LTP/LTD vs Δt)": RoutineOverview(
         title="STDP timing window (LTP/LTD vs Δt)",
         goal=(
-            "Measure the STDP timing window: how a synapse's weight change "
-            "depends on the pre/post spike interval Δt. The routine sweeps Δt, "
-            "inducing one pairing per value and recording the weight change — "
-            "potentiation (LTP) for pre-before-post, depression (LTD) otherwise."
+            "Measure the STDP timing window: how weight change depends on "
+            "spike timing Δt. Potentiation (LTP) for pre-before-post, "
+            "depression (LTD) otherwise."
         ),
         parameters=(
             ("Trace & synapse weight", "signals read to measure Δ weight"),
@@ -202,28 +199,36 @@ class RoutineSelectorDialog(_SelfRaisingDialog):
         selector_row.addWidget(self.cmb_routine, stretch=1)
         layout.addLayout(selector_row)
 
-        # --- Preview (always visible, updates with the selection) ---
-        self.lbl_title = QtWidgets.QLabel(self)
+        # --- Preview (always visible, updates with the selection) - in its
+        # own scroll area so the info and plot both still fit, scrolled, on
+        # a small screen instead of getting clipped or squeezed. The selector
+        # above and the buttons below stay fixed, out of the scrolled area.
+        preview = QtWidgets.QWidget(self)
+        preview_layout = QtWidgets.QVBoxLayout(preview)
+        preview_layout.setContentsMargins(0, 0, 4, 0)
+        preview_layout.setSpacing(8)
+
+        self.lbl_title = QtWidgets.QLabel(preview)
         title_font = self.lbl_title.font()
         title_font.setBold(True)
         title_font.setPointSizeF(title_font.pointSizeF() + 1.5)
         self.lbl_title.setFont(title_font)
         self.lbl_title.setWordWrap(True)
-        layout.addWidget(self.lbl_title)
+        preview_layout.addWidget(self.lbl_title)
 
-        self.lbl_goal = QtWidgets.QLabel(self)
+        self.lbl_goal = QtWidgets.QLabel(preview)
         self.lbl_goal.setWordWrap(True)
-        layout.addWidget(self.lbl_goal)
+        preview_layout.addWidget(self.lbl_goal)
 
-        params_header = QtWidgets.QLabel("Parameters you'll set:", self)
+        params_header = QtWidgets.QLabel("Parameters you'll set:", preview)
         params_font = params_header.font()
         params_font.setBold(True)
         params_header.setFont(params_font)
-        layout.addWidget(params_header)
+        preview_layout.addWidget(params_header)
 
-        self.lbl_params = QtWidgets.QLabel(self)
+        self.lbl_params = QtWidgets.QLabel(preview)
         self.lbl_params.setWordWrap(True)
-        layout.addWidget(self.lbl_params)
+        preview_layout.addWidget(self.lbl_params)
 
         self.plot_widget = MatplotlibWidget(size=(4.5, 2.6))
         # The sample plot is illustrative, so drop the interactive navigation
@@ -231,20 +236,26 @@ class RoutineSelectorDialog(_SelfRaisingDialog):
         if getattr(self.plot_widget, "toolbar", None) is not None:
             self.plot_widget.toolbar.setVisible(False)
         self._axes = self.plot_widget.getFigure().add_subplot(111)
-        layout.addWidget(self.plot_widget, stretch=1)
+        preview_layout.addWidget(self.plot_widget, stretch=1)
 
         # Some routines preview a static diagram (SVG) rather than a plot; only
         # one of the two preview widgets is visible at a time.
-        self.image_widget = _SvgImageWidget(self)
+        self.image_widget = _SvgImageWidget(preview)
         self.image_widget.setVisible(False)
-        layout.addWidget(self.image_widget, stretch=1)
+        preview_layout.addWidget(self.image_widget, stretch=1)
 
-        sample_note = QtWidgets.QLabel("Illustration only — not your data.", self)
+        sample_note = QtWidgets.QLabel("Illustration only, not your data.", preview)
         sample_note.setWordWrap(True)
         note_font = sample_note.font()
         note_font.setItalic(True)
         sample_note.setFont(note_font)
-        layout.addWidget(sample_note)
+        preview_layout.addWidget(sample_note)
+
+        preview_scroll = QtWidgets.QScrollArea(self)
+        preview_scroll.setWidget(preview)
+        preview_scroll.setWidgetResizable(True)
+        preview_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        layout.addWidget(preview_scroll, stretch=1)
 
         button_box = QtWidgets.QDialogButtonBox(self)
         self.btn_continue = button_box.addButton(
@@ -279,7 +290,7 @@ class RoutineSelectorDialog(_SelfRaisingDialog):
         self.lbl_goal.setText(overview.goal)
         self.lbl_params.setText(
             "\n".join(
-                f"• {name} — {description}" for name, description in overview.parameters
+                f"• {name}: {description}" for name, description in overview.parameters
             )
         )
         if overview.image_path is not None:
@@ -301,18 +312,19 @@ class RoutineSelectorDialog(_SelfRaisingDialog):
         self.accept()
 
     def apply_theme(self, theme: str) -> None:
-        """Recolor the sample plot to match the application theme."""
+        """No-op for the sample plot's own colors: the preview always stays
+        white/black regardless of the app theme (kept for the caller's sake,
+        since every other dynamic-input dialog is themed this way)."""
         self._theme = theme
         self._recolor_axes()
         self.plot_widget.draw()
 
     def _recolor_axes(self) -> None:
-        face, text = theme_module.mpl_colors(self._theme)
-        self.plot_widget.getFigure().set_facecolor(face)
-        self._axes.set_facecolor(face)
-        self._axes.tick_params(colors=text)
+        self.plot_widget.getFigure().set_facecolor("white")
+        self._axes.set_facecolor("white")
+        self._axes.tick_params(colors="black")
         for spine in self._axes.spines.values():
-            spine.set_color(text)
+            spine.set_color("black")
         for axis_label in (self._axes.xaxis.label, self._axes.yaxis.label):
-            axis_label.set_color(text)
-        self._axes.title.set_color(text)
+            axis_label.set_color("black")
+        self._axes.title.set_color("black")

@@ -364,6 +364,48 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
     widget.close()
 
 
+def test_untitled_overlay_widget_has_no_group_box_border(qtbot: QtBot) -> None:
+    """Regression: CellOverlayWidget is a QGroupBox, which paints a border
+    (and the retro theme styles one in explicitly) even with an empty title.
+    Embedded borderless next to the Video tab's canvas (SpatialFootprintWidget
+    passes ""), that border showed up as an edge the Video tab doesn't have.
+    A widget with a real title (e.g. the patch-clamp import dialog's "Cellpose
+    Preview") must still get the normal, visible group box chrome."""
+    untitled = CellOverlayWidget("")
+    qtbot.addWidget(untitled)
+    assert untitled.isFlat()
+    assert "border: none" in untitled.styleSheet()
+
+    titled = CellOverlayWidget("Cellpose Preview")
+    qtbot.addWidget(titled)
+    assert not titled.isFlat()
+    assert titled.styleSheet() == ""
+    titled.close()
+    untitled.close()
+
+
+def test_untitled_overlay_widget_has_no_bottom_margin(qtbot: QtBot) -> None:
+    """Regression: the group box's own layout reserved 10px below its
+    content regardless of title - for the untitled, embedded-in-a-tab case
+    that stacked on top of the checkbox row's own height, making the Cell
+    segmentation tab's bottom bar visibly thicker than the Video tab's fixed
+    44px action bar. A titled group box (a real dialog preview) still gets
+    that breathing room."""
+    untitled = CellOverlayWidget("")
+    qtbot.addWidget(untitled)
+    layout = untitled.layout()
+    assert layout is not None
+    assert layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+
+    titled = CellOverlayWidget("Cellpose Preview")
+    qtbot.addWidget(titled)
+    titled_layout = titled.layout()
+    assert titled_layout is not None
+    assert titled_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 10)
+    titled.close()
+    untitled.close()
+
+
 def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
     qtbot: QtBot,
 ) -> None:
@@ -416,43 +458,83 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
     widget.close()
 
 
-def test_checkbox_row_sits_at_the_top_of_the_widget(qtbot: QtBot) -> None:
-    """The display-toggle checkboxes are the first thing in the layout, so
-    they read as a fixed toolbar above the view rather than floating below
-    it."""
+def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
+    """The display-toggle checkboxes are the last thing in the Cell
+    segmentation tab, in a bar the same size as the Video tab's bottom
+    action bar (Save video.../Remove imaging data) - matching shapes for
+    both tabs keeps switching between them from bouncing the panel around."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    layout = widget.layout()
-    assert layout is not None
-    assert layout.indexOf(widget.checkbox_container) == 0
-    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+    cell_tab = widget.tabs.widget(0)
+    assert cell_tab is not None
+    cell_tab_layout = cell_tab.layout()
+    assert cell_tab_layout is not None
+    assert cell_tab_layout.indexOf(widget.checkbox_container) > cell_tab_layout.indexOf(
         widget.empty_state_widget
     )
-    assert layout.indexOf(widget.checkbox_container) < layout.indexOf(
+    assert cell_tab_layout.indexOf(widget.checkbox_container) > cell_tab_layout.indexOf(
         widget.overlay_widget
+    )
+    assert (
+        widget.checkbox_container.height()
+        == widget.calcium_video_widget.video_actions_widget.height()
+        == 44
     )
     widget.close()
 
 
-def test_checkbox_row_has_no_outer_padding_and_is_not_clipped(qtbot: QtBot) -> None:
-    """Regression: forcing the row to a fixed height half its natural size
-    clipped the checkboxes' own text/indicator. Shrinking only the outer
-    layout margins (not the checkboxes themselves) keeps the row compact
-    without cutting anything off."""
+def test_checkbox_row_margins_match_the_video_tabs_action_bar(qtbot: QtBot) -> None:
+    """The two tabs' bottom bars must look identical, margins included, or
+    switching between them still reads as a (smaller) layout shift even once
+    their overall sizes match."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
     checkbox_layout = widget.checkbox_container.layout()
+    actions_layout = widget.calcium_video_widget.video_actions_widget.layout()
     assert checkbox_layout is not None
-    assert checkbox_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+    assert actions_layout is not None
+    assert checkbox_layout.contentsMargins() == actions_layout.contentsMargins()
 
     tallest_checkbox_height = max(
         widget.show_labels_checkbox.sizeHint().height(),
         widget.show_segmentation_checkbox.sizeHint().height(),
         widget.show_shapes_checkbox.sizeHint().height(),
     )
-    assert widget.checkbox_container.sizeHint().height() >= tallest_checkbox_height
+    margins = checkbox_layout.contentsMargins()
+    available_height = (
+        widget.checkbox_container.height() - margins.top() - margins.bottom()
+    )
+    assert available_height >= tallest_checkbox_height
+    widget.close()
+
+
+def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> None:
+    """Regression: QTabWidget bases its size hint on the current page alone,
+    and the checkbox row (visible only on the Cell segmentation tab) isn't
+    counted at all while hidden - together these made the whole panel's
+    preferred size change on every tab switch, bouncing it around in its
+    splitter. Both the size hint and the actual on-screen geometry must stay
+    fixed regardless of which tab is showing."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result())
+    widget.resize(400, 400)
+    widget.show()
+    qtbot.waitExposed(widget)
+
+    assert widget.tabs.currentIndex() == 0
+    size_hint_on_cell_tab = widget.sizeHint()
+    min_size_hint_on_cell_tab = widget.minimumSizeHint()
+    geometry_on_cell_tab = widget.tabs.geometry()
+
+    widget.tabs.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1)
+
+    assert widget.sizeHint() == size_hint_on_cell_tab
+    assert widget.minimumSizeHint() == min_size_hint_on_cell_tab
+    assert widget.tabs.geometry() == geometry_on_cell_tab
     widget.close()
 
 

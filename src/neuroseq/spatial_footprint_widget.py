@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -52,6 +53,41 @@ class _PanelLayout(QtWidgets.QVBoxLayout):
         return -1
 
 
+class _StableSizeTabWidget(QtWidgets.QTabWidget):
+    """A QTabWidget whose size hint doesn't change when switching tabs.
+
+    QTabWidget bases sizeHint()/minimumSizeHint() on the *current* page
+    alone, so an enclosing QSplitter reflows every time the user switches to
+    a tab whose content has a different natural size - here, the Cell
+    segmentation and Video tabs visibly bounced around on every switch.
+    Basing it on the largest page instead keeps the splitter's allocation
+    stable regardless of which tab is showing.
+    """
+
+    def _combined_page_size(
+        self, hint_of: Callable[[QtWidgets.QWidget], QtCore.QSize]
+    ) -> QtCore.QSize:
+        width = 0
+        height = 0
+        for index in range(self.count()):
+            page = self.widget(index)
+            if page is None:
+                continue
+            size = hint_of(page)
+            width = max(width, size.width())
+            height = max(height, size.height())
+        bar = self.tabBar()
+        bar_size = bar.sizeHint() if bar is not None else QtCore.QSize(0, 0)
+        # The default (North) tab position stacks the bar above the pages.
+        return QtCore.QSize(max(width, bar_size.width()), height + bar_size.height())
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.sizeHint())
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.minimumSizeHint())
+
+
 class SpatialFootprintWidget(QtWidgets.QWidget):
     """Show cell spatial footprints and calcium video in a tabbed panel.
 
@@ -94,23 +130,24 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._state = state if state is not None else SpatialFootprintState()
         root_layout = _PanelLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        self.tabs = QtWidgets.QTabWidget(self)
+        self.tabs = _StableSizeTabWidget(self)
         self.tabs.setDocumentMode(True)
-        self.tabs.currentChanged.connect(self._on_tab_changed)
         cell_tab = QtWidgets.QWidget(self.tabs)
         layout = QtWidgets.QVBoxLayout(cell_tab)
         layout.setContentsMargins(0, 0, 0, 0)
+        # Matches CalciumVideoWidget's own layout (see FPLWidget) - without
+        # this, Qt's default inter-widget spacing opened a gap above the
+        # checkbox row that the Video tab's bottom bar doesn't have.
+        layout.setSpacing(0)
 
         # Same three display toggles as the Cell Segmentation import dialog
         # (cellpose_import_dialog.py), so this docked/detached panel offers
         # the same at-a-glance controls. Only meaningful once there's a
         # segmentation to toggle, so the whole row is hidden until then.
         checkbox_layout = QtWidgets.QHBoxLayout()
-        # No outer padding around the row - shrinks it to a slim strip
-        # without touching the checkboxes' own size, so their text/indicator
-        # never gets clipped (unlike forcing the container to some fixed
-        # height smaller than the checkboxes' own natural size, which does).
-        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        # Matches CalciumVideoWidget's bottom action bar margins exactly, so
+        # both tabs' bottom bars look identical.
+        checkbox_layout.setContentsMargins(4, 4, 4, 4)
         checkbox_layout.addStretch(1)
         self.show_labels_checkbox = QtWidgets.QCheckBox("Show labels")
         self.show_labels_checkbox.setChecked(True)
@@ -129,7 +166,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.checkbox_container = QtWidgets.QWidget()
         self.checkbox_container.setLayout(checkbox_layout)
         self.checkbox_container.setVisible(False)
-        layout.addWidget(self.checkbox_container)
+        # Same fixed height and size policy as CalciumVideoWidget's bottom
+        # action bar (Save video.../Remove imaging data), so the Cell
+        # segmentation and Video tabs both end with a bar of identical size
+        # - keeps _StableSizeTabWidget's per-page size hints matched instead
+        # of merely close, for the smoothest possible switch between them.
+        self.checkbox_container.setFixedHeight(44)
+        self.checkbox_container.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Fixed,
+        )
 
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
@@ -167,6 +213,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         self.overlay_widget.background_clicked.connect(self.clear_selection)
         layout.addWidget(self.overlay_widget)
+        # At the bottom, like CalciumVideoWidget's action bar - see the
+        # checkbox_container size comment above.
+        layout.addWidget(self.checkbox_container)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
         # Keep the connection handles (not just the callables) so close() can
@@ -192,10 +241,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.calcium_video_widget = CalciumVideoWidget(parent=self.tabs)
         self.tabs.addTab(cell_tab, "Cell segmentation")
         self.tabs.addTab(self.calcium_video_widget, "Video")
-        # Keep the compact display controls anchored to the panel edge. They
-        # belong to the cell-segmentation view and disappear on the video tab.
-        layout.removeWidget(self.checkbox_container)
-        root_layout.insertWidget(0, self.checkbox_container)
+        # checkbox_container now lives inside cell_tab's own layout (added
+        # above), so self.tabs (a _StableSizeTabWidget) is root_layout's only
+        # child and already reports a size hint that's stable across tabs -
+        # no need for SpatialFootprintWidget to override its own.
         root_layout.addWidget(self.tabs)
         self._on_state_data_changed()
 
@@ -245,24 +294,21 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         )
         self._update_aoi_overlay_visibility()
 
-    def _on_tab_changed(self, _index: int) -> None:
-        self._update_checkbox_visibility()
-        self._update_empty_state_visibility()
-
     def _update_checkbox_visibility(self) -> None:
-        self.checkbox_container.setVisible(
-            self._cellpose_data is not None and self.tabs.currentIndex() == 0
-        )
+        # No tabs.currentIndex() check needed: checkbox_container lives
+        # inside the Cell segmentation page now, so the tab widget already
+        # hides it on screen whenever the Video tab is current. Gating this
+        # on the current tab too would make it (and therefore cell_tab's own
+        # size hint) flicker between two different sizes depending on
+        # whichever tab happens to be showing - exactly the bounce
+        # _StableSizeTabWidget exists to prevent.
+        self.checkbox_container.setVisible(self._cellpose_data is not None)
 
     def _update_empty_state_visibility(self) -> None:
-        self.empty_state_widget.setVisible(
-            self._cellpose_data is None and self.tabs.currentIndex() == 0
-        )
+        self.empty_state_widget.setVisible(self._cellpose_data is None)
 
     def _update_overlay_visibility(self) -> None:
-        self.overlay_widget.setVisible(
-            self._cellpose_data is not None and self.tabs.currentIndex() == 0
-        )
+        self.overlay_widget.setVisible(self._cellpose_data is not None)
 
     def _on_display_toggle_changed(self) -> None:
         """Sync overlay display options with the checkboxes, matching the

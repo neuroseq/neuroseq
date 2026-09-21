@@ -55,14 +55,9 @@ class CalciumVideoWidget(FPLWidget):
         self._stim_warning_shown = False
         self._hovered_cellpose_id: int | None = None
 
-        controls = QtWidgets.QHBoxLayout()
-        controls.setContentsMargins(4, 4, 4, 4)
-        controls.addWidget(QtWidgets.QLabel("Stim source:"))
         self.stim_combo = QtWidgets.QComboBox(self)
         self.stim_combo.setMinimumWidth(180)
         self.stim_combo.currentIndexChanged.connect(self._on_stim_source_changed)
-        controls.addWidget(self.stim_combo)
-        controls.addStretch(1)
         self.save_button = QtWidgets.QPushButton("Save video…", self)
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
@@ -70,10 +65,15 @@ class CalciumVideoWidget(FPLWidget):
         self.video_actions_widget = QtWidgets.QWidget(self)
         actions = QtWidgets.QHBoxLayout(self.video_actions_widget)
         actions.setContentsMargins(4, 4, 4, 4)
+        # Stim source lives in the same bottom bar as the other video
+        # actions, rather than a separate row above the canvas, so this tab
+        # matches the Cell segmentation tab's shape (content, then one fixed
+        # bottom bar) and switching between them doesn't shift anything.
+        actions.addWidget(QtWidgets.QLabel("Stim source:"))
+        actions.addWidget(self.stim_combo)
         actions.addStretch(1)
         actions.addWidget(self.save_button)
         actions.addWidget(self.remove_button)
-        actions.addStretch(1)
         self.video_actions_widget.setFixedHeight(44)
         self.video_actions_widget.setSizePolicy(
             QtWidgets.QSizePolicy.Policy.Expanding,
@@ -82,10 +82,8 @@ class CalciumVideoWidget(FPLWidget):
         self.import_button = QtWidgets.QPushButton("Import Video", self)
         self.import_button.clicked.connect(self.import_requested.emit)
 
-        # Put the controls above the canvas created by FPLWidget.
         layout = self.layout()
         assert isinstance(layout, QtWidgets.QVBoxLayout)
-        layout.insertLayout(0, controls)
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
         empty_layout.addStretch(1)
@@ -96,7 +94,7 @@ class CalciumVideoWidget(FPLWidget):
             self.import_button, alignment=QtCore.Qt.AlignmentFlag.AlignCenter
         )
         empty_layout.addStretch(1)
-        layout.insertWidget(1, self.empty_state_widget)
+        layout.insertWidget(0, self.empty_state_widget)
         layout.addWidget(self.video_actions_widget)
         self.save_button.setEnabled(False)
         self.remove_button.setEnabled(False)

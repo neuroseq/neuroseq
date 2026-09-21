@@ -244,8 +244,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.config_data_edit.setMaximumHeight(150)
         self.config_data_edit.setToolTip(
             "HOLO4D sequence configuration data. Note: the laser/lightsource "
-            "ID and the invertedportcnt/inverted0 fields are always "
-            "recomputed from the laser selected above, overriding whatever "
+            "ID is always recomputed from the laser selected above, and "
+            "invertedportcnt is always forced to 0 (inverted pulses are "
+            "never wanted, so inverted0 is dropped) - overriding whatever "
             "is typed here for those specific fields."
         )
         default_config = self._default_syscon2_config_text()
@@ -1076,8 +1077,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 version=3
 scanmode=Accurate
 runs=1
-invertedportcnt=1
-inverted0=dummy_1_0 RMI In
+invertedportcnt=0
 AutoTriggerRulesEnabled=False
 AutoTriggerRulesCount=1
 SourceConnectorPort0=dummy_1_0 RMI In

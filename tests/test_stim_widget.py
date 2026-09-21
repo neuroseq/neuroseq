@@ -438,6 +438,32 @@ def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
     stim_widget.close()
 
 
+def test_stim_widget_y_tick_labels_stay_on_their_own_row(qtbot: QtBot) -> None:
+    """Regression: when there isn't room for a tick per row, pygfx halves
+    its step and asks for labels at half-integer y's too (e.g. 1.5, not just
+    1 and 2). Rounding those to the nearest row drew that row's number half
+    a row off from its actual position - and Python's round-half-to-even
+    then hid every other integer row's own label outright as a same-value
+    duplicate. Every label pygfx does ask for here must land exactly on the
+    row it names, with no misplaced or missing ones in between."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    stim_array = StimArray("", StimType.Excitation, np.zeros((10, 10)), "mV", dt=0.001)
+    stim_widget.set_data(stim_array)
+
+    format_tick = stim_widget._create_y_tick_formatter()
+    for half_step in range(19):  # 0, 0.5, 1, ..., 9
+        y = half_step * 0.5
+        label = format_tick(y, 0, 9)
+        if label:
+            assert y == pytest.approx(round(y)), (
+                f"label {label!r} drawn off-row at y={y}"
+            )
+            assert label == str(round(y))
+    stim_widget.close()
+
+
 def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -613,15 +639,24 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     mouse_click_and_drag(qtbot, stim_widget, start, end)
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
-    assert 0.15 * n_neurons < stim_widget.selected_neuron_slice.start < 0.35 * n_neurons
-    assert 0.65 * n_neurons < stim_widget.selected_neuron_slice.stop < 0.90 * n_neurons
+    # A quarter-to-three-quarters drag should land roughly in the middle
+    # neuron/time band - bounds are inclusive since pixel-to-index rounding
+    # can legitimately land exactly on a boundary (e.g. 0.35 * 20 == 7).
     assert (
-        0.15 * n_timestamps
-        < stim_widget.selected_time_slice.start
-        < 0.35 * n_timestamps
+        0.15 * n_neurons <= stim_widget.selected_neuron_slice.start <= 0.35 * n_neurons
     )
     assert (
-        0.65 * n_timestamps < stim_widget.selected_time_slice.stop < 0.90 * n_timestamps
+        0.65 * n_neurons <= stim_widget.selected_neuron_slice.stop <= 0.90 * n_neurons
+    )
+    assert (
+        0.15 * n_timestamps
+        <= stim_widget.selected_time_slice.start
+        <= 0.35 * n_timestamps
+    )
+    assert (
+        0.65 * n_timestamps
+        <= stim_widget.selected_time_slice.stop
+        <= 0.90 * n_timestamps
     )
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())

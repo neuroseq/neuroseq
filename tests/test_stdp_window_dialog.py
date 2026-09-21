@@ -376,6 +376,18 @@ def test_plots_open_in_separate_window(qtbot) -> None:
     assert dialog.window_plot.window() is dialog.plot_window
 
 
+def test_stdp_window_plot_window_is_scrollable(qtbot) -> None:
+    """So a short screen scrolls the plots instead of squeezing the figure
+    until axis labels overlap or get clipped off."""
+    _project, _editor, dialog = _make_dialog(qtbot)
+    qtbot.addWidget(dialog.plot_window)
+
+    scroll_areas = dialog.plot_window.findChildren(QtWidgets.QScrollArea)
+    assert len(scroll_areas) == 1
+    assert scroll_areas[0].widget() is dialog.window_plot
+    assert scroll_areas[0].widgetResizable()
+
+
 def test_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
     qtbot.addWidget(dialog.stim_heatmap_window)

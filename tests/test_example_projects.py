@@ -8,6 +8,7 @@ import pytest
 
 import neuroseq.example_projects as example_projects
 from neuroseq.example_projects import default_project
+from neuroseq.example_projects import getting_started_project
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 
@@ -53,15 +54,14 @@ def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
     project = default_project()
 
     stimulus = project.stim_arrays["stimulus"]
+    assert list(project.stim_arrays.keys()) == ["stimulus"]
     assert stimulus.values.shape == (1180, 10)
     assert stimulus.units == "1"
-    assert project.stim_arrays["stimulus_inh"].units == "1"
     assert project.b2_model.neurongroups["P"]["neuronnumber"] == 10
-    assert project.b2_model.parameters["g_exc"] == 0.25 * b2.nS
-    assert project.b2_model.parameters["g_inh"] == 0.25 * b2.nS
+    assert project.b2_model.parameters["g_exc"] / b2.nS == pytest.approx(400)
     assert project.b2_model.initials["Ce"]["we"] == "6*nS"
     assert "g_exc * stimulus(t, i)" in project.b2_model.neurongroups["P"]["model"]
-    assert "g_inh * stimulus_inh(t, i)" in project.b2_model.neurongroups["P"]["model"]
+    assert "stimulus_inh" not in project.b2_model.neurongroups["P"]["model"]
 
     pulse_n = int(round(0.100 / stimulus.dt))
     gap_n = int(round(0.018 / stimulus.dt))
@@ -73,6 +73,65 @@ def test_default_project_uses_10_neurons_and_sequential_stimulus() -> None:
         for j in range(stimulus.values.shape[1]):
             if j != i:
                 assert np.all(stimulus.values[t0 : t0 + pulse_n, j] == 0.0)
+
+
+def test_default_project_stimulus_pulses_evoke_spikes() -> None:
+    """Regression: g_exc was 0.25 nS (a leftover placeholder, ~1600x weaker
+    than every other example project's identically-purposed optogenetic
+    drive parameter), too weak to depolarize a neuron past threshold within
+    its own 100ms stimulus pulse - the stims did not visibly "bump up"
+    activity at all. Every neuron must spike during its own pulse window."""
+    project = default_project()
+    project.run_simulation(1.18)
+
+    spike_monitor = project.b2_model.network["spike"]
+    spike_indices = np.asarray(spike_monitor.i[:])
+    spike_times = np.asarray(spike_monitor.t[:] / b2.second)
+
+    stimulus = project.stim_arrays["stimulus"]
+    pulse_n = int(round(0.100 / stimulus.dt))
+    gap_n = int(round(0.018 / stimulus.dt))
+    for i in range(stimulus.values.shape[1]):
+        t0 = i * (pulse_n + gap_n)
+        window_start = t0 * stimulus.dt
+        window_end = window_start + pulse_n * stimulus.dt
+        during_own_pulse = (
+            (spike_indices == i)
+            & (spike_times >= window_start)
+            & (spike_times < window_end)
+        )
+        assert during_own_pulse.any(), f"neuron {i} never spiked during its own pulse"
+
+
+def test_getting_started_project_bundles_a_cell_segmentation() -> None:
+    """The Getting Started example ships with a real 2-photon FOV +
+    Cellpose segmentation so its Cell segmentation tab isn't empty, mapped
+    to the model's own neuron count rather than every detected cell - but
+    plain default_project() (also used as the app's blank "New Project"
+    template) must not carry it, or every new project would open with
+    someone else's imaging data already attached."""
+    assert default_project().cellpose_data is None
+
+    project = getting_started_project()
+
+    cellpose_data = project.cellpose_data
+    assert cellpose_data is not None
+    assert cellpose_data.segmentation_array is not None
+    assert cellpose_data.overlay_image is not None
+    assert cellpose_data.image_path.exists()
+
+    n_neurons = project.b2_model.neurongroups["P"]["neuronnumber"]
+    mapping = cellpose_data.stimulus_to_cellpose_mapping
+    assert mapping is not None
+    assert set(mapping.keys()) == set(range(n_neurons))
+    # more cells are detected than the model has neurons - only the first
+    # n_neurons should be mapped, not every one of them
+    unique_ids = np.unique(cellpose_data.segmentation_array)
+    n_detected_cells = int(np.sum(unique_ids >= 0))
+    assert n_detected_cells > n_neurons
+    # max_neurons must follow the mapping, not the full segmentation, or the
+    # trace/stim/spike panels grow empty rows above the real neurons
+    assert project.max_neurons == n_neurons
 
 
 def test_hh_stdp_example_is_two_neuron_and_potentiates() -> None:

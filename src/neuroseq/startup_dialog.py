@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import pathlib
+import random
 
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.example_projects import default_project
+from neuroseq import console_art
+from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
+
+_BRAIN_ICON_HEIGHT = 48
 
 
 class StartupDialog(QtWidgets.QDialog):
@@ -33,9 +38,13 @@ class StartupDialog(QtWidgets.QDialog):
 
         layout = QtWidgets.QVBoxLayout(self)
 
+        title_row = QtWidgets.QHBoxLayout()
+        title_row.addWidget(self._brain_icon(mirrored=True))
         title = QtWidgets.QLabel("<h2>Welcome to NeuroSeq</h2>")
-        title.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
-        layout.addWidget(title)
+        title.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        title_row.addWidget(title, stretch=1)
+        title_row.addWidget(self._brain_icon(mirrored=False))
+        layout.addLayout(title_row)
 
         self.btn_example = QtWidgets.QPushButton("Open example project")
         self.btn_example.clicked.connect(self._choose_example)
@@ -67,8 +76,28 @@ class StartupDialog(QtWidgets.QDialog):
             self.recent_list.itemDoubleClicked.connect(self._choose_recent)
             layout.addWidget(self.recent_list)
 
+    def _brain_icon(self, mirrored: bool) -> QtWidgets.QLabel:
+        """A small randomly-retinted brain (see console_widget.py for the
+        console's own), flanking the title - mirrored on one side so the
+        pair faces inward, toward the title, instead of both facing the
+        same way."""
+        image = QtGui.QImage()
+        image.loadFromData(
+            console_art.tinted_brain_image_bytes(
+                random.Random(), console_art.startup_brain_image_path()
+            )
+        )
+        if mirrored:
+            image = image.mirrored(True, False)
+        pixmap = QtGui.QPixmap.fromImage(image).scaledToHeight(
+            _BRAIN_ICON_HEIGHT, QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+        label = QtWidgets.QLabel(self)
+        label.setPixmap(pixmap)
+        return label
+
     def _choose_example(self) -> None:
-        self.chosen_project = default_project()
+        self.chosen_project = getting_started_project()
         self.accept()
 
     def _choose_load(self) -> None:

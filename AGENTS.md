@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`src/neuroseq/` contains the installable package and most application code. The layout is intentionally flat: GUI entry lives in `__main__.py`, widgets and dialogs use names like `*_widget.py` and `*_dialog.py`, and import/export code uses `importer_*.py` and `exporter_*.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds MkDocs content, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `examplary_data/`, and `notebooks/` are supporting material, not core package code.
+`src/neuroseq/` contains the installable package and most application code. The layout is intentionally flat: GUI entry lives in `__main__.py`, widgets and dialogs use names like `*_widget.py` and `*_dialog.py`, and import/export code uses `importer_*.py` and `exporter_*.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds MkDocs content, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `example_data/`, and `notebooks/` are supporting material, not core package code.
 
 ## NeuroSeq Functionality Overview
 

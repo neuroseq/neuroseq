@@ -478,14 +478,14 @@ Copy-paste examples:
 ```bash
 # 1) Default test data (10x10, radius=10, gap=10)
 python -m neuroseq \
-  --generate-cellpose-test-data examplary_data/cellpose_default.tif
+  --generate-cellpose-test-data example_data/cellpose_default.tif
 ```
 
 ```bash
 # 2) Custom rows/cols/radius/gap and explicit segmentation output path
 python -m neuroseq \
-  --generate-cellpose-test-data examplary_data/cellpose_custom.tif \
-  --cellpose-segmentation-output examplary_data/cellpose_custom_segmentation.npy \
+  --generate-cellpose-test-data example_data/cellpose_custom.tif \
+  --cellpose-segmentation-output example_data/cellpose_custom_segmentation.npy \
   --cellpose-grid-rows 8 \
   --cellpose-grid-cols 12 \
   --cellpose-radius 7 \
@@ -495,7 +495,7 @@ python -m neuroseq \
 ```bash
 # 3) Fixed square output (1300x1300) with default auto-fit radius/gap
 python -m neuroseq \
-  --generate-cellpose-test-data examplary_data/cellpose_1300_autofit.tif \
+  --generate-cellpose-test-data example_data/cellpose_1300_autofit.tif \
   --cellpose-grid-rows 10 \
   --cellpose-grid-cols 10 \
   --cellpose-radius 10 \
@@ -506,7 +506,7 @@ python -m neuroseq \
 ```bash
 # 4) Fixed square output (1300x1300) with fixed radius/gap (no auto-fit)
 python -m neuroseq \
-  --generate-cellpose-test-data examplary_data/cellpose_1300_fixed.tif \
+  --generate-cellpose-test-data example_data/cellpose_1300_fixed.tif \
   --cellpose-grid-rows 10 \
   --cellpose-grid-cols 10 \
   --cellpose-radius 10 \
@@ -518,7 +518,7 @@ python -m neuroseq \
 ```bash
 # 5) Fixed square output with fixed radius and auto-fitted gap
 python -m neuroseq \
-  --generate-cellpose-test-data examplary_data/cellpose_1300_fixed_radius_auto_gap.tif \
+  --generate-cellpose-test-data example_data/cellpose_1300_fixed_radius_auto_gap.tif \
   --cellpose-grid-rows 8 \
   --cellpose-grid-cols 12 \
   --cellpose-radius 10 \

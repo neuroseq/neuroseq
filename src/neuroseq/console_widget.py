@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from typing import Any
 
 import brian2 as b2
@@ -11,6 +12,11 @@ from qtpy import QtWidgets
 
 from neuroseq import console_art
 from neuroseq.project import Project
+
+# A fixed name for the brain image's document resource, so re-registering it
+# under the same name (see _randomize_brain_image()) restyles the existing
+# inline image in place instead of inserting a second copy.
+_BRAIN_RESOURCE_URL = QtCore.QUrl("neuroseq-console-brain.png")
 
 SAMPLE_CODE = """\
 # ── Project ──────────────────────────────────────────────────
@@ -89,6 +95,11 @@ class ConsoleWidget(ReplWidget):
             "b2": b2,
             "project": None,
         }
+        # Word-wrap would reflow the fixed character grid of the splash art
+        # (and any wide array repr) into garbage whenever the panel is
+        # narrower than the content - scroll horizontally instead, like a
+        # terminal does.
+        self.output.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
         self._print_intro()
 
         # Create button layout
@@ -113,9 +124,12 @@ class ConsoleWidget(ReplWidget):
         self.layout.addLayout(btn_layout)
 
     def _print_intro(self) -> None:
-        # A fresh brain is grown for every launch, so the splash is never
-        # quite the same twice.
-        self._insert_centered(console_art.console_splash())
+        banner = console_art.welcome_banner()
+        width = max(len(line) for line in banner)
+        self._insert_centered("\n" + "\n".join(banner) + "\n")
+        self._randomize_brain_image()
+        self._insert_brain_image()
+        self._insert_centered("\n" + "-" * width + "\n")
         self.output.insertPlainText(
             "This is a Python console where you can interact directly with the Model using the 'project' object.\n"
         )
@@ -145,9 +159,9 @@ class ConsoleWidget(ReplWidget):
         """Insert ``text`` as horizontally centered blocks, then go back to left.
 
         Qt centers each line on its own, so this only preserves ASCII art when
-        every line is the same length - which ``console_splash`` guarantees.
-        Centering is done per block rather than by padding with spaces so it
-        stays correct when the console is resized.
+        every line is the same length - which ``welcome_banner()``'s block
+        font guarantees. Centering is done per block rather than by padding
+        with spaces so it stays correct when the console is resized.
         """
         cursor = self.output.textCursor()
         cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
@@ -159,6 +173,44 @@ class ConsoleWidget(ReplWidget):
         left.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         cursor.setBlockFormat(left)
         self.output.setTextCursor(cursor)
+
+    def _insert_brain_image(self) -> None:
+        """Insert a reference to the brain image resource (already
+        registered by ``_randomize_brain_image()``) as its own centered
+        block."""
+        cursor = self.output.textCursor()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        centered = QtGui.QTextBlockFormat()
+        centered.setAlignment(QtCore.Qt.AlignmentFlag.AlignHCenter)
+        centered.setTopMargin(16)
+        cursor.setBlockFormat(centered)
+        cursor.insertImage(_BRAIN_RESOURCE_URL.toString())
+        cursor.insertBlock()
+        left = QtGui.QTextBlockFormat()
+        left.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        cursor.setBlockFormat(left)
+        self.output.setTextCursor(cursor)
+
+    def _randomize_brain_image(self) -> None:
+        """(Re-)register the brain image document resource with a freshly
+        randomized tint.
+
+        Registering it under the same fixed name every time (rather than
+        inserting a new image) restyles the existing inline image in place -
+        called once on construction and again every time the console is
+        shown, so the color varies both at launch and on every close/reopen.
+        """
+        image = QtGui.QImage()
+        image.loadFromData(console_art.tinted_brain_image_bytes(random.Random()))
+        self.output.document().addResource(
+            QtGui.QTextDocument.ResourceType.ImageResource,
+            _BRAIN_RESOURCE_URL,
+            image,
+        )
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self._randomize_brain_image()
 
     def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
