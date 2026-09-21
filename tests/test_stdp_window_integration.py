@@ -26,7 +26,20 @@ class _BrianEditor:
         self.current_stim_modifier.stim_array.values[:] = 0.0
 
     def reset_stim_array(self) -> None:
+        # Mirrors StimEditor.reset_stim_array(): trim the array back to the
+        # current simulation head (never growing it). dynamic_input_blocks
+        # .append_block() relies on this actually trimming - the example
+        # project's stim arrays ship pre-authored at several seconds long,
+        # and clearing their values (see clear_all_stim_arrays) does not
+        # shorten them, so without a real trim here every appended probe
+        # would land far past the end of the recorded trace.
         self.reset_count = getattr(self, "reset_count", 0) + 1
+        stim = self.current_stim_modifier.stim_array
+        target_samples = max(
+            1, int(np.ceil(self.project.b2_model.get_sim_time_secs() / stim.dt))
+        )
+        if stim.values.shape[0] > target_samples:
+            stim.values = stim.values[:target_samples]
 
     def clear_all_stim_arrays(self) -> None:
         self.cleared_all += 1

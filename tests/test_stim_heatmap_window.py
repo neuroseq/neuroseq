@@ -6,8 +6,8 @@ from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import StimHeatmapWindow
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import StimHeatmapWindow
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.utils import get_cmap

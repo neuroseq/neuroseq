@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from qtpy import QtWidgets
 
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stim import DrawStimType
 from neuroseq.stim_patterns import generate_fuer_elise
 from neuroseq.stim_patterns import generate_per_neuron

@@ -1286,7 +1286,7 @@ class Gui(QtWidgets.QMainWindow):
         # A replaced project must not inherit the previous run's Design dynamic
         # input state (plots, log, EPSP history); drop the cached dialog so it
         # is rebuilt fresh on next open.
-        self.stim_editor.discard_input_designer()
+        self.stim_editor.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self._update_combo_boxes()
@@ -1983,7 +1983,7 @@ class Gui(QtWidgets.QMainWindow):
             # was dropped so its closed loop stops instead of stalling forever
             # waiting for a completion callback that will never arrive. This is
             # a no-op when no routine is awaiting a simulation.
-            self.stim_editor.input_designer_simulation_failed(
+            self.stim_editor.dynamic_input_simulation_failed(
                 "another operation is already in progress"
             )
             return
@@ -2036,7 +2036,7 @@ class Gui(QtWidgets.QMainWindow):
             # Let Qt paint the newly refreshed trace before Design dynamic input
             # appends and focuses the next stimulation block.
             QtCore.QTimer.singleShot(
-                0, self.stim_editor.input_designer_simulation_finished
+                0, self.stim_editor.dynamic_input_simulation_finished
             )
 
         self._dispatch_io_task(
@@ -2046,7 +2046,7 @@ class Gui(QtWidgets.QMainWindow):
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
             cancel_callback=_request_brian2_cancel,
-            on_failure=self.stim_editor.input_designer_simulation_failed,
+            on_failure=self.stim_editor.dynamic_input_simulation_failed,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:
@@ -2792,7 +2792,7 @@ class Gui(QtWidgets.QMainWindow):
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
         self.spatial_footprint_widget.apply_theme(theme)
-        self.stim_editor.apply_input_designer_theme(theme)
+        self.stim_editor.apply_dynamic_input_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
             action.setChecked(True)
@@ -3288,7 +3288,7 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_design_dynamic_input, "mdi6.pencil-box-multiple-outline"
         )
         self.btn_design_dynamic_input.clicked.connect(
-            self.stim_editor.open_input_designer
+            self.stim_editor.open_dynamic_input_designer
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
 

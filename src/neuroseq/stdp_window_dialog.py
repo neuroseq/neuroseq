@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
@@ -14,14 +16,18 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import EPSPMeasurement
-from neuroseq.input_designer_dialog import StimHeatmapWindow
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
-from neuroseq.input_designer_dialog import _set_native_minimized_position
-from neuroseq.input_designer_dialog import _WheelToScrollFilter
-from neuroseq.input_designer_dialog import _wrap_in_scroll_area
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.dynamic_input_blocks import append_block
+from neuroseq.dynamic_input_measurement import EPSPMeasurement
+from neuroseq.dynamic_input_measurement import NoEpspDetected
+from neuroseq.dynamic_input_measurement import measure_epsp
+from neuroseq.dynamic_input_routine import RoutineBackend
+from neuroseq.dynamic_input_routine import SimulationHost
+from neuroseq.dynamic_input_routine import backend_property
+from neuroseq.stdp_synaptic_tuning_dialog import StimHeatmapWindow
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
+from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
+from neuroseq.stdp_synaptic_tuning_dialog import _wrap_in_scroll_area
 from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
 from neuroseq.stdp_window import interleave_by_magnitude
@@ -29,19 +35,253 @@ from neuroseq.stdp_window import percent_change
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 
+# Backwards-compatible import for callers/tests that used the former local
+# exception name before measurement was shared between the routines.
+_NoEpspDetected = NoEpspDetected
+
 if TYPE_CHECKING:
     from neuroseq.project import Project
     from neuroseq.stim import StimArray
     from neuroseq.stim_editor import StimEditor
 
 
-class _NoEpspDetected(ValueError):
-    """No EPSP could be detected in a probe response window.
+class StdpWindowBackend(RoutineBackend):
+    """Lifecycle backend for the STDP timing-window dialog.
 
-    Distinct from other measurement ``ValueError``s (missing trace row, trace
-    too short) so the sweep can treat an undetectable EPSP as a skipped point
-    instead of a fatal error.
+    Owns the Qt-free Δt-sweep decision graph; the dialog supplies
+    rendering, trace/weight measurement, checkpoint restore, and
+    append-block callbacks.
     """
+
+    def __init__(self, host: SimulationHost) -> None:
+        super().__init__(host)
+        self.delta_ts: list[float] = []
+        self.index = 0
+        self.pairing_repeat = 0
+        self.baseline_epsp: float | None = None
+        self.last_epsp: float | None = None
+        self.pending_delta_t = 0.0
+        self.results: list[tuple[float, float]] = []
+        self.epsp_trajectory: list[float] = []
+        self.probe_pulse_times: list[float] = []
+        self.view_block_samples: int | None = None
+        self.checkpoint: str | None = None
+        self.baseline_sample = 0
+        self.point_start = 0
+        self.saturation_warned = False
+        self.resolution_warning_logged = False
+        self.config: StdpWindowRunConfig | None = None
+        self.on_restore_baseline: Callable[[], None] | None = None
+
+    def _cfg(self) -> StdpWindowRunConfig:
+        if self.config is None:
+            raise RuntimeError("STDP window sweep has not been configured")
+        return self.config
+
+    def begin_sweep(
+        self,
+        config: StdpWindowRunConfig,
+        delta_ts: list[float],
+        *,
+        weight_baseline: float | None,
+    ) -> None:
+        self.config = config
+        self.begin()
+        self.delta_ts = list(delta_ts)
+        self.index = 0
+        self.pairing_repeat = 0
+        self.results = []
+        self.epsp_trajectory = []
+        self.probe_pulse_times = []
+        self.view_block_samples = None
+        self.saturation_warned = False
+        self.phase = "idle"
+        if weight_baseline is not None:
+            self.baseline_epsp = weight_baseline
+            self.last_epsp = weight_baseline
+            self.epsp_trajectory.append(weight_baseline)
+            self._log(f"Baseline synaptic weight: {weight_baseline:.6g}.")
+            self._measurement_changed()
+            self.begin_point()
+        else:
+            self.baseline_epsp = None
+            self.last_epsp = None
+            self.phase = "baseline_probe"
+            self.probe()
+
+    def probe(self) -> None:
+        c = self._cfg()
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(c.pulse_ms, c.stim_dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(c.recovery_ms, c.stim_dt)
+        period_n, _period_ms = snap_milliseconds_to_dt(
+            StdpWindowDialog.PROBE_PERIOD_MS, c.stim_dt, minimum_samples=pulse_n + 1
+        )
+        tail_n, _tail_ms = snap_milliseconds_to_dt(c.response_ms, c.stim_dt)
+        samples = (
+            lead_n + (StdpWindowDialog.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
+        )
+        block = np.zeros((samples, c.n_neurons), dtype=np.float32)
+        pulse_offsets = [
+            lead_n + index * period_n for index in range(StdpWindowDialog.PROBE_PULSES)
+        ]
+        for offset in pulse_offsets:
+            block[offset : offset + pulse_n, c.presynaptic_id] = c.amplitude
+        block_start = self._host.append_block(block)
+        self.probe_pulse_times = [
+            (block_start + offset) * c.stim_dt for offset in pulse_offsets
+        ]
+        self._log("Appended five presynaptic probe pulses.")
+        self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
+
+    def pairing(self, delta_t_ms: float) -> None:
+        c = self._cfg()
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(c.pulse_ms, c.stim_dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(c.recovery_ms, c.stim_dt)
+        gap_n, gap_ms = snap_milliseconds_to_dt(abs(delta_t_ms), c.stim_dt)
+        self.pending_delta_t = copysign(gap_ms, delta_t_ms)
+        delta_t_ms = self.pending_delta_t
+        tail_n, _tail_ms = snap_milliseconds_to_dt(c.response_ms, c.stim_dt)
+        samples = lead_n + gap_n + pulse_n + tail_n
+        block = np.zeros((samples, c.n_neurons), dtype=np.float32)
+        pre_before_post = delta_t_ms >= 0.0
+        first = c.presynaptic_id if pre_before_post else c.postsynaptic_id
+        second = c.postsynaptic_id if pre_before_post else c.presynaptic_id
+        block[lead_n : lead_n + pulse_n, first] = c.amplitude
+        block[lead_n + gap_n : lead_n + gap_n + pulse_n, second] = c.amplitude
+        self._host.append_block(block)
+        self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
+
+    def begin_point(self) -> None:
+        c = self._cfg()
+        self.pending_delta_t = self.delta_ts[self.index]
+        self.pairing_repeat = 0
+        if c.sweep_mode == StdpWindowDialog.RESET_MODE and self.on_restore_baseline:
+            self.on_restore_baseline()
+        self.apply_next_pairing()
+
+    def apply_next_pairing(self) -> None:
+        c = self._cfg()
+        self.pairing_repeat += 1
+        self.phase = "pair"
+        self._log(
+            f"Δt {self.pending_delta_t:+.3g} ms: pairing "
+            f"{self.pairing_repeat}/{c.pairings_per_point}."
+        )
+        self.pairing(self.pending_delta_t)
+
+    def should_continue_pairing(self) -> bool:
+        return self.pairing_repeat < self._cfg().pairings_per_point
+
+    def begin_probe_phase(self) -> None:
+        self.phase = "probe"
+        self.probe()
+
+    def record_baseline_probe(self, amplitude: float, units: str) -> None:
+        self.baseline_epsp = amplitude
+        self.last_epsp = amplitude
+        self.epsp_trajectory.append(amplitude)
+        self._log(f"Baseline EPSP: {amplitude:.6g} {units}.")
+        self._measurement_changed()
+        self.index = 0
+        self.begin_point()
+
+    def handle_probe_measurement(self, measurement: EPSPMeasurement | None) -> None:
+        if self.baseline_epsp is None or self.last_epsp is None:
+            self.finish("Baseline EPSP is unavailable.")
+            return
+        delta_t = self.pending_delta_t
+        label = classify_window(delta_t)
+        if measurement is None:
+            # An undetectable EPSP is a skipped point, not a fatal error:
+            # record NaN and carry on so one shunted response does not abort
+            # the sweep.
+            self.epsp_trajectory.append(float("nan"))
+            self.results.append((delta_t, float("nan")))
+            self._log(f"Δt {delta_t:+.3g} ms → EPSP undetectable; point skipped.")
+        else:
+            self.epsp_trajectory.append(measurement.amplitude)
+            percent = self._percent_for(measurement.amplitude)
+            self.results.append((delta_t, percent))
+            if self._cfg().sweep_mode != StdpWindowDialog.RESET_MODE:
+                self.last_epsp = measurement.amplitude
+            self._log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% EPSP ({label}).")
+            self._maybe_warn_saturation(measurement.amplitude)
+        self._measurement_changed()
+        self.advance_point()
+
+    def record_weight_point(self, weight: float) -> None:
+        if self.baseline_epsp is None or self.last_epsp is None:
+            self.finish("Baseline synaptic weight is unavailable.")
+            return
+        delta_t = self.pending_delta_t
+        label = classify_window(delta_t)
+        self.epsp_trajectory.append(weight)
+        percent = self._percent_for(weight)
+        self.results.append((delta_t, percent))
+        if self._cfg().sweep_mode != StdpWindowDialog.RESET_MODE:
+            self.last_epsp = weight
+        self._log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% weight ({label}).")
+        self._maybe_warn_saturation(weight)
+        self._measurement_changed()
+        self.advance_point()
+
+    def _percent_for(self, measure: float) -> float:
+        """Percent change: from the fixed baseline (reset) or the running
+        value (continuous)."""
+        baseline = self.baseline_epsp
+        last = self.last_epsp
+        assert baseline is not None and last is not None
+        reference = (
+            baseline if self._cfg().sweep_mode == StdpWindowDialog.RESET_MODE else last
+        )
+        return percent_change(reference, measure, reference)
+
+    def _maybe_warn_saturation(self, epsp: float) -> None:
+        baseline = self.baseline_epsp
+        if self.saturation_warned or baseline is None or baseline == 0.0:
+            return
+        ratio = epsp / baseline
+        if ratio < 0.25 or ratio > 4.0:
+            self.saturation_warned = True
+            self._log(
+                "EPSP drift is far from baseline; later Δt points may be "
+                "affected by synaptic saturation."
+            )
+
+    def advance_point(self) -> None:
+        self.index += 1
+        if self.index >= len(self.delta_ts):
+            measured = sum(1 for _dt, percent in self.results if percent == percent)
+            self.finish(
+                f"STDP window sweep finished; measured {measured}/"
+                f"{len(self.results)} points."
+            )
+            return
+        self.begin_point()
+
+    def _advance(self) -> None:
+        if self.on_advance is not None:
+            self.on_advance()
+
+
+@dataclass(frozen=True)
+class StdpWindowRunConfig:
+    dt_min_ms: float
+    dt_max_ms: float
+    dt_points: int
+    include_zero: bool
+    pairings_per_point: int
+    readout: str
+    sweep_mode: str
+    presynaptic_id: int
+    postsynaptic_id: int
+    amplitude: float
+    pulse_ms: float
+    recovery_ms: float
+    response_ms: float
+    stim_dt: float
+    n_neurons: int
+    max_iterations: int = 0
 
 
 class StdpWindowDialog(_SelfRaisingDialog):
@@ -68,33 +308,26 @@ class StdpWindowDialog(_SelfRaisingDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Cached modeless routine windows must outlive transient host windows;
+        # detach an optional host parent to avoid Qt deleting the cache first.
+        if parent is not None:
+            self.setParent(None)
         self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
         self.editor = editor
         self.project = editor.project
+        self._backend = StdpWindowBackend(self)
+        self._backend.on_advance = self._advance_domain
+        self._backend.on_measurement = self._update_plot
+        self._backend.on_restore_baseline = self._restore_baseline
         self._running = False
         self._awaiting_simulation = False
         self._paused = False
         self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
-        self._delta_ts: list[float] = []
-        self._index = 0
-        self._pairing_repeat = 0
-        self._baseline_epsp: float | None = None
-        self._last_epsp: float | None = None
-        self._pending_delta_t = 0.0
-        self._results: list[tuple[float, float]] = []
-        self._epsp_trajectory: list[float] = []
-        self._probe_pulse_times: list[float] = []
-        self._view_block_samples: int | None = None
-        self._checkpoint: str | None = None
-        self._baseline_sample = 0
-        self._point_start = 0
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
         self._plot_window_positioned = False
-        self._saturation_warned = False
-        self._resolution_warning_logged = False
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -262,7 +495,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         )
 
         # No Qt parent for the popups - see StimHeatmapWindow's construction
-        # in input_designer_dialog.py for why (KWin/X11 groups a whole chain
+        # in stdp_synaptic_tuning_dialog.py for why (KWin/X11 groups a whole chain
         # of transient windows sharing one owner, so clicking one never
         # brings it above a sibling in the same chain).
         self.plot_window = _SelfRaisingDialog()
@@ -293,6 +526,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.lbl_estimate = QtWidgets.QLabel("", self)
         layout.addWidget(self.lbl_estimate)
         self.log = QtWidgets.QPlainTextEdit(self)
+        self._backend.on_log = self._append_log
         self.log.setMaximumHeight(130)
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
@@ -579,34 +813,35 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._begin_sweep(clear_log=True)
 
     def _begin_sweep(self, *, clear_log: bool) -> None:
-        self._delta_ts = self._current_delta_t_values()
-        if not self._delta_ts:
+        delta_ts = self._current_delta_t_values()
+        if not delta_ts:
             self._finish("No Δt points to sweep.")
             return
-        self._running = True
-        self._awaiting_simulation = False
-        self._phase = "idle"
-        self._index = 0
-        self._pairing_repeat = 0
-        # These hold the generic per-point measurement (EPSP amplitude in EPSP
-        # mode, synaptic weight in weight mode).
-        self._baseline_epsp = None
-        self._last_epsp = None
-        self._pending_delta_t = 0.0
-        self._results = []
-        self._epsp_trajectory = []
-        self._probe_pulse_times = []
-        self._view_block_samples = None
-        self._saturation_warned = False
-        self._resolution_warning_logged = False
-        self._checkpoint = None
+        stim = self._require_stim()
+        config = StdpWindowRunConfig(
+            dt_min_ms=self.spn_dt_min_ms.value(),
+            dt_max_ms=self.spn_dt_max_ms.value(),
+            dt_points=self.spn_dt_points.value(),
+            include_zero=self.chk_include_zero.isChecked(),
+            pairings_per_point=self.spn_pairings_per_point.value(),
+            readout=self.cmb_readout.currentText(),
+            sweep_mode=self.cmb_sweep_mode.currentText(),
+            presynaptic_id=self.spn_presynaptic.value(),
+            postsynaptic_id=self.spn_postsynaptic.value(),
+            amplitude=self.spn_amplitude.value(),
+            pulse_ms=self.spn_pulse_ms.value(),
+            recovery_ms=self.spn_recovery_ms.value(),
+            response_ms=self.spn_response_ms.value(),
+            stim_dt=float(stim.dt),
+            n_neurons=int(stim.values.shape[1]),
+        )
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_pause.setEnabled(True)
         if clear_log:
             self.log.clear()
         self._append_log(
-            f"Sweeping {len(self._delta_ts)} Δt points; estimated simulations "
+            f"Sweeping {len(delta_ts)} Δt points; estimated simulations "
             f"~{self._estimated_probe_count()}."
         )
         self._maybe_log_delta_t_resolution_warning()
@@ -615,8 +850,13 @@ class StdpWindowDialog(_SelfRaisingDialog):
             "rheobase first if needed."
         )
         self._update_plot()
+        # Reset-mode checkpoint bookkeeping touches the live Brian2 model
+        # directly (project.b2_model.store), so it stays a distinct dialog-side
+        # step rather than moving into the backend's begin_sweep().
+        self._checkpoint = None
+        self._baseline_sample = 0
+        self._point_start = 0
         if self._reset_mode():
-            stim = self._require_stim()
             project = self._require_project()
             self._baseline_sample = int(
                 np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
@@ -624,36 +864,20 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._point_start = self._baseline_sample
             self._checkpoint = f"STDP window baseline {id(self)}"
             project.b2_model.store(self._checkpoint)
+        weight_baseline: float | None = None
         if self._weight_mode():
-            weight = self._read_synapse_weight()
-            if weight is None:
+            weight_baseline = self._read_synapse_weight()
+            if weight_baseline is None:
                 self._finish("Could not read the baseline synaptic weight.")
                 return
-            self._baseline_epsp = weight
-            self._last_epsp = weight
-            self._epsp_trajectory.append(weight)
-            self._append_log(f"Baseline synaptic weight: {weight:.6g}.")
-            self._update_plot()
-            self._begin_point()
-        else:
-            self._phase = "baseline_probe"
-            self._append_probe()
+        self._backend.begin_sweep(config, delta_ts, weight_baseline=weight_baseline)
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
 
     def toggle_pause(self) -> None:
-        self._paused = not self._paused
+        self._backend.toggle_pause()
         self.btn_pause.setText("Resume" if self._paused else "Pause")
-        if self._paused:
-            self._append_log("Paused - the routine will hold after its current step.")
-            return
-        self._append_log("Resumed.")
-        if self._pending_simulation_seconds is not None:
-            seconds = self._pending_simulation_seconds
-            self._pending_simulation_seconds = None
-            self._awaiting_simulation = True
-            self.simulation_requested.emit(seconds)
 
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
@@ -666,65 +890,8 @@ class StdpWindowDialog(_SelfRaisingDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
-    def _append_probe(self) -> None:
-        stim = self._require_stim()
-        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
-        lead_n, _lead_ms = snap_milliseconds_to_dt(
-            self.spn_recovery_ms.value(), stim.dt
-        )
-        period_n, _period_ms = snap_milliseconds_to_dt(
-            self.PROBE_PERIOD_MS, stim.dt, minimum_samples=pulse_n + 1
-        )
-        tail_n, _tail_ms = snap_milliseconds_to_dt(
-            self.spn_response_ms.value(), stim.dt
-        )
-        samples = lead_n + (self.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
-        block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
-        pulse_offsets = [
-            lead_n + index * period_n for index in range(self.PROBE_PULSES)
-        ]
-        for offset in pulse_offsets:
-            block[offset : offset + pulse_n, self.spn_presynaptic.value()] = (
-                self.spn_amplitude.value()
-            )
-        block_start = self._place_block(block)
-        self._probe_pulse_times = [
-            (block_start + offset) * stim.dt for offset in pulse_offsets
-        ]
-        self._append_log("Appended five presynaptic probe pulses.")
-        self._run_to_sample(block_start + samples)
-
-    def _append_pairing(self, delta_t_ms: float) -> None:
-        stim = self._require_stim()
-        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
-        lead_n, _lead_ms = snap_milliseconds_to_dt(
-            self.spn_recovery_ms.value(), stim.dt
-        )
-        gap_n, gap_ms = snap_milliseconds_to_dt(abs(delta_t_ms), stim.dt)
-        self._pending_delta_t = copysign(gap_ms, delta_t_ms)
-        delta_t_ms = self._pending_delta_t
-        tail_n, _tail_ms = snap_milliseconds_to_dt(
-            self.spn_response_ms.value(), stim.dt
-        )
-        samples = lead_n + gap_n + pulse_n + tail_n
-        block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
-        pre_before_post = delta_t_ms >= 0.0
-        first = (
-            self.spn_presynaptic.value()
-            if pre_before_post
-            else self.spn_postsynaptic.value()
-        )
-        second = (
-            self.spn_postsynaptic.value()
-            if pre_before_post
-            else self.spn_presynaptic.value()
-        )
-        block[lead_n : lead_n + pulse_n, first] = self.spn_amplitude.value()
-        block[lead_n + gap_n : lead_n + gap_n + pulse_n, second] = (
-            self.spn_amplitude.value()
-        )
-        block_start = self._place_block(block)
-        self._run_to_sample(block_start + samples)
+    def append_block(self, block: np.ndarray) -> int:
+        return self._place_block(block)
 
     def _restore_baseline(self) -> None:
         """Reset mode: rewind the network to the baseline checkpoint."""
@@ -734,20 +901,20 @@ class StdpWindowDialog(_SelfRaisingDialog):
 
     def _place_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
-        project = self._require_project()
         if self._reset_mode():
-            # Overwrite a fixed region: the clock was rewound by _restore_baseline,
-            # and blocks within a point are laid down consecutively from there.
+            # A reset point deliberately reuses the baseline region. Trim any
+            # automatic padding first, then preserve the checkpoint's fixed
+            # placement semantics.
+            self.editor.reset_stim_array()
             start = self._point_start
+            self.editor.apply_pattern(
+                slice(0, stim.values.shape[1]),
+                slice(start, start + block.shape[0]),
+                block,
+            )
             self._point_start = start + block.shape[0]
         else:
-            current_sample = int(
-                np.ceil(project.b2_model.get_sim_time_secs() / stim.dt)
-            )
-            start = max(stim.values.shape[0], current_sample)
-        self.editor.apply_pattern(
-            slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
-        )
+            start = append_block(self.editor, stim, block)
         if self.chk_follow_input.isChecked():
             if self._view_block_samples is None:
                 self._view_block_samples = block.shape[0]
@@ -762,20 +929,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._update_stim_heatmap()
         return start
 
-    def _run_to_sample(self, stop_sample: int) -> None:
-        stim = self._require_stim()
-        current_time = self._require_project().b2_model.get_sim_time_secs()
-        run_seconds = max(stim.dt, stop_sample * stim.dt - current_time)
-        self._request_simulation(run_seconds)
-
     def _request_simulation(self, seconds: float) -> None:
-        if self._paused:
-            self._pending_simulation_seconds = seconds
-            self._append_log(
-                "Paused - next iteration queued; click Resume to continue."
-            )
-            return
-        self._awaiting_simulation = True
+        self._backend.request_simulation(seconds)
+
+    def request_simulation(self, seconds: float) -> None:
         self.simulation_requested.emit(seconds)
 
     def simulation_finished(self) -> None:
@@ -783,7 +940,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return
         if not self._awaiting_simulation:
             return
-        self._awaiting_simulation = False
+        self._backend.simulation_finished()
+
+    def _advance_domain(self) -> None:
+        assert self.project is not None
         if self._phase in ("initialize_trace", "initialize_weight"):
             self.refresh()
             if self._weight_mode():
@@ -812,13 +972,19 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._begin_sweep(clear_log=False)
             return
         if self._phase == "pair":
-            if self._pairing_repeat < self.spn_pairings_per_point.value():
-                self._apply_next_pairing()
-            elif self._weight_mode():
-                self._record_weight_point()
-            else:
-                self._phase = "probe"
-                self._append_probe()
+            if self._backend.should_continue_pairing():
+                self._backend.apply_next_pairing()
+                return
+            if self._weight_mode():
+                weight = self._read_synapse_weight()
+                if weight is None:
+                    self._finish(
+                        "Could not read the synaptic weight after the pairing."
+                    )
+                    return
+                self._backend.record_weight_point(weight)
+                return
+            self._backend.begin_probe_phase()
             return
 
         self.refresh()
@@ -835,7 +1001,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return
         try:
             measurement: EPSPMeasurement | None = self._measure_epsps(trace)
-        except _NoEpspDetected:
+        except NoEpspDetected:
             measurement = None
         except ValueError as exc:
             self._finish(f"EPSP measurement failed: {exc}")
@@ -849,158 +1015,22 @@ class StdpWindowDialog(_SelfRaisingDialog):
                     "'Synaptic weight' readout or an isolated-synapse project."
                 )
                 return
-            self._baseline_epsp = measurement.amplitude
-            self._last_epsp = measurement.amplitude
-            self._epsp_trajectory.append(measurement.amplitude)
-            self._append_log(
-                f"Baseline EPSP: {measurement.amplitude:.6g} {measurement.units}."
+            self._backend.record_baseline_probe(
+                measurement.amplitude, measurement.units
             )
-            self._update_plot()
-            self._index = 0
-            self._begin_point()
             return
 
         if self._phase == "probe":
-            self._handle_probe_measurement(measurement)
-
-    def _handle_probe_measurement(self, measurement: EPSPMeasurement | None) -> None:
-        if self._baseline_epsp is None or self._last_epsp is None:
-            self._finish("Baseline EPSP is unavailable.")
-            return
-        delta_t = self._pending_delta_t
-        label = classify_window(delta_t)
-        if measurement is None:
-            # An undetectable EPSP is a skipped point, not a fatal error: record
-            # NaN and carry on so one shunted response does not abort the sweep.
-            self._epsp_trajectory.append(float("nan"))
-            self._results.append((delta_t, float("nan")))
-            self._append_log(
-                f"Δt {delta_t:+.3g} ms → EPSP undetectable; point skipped."
-            )
-        else:
-            self._epsp_trajectory.append(measurement.amplitude)
-            percent = self._percent_for(measurement.amplitude)
-            self._results.append((delta_t, percent))
-            if not self._reset_mode():
-                self._last_epsp = measurement.amplitude
-            self._append_log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% EPSP ({label}).")
-            self._maybe_warn_saturation(measurement.amplitude)
-        self._update_plot()
-        self._advance_point()
-
-    def _record_weight_point(self) -> None:
-        if self._baseline_epsp is None or self._last_epsp is None:
-            self._finish("Baseline synaptic weight is unavailable.")
-            return
-        weight = self._read_synapse_weight()
-        if weight is None:
-            self._finish("Could not read the synaptic weight after the pairing.")
-            return
-        delta_t = self._pending_delta_t
-        label = classify_window(delta_t)
-        self._epsp_trajectory.append(weight)
-        percent = self._percent_for(weight)
-        self._results.append((delta_t, percent))
-        if not self._reset_mode():
-            self._last_epsp = weight
-        self._append_log(f"Δt {delta_t:+.3g} ms → {percent:+.3f}% weight ({label}).")
-        self._maybe_warn_saturation(weight)
-        self._update_plot()
-        self._advance_point()
-
-    def _percent_for(self, measure: float) -> float:
-        """Percent change: from the fixed baseline (reset) or the running
-        value (continuous)."""
-        baseline = self._baseline_epsp
-        last = self._last_epsp
-        assert baseline is not None and last is not None
-        reference = baseline if self._reset_mode() else last
-        return percent_change(reference, measure, reference)
-
-    def _advance_point(self) -> None:
-        self._index += 1
-        if self._index >= len(self._delta_ts):
-            measured = sum(1 for _dt, percent in self._results if percent == percent)
-            self._finish(
-                f"STDP window sweep finished; measured {measured}/"
-                f"{len(self._results)} points."
-            )
-            return
-        self._begin_point()
-
-    def _begin_point(self) -> None:
-        self._pending_delta_t = self._delta_ts[self._index]
-        self._pairing_repeat = 0
-        if self._reset_mode():
-            self._restore_baseline()
-        self._apply_next_pairing()
-
-    def _apply_next_pairing(self) -> None:
-        self._pairing_repeat += 1
-        self._phase = "pair"
-        self._append_log(
-            f"Δt {self._pending_delta_t:+.3g} ms: pairing "
-            f"{self._pairing_repeat}/{self.spn_pairings_per_point.value()}."
-        )
-        self._append_pairing(self._pending_delta_t)
+            self._backend.handle_probe_measurement(measurement)
 
     def _measure_epsps(self, trace: TraceData) -> EPSPMeasurement:
-        neuron_id = self.spn_postsynaptic.value()
-        matches = np.flatnonzero(trace.indices == neuron_id)
-        if matches.size == 0:
-            raise ValueError(
-                f"Postsynaptic neuron {neuron_id} is not recorded in the "
-                "selected trace."
-            )
-        trace_mv = _to_mv(trace.traces[int(matches[0])], trace.units)
-        dt_ms = 1000.0 * trace.dt
-        baseline_ms = 12.0
-        response_ms = self.spn_response_ms.value()
-        amplitudes: list[float] = []
-        for pulse_time in self._probe_pulse_times:
-            onset_ms = 1000.0 * pulse_time
-            start_ms = max(0.0, onset_ms - baseline_ms)
-            stop_ms = onset_ms + response_ms
-            start = max(0, int(np.floor(start_ms / dt_ms)))
-            stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
-            if start >= trace_mv.size:
-                trace_duration_ms = trace_mv.size * dt_ms
-                raise ValueError(
-                    f"The selected trace ends at {trace_duration_ms:.3f} ms, "
-                    f"before the probe at {onset_ms:.3f} ms. Select the current "
-                    "simulation voltage trace and try again."
-                )
-            detection = detect_epsps(trace_mv[start:stop], dt_ms)
-            relative_onset_ms = onset_ms - start * dt_ms
-            sample_tolerance_ms = 0.5 * dt_ms
-            candidates = detection.amplitudes_mv[
-                (detection.times_ms >= relative_onset_ms - sample_tolerance_ms)
-                & (
-                    detection.times_ms
-                    <= relative_onset_ms + response_ms + sample_tolerance_ms
-                )
-            ]
-            if candidates.size == 0:
-                raise _NoEpspDetected(
-                    f"No EPSP was detected after the probe at {onset_ms:.3f} ms."
-                )
-            amplitudes.append(float(np.max(candidates)))
-        return EPSPMeasurement(
-            amplitude=float(np.mean(amplitudes)),
-            pulse_amplitudes=tuple(amplitudes),
+        return measure_epsp(
+            trace,
+            self.spn_postsynaptic.value(),
+            self._probe_pulse_times,
+            baseline_ms=12.0,
+            response_ms=self.spn_response_ms.value(),
         )
-
-    def _maybe_warn_saturation(self, epsp: float) -> None:
-        baseline = self._baseline_epsp
-        if self._saturation_warned or baseline is None or baseline == 0.0:
-            return
-        ratio = epsp / baseline
-        if ratio < 0.25 or ratio > 4.0:
-            self._saturation_warned = True
-            self._append_log(
-                "EPSP drift is far from baseline; later Δt points may be affected "
-                "by synaptic saturation."
-            )
 
     def _current_delta_t_values(self) -> list[float]:
         values = self._snapped_delta_ts(
@@ -1181,16 +1211,68 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
-        self._running = False
-        self._awaiting_simulation = False
-        self._paused = False
-        self._pending_simulation_seconds = None
-        self._phase = "idle"
+        self._backend.finish(message)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
         self._append_log(message)
+
+    @property
+    def _running(self) -> bool:
+        return self._backend.running
+
+    @_running.setter
+    def _running(self, value: bool) -> None:
+        self._backend.running = value
+
+    @property
+    def _awaiting_simulation(self) -> bool:
+        return self._backend.awaiting_simulation
+
+    @_awaiting_simulation.setter
+    def _awaiting_simulation(self, value: bool) -> None:
+        self._backend.awaiting_simulation = value
+
+    @property
+    def _paused(self) -> bool:
+        return self._backend.paused
+
+    @_paused.setter
+    def _paused(self, value: bool) -> None:
+        self._backend.paused = value
+
+    @property
+    def _pending_simulation_seconds(self) -> float | None:
+        return self._backend.pending_simulation_seconds
+
+    @_pending_simulation_seconds.setter
+    def _pending_simulation_seconds(self, value: float | None) -> None:
+        self._backend.pending_simulation_seconds = value
+
+    @property
+    def _phase(self) -> str:
+        return self._backend.phase
+
+    @_phase.setter
+    def _phase(self, value: str) -> None:
+        self._backend.phase = value
+
+    _delta_ts = backend_property("delta_ts")
+    _index = backend_property("index")
+    _pairing_repeat = backend_property("pairing_repeat")
+    _baseline_epsp = backend_property("baseline_epsp")
+    _last_epsp = backend_property("last_epsp")
+    _pending_delta_t = backend_property("pending_delta_t")
+    _results = backend_property("results")
+    _epsp_trajectory = backend_property("epsp_trajectory")
+    _probe_pulse_times = backend_property("probe_pulse_times")
+    _view_block_samples = backend_property("view_block_samples")
+    _checkpoint = backend_property("checkpoint")
+    _baseline_sample = backend_property("baseline_sample")
+    _point_start = backend_property("point_start")
+    _saturation_warned = backend_property("saturation_warned")
+    _resolution_warning_logged = backend_property("resolution_warning_logged")
 
     def _append_log(self, message: str) -> None:
         self.log.appendPlainText(message)

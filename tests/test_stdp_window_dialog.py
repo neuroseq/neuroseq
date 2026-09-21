@@ -10,7 +10,7 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import EPSPMeasurement
+from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stdp_window_dialog import _NoEpspDetected
 from neuroseq.stim import StimArray

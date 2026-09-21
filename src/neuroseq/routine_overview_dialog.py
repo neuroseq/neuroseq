@@ -23,7 +23,7 @@ from qtpy import QtWidgets
 from qtpy.QtSvg import QSvgRenderer
 
 from neuroseq import theme as theme_module
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 
 _RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
 
@@ -44,7 +44,7 @@ class RoutineOverview:
     image_path: Path | None = None
 
 
-def _plot_targeted_stdp(ax: Axes) -> None:
+def _plot_stdp_synaptic_tuning(ax: Axes) -> None:
     iterations = np.arange(0, 12)
     target = 150.0
     epsp = target - (target - 100.0) * np.exp(-iterations / 3.0)
@@ -74,8 +74,8 @@ def _plot_stdp_window(ax: Axes) -> None:
 
 # Keyed by the routine identifiers in StimEditor.DYNAMIC_INPUT_ROUTINES.
 ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
-    "Targeted STDP synaptic strength": RoutineOverview(
-        title="Targeted STDP synaptic strength",
+    "STDP synaptic tuning": RoutineOverview(
+        title="STDP synaptic tuning",
         goal=(
             "Closed-loop tuning of one synapse's strength: probe the EPSP, "
             "pair pre/post spikes via STDP, and adapt until the EPSP reaches "
@@ -88,7 +88,7 @@ ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
             ("Post-pulse window", "where the EPSP is measured"),
         ),
         plot_title="Drive the EPSP to a target",
-        plot=_plot_targeted_stdp,
+        plot=_plot_stdp_synaptic_tuning,
     ),
     "Minimal input for spiking (rheobase)": RoutineOverview(
         title="Minimal input for spiking (rheobase)",

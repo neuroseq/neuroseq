@@ -13,10 +13,11 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.input_designer_dialog import InputDesignerDialog
+from neuroseq.dynamic_input_routine import DynamicInputDialog
 from neuroseq.project import Project
 from neuroseq.rheobase_dialog import RheobaseDialog
 from neuroseq.routine_overview_dialog import RoutineSelectorDialog
+from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
@@ -65,11 +66,11 @@ class StimEditor(QtWidgets.QWidget):
     trim_to_mapped_neurons_requested = QtCore.Signal()
 
     # Dynamic-input routines offered when the user opens the designer.
-    TARGETED_STDP_ROUTINE = "Targeted STDP synaptic strength"
+    STDP_SYNAPTIC_TUNING_ROUTINE = "STDP synaptic tuning"
     RHEOBASE_ROUTINE = "Minimal input for spiking (rheobase)"
     STDP_WINDOW_ROUTINE = "STDP timing window (LTP/LTD vs Δt)"
     DYNAMIC_INPUT_ROUTINES = (
-        TARGETED_STDP_ROUTINE,
+        STDP_SYNAPTIC_TUNING_ROUTINE,
         RHEOBASE_ROUTINE,
         STDP_WINDOW_ROUTINE,
     )
@@ -100,11 +101,11 @@ class StimEditor(QtWidgets.QWidget):
         self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
         self._pattern_dialog: StimPatternDialog | None = None
-        self._input_designer_dialog: InputDesignerDialog | None = None
+        self._stdp_synaptic_tuning_dialog: StdpSynapticTuningDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
         self._stdp_window_dialog: StdpWindowDialog | None = None
         self._routine_selector_dialog: RoutineSelectorDialog | None = None
-        self._input_designer_theme = "light"
+        self._dynamic_input_theme = "light"
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position
@@ -1146,14 +1147,14 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog.raise_()
         self._pattern_dialog.activateWindow()
 
-    def open_input_designer(self) -> None:
+    def open_dynamic_input_designer(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
             return
         # A single selector window shows the routine dropdown with an always-on
         # preview (goal, parameters, sample plot) beneath it; the real routine
         # dialog opens only when the user clicks Continue.
         dialog = RoutineSelectorDialog(
-            list(self.DYNAMIC_INPUT_ROUTINES), self._input_designer_theme
+            list(self.DYNAMIC_INPUT_ROUTINES), self._dynamic_input_theme
         )
         dialog.routine_chosen.connect(self._open_routine_dialog_for)
         dialog.finished.connect(dialog.deleteLater)
@@ -1163,8 +1164,10 @@ class StimEditor(QtWidgets.QWidget):
         dialog.activateWindow()
 
     def _open_routine_dialog_for(self, routine: str) -> None:
-        if routine == self.TARGETED_STDP_ROUTINE:
-            self._show_routine_dialog("_input_designer_dialog", InputDesignerDialog)
+        if routine == self.STDP_SYNAPTIC_TUNING_ROUTINE:
+            self._show_routine_dialog(
+                "_stdp_synaptic_tuning_dialog", StdpSynapticTuningDialog
+            )
         elif routine == self.RHEOBASE_ROUTINE:
             self._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
         elif routine == self.STDP_WINDOW_ROUTINE:
@@ -1173,16 +1176,18 @@ class StimEditor(QtWidgets.QWidget):
     def _show_routine_dialog(
         self,
         attr_name: Literal[
-            "_input_designer_dialog", "_rheobase_dialog", "_stdp_window_dialog"
+            "_stdp_synaptic_tuning_dialog", "_rheobase_dialog", "_stdp_window_dialog"
         ],
-        cls: type[InputDesignerDialog] | type[RheobaseDialog] | type[StdpWindowDialog],
+        cls: type[StdpSynapticTuningDialog]
+        | type[RheobaseDialog]
+        | type[StdpWindowDialog],
     ) -> None:
         dialog = getattr(self, attr_name)
         if dialog is None:
             # No Qt parent: a parent sets WM_TRANSIENT_FOR to the main
             # window, and on X11/KWin the routine dialog and its own two
             # popups (also parentless - see StimHeatmapWindow's
-            # construction in input_designer_dialog.py) would then all
+            # construction in stdp_synaptic_tuning_dialog.py) would then all
             # share one owner. KWin can treat that whole chain as a single
             # "raise group" tied to the app's own foreground status, so
             # none of them can be individually brought to the front of the
@@ -1190,13 +1195,13 @@ class StimEditor(QtWidgets.QWidget):
             dialog = cls(self, None)
             dialog.simulation_requested.connect(self.simulation_requested)
             setattr(self, attr_name, dialog)
-        dialog.apply_theme(self._input_designer_theme)
+        dialog.apply_theme(self._dynamic_input_theme)
         dialog.refresh()
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
 
-    def discard_input_designer(self) -> None:
+    def discard_dynamic_input_dialogs(self) -> None:
         """Drop any cached Design dynamic input dialogs.
 
         Called when the project is replaced so the designer does not carry a
@@ -1204,7 +1209,7 @@ class StimEditor(QtWidgets.QWidget):
         are rebuilt fresh the next time they are opened.
         """
         for attr_name in (
-            "_input_designer_dialog",
+            "_stdp_synaptic_tuning_dialog",
             "_rheobase_dialog",
             "_stdp_window_dialog",
             "_routine_selector_dialog",
@@ -1220,26 +1225,26 @@ class StimEditor(QtWidgets.QWidget):
         self.controller.focus_time_range(start_seconds, stop_seconds)
         self.time_range_focus_requested.emit(start_seconds, stop_seconds)
 
-    def input_designer_simulation_finished(self) -> None:
+    def dynamic_input_simulation_finished(self) -> None:
         for dialog in self._dynamic_input_dialogs():
             dialog.simulation_finished()
 
-    def input_designer_simulation_failed(self, message: str) -> None:
+    def dynamic_input_simulation_failed(self, message: str) -> None:
         for dialog in self._dynamic_input_dialogs():
             dialog.simulation_failed(message)
 
-    def apply_input_designer_theme(self, theme: str) -> None:
-        self._input_designer_theme = theme
+    def apply_dynamic_input_theme(self, theme: str) -> None:
+        self._dynamic_input_theme = theme
         for dialog in self._dynamic_input_dialogs():
             dialog.apply_theme(theme)
 
     def _dynamic_input_dialogs(
         self,
-    ) -> list[InputDesignerDialog | RheobaseDialog | StdpWindowDialog]:
+    ) -> list[DynamicInputDialog]:
         return [
             dialog
             for dialog in (
-                self._input_designer_dialog,
+                self._stdp_synaptic_tuning_dialog,
                 self._rheobase_dialog,
                 self._stdp_window_dialog,
             )
@@ -1543,7 +1548,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         add_action(
             "Design dynamic input",
-            self.open_input_designer,
+            self.open_dynamic_input_designer,
             menu,
             None,
             self,

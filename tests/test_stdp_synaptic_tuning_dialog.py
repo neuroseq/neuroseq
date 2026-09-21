@@ -9,9 +9,9 @@ from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import EPSPMeasurement
-from neuroseq.input_designer_dialog import InputDesignerDialog
-from neuroseq.input_designer_dialog import _stim_pulse_rgba
+from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
+from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _stim_pulse_rgba
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -76,12 +76,12 @@ class _FakeEditor:
         stim.values = np.vstack((stim.values, values))
 
 
-def test_input_designer_runs_probe_pairing_probe_and_reaches_target(
+def test_stdp_synaptic_tuning_runs_probe_pairing_probe_and_reaches_target(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     amplitudes = iter([2.0, 2.5])
     measured_neurons: list[int] = []
@@ -121,12 +121,12 @@ def test_input_designer_runs_probe_pairing_probe_and_reaches_target(
     assert measured_neurons[0] == 1
 
 
-def test_input_designer_uses_post_pre_pairing_for_depression(
+def test_stdp_synaptic_tuning_uses_post_pre_pairing_for_depression(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
         dialog,
@@ -145,12 +145,12 @@ def test_input_designer_uses_post_pre_pairing_for_depression(
 
 
 @pytest.mark.parametrize("visible_blocks", [0, 3])
-def test_input_designer_camera_keeps_configured_width(
+def test_stdp_synaptic_tuning_camera_keeps_configured_width(
     qtbot, visible_blocks: int
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.spn_history_blocks.setValue(visible_blocks)
 
@@ -165,10 +165,10 @@ def test_input_designer_camera_keeps_configured_width(
     ]
 
 
-def test_input_designer_protocol_defaults(qtbot) -> None:
+def test_stdp_synaptic_tuning_protocol_defaults(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     assert dialog.spn_pairing_interval_ms.value() == 30.0
@@ -184,12 +184,12 @@ def test_input_designer_protocol_defaults(qtbot) -> None:
     assert dialog.windowFlags() & QtCore.Qt.WindowType.WindowMinimizeButtonHint
 
 
-def test_input_designer_adaptive_strategy_updates_signed_pairing_time(
+def test_stdp_synaptic_tuning_adaptive_strategy_updates_signed_pairing_time(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
     dialog.spn_initial_pairing_time_ms.setValue(10.0)
@@ -219,12 +219,12 @@ def test_input_designer_adaptive_strategy_updates_signed_pairing_time(
     assert list(dialog.pairing_time_axes.lines[-1].get_ydata()) == [10.0, 5.0]
 
 
-def test_input_designer_adaptive_strategy_increases_time_and_changes_sign(
+def test_stdp_synaptic_tuning_adaptive_strategy_increases_time_and_changes_sign(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
     dialog.spn_initial_pairing_time_ms.setValue(10.0)
@@ -251,10 +251,10 @@ def test_input_designer_adaptive_strategy_increases_time_and_changes_sign(
     )
 
 
-def test_input_designer_can_hide_parameters(qtbot) -> None:
+def test_stdp_synaptic_tuning_can_hide_parameters(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     qtbot.addWidget(dialog.plot_window)
     dialog.show()
@@ -281,10 +281,12 @@ def test_input_designer_can_hide_parameters(qtbot) -> None:
     assert dialog.btn_toggle_parameters.arrowType() == QtCore.Qt.ArrowType.DownArrow
 
 
-def test_input_designer_can_continue_after_convergence(qtbot, monkeypatch) -> None:
+def test_stdp_synaptic_tuning_can_continue_after_convergence(
+    qtbot, monkeypatch
+) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.spn_target.setValue(100.0)
     dialog.spn_tolerance.setValue(1.0)
@@ -305,7 +307,7 @@ def test_input_designer_can_continue_after_convergence(qtbot, monkeypatch) -> No
     assert "configured to run through the last iteration" in dialog.log.toPlainText()
 
 
-def test_input_designer_positions_native_minimized_window_without_moving_restore(
+def test_stdp_synaptic_tuning_positions_native_minimized_window_without_moving_restore(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
@@ -314,7 +316,7 @@ def test_input_designer_positions_native_minimized_window_without_moving_restore
     host.resize(900, 700)
     qtbot.addWidget(host)
     host.show()
-    dialog = InputDesignerDialog(editor, parent=host)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor, parent=host)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.move(240, 180)
     original_position = dialog.pos()
@@ -325,7 +327,7 @@ def test_input_designer_positions_native_minimized_window_without_moving_restore
         return True
 
     monkeypatch.setattr(
-        "neuroseq.input_designer_dialog._set_native_minimized_position",
+        "neuroseq.stdp_synaptic_tuning_dialog._set_native_minimized_position",
         record_placement,
     )
 
@@ -342,13 +344,13 @@ def test_input_designer_positions_native_minimized_window_without_moving_restore
     assert dialog.pos() == original_position
 
 
-def test_input_designer_initializes_missing_trace_then_starts_protocol(
+def test_stdp_synaptic_tuning_initializes_missing_trace_then_starts_protocol(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     project.trace_available = False
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     monkeypatch.setattr(
@@ -370,7 +372,9 @@ def test_input_designer_initializes_missing_trace_then_starts_protocol(
     assert dialog._phase == "baseline_probe"
 
 
-def test_input_designer_initializes_when_only_imported_trace_exists(qtbot) -> None:
+def test_stdp_synaptic_tuning_initializes_when_only_imported_trace_exists(
+    qtbot,
+) -> None:
     project = _FakeProject()
     imported_trace = TraceData(
         "Imported EPSP trace",
@@ -381,7 +385,7 @@ def test_input_designer_initializes_when_only_imported_trace_exists(qtbot) -> No
     )
     project.traces = {imported_trace.name: imported_trace}
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     requested: list[float] = []
     dialog.simulation_requested.connect(requested.append)
@@ -392,7 +396,9 @@ def test_input_designer_initializes_when_only_imported_trace_exists(qtbot) -> No
     assert dialog._phase == "initialize_trace"
 
 
-def test_input_designer_prefers_simulation_voltage_trace_for_measurement(qtbot) -> None:
+def test_stdp_synaptic_tuning_prefers_simulation_voltage_trace_for_measurement(
+    qtbot,
+) -> None:
     project = _FakeProject()
     imported_trace = TraceData(
         "Imported EPSP trace",
@@ -406,7 +412,7 @@ def test_input_designer_prefers_simulation_voltage_trace_for_measurement(qtbot) 
         project.trace.name: project.trace,
     }
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     dialog.cmb_trace.setCurrentText(imported_trace.name)
@@ -415,10 +421,10 @@ def test_input_designer_prefers_simulation_voltage_trace_for_measurement(qtbot) 
     assert dialog.cmb_trace.currentText() == project.trace.name
 
 
-def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
+def test_stdp_synaptic_tuning_reuses_epsp_plugin_detection(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     pulse_samples = [50, 150, 250, 350, 450]
     x = np.arange(project.trace.traces.shape[1])
@@ -435,10 +441,12 @@ def test_input_designer_reuses_epsp_plugin_detection(qtbot) -> None:
     assert len(measurement.pulse_amplitudes) == 5
 
 
-def test_input_designer_reports_when_selected_trace_ends_before_probe(qtbot) -> None:
+def test_stdp_synaptic_tuning_reports_when_selected_trace_ends_before_probe(
+    qtbot,
+) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog._probe_pulse_times = [2.244]
 
@@ -446,10 +454,10 @@ def test_input_designer_reports_when_selected_trace_ends_before_probe(qtbot) -> 
         dialog._measure_epsps(project.trace)
 
 
-def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
+def test_stdp_synaptic_tuning_matplotlib_plots_follow_theme(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     dialog.apply_theme(theme.DARK)
@@ -488,10 +496,10 @@ def test_input_designer_matplotlib_plots_follow_theme(qtbot) -> None:
     assert dialog.difference_axes.get_ylabel() == "Δ target\n(%)"
 
 
-def test_input_designer_stops_routine_when_closed(qtbot, monkeypatch) -> None:
+def test_stdp_synaptic_tuning_stops_routine_when_closed(qtbot, monkeypatch) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
         dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
@@ -507,10 +515,12 @@ def test_input_designer_stops_routine_when_closed(qtbot, monkeypatch) -> None:
     assert "dialog closed" in dialog.log.toPlainText()
 
 
-def test_input_designer_ignores_unrequested_simulation(qtbot, monkeypatch) -> None:
+def test_stdp_synaptic_tuning_ignores_unrequested_simulation(
+    qtbot, monkeypatch
+) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     measurements: list[int] = []
 
@@ -532,12 +542,12 @@ def test_input_designer_ignores_unrequested_simulation(qtbot, monkeypatch) -> No
     assert dialog._running
 
 
-def test_input_designer_adaptive_magnitude_clamped_to_maximum(
+def test_stdp_synaptic_tuning_adaptive_magnitude_clamped_to_maximum(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
     dialog.spn_initial_pairing_time_ms.setMaximum(12.0)
@@ -561,12 +571,12 @@ def test_input_designer_adaptive_magnitude_clamped_to_maximum(
     assert dialog._pairing_times_ms == [10.0, -12.0]
 
 
-def test_input_designer_adaptive_magnitude_floored_above_zero(
+def test_stdp_synaptic_tuning_adaptive_magnitude_floored_above_zero(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
     dialog.spn_initial_pairing_time_ms.setValue(10.0)
@@ -591,10 +601,10 @@ def test_input_designer_adaptive_magnitude_floored_above_zero(
     assert min(abs(t) for t in dialog._pairing_times_ms) >= 1.0 - 1e-9
 
 
-def test_input_designer_measures_dominant_epsp_not_earlier_blip(qtbot) -> None:
+def test_stdp_synaptic_tuning_measures_dominant_epsp_not_earlier_blip(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     x = np.arange(project.trace.traces.shape[1])
     project.trace.traces[1] = -70.0
@@ -610,10 +620,10 @@ def test_input_designer_measures_dominant_epsp_not_earlier_blip(qtbot) -> None:
     assert measurement.amplitude > 4.0
 
 
-def test_input_designer_pulse_amplitude_minimum_is_positive(qtbot) -> None:
+def test_stdp_synaptic_tuning_pulse_amplitude_minimum_is_positive(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     assert dialog.spn_amplitude.minimum() > 0.0
@@ -622,10 +632,10 @@ def test_input_designer_pulse_amplitude_minimum_is_positive(qtbot) -> None:
     assert dialog.spn_amplitude.value() > 0.0
 
 
-def test_input_designer_parameters_are_scrollable(qtbot) -> None:
+def test_stdp_synaptic_tuning_parameters_are_scrollable(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     assert dialog.parameters_scroll.widget() is dialog.parameters_panel
@@ -637,10 +647,10 @@ def test_input_designer_parameters_are_scrollable(qtbot) -> None:
     )
 
 
-def test_input_designer_wheel_over_field_does_not_change_value(qtbot) -> None:
+def test_stdp_synaptic_tuning_wheel_over_field_does_not_change_value(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     spin = dialog.spn_max_iterations
@@ -663,10 +673,10 @@ def test_input_designer_wheel_over_field_does_not_change_value(qtbot) -> None:
     assert spin.value() == before
 
 
-def test_input_designer_plots_open_in_separate_window(qtbot) -> None:
+def test_stdp_synaptic_tuning_plots_open_in_separate_window(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     qtbot.addWidget(dialog.plot_window)
 
@@ -689,10 +699,10 @@ def test_input_designer_plots_open_in_separate_window(qtbot) -> None:
     qtbot.waitUntil(lambda: not dialog.plot_window.isVisible())
 
 
-def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
+def test_stdp_synaptic_tuning_shows_stim_array_info_and_clear_button(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     # refresh() (run in __init__) fills the top info from the current array.
@@ -707,10 +717,10 @@ def test_input_designer_shows_stim_array_info_and_clear_button(qtbot) -> None:
     assert editor.cleared == 1
 
 
-def test_input_designer_pulse_duration_controls_probe_width(qtbot) -> None:
+def test_stdp_synaptic_tuning_pulse_duration_controls_probe_width(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     assert dialog.spn_pulse_ms.value() == 5.0
@@ -722,12 +732,12 @@ def test_input_designer_pulse_duration_controls_probe_width(qtbot) -> None:
     assert np.count_nonzero(probe[:, 0]) == 5 * 3
 
 
-def test_input_designer_pairing_time_recorded_as_effective_grid_value(
+def test_stdp_synaptic_tuning_pairing_time_recorded_as_effective_grid_value(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     dialog.cmb_pairing_strategy.setCurrentText(dialog.ADAPTIVE_PAIRING_STRATEGY)
     dialog.spn_initial_pairing_time_ms.setValue(10.0)
@@ -750,10 +760,10 @@ def test_input_designer_pairing_time_recorded_as_effective_grid_value(
     assert "pairing times are snapped" in dialog.log.toPlainText()
 
 
-def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
+def test_stdp_synaptic_tuning_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     qtbot.addWidget(dialog.stim_heatmap_window)
 
@@ -773,12 +783,12 @@ def test_input_designer_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
     qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
 
 
-def test_input_designer_updates_stim_heatmap_as_blocks_are_appended(
+def test_stdp_synaptic_tuning_updates_stim_heatmap_as_blocks_are_appended(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
         dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
@@ -796,12 +806,12 @@ def test_input_designer_updates_stim_heatmap_as_blocks_are_appended(
     assert image.get_array().shape[1] == stim.values.shape[0]
 
 
-def test_input_designer_stim_heatmap_shows_only_targeted_neurons_and_traces(
+def test_stdp_synaptic_tuning_stim_heatmap_shows_only_targeted_neurons_and_traces(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
         dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
@@ -841,10 +851,10 @@ def test_input_designer_stim_heatmap_shows_only_targeted_neurons_and_traces(
     assert plotted == {(0.0,), (-55.0,)}
 
 
-def test_input_designer_forwards_theme_to_stim_heatmap(qtbot) -> None:
+def test_stdp_synaptic_tuning_forwards_theme_to_stim_heatmap(qtbot) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
 
     dialog.apply_theme(theme.DARK)
@@ -864,12 +874,12 @@ def test_stim_heatmap_colors_do_not_fade_with_pulse_magnitude() -> None:
     assert rgba[0, 3, 3] == 1.0
 
 
-def test_input_designer_pause_defers_next_simulation_and_resets_on_finish(
+def test_stdp_synaptic_tuning_pause_defers_next_simulation_and_resets_on_finish(
     qtbot,
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
-    dialog = InputDesignerDialog(editor)  # type: ignore[arg-type]
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     requested: list[float] = []
     dialog.simulation_requested.connect(requested.append)

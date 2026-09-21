@@ -430,7 +430,7 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
         StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
     )
     monkeypatch.setattr(
-        StimEditor, "open_input_designer", lambda self: dynamic_calls.append(1)
+        StimEditor, "open_dynamic_input_designer", lambda self: dynamic_calls.append(1)
     )
     gui = Gui()
     qtbot.addWidget(gui)
@@ -4345,7 +4345,7 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "25" in qmessagebox_calls[0]["text"]
 
 
-def test_brian2_busy_notifies_input_designer(
+def test_brian2_busy_notifies_dynamic_input(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     gui = Gui()
@@ -4356,7 +4356,7 @@ def test_brian2_busy_notifies_input_designer(
     dropped: list[str] = []
     monkeypatch.setattr(
         gui.stim_editor,
-        "input_designer_simulation_failed",
+        "dynamic_input_simulation_failed",
         lambda message: dropped.append(message),
     )
 
