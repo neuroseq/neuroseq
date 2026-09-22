@@ -10,6 +10,7 @@ from neuroseq.data import TraceData
 from neuroseq.rheobase_dialog import RheobaseDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:
@@ -49,7 +50,6 @@ class _FakeEditor:
         self.calls: list[np.ndarray] = []
         self.time_slices: list[slice] = []
         self.cleared = 0
-        self.cleared_all = 0
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -66,9 +66,11 @@ class _FakeEditor:
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
-    def clear_all_stim_arrays(self) -> None:
-        self.cleared_all += 1
-        self.current_stim_modifier.stim_array.values[:] = 0.0
+    def current_stim_array_has_unsimulated_tail(self) -> bool:
+        stim = self.current_stim_modifier.stim_array
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
+        return bool(np.any(stim.values[n_keep:, :]))
 
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
@@ -430,7 +432,7 @@ def test_rheobase_updates_stim_heatmap_as_blocks_are_appended(qtbot) -> None:
 
 
 def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
-    qtbot, monkeypatch
+    qtbot,
 ) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     stim = editor.current_stim_modifier.stim_array
@@ -438,7 +440,6 @@ def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
     # search, which targets neuron 0) must not wash out neuron 0's own,
     # much smaller pulses in the heatmap's color scale.
     stim.values[0, 1] = 1000.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
     assert dialog.spn_neuron.value() == 0
 
     dialog.start()
@@ -518,63 +519,57 @@ def test_rheobase_matplotlib_plots_follow_theme(qtbot) -> None:
     assert to_hex(dialog.search_axes.get_facecolor()) == "#ffffff"
 
 
-def test_rheobase_no_warning_when_all_stim_arrays_empty(qtbot, monkeypatch) -> None:
+def test_rheobase_no_warning_when_stim_array_has_no_unsimulated_tail(
+    qtbot, monkeypatch
+) -> None:
+    """Content at (or before) the simulation head never needs confirming -
+    this is what lets routines stack back to back without interruption."""
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
-    monkeypatch.setattr(
-        dialog,
-        "_prompt_existing_input_choice",
-        lambda names: pytest.fail("no prompt expected for empty stim arrays"),
-    )
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()
 
-    assert editor.cleared_all == 0
     assert len(editor.calls) >= 1
 
 
-def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
+def test_rheobase_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "cancel")
+    # Past the simulation head - reset_stim_array() would discard this, so
+    # starting must be confirmed first. patch_b2w_exec_show (autouse) turns
+    # the confirmation's .exec() into a non-blocking .show(), so with no
+    # button actually clicked it naturally resolves to "cancel" - no need to
+    # mock the confirm step itself here.
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()
 
     assert not dialog._running
     assert editor.calls == []
-    assert editor.cleared_all == 0
-    assert "existing input kept" in dialog.log.toPlainText()
+    assert "unsimulated input kept" in dialog.log.toPlainText()
 
 
-def test_rheobase_clear_all_before_start(qtbot, monkeypatch) -> None:
+def test_rheobase_confirms_and_discards_unsimulated_tail_before_start(
+    qtbot, monkeypatch
+) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()
 
-    assert editor.cleared_all == 1
     assert len(editor.calls) >= 1
-    # The pre-existing input was zeroed before the routine appended its probes.
-    assert editor.current_stim_modifier.stim_array.values[0, 0] == 0.0
-
-
-def test_rheobase_append_anyway_keeps_input(qtbot, monkeypatch) -> None:
-    _project, editor, dialog = _make_dialog(qtbot)
-    _use_fixed_duration_strategy(dialog)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
-    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
-
-    dialog.start()
-
-    assert editor.cleared_all == 0
-    assert len(editor.calls) >= 1
+    # reset_stim_array(), called right after confirming, is what actually
+    # discards the unsimulated tail.
+    assert editor.reset_count >= 1
 
 
 def test_rheobase_estimate_updates_with_settings(qtbot) -> None:

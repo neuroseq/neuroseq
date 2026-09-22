@@ -425,6 +425,25 @@ class StimEditor(QtWidgets.QWidget):
             return  # already at (or within a sample of) the simulation head
         self._apply_trim(target_secs, only_stim_name=stim.name)
 
+    def current_stim_array_has_unsimulated_tail(self) -> bool:
+        """Would reset_stim_array() actually discard nonzero content?
+
+        Every design routine calls reset_stim_array() right before it
+        starts. Content at or before the simulation head is never touched
+        by that trim, so stacking routines back to back - each appending
+        after the previous one's already-simulated output - never loses
+        anything and needs no confirmation. The one case that does is
+        nonzero content *past* the simulation head (a manually drawn
+        pattern, or a routine stopped mid-run): reset_stim_array() would
+        silently drop it.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return False
+        stim = self.current_stim_modifier.stim_array
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
+        return bool(np.any(stim.values[n_keep:, :]))
+
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction
     ) -> None:
@@ -1099,9 +1118,15 @@ class StimEditor(QtWidgets.QWidget):
         if self.current_stim_modifier is None:
             return
         name = self.current_stim_modifier.stim_array.name
+        # Parented to whichever top-level window is actually active, not to
+        # this widget: the routine dialogs' "Clear input array" button calls
+        # straight through to this method, and those dialogs are created
+        # without a Qt parent (see _show_routine_dialog's docstring). A box
+        # parented to self would hand focus back to the main window once
+        # closed, leaving the parentless routine dialog behind it.
         if (
             QtWidgets.QMessageBox.question(
-                self,
+                QtWidgets.QApplication.activeWindow() or self,
                 "Clear input array",
                 f"Set all values in '{name}' to zero?",
                 QtWidgets.QMessageBox.StandardButton.Yes
@@ -1115,16 +1140,6 @@ class StimEditor(QtWidgets.QWidget):
         pattern_dialog = getattr(self, "_pattern_dialog", None)
         if pattern_dialog is not None:
             pattern_dialog.reset_start_time()
-
-    def clear_all_stim_arrays(self) -> None:
-        """Zero every stim array in the project through the undoable pathway."""
-        if self.project is None:
-            return
-        for name in list(self.stims_dict.keys()):
-            modifier = self.stims_dict[name]
-            self.replace_stim_values_with_undo(
-                name, np.zeros_like(modifier.stim_array.values)
-            )
 
     def _current_pattern_context(self) -> StimPatternContext:
         if self.current_stim_modifier is None:

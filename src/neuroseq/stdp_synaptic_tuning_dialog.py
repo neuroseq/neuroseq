@@ -360,6 +360,42 @@ def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
     return rgba
 
 
+def confirm_discard_unsimulated_input(
+    dialog: QtWidgets.QWidget, editor: StimEditor
+) -> bool:
+    """Warn before starting a routine if doing so would silently discard
+    unrun input, shared by all three routine dialogs' Start handlers.
+
+    Every routine calls editor.reset_stim_array() right before it starts.
+    Stacking routines back to back - each appending after the previous
+    one's already-simulated output - never loses anything, so it needs no
+    confirmation at all. This only prompts for the one case that does:
+    nonzero content past the simulation head, which that trim would
+    otherwise drop without asking.
+    """
+    if editor.current_stim_modifier is None:
+        return True
+    if not editor.current_stim_array_has_unsimulated_tail():
+        return True
+    name = editor.current_stim_modifier.stim_array.name
+    box = QtWidgets.QMessageBox(dialog)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle("Unsimulated input")
+    box.setText(
+        f"'{name}' has pulses beyond the current simulation time. Starting "
+        "this routine discards them - it trims the array back to the "
+        "simulation head first, same as the Reset input array button."
+    )
+    box.setInformativeText("Discard them and start, or cancel.")
+    discard_button = box.addButton(
+        "Discard and start", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+    )
+    cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(cancel_button)
+    box.exec()
+    return box.clickedButton() is discard_button
+
+
 class StimHeatmapWindow(_SelfRaisingDialog):
     """A live, whole-history view (neuron ID x time) of the input pattern,
     and below it the recorded trace(s) of the neuron(s) it targets - shared
@@ -984,6 +1020,9 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self.refresh()
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
+            return
+        if not confirm_discard_unsimulated_input(self, self.editor):
+            self._append_log("Routine cancelled; unsimulated input kept.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.

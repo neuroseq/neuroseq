@@ -14,6 +14,7 @@ from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
 from neuroseq.stdp_synaptic_tuning_dialog import _stim_pulse_rgba
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:
@@ -66,6 +67,12 @@ class _FakeEditor:
 
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
+
+    def current_stim_array_has_unsimulated_tail(self) -> bool:
+        stim = self.current_stim_modifier.stim_array
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
+        return bool(np.any(stim.values[n_keep:, :]))
 
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
@@ -142,6 +149,68 @@ def test_stdp_synaptic_tuning_uses_post_pre_pairing_for_depression(
     pairing = editor.calls[1]
     assert np.flatnonzero(pairing[:, 1])[0] < np.flatnonzero(pairing[:, 0])[0]
     assert "depression" in dialog.log.toPlainText()
+
+
+def test_stdp_synaptic_tuning_no_warning_when_stim_array_has_no_unsimulated_tail(
+    qtbot, monkeypatch
+) -> None:
+    """Content at (or before) the simulation head never needs confirming -
+    this is what lets routines stack back to back without interruption."""
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+
+    assert editor.calls
+
+
+def test_stdp_synaptic_tuning_cancel_keeps_unsimulated_input(qtbot) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    # Past the simulation head (0.0) - reset_stim_array() would discard this,
+    # so starting must be confirmed first. patch_b2w_exec_show (autouse)
+    # turns the confirmation's .exec() into a non-blocking .show(), so with
+    # no button actually clicked it naturally resolves to "cancel" - no need
+    # to mock the confirm step itself here.
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+
+    dialog.start()
+
+    assert not dialog._running
+    assert editor.calls == []
+    assert "unsimulated input kept" in dialog.log.toPlainText()
+
+
+def test_stdp_synaptic_tuning_confirms_and_discards_unsimulated_tail_before_start(
+    qtbot, monkeypatch
+) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_synaptic_tuning_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+
+    assert editor.calls
+    # reset_stim_array(), called right after confirming, is what actually
+    # discards the unsimulated tail.
+    assert editor.reset_count >= 1
 
 
 @pytest.mark.parametrize("visible_blocks", [0, 3])

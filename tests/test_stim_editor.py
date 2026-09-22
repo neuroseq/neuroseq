@@ -721,6 +721,102 @@ def test_reset_stim_array_no_op_when_already_at_simulation_head(qtbot: QtBot):
     stim_editor.close()
 
 
+def test_current_stim_array_has_unsimulated_tail_detects_content_past_sim_head(
+    qtbot: QtBot,
+):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    # The default project's own stim pattern runs to 1.161s, far past the
+    # 50ms actually simulated here - exactly the case reset_stim_array()
+    # would silently trim away.
+    project.run_simulation(0.05)
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+
+    assert stim_editor.current_stim_array_has_unsimulated_tail()
+    stim_editor.close()
+
+
+def test_current_stim_array_has_unsimulated_tail_ignores_already_simulated_history(
+    qtbot: QtBot,
+):
+    """Content at or before the simulation head is exactly what
+    reset_stim_array() never touches, so it must never trip this check -
+    this is what lets design routines stack back to back without a warning
+    interrupting every subsequent run."""
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    project.run_simulation(0.05)
+    stim_editor = _make_editor_for_project(qtbot, project)
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert stim_editor.current_stim_array_has_unsimulated_tail()  # sanity check
+
+    # reset_stim_array() (as every routine calls right before it starts)
+    # trims exactly down to what has been simulated.
+    stim_editor.reset_stim_array()
+    assert np.any(modifier.stim_array.values)  # still real, simulated content
+    assert not stim_editor.current_stim_array_has_unsimulated_tail()
+    stim_editor.close()
+
+
+def test_clear_stim_array_confirmation_parents_to_active_window(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+):
+    """The confirmation must be parented to whichever window is actually
+    active, not to the StimEditor itself: it is also shown from a routine
+    dialog's "Clear input array" button, and those dialogs are deliberately
+    created without a Qt parent (see StimEditor._show_routine_dialog's
+    docstring) - a box parented to self would hand focus back to the main
+    window once closed, leaving the parentless routine dialog behind it."""
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    stim_editor = _make_editor_for_project(qtbot, project)
+    fake_active_window = QtWidgets.QWidget()
+    qtbot.addWidget(fake_active_window)
+    monkeypatch.setattr(
+        QtWidgets.QApplication, "activeWindow", lambda: fake_active_window
+    )
+    captured_parents = []
+
+    def fake_question(parent, *args, **kwargs):
+        captured_parents.append(parent)
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", fake_question)
+
+    stim_editor.clear_stim_array()
+
+    assert captured_parents == [fake_active_window]
+    stim_editor.close()
+
+
+def test_clear_stim_array_confirmation_falls_back_to_self(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+):
+    from neuroseq.example_projects import default_project
+
+    project = default_project()
+    stim_editor = _make_editor_for_project(qtbot, project)
+    monkeypatch.setattr(QtWidgets.QApplication, "activeWindow", lambda: None)
+    captured_parents = []
+
+    def fake_question(parent, *args, **kwargs):
+        captured_parents.append(parent)
+        return QtWidgets.QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", fake_question)
+
+    stim_editor.clear_stim_array()
+
+    assert captured_parents == [stim_editor]
+    stim_editor.close()
+
+
 def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     project = Project()
     values = np.zeros((1000, 4))
@@ -1529,27 +1625,4 @@ def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> Non
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
     stim_editor.close()
-
-
-def test_clear_all_stim_arrays_zeroes_every_array(qtbot: QtBot) -> None:
-    project = Project()
-    project.stim_arrays = {
-        "a": StimArray(
-            "a", neuroseq.stim.StimType.Excitation, np.ones((5, 3)), "mV", 0.001
-        ),
-        "b": StimArray(
-            "b", neuroseq.stim.StimType.Inhibition, np.full((5, 3), 2.0), "mV", 0.001
-        ),
-    }
-    cmb_stim = QtWidgets.QComboBox()
-    toolbar = QtWidgets.QToolBar()
-    controller = ConstrainedPanZoomController()
-    stim_editor = StimEditor(controller, cmb_stim, toolbar)
-    qtbot.addWidget(stim_editor)
-    stim_editor.set_project(project)
-
-    stim_editor.clear_all_stim_arrays()
-
-    for stim in project.stim_arrays.values():
-        assert not np.any(stim.values)
     stim_editor.close()

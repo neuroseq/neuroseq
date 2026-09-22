@@ -1118,6 +1118,34 @@ def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> N
     gui.close()
 
 
+def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
+    qtbot: QtBot,
+) -> None:
+    """The routine dialogs (and their own plot/heatmap popups) are created
+    without a Qt parent - see StimEditor._show_routine_dialog's docstring -
+    so closing the main window would otherwise leave them open as orphaned
+    windows: findChildren() never finds them, since they were never made
+    Qt children of the main window in the first place."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.update_project(default_project())
+
+    gui.stim_editor.open_dynamic_input_designer()
+    selector = gui.stim_editor._routine_selector_dialog
+    assert selector is not None
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector._on_continue()
+    dialog = gui.stim_editor._rheobase_dialog
+    assert dialog is not None
+    assert dialog.isVisible()
+
+    gui._close_confirmed = True
+    gui.close()
+
+    assert not dialog.isVisible()
+    assert gui.stim_editor._rheobase_dialog is None
+
+
 def _make_timed_project(n_timepoints: int, dt: float = 0.01) -> Project:
     project = Project()
     traces = TraceData(

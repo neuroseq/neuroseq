@@ -26,6 +26,7 @@ from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
 from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
 from neuroseq.stdp_synaptic_tuning_dialog import _wrap_in_scroll_area
+from neuroseq.stdp_synaptic_tuning_dialog import confirm_discard_unsimulated_input
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
@@ -854,8 +855,8 @@ class RheobaseDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        if not self._confirm_start_over_existing_input():
-            self._append_log("Routine cancelled; existing input kept.")
+        if not confirm_discard_unsimulated_input(self, self.editor):
+            self._append_log("Routine cancelled; unsimulated input kept.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -1359,55 +1360,3 @@ class RheobaseDialog(_SelfRaisingDialog):
             "Estimated simulations for the current settings: "
             f"~{self._estimated_probe_count()}"
         )
-
-    def _nonempty_stim_array_names(self) -> list[str]:
-        project = self.project
-        if project is None:
-            return []
-        return [
-            name
-            for name, stim in project.stim_arrays.items()
-            if bool(np.any(stim.values))
-        ]
-
-    def _prompt_existing_input_choice(self, names: list[str]) -> str:
-        """Ask what to do about non-empty stim arrays; return the chosen action."""
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        box.setWindowTitle("Existing input")
-        listed = "\n".join(f"  • {name}" for name in names)
-        box.setText(
-            "The routine appends its probe pulses after any existing input, which "
-            "lengthens every simulation. These input arrays already contain "
-            f"input:\n\n{listed}"
-        )
-        box.setInformativeText(
-            "Clear all input arrays first, append after the existing input, or cancel."
-        )
-        clear_button = box.addButton(
-            "Clear all input arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
-        )
-        box.addButton("Append anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(cancel_button)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is cancel_button or clicked is None:
-            return "cancel"
-        if clicked is clear_button:
-            return "clear"
-        return "append"
-
-    def _confirm_start_over_existing_input(self) -> bool:
-        """Warn about non-empty stim arrays; return whether to proceed."""
-        names = self._nonempty_stim_array_names()
-        if not names:
-            return True
-        choice = self._prompt_existing_input_choice(names)
-        if choice == "cancel":
-            return False
-        if choice == "clear":
-            self.editor.clear_all_stim_arrays()
-            self.refresh()
-            self._append_log("Cleared all input arrays before starting.")
-        return True

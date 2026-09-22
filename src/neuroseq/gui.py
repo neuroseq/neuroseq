@@ -4163,4 +4163,9 @@ class Gui(QtWidgets.QMainWindow):
             analysis_window.close()
         for detached_window in self.findChildren(DetachedPanelWindow):
             detached_window.close()
+        # The Design dynamic input routine dialogs (and their own plot/heatmap
+        # popups) are created without a Qt parent - see _show_routine_dialog's
+        # docstring - so findChildren() above never finds them and they would
+        # otherwise survive the main window closing.
+        self.stim_editor.discard_dynamic_input_dialogs()
         super().closeEvent(event)

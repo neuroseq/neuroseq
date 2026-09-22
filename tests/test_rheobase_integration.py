@@ -40,9 +40,13 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     dialog = RheobaseDialog(editor)
     qtbot.addWidget(dialog)
 
-    # The fixture ships two non-empty stim arrays; clear them so the probes run
-    # from zero (this also exercises the clear-all-stim-arrays warning path).
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    # The fixture ships a stim array with pre-authored content past the
+    # (unsimulated) start; confirm discarding it so the probes run from the
+    # simulation head (this also exercises the confirm-and-discard path).
+    monkeypatch.setattr(
+        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
 
     def run(seconds: float) -> None:
         b2_model.run_simulation(seconds, project.stim_arrays)
