@@ -538,11 +538,12 @@ def test_rheobase_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
     # Past the simulation head - reset_stim_array() would discard this, so
-    # starting must be confirmed first. patch_b2w_exec_show (autouse) turns
-    # the confirmation's .exec() into a non-blocking .show(), so with no
-    # button actually clicked it naturally resolves to "cancel" - no need to
-    # mock the confirm step itself here.
+    # starting must be confirmed first.
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: False,
+    )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()

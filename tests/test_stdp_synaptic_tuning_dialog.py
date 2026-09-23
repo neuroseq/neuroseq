@@ -170,17 +170,20 @@ def test_stdp_synaptic_tuning_no_warning_when_stim_array_has_no_unsimulated_tail
     assert editor.calls
 
 
-def test_stdp_synaptic_tuning_cancel_keeps_unsimulated_input(qtbot) -> None:
+def test_stdp_synaptic_tuning_cancel_keeps_unsimulated_input(
+    qtbot, monkeypatch
+) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     # Past the simulation head (0.0) - reset_stim_array() would discard this,
-    # so starting must be confirmed first. patch_b2w_exec_show (autouse)
-    # turns the confirmation's .exec() into a non-blocking .show(), so with
-    # no button actually clicked it naturally resolves to "cancel" - no need
-    # to mock the confirm step itself here.
+    # so starting must be confirmed first.
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_synaptic_tuning_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: False,
+    )
 
     dialog.start()
 

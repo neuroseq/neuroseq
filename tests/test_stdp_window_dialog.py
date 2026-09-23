@@ -317,10 +317,11 @@ def test_confirms_and_discards_unsimulated_tail_before_start(
 
 def test_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
-    # patch_b2w_exec_show (autouse) turns the confirmation's .exec() into a
-    # non-blocking .show(), so with no button actually clicked it naturally
-    # resolves to "cancel" - no need to mock the confirm step itself here.
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: False,
+    )
 
     dialog.start()
 
