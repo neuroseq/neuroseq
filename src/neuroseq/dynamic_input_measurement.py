@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import brian2.numpy_ as np
+
+from neuroseq.data import TraceData
+from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
+from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.rheobase import count_spikes
+
+
+@dataclass(frozen=True)
+class EPSPMeasurement:
+    amplitude: float
+    pulse_amplitudes: tuple[float, ...]
+    units: str = "mV"
+
+
+class NoEpspDetected(ValueError):
+    """Raised when no EPSP can be associated with a probe pulse."""
+
+
+def _trace_row_mv(trace: TraceData, neuron_id: int) -> tuple[np.ndarray, float]:
+    matches = np.flatnonzero(trace.indices == neuron_id)
+    if matches.size == 0:
+        raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
+    return _to_mv(trace.traces[int(matches[0])], trace.units), 1000.0 * trace.dt
+
+
+def measure_spike_count(
+    trace: TraceData,
+    neuron_id: int,
+    onset_seconds: float,
+    window_ms: float,
+    threshold_mv: float,
+) -> int:
+    """Count threshold crossings in the requested trace window."""
+    trace_mv, dt_ms = _trace_row_mv(trace, neuron_id)
+    onset_ms = 1000.0 * onset_seconds
+    start = max(0, int(np.floor(onset_ms / dt_ms)))
+    stop = min(trace_mv.size, int(np.ceil((onset_ms + window_ms) / dt_ms)) + 1)
+    return count_spikes(trace_mv[start:stop], threshold_mv)
+
+
+def measure_epsp(
+    trace: TraceData,
+    neuron_id: int,
+    probe_pulse_times_s: list[float],
+    baseline_ms: float,
+    response_ms: float,
+) -> EPSPMeasurement:
+    """Measure the dominant detected EPSP after each probe pulse."""
+    trace_mv, dt_ms = _trace_row_mv(trace, neuron_id)
+    amplitudes: list[float] = []
+    for pulse_time in probe_pulse_times_s:
+        onset_ms = 1000.0 * pulse_time
+        start_ms = max(0.0, onset_ms - baseline_ms)
+        stop_ms = onset_ms + response_ms
+        start = max(0, int(np.floor(start_ms / dt_ms)))
+        stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
+        if start >= trace_mv.size:
+            trace_duration_ms = trace_mv.size * dt_ms
+            raise NoEpspDetected(
+                f"The selected trace ends at {trace_duration_ms:.3f} ms, "
+                f"before the probe at {onset_ms:.3f} ms. Select the current "
+                "simulation voltage trace and try again."
+            )
+        detection = detect_epsps(trace_mv[start:stop], dt_ms)
+        relative_onset_ms = onset_ms - start * dt_ms
+        tolerance_ms = 0.5 * dt_ms
+        candidates = detection.amplitudes_mv[
+            (detection.times_ms >= relative_onset_ms - tolerance_ms)
+            & (detection.times_ms <= relative_onset_ms + response_ms + tolerance_ms)
+        ]
+        if candidates.size == 0:
+            raise NoEpspDetected(
+                f"No EPSP was detected after the probe at {onset_ms:.3f} ms."
+            )
+        amplitudes.append(float(np.max(candidates)))
+    return EPSPMeasurement(float(np.mean(amplitudes)), tuple(amplitudes))

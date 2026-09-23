@@ -10,11 +10,12 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import EPSPMeasurement
+from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stdp_window_dialog import _NoEpspDetected
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:
@@ -67,7 +68,6 @@ class _FakeEditor:
         self.calls: list[np.ndarray] = []
         self.time_slices: list[slice] = []
         self.cleared = 0
-        self.cleared_all = 0
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -84,10 +84,11 @@ class _FakeEditor:
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
-    def clear_all_stim_arrays(self) -> None:
-        self.cleared_all += 1
-        for stim in self.project.stim_arrays.values():
-            stim.values[:] = 0.0
+    def current_stim_array_has_unsimulated_tail(self) -> bool:
+        stim = self.current_stim_modifier.stim_array
+        target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
+        n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
+        return bool(np.any(stim.values[n_keep:, :]))
 
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
@@ -293,29 +294,51 @@ def test_estimate_matches_run_count(qtbot) -> None:
     assert "~13" in dialog.lbl_estimate.text()
 
 
-def test_warns_and_can_clear_existing_input(qtbot, monkeypatch) -> None:
+def test_confirms_and_discards_unsimulated_tail_before_start(
+    qtbot, monkeypatch
+) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    # Past the simulation head (0.0) - reset_stim_array() would discard this,
+    # so starting must be confirmed first.
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
     _patch_directional_measurement(monkeypatch, dialog)
 
     dialog.start()
 
-    assert editor.cleared_all == 1
-    assert editor.current_stim_modifier.stim_array.values[0, 0] == 0.0
     assert len(editor.calls) == 1
+    # reset_stim_array(), called right after confirming, is what actually
+    # discards the unsimulated tail.
+    assert editor.reset_count >= 1
 
 
-def test_cancel_existing_input_keeps_input(qtbot, monkeypatch) -> None:
+def test_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "cancel")
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: False,
+    )
 
     dialog.start()
 
     assert not dialog._running
     assert editor.calls == []
-    assert editor.cleared_all == 0
+
+
+def test_no_warning_when_stim_array_has_no_unsimulated_tail(qtbot, monkeypatch) -> None:
+    """Content at (or before) the simulation head never needs confirming -
+    this is what lets routines stack back to back without interruption."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+
+    assert len(editor.calls) == 1
 
 
 def test_stops_when_dialog_closed(qtbot, monkeypatch) -> None:
@@ -423,7 +446,6 @@ def test_stim_heatmap_shows_only_targeted_neurons_and_traces(
     # not wash out the targeted neurons' own pulses in the heatmap's color
     # scale.
     stim.values[0, 2] = 1000.0
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "append")
 
     dialog.start()
 

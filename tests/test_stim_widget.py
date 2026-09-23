@@ -526,11 +526,19 @@ def test_stim_widget_short_stimuli_minimum_size_toggle(qtbot: QtBot) -> None:
 
     graphic = stim_widget.minimum_size_graphic
     assert graphic is not None
-    assert graphic.sizes == pytest.approx(4.0)
-    assert graphic.size_space == "screen"
+    assert graphic.marker_line is not None
+    assert graphic.marker_line.material.thickness == pytest.approx(4.0)
+    assert graphic.marker_line.material.thickness_space == "screen"
     assert stim_widget.graphic is not None
     assert stim_widget.graphic.offset[2] > 199.0
-    assert np.all(graphic.data.value[:, 2] > 199.0)
+    assert np.all(graphic.marker_line.geometry.positions.data[:, 2] > 199.0)
+    assert graphic.fill_line is not None
+    assert np.all(graphic.fill_line.geometry.positions.data[:, 2] > 199.0)
+    # One vertical marker segment (2 endpoints) for the single nonzero
+    # sample, spanning the full row height around neuron index 1.
+    positions = graphic.marker_line.geometry.positions.data
+    assert positions.shape[0] == 2
+    assert sorted(positions[:, 1].tolist()) == pytest.approx([0.5, 1.5])
     assert graphic.visible
 
     stim_widget.set_keep_short_stimuli_visible(False)
@@ -538,6 +546,127 @@ def test_stim_widget_short_stimuli_minimum_size_toggle(qtbot: QtBot) -> None:
     assert values[50_000, 1] == 1.0
     stim_widget.set_keep_short_stimuli_visible(True)
     assert graphic.visible
+
+
+def test_stim_widget_minimum_size_markers_stay_opaque_regardless_of_amplitude(
+    qtbot: QtBot,
+) -> None:
+    """A low-amplitude pulse's "keep visible" markers must render at full
+    alpha, just like a high-amplitude pulse's - the whole point of the
+    minimum-size overlay is to guarantee visibility regardless of
+    amplitude. Coloring markers by normalized magnitude (as the main
+    heatmap image legitimately does) silently defeats that guarantee for
+    anything far below the array's peak amplitude, exactly like
+    _stim_pulse_rgba was already fixed to avoid for the closed-loop
+    routines' live heatmap."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((200, 1))
+    values[10:60, 0] = 100.0  # high amplitude, wide
+    values[150:160, 0] = 1.0  # low amplitude (1% of peak), narrow
+    stim_widget.set_data(
+        StimArray("mixed", StimType.Excitation, values, "mV", dt=0.001)
+    )
+
+    graphic = stim_widget.minimum_size_graphic
+    assert graphic is not None
+    assert graphic.fill_line is not None
+    assert graphic.marker_line is not None
+    fill_colors = graphic.fill_line.geometry.colors.data
+    fill_positions = graphic.fill_line.geometry.positions.data
+    marker_colors = graphic.marker_line.geometry.colors.data
+    marker_positions = graphic.marker_line.geometry.positions.data
+    # Two contiguous runs (10:60 and 150:160), one fill + one marker segment
+    # (2 endpoints each) per run, regardless of amplitude.
+    assert fill_positions.shape[0] == 4
+    assert marker_positions.shape[0] == 4
+    assert np.all(fill_colors[:, 3] == pytest.approx(1.0))
+    assert np.all(marker_colors[:, 3] == pytest.approx(1.0))
+    # Marker segments span the full row height (neuron index 0: -0.5 to 0.5),
+    # not just a fixed small screen-space square.
+    assert np.all(np.isin(np.round(marker_positions[:, 1], 3), [-0.5, 0.5]))
+    # Fill segments sit at the row center and span each run's true extent -
+    # this is what keeps a wide low-amplitude pulse looking like one
+    # continuous block instead of a train of short separate pulses.
+    assert np.all(fill_positions[:, 1] == pytest.approx(0.0))
+    assert sorted(fill_positions[:, 0].tolist()) == pytest.approx(
+        [10.0, 60.0, 150.0, 160.0]
+    )
+
+
+def test_stim_widget_minimum_size_markers_keep_sign_for_external_stim(
+    qtbot: QtBot,
+) -> None:
+    """External (bidirectional) stim markers must still distinguish
+    positive from negative samples by color, even though magnitude no
+    longer affects opacity - confirms per-segment (not just per-graphic)
+    coloring works for the line-segment overlay."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((10, 1))
+    values[2, 0] = 5.0
+    values[7, 0] = -5.0
+    stim_widget.set_data(StimArray("ext", StimType.External, values, "mV", dt=0.001))
+
+    graphic = stim_widget.minimum_size_graphic
+    assert graphic is not None
+    assert graphic.fill_line is not None
+    positions = graphic.fill_line.geometry.positions.data
+    colors = graphic.fill_line.geometry.colors.data
+    assert positions.shape[0] == 4  # 2 runs x 2 endpoints
+    # Runs are ordered by time, so the positive sample (time index 2) comes
+    # before the negative one (time index 7).
+    positive_color = colors[0]
+    negative_color = colors[2]
+    assert not np.allclose(positive_color, negative_color)
+    assert np.all(colors[:, 3] == pytest.approx(1.0))
+
+
+def test_stim_widget_minimum_size_overlay_merges_contiguous_run_into_one_fill(
+    qtbot: QtBot,
+) -> None:
+    """A single wide contiguous pulse must produce one fill segment for its
+    whole duration, not one per sample. Building one segment per sample (an
+    earlier version of this overlay did) left visible gaps between adjacent
+    samples whenever they render narrower than their on-screen spacing,
+    breaking a single continuous low-amplitude pulse into what looks like a
+    rapid train of short separate pulses."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((200, 1))
+    values[10:160, 0] = 1.0  # one 150-sample-wide contiguous pulse
+    stim_widget.set_data(StimArray("wide", StimType.Excitation, values, "mV", dt=0.001))
+
+    graphic = stim_widget.minimum_size_graphic
+    assert graphic is not None
+    assert graphic.fill_line is not None
+    positions = graphic.fill_line.geometry.positions.data
+    assert positions.shape[0] == 2  # one run -> one fill segment, not 150
+    assert sorted(positions[:, 0].tolist()) == pytest.approx([10.0, 160.0])
+
+
+def test_stim_widget_minimum_size_overlay_keeps_separate_runs_apart(
+    qtbot: QtBot,
+) -> None:
+    """Two pulses separated by a real zero gap must stay two distinct fill
+    segments, not merge into one."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((200, 1))
+    values[10:60, 0] = 1.0
+    values[70:120, 0] = 1.0
+    stim_widget.set_data(StimArray("two", StimType.Excitation, values, "mV", dt=0.001))
+
+    graphic = stim_widget.minimum_size_graphic
+    assert graphic is not None
+    assert graphic.fill_line is not None
+    positions = graphic.fill_line.geometry.positions.data
+    assert positions.shape[0] == 4  # two runs -> two fill segments
+    assert sorted(positions[:, 0].tolist()) == pytest.approx([10.0, 60.0, 70.0, 120.0])
 
 
 def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(

@@ -11,7 +11,7 @@
 
 - [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
-- [Design dynamic input](user_guide/input_designer.md)
+- [Design dynamic input](user_guide/stdp_synaptic_tuning.md)
 - [Run external simulators](user_guide/run_external_simulators.md)
 - [Experiments](user_guide/experiments.md)
 - [Analysis tools and custom plugins](user_guide/analysis_and_plugins.md)

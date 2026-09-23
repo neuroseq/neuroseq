@@ -12,7 +12,7 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_widget import apply_cmap_alpha

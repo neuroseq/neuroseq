@@ -4,7 +4,6 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
 from neuroseq.llm import available_backends
 from neuroseq.llm.anthropic_backend import AnthropicBackend
 from neuroseq.llm.backend import LLMBackend
@@ -13,6 +12,7 @@ from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
 from neuroseq.llm.secrets import delete_api_key
 from neuroseq.llm.secrets import set_api_key
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 
 
 class LLMSettingsDialog(_SelfRaisingDialog):
