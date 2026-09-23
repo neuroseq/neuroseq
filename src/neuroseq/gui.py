@@ -1809,6 +1809,17 @@ class Gui(QtWidgets.QMainWindow):
             if action is not None:
                 action.setEnabled(bool(enabled))
 
+    def _iter_menu_actions(self, menu: QtWidgets.QMenu) -> list[QtWidgets.QAction]:
+        """Recursively collect every leaf action in ``menu``, including submenus'."""
+        actions: list[QtWidgets.QAction] = []
+        for action in menu.actions():
+            submenu = action.menu()
+            if submenu is not None:
+                actions.extend(self._iter_menu_actions(submenu))
+            else:
+                actions.append(action)
+        return actions
+
     def _set_io_actions_enabled(self, enabled: bool) -> None:
         """Gate file-IO entry points while a save/load/simulation worker is running.
 
@@ -1819,11 +1830,24 @@ class Gui(QtWidgets.QMainWindow):
         always targets the tab that was active when it was dispatched, so
         switching/closing/opening tabs mid-task would let its completion
         callback land on the wrong tab's now-active widgets.
+
+        ``QMenu.setEnabled``/``QToolBar.setEnabled`` only grey out the
+        container and block mouse interaction with it -- the ``QAction``s
+        inside keep their own ``enabled`` state, so a ``Qt.WindowShortcut``
+        such as Ctrl+N/Ctrl+O/Ctrl+E still fires even while the File menu
+        looks disabled. Disable every action reachable from the File menu
+        (each one doubles as its toolbar button, since ``add_action``
+        shares one ``QAction`` between the two) so the shortcuts are
+        blocked too.
         """
         for attr in ("menu_file", "toolbar_file", "tab_bar"):
             target = getattr(self, attr, None)
             if target is not None:
                 target.setEnabled(bool(enabled))
+        menu_file = getattr(self, "menu_file", None)
+        if menu_file is not None:
+            for action in self._iter_menu_actions(menu_file):
+                action.setEnabled(bool(enabled))
         self._set_simulation_actions_enabled(bool(enabled))
 
     def _dispatch_io_task(
@@ -2028,6 +2052,29 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_brian2_finished(_result: object) -> None:
             self.logger.info("Brian2 simulation finished.")
+            if self.project is not project:
+                # The active tab changed while this simulation was running.
+                # Its results are already saved on ``project`` (run_simulation
+                # mutated it directly), but the shared stim_editor/controllers
+                # now belong to a different project: refreshing them, or
+                # telling stim_editor's Design dynamic input dialogs the
+                # simulation finished, would apply this tab's results (or
+                # continuation) to whatever project the user switched to.
+                self.logger.warning(
+                    "Active tab changed during Brian2 simulation; results "
+                    f"were saved to '{self._tab_label_for(project)}' but its "
+                    "view was not refreshed and no Design dynamic input "
+                    "continuation was triggered for it."
+                )
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Simulation finished",
+                    "The simulation finished after a project switch.\n"
+                    f"Results were saved to '{self._tab_label_for(project)}', "
+                    "the project that started it, not the project currently "
+                    "open. Switch back to it to see the update.",
+                )
+                return
             visible_time_range = self.controller.current_time_range()
             self._update_data(keep_undo_history=True)
             if visible_time_range is not None:

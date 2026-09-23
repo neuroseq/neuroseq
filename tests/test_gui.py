@@ -1926,6 +1926,82 @@ def test_gui_simulate_and_cancel(
     gui.close()
 
 
+def test_file_menu_shortcuts_are_disabled_during_a_running_io_task(
+    qtbot: QtBot, test_project: Project
+) -> None:
+    """Regression test for #556: ``_set_io_actions_enabled`` used to only
+    disable the File menu/toolbar/tab bar *containers*.  Disabling a QMenu
+    or QToolBar greys it out and blocks mouse clicks, but each QAction it
+    holds keeps its own ``enabled`` flag - so a Qt.WindowShortcut such as
+    Ctrl+N/Ctrl+O/Ctrl+E kept firing even while the File menu looked
+    disabled, letting a user open/switch tabs while a Brian2 simulation
+    (or any other IO task) was still running for the previously active
+    tab."""
+    gui = Gui()
+    gui.load_project(test_project)
+    qtbot.addWidget(gui)
+
+    actions = gui._iter_menu_actions(gui.menu_file)
+    assert any(a.shortcut().toString() == "Ctrl+N" for a in actions)
+    assert all(a.isEnabled() for a in actions)
+
+    gui._set_io_actions_enabled(False)
+    assert gui.menu_file.isEnabled() is False
+    assert all(not a.isEnabled() for a in gui._iter_menu_actions(gui.menu_file))
+
+    gui._set_io_actions_enabled(True)
+    assert gui.menu_file.isEnabled() is True
+    assert all(a.isEnabled() for a in gui._iter_menu_actions(gui.menu_file))
+    gui.close()
+
+
+def test_brian2_simulation_finish_does_not_touch_a_different_tab(
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    test_project: Project,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Regression test for #556: if the active tab changes while a Brian2
+    simulation is running (e.g. through the shortcut bypass fixed above),
+    its completion callback used to unconditionally refresh the shared
+    widgets from ``self.project`` and tell stim_editor's Design dynamic
+    input dialogs the simulation finished - both of which, by then, belong
+    to whichever *other* tab is active, not the one that was simulated."""
+    gui = Gui()
+    gui.load_project(test_project)
+    qtbot.addWidget(gui)
+    simulated_project = gui.project
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.2", True))
+
+    gui.btn_continue_simulation_clicked()
+    assert gui._io_worker is not None
+
+    # Switch tabs while the simulation for `simulated_project` is still
+    # running on the worker thread - this is exactly what the (now fixed)
+    # shortcut bypass let a user do despite the "disabled" File menu/tab bar.
+    other_project = default_project()
+    gui._open_project_in_new_tab(other_project, reset_controller=True)
+    assert gui.project is other_project
+
+    _wait_for_brian2_simulation(qtbot, gui)
+
+    # The simulation still ran to completion and its results live on the
+    # project that was actually simulated...
+    assert float(simulated_project.b2_model.network.t) > 0
+
+    # ...but the other (now active) tab was left alone: no combo-box entries
+    # borrowed from the simulated project, and the user was told where the
+    # results actually went instead of the change silently landing elsewhere.
+    assert gui.project is other_project
+    assert gui.cmb_trace.count() == 0
+    assert any(
+        call["name"] == "information" and "project switch" in call["text"]
+        for call in qmessagebox_calls
+    )
+    gui._close_confirmed = True
+    gui.close()
+
+
 def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
