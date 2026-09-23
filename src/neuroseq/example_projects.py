@@ -94,7 +94,7 @@ def default_project() -> Project:
         "Cm", (1 * b2.ufarad * b2.cm**-2) * b2_model.parameters["area"]
     )
     b2_model.define_parameter("gl", 10.0 * b2.nsiemens)
-    b2_model.define_parameter("gmax", 60.0 * b2.nsiemens)
+    b2_model.define_parameter("gmax", 2.0 * b2.nsiemens)
 
     b2_model.define_parameter("El", -60 * b2.mV)
     b2_model.define_parameter("EK", -90 * b2.mV)
@@ -117,11 +117,13 @@ def default_project() -> Project:
         "g_exc", (2e-3 * b2.siemens * b2.cm**-2) * b2_model.parameters["area"]
     )
 
-    b2_model.define_parameter("we", 6 * b2.nS)
-    b2_model.define_parameter("wi", 67 * b2.nS)
+    # b2_model.define_parameter("wee", 6 * b2.nS)
+    # b2_model.define_parameter("wii", 67 * b2.nS)
+    # b2_model.define_parameter("wei", 6 * b2.nS)
+    # b2_model.define_parameter("wie", 67 * b2.nS)
 
-    b2_model.define_parameter("dApost", -6.3 * b2.nsiemens)
-    b2_model.define_parameter("dApre", 6.0 * b2.nsiemens)
+    b2_model.define_parameter("dApost", -0.01 * 1.05 * b2.nsiemens)
+    b2_model.define_parameter("dApre", 0.01 * b2.nsiemens)
 
     eqs = """
 dv/dt = (gl*(El-v)+ge*(Ee-v)+geopto*(Eeopto-v)+gi*(Ei-v)-g_na*(m*m*m)*h*(v-ENa)-g_kd*(n*n*n*n)*(v-EK))/Cm : volt
@@ -152,46 +154,53 @@ beta_n = .5*exp((10*mV-v+VT)/(40*mV))/ms : Hz
     b2_model.define_neuronsubgroup_target("Pi", "P")
     b2_model.define_neuronsubgroup_idxs("Pi", (nneurons_exc, nneurons))
 
+    # Excitatory -> Excitatory synapses
+
     ce_eq = """
-we : siemens
+wee : siemens
 dApre/dt = -Apre / taupre : siemens (event-driven)
 dApost/dt = -Apost / taupost : siemens (event-driven)
     """
-    b2_model.define_synapse_equation("Ce", ce_eq)
-    b2_model.define_synapse_connection("Ce", connection_condition="i != j")
-    b2_model.define_synapse_origin("Ce", "Pe")
-    b2_model.define_synapse_target("Ce", "Pe")
-
-    b2_model.define_synapse_equation("Cie", "wi = 67*nS : siemens")
-    b2_model.define_synapse_connection("Cie", None)
-    b2_model.define_synapse_origin("Cie", "Pi")
-    b2_model.define_synapse_target("Cie", "Pe")
-
-    b2_model.define_synapse_equation("Cei", "we = 6*nS : siemens")
-    b2_model.define_synapse_connection("Cei", None)
-    b2_model.define_synapse_origin("Cei", "Pe")
-    b2_model.define_synapse_target("Cei", "Pi")
+    b2_model.define_synapse_equation("Cee", ce_eq)
+    b2_model.define_synapse_connection("Cee", connection_condition="i != j")
+    b2_model.define_synapse_origin("Cee", "Pe")
+    b2_model.define_synapse_target("Cee", "Pe")
 
     ce_on_pre = """
-ge += we
+ge += wee
 Apre += dApre
-we = clip(we + Apost, -gmax, gmax)
+wee = clip(wee + Apost, 0.0*nS, gmax)
 """
-    b2_model.define_synapse_pre("Ce", ce_on_pre)
-    b2_model.define_synapse_pre("Cei", "ge+=we")
-    b2_model.define_synapse_pre("Cie", "gi+=wi")
+    b2_model.define_synapse_pre("Cee", ce_on_pre)
 
     ce_on_post = """
 Apost += dApost
-we= clip(we + Apre, -gmax, gmax)
+wee= clip(wee + Apre, 0.0*nS, gmax)
 """
-    b2_model.define_synapse_post("Ce", ce_on_post)
-    b2_model.define_init("Ce", "we", "6*nS")
+    b2_model.define_synapse_post("Cee", ce_on_post)
+
+    b2_model.define_init("Cee", "wee", "1*nS")
+
+    # Inhibitory -> Excitatory synapses
+
+    b2_model.define_synapse_equation("Cie", "wie = 5*nS : siemens")
+    b2_model.define_synapse_connection("Cie", None)
+    b2_model.define_synapse_origin("Cie", "Pi")
+    b2_model.define_synapse_target("Cie", "Pe")
+    b2_model.define_synapse_pre("Cie", "gi+=wie")
+
+    # Excitatory -> Inhibitory synapses
+
+    b2_model.define_synapse_equation("Cei", "wei = 1*nS : siemens")
+    b2_model.define_synapse_connection("Cei", None)
+    b2_model.define_synapse_origin("Cei", "Pe")
+    b2_model.define_synapse_target("Cei", "Pi")
+    b2_model.define_synapse_pre("Cei", "ge+=wei")
 
     # initial conditions
-    b2_model.define_init("P", "v", "El + (randn() * 5 - 5)*mV")
-    b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
-    b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
+    b2_model.define_init("P", "v", "El")
+    # b2_model.define_init("P", "ge", "(randn() * 1.5 + 4) * 10.*nS")
+    # b2_model.define_init("P", "gi", "(randn() * 12 + 20) * 10.*nS")
 
     # monitors
     b2_model.define_monitor_source("trace", "P")
@@ -202,9 +211,9 @@ we= clip(we + Apre, -gmax, gmax)
     b2_model.define_monitor_type("spike", "SpikeMonitor")
     b2_model.define_monitor_variable("spike", "v")
 
-    b2_model.define_monitor_source("synapse", "Ce")
+    b2_model.define_monitor_source("synapse", "Cee")
     b2_model.define_monitor_type("synapse", "StateMonitor")
-    b2_model.define_monitor_variable("synapse", "we")
+    b2_model.define_monitor_variable("synapse", "wee")
 
     # define stim arrays
 
