@@ -1210,6 +1210,53 @@ def test_switching_to_tab_with_no_stim_arrays_still_updates_time_slider_range(
     gui.close()
 
 
+def test_closing_the_only_dirty_tab_prompts_to_save_then_opens_example_project(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    assert len(gui.tabs) == 1
+    gui.project.mark_dirty()
+
+    warn_calls: list[tuple] = []
+
+    def _fake_warning(*args, **kwargs):
+        warn_calls.append(args)
+        return QtWidgets.QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+
+    gui._close_tab(0)
+
+    assert len(warn_calls) == 1  # asked about saving before replacing the tab
+    assert len(gui.tabs) == 1
+    assert gui.project.project_name == "Getting Started Project"
+    gui.close()
+
+
+def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    assert len(gui.tabs) == 1
+    assert not gui.project.dirty
+
+    warn_calls: list[tuple] = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: warn_calls.append(args),
+    )
+
+    gui._close_tab(0)
+
+    assert warn_calls == []  # nothing unsaved, so no prompt was needed
+    assert len(gui.tabs) == 1
+    assert gui.project.project_name == "Getting Started Project"
+    gui.close()
+
+
 def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)

@@ -37,6 +37,7 @@ from neuroseq.data_widget import DataWidget
 from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
+from neuroseq.example_projects import getting_started_project
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_csv
 from neuroseq.exporter_igor2 import export_igor2_ibw
@@ -647,7 +648,10 @@ class Gui(QtWidgets.QMainWindow):
 
     def _remove_tab(self, index: int) -> None:
         if len(self.tabs) == 1:
-            self.update_project(default_project(), reset_controller=True)
+            # Closing the last tab can't leave the window with no project at
+            # all, and a blank default_project() would strand the user with
+            # nothing to look at - open the Getting Started example instead.
+            self.update_project(getting_started_project(), reset_controller=True)
             return
         del self.tabs[index]
         self.tab_bar.removeTab(index)
