@@ -165,6 +165,14 @@ class Project:
         # slider value; not persisted to the saved archive.
         self.last_time_ms: int = 0
 
+        # Cell(s) selected in the Spatial Footprints panel while this
+        # project's tab was active. Transient GUI state, per-project like
+        # last_time_ms - the panel's selection lives on one shared
+        # SpatialFootprintState, so without this it would be wiped by
+        # set_data() the moment another tab becomes active (issue #555); not
+        # persisted to the saved archive.
+        self.selected_cellpose_ids: set[int] = set()
+
         # External-simulation function state. `external_simulate_path` is either
         # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
         # sentinel resolving to `neuroseq.example_models.<module_name>.simulate`.

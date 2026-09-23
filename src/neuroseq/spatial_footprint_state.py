@@ -186,3 +186,10 @@ class SpatialFootprintState(QtCore.QObject):
         if not self.selected_cellpose_ids:
             return
         self._set_selected(set())
+
+    def set_selected(self, cellpose_ids: Iterable[int]) -> None:
+        """Replace the selection outright with `cellpose_ids`, unlike
+        `toggle_selected(_many)` which flips each id's own state. Used to
+        restore a project's remembered selection when switching back to its
+        tab - see `Gui._activate_tab_index`/`update_project`."""
+        self._set_selected(set(cellpose_ids))

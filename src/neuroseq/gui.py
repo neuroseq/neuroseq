@@ -611,10 +611,18 @@ class Gui(QtWidgets.QMainWindow):
 
     def _activate_tab_index(self, index: int, reset_controller: bool = False) -> None:
         if 0 <= self._active_tab_index < len(self.tabs):
+            outgoing_project = self.tabs[self._active_tab_index]
             # Remember where the outgoing tab's playback position was, so
             # switching back to it later restores this instead of showing
             # whatever the (shared) time slider happens to display.
-            self.tabs[self._active_tab_index].last_time_ms = self.time_slider.t_ms
+            outgoing_project.last_time_ms = self.time_slider.t_ms
+            # Same idea for the Spatial Footprints selection - it lives on
+            # the one shared _spatial_footprint_state, so without this it
+            # gets wiped by set_data() the moment another tab becomes active
+            # (issue #555).
+            outgoing_project.selected_cellpose_ids = set(
+                self._spatial_footprint_state.selected_cellpose_ids
+            )
         self._active_tab_index = index
         self.update_project(self.tabs[index], reset_controller=reset_controller)
 
@@ -1297,6 +1305,10 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            # set_data() above always clears the (shared) selection state;
+            # restore this project's own remembered one - see the matching
+            # save in _activate_tab_index (issue #555).
+            self._spatial_footprint_state.set_selected(project.selected_cellpose_ids)
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(

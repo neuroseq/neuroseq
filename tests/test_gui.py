@@ -1257,6 +1257,43 @@ def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
     gui.close()
 
 
+def test_switching_project_tabs_restores_each_tabs_own_spatial_footprint_selection(
+    qtbot: QtBot,
+) -> None:
+    """Regression test for #555: the Spatial Footprints panel's selection
+    lives on one shared SpatialFootprintState (see SpatialFootprintWidget's
+    ``state`` parameter), and set_data() - called on every tab switch -
+    always clears it. Switching tabs used to silently deselect whatever the
+    user had selected, even when switching straight back."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab0_project = gui.project
+    tab0_project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(tab0_project)
+
+    tab1_project = Project()
+    tab1_project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == set()
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {2}
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == set()
+    assert tab1_project.selected_cellpose_ids == {2}  # remembered on the way out
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {1}
+
+    gui._activate_tab_index(1, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {2}  # restored
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {1}  # restored
+    gui.close()
+
+
 def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
