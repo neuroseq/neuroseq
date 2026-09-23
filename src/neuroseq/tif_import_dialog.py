@@ -897,6 +897,7 @@ class TifImportDialog(QtWidgets.QDialog):
         if result.extra.get("pipeline") == "roi_average":
             from neuroseq.data import TraceData
 
+            raw_cellpose_ids = np.arange(n_neurons, dtype=np.uint32)
             indices = _resolve_suite2p_indices(n_neurons, self._selected_mapping())
             traces = TraceData(
                 "Simply averaged ROI traces",
@@ -904,6 +905,7 @@ class TifImportDialog(QtWidgets.QDialog):
                 indices,
                 "fluorescence",
                 dt,
+                raw_cellpose_ids,
             )
             self.imported_data = [traces]
             QtWidgets.QMessageBox.information(
