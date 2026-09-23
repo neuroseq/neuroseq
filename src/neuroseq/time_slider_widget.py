@@ -49,7 +49,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
-        self.relative_playback_speed = 1.0
+        self.relative_playback_speed = 0.25
         self.t_ms = 0
         self.t_max_ms = 0
         self.t_playback_start_ms = 0
