@@ -61,7 +61,7 @@ def measure_epsp(
         stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
         if start >= trace_mv.size:
             trace_duration_ms = trace_mv.size * dt_ms
-            raise NoEpspDetected(
+            raise ValueError(
                 f"The selected trace ends at {trace_duration_ms:.3f} ms, "
                 f"before the probe at {onset_ms:.3f} ms. Select the current "
                 "simulation voltage trace and try again."
