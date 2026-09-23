@@ -124,9 +124,10 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 
     def _make_callback(name: str) -> Callable:
         # this function has the same calling interface as the qmessagebox static methods like information()
-        def _mock(parent: Any, title: str, text: str) -> None:
+        def _mock(parent: Any, title: str, text: str, *args: Any, **kwargs: Any) -> Any:
             # but instead of displaying the message box it just appends the supplied arguments to the calls list
             calls.append({"name": name, "title": title, "text": text})
+            return QtWidgets.QMessageBox.StandardButton.Ok
 
         return _mock
 
