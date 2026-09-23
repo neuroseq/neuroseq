@@ -7,6 +7,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
+from qtpy import QtWidgets
 
 from neuroseq import console_art
 from neuroseq import theme
@@ -24,6 +25,7 @@ def test_console(qtbot: QtBot, test_project: Project) -> None:
     console.console_command_entered.connect(lambda: signals.append(True))
     assert "np" in console.namespace()
     assert "b2" in console.namespace()
+    assert "plt" in console.namespace()
     assert console.namespace()["project"] is None
     # start with a valid project
     console.set_project(test_project)
@@ -102,6 +104,23 @@ def test_console_retints_the_brain_image_on_construction_and_every_show(
     console.show()
     qtbot.waitUntil(lambda: console.isVisible())
     assert len(calls) > after_first_show
+
+
+@pytest.mark.parametrize("method", ["_show_sample_code", "_show_console_history"])
+def test_console_help_dialogs_allow_console_interaction(qtbot: QtBot, method) -> None:
+    console = ConsoleWidget()
+    qtbot.addWidget(console)
+    console.show()
+    getattr(console, method)()
+    dialog = console.findChild(QtWidgets.QDialog)
+    assert dialog is not None
+    assert dialog.isVisible()
+    assert not dialog.isModal()
+    assert QtWidgets.QApplication.activeModalWidget() is None
+    qtbot.keyClicks(console.input, "1 + 1")
+    assert console.input.text() == "1 + 1"
+    with qtbot.waitSignal(dialog.destroyed):
+        dialog.close()
 
 
 def test_sample_code_mentions_sequential_pulse_snippet() -> None:
