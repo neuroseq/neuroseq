@@ -116,6 +116,7 @@ class StimEditor(QtWidgets.QWidget):
         self.context_menu = QtWidgets.QMenu("Actions", self)
         self._add_actions(self.toolbar, self.context_menu)
         self.stim_widget = StimWidget(controller=controller, menu=self.context_menu)
+        self.stim_widget.selection_changed.connect(self._update_amplitude_action)
         layout.addWidget(self.stim_widget, 0, 0, 3, 3)
         # y scrollbar and zoom buttons
         self.y_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
@@ -472,6 +473,7 @@ class StimEditor(QtWidgets.QWidget):
         self.set_project(self.project, keep_undo_history=False)
 
     def _stim_values_updated(self) -> None:
+        self._update_amplitude_action()
         if self.current_stim_modifier is None:
             self.action_undo.setEnabled(False)
             self.action_redo.setEnabled(False)
@@ -574,6 +576,18 @@ class StimEditor(QtWidgets.QWidget):
                     return np.full((n_samples, 1), self.draw_stim.value1)
                 return self.draw_stim.value1
 
+    def _update_amplitude_action(self) -> None:
+        modifier = self.current_stim_modifier
+        neuron_slice = self.stim_widget.selected_neuron_slice
+        time_slice = self.stim_widget.selected_time_slice
+        self.action_set_amplitude.setEnabled(
+            self.mode == InteractMode.SELECT
+            and modifier is not None
+            and neuron_slice is not None
+            and time_slice is not None
+            and modifier.stim_array.values[time_slice, neuron_slice].size > 0
+        )
+
     def set_mode(self, mode: InteractMode) -> None:
         self.mode = mode
         self.stim_widget.set_mode(mode)
@@ -591,6 +605,7 @@ class StimEditor(QtWidgets.QWidget):
             action.setVisible(self.mode == InteractMode.DRAW)
         for action in self.actions_edit:
             action.setVisible(self.mode == InteractMode.SELECT)
+        self._update_amplitude_action()
 
     def set_draw_mode(self, draw_mode: DrawMode) -> None:
         self.draw_mode = draw_mode
@@ -1367,7 +1382,7 @@ class StimEditor(QtWidgets.QWidget):
         # Show selection settings only while Select mode is active.
         self.actions_edit = []
         self.action_set_amplitude = add_action(
-            "Set amplitude",
+            "Set amplitude to selected input",
             self.set_selected_stim_amplitude,
             menu,
             toolbar,
@@ -1375,6 +1390,7 @@ class StimEditor(QtWidgets.QWidget):
             icon="mdi6.tune-vertical",
         )
         self.actions_edit.append(self.action_set_amplitude)
+        self.action_set_amplitude.setEnabled(False)
         self.actions_edit.append(
             add_action(
                 "Select all (Ctrl+A)",

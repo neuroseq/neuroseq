@@ -247,8 +247,16 @@ def test_set_selected_stim_amplitude(qtbot, monkeypatch, amplitude):
     assert action in editor.toolbar.actions()
     assert not action.isEnabled()
     editor.set_mode(InteractMode.SELECT)
-    assert action.isEnabled()
+    assert not action.isEnabled()
+    assert action.text() == "Set amplitude to selected input"
     editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    assert action.isEnabled()
+    editor.stim_widget.unselect_neurons()
+    assert not action.isEnabled()
+    editor.stim_widget.select_neurons(slice(1, 1), slice(2, 5))
+    assert not action.isEnabled()
+    editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    assert action.isEnabled()
 
     def get_amplitude(*args):
         assert "mV" in args[2]
