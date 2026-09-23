@@ -50,6 +50,10 @@ def test_retro_theme_preserves_console_banner_character_spacing(qtbot: QtBot) ->
     console.show()
     qtbot.waitUntil(lambda: console.isVisible())
     assert console.output.font().family() == original_family
+    assert (
+        console.output.document().defaultTextOption().flags()
+        & QtGui.QTextOption.Flag.IncludeTrailingSpaces
+    )
     metrics = QtGui.QFontMetricsF(console.output.font())
     assert metrics.horizontalAdvance("#") == pytest.approx(
         metrics.horizontalAdvance(" ")

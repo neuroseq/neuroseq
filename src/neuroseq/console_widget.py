@@ -100,6 +100,11 @@ class ConsoleWidget(ReplWidget):
         # narrower than the content - scroll horizontally instead, like a
         # terminal does.
         self.output.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
+        text_option = self.output.document().defaultTextOption()
+        text_option.setFlags(
+            text_option.flags() | QtGui.QTextOption.Flag.IncludeTrailingSpaces
+        )
+        self.output.document().setDefaultTextOption(text_option)
         self._print_intro()
 
         # Create button layout
