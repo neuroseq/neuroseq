@@ -1,3 +1,14 @@
+"""Stimulus-array rendering helpers.
+
+The primary `StimWidget` view renders stimulus data with an image/scatter path
+that preserves amplitude-dependent alpha and true sample geometry. The
+`MinimumStimulusOverlay` defined here is an auxiliary visibility layer for the
+"keep short stimuli visible" mode: it expects the same `(time, neuron)` value
+grid, treats each contiguous same-sign nonzero run as one pulse, and should be
+used only when callers need a minimum on-screen footprint rather than the
+faithful main heatmap/scatter rendering alone.
+"""
+
 from __future__ import annotations
 
 import math
