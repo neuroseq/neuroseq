@@ -19,19 +19,31 @@ class _BrianEditor:
         self.calls: list[np.ndarray] = []
         self.focused_ranges: list[tuple[float, float]] = []
         self.cleared = 0
-        self.cleared_all = 0
 
     def clear_stim_array(self) -> None:
         self.cleared += 1
         self.current_stim_modifier.stim_array.values[:] = 0.0
 
-    def reset_stim_array(self) -> None:
-        self.reset_count = getattr(self, "reset_count", 0) + 1
+    def _target_samples(self) -> int:
+        stim = self.current_stim_modifier.stim_array
+        return max(1, int(np.ceil(self.project.b2_model.get_sim_time_secs() / stim.dt)))
 
-    def clear_all_stim_arrays(self) -> None:
-        self.cleared_all += 1
-        for stim in self.project.stim_arrays.values():
-            stim.values[:] = 0.0
+    def reset_stim_array(self) -> None:
+        # Mirrors StimEditor.reset_stim_array(): trim the array back to the
+        # current simulation head (never growing it). dynamic_input_blocks
+        # .append_block() relies on this actually trimming - the example
+        # project's stim arrays ship pre-authored at several seconds long,
+        # so without a real trim here every appended probe would land far
+        # past the end of the recorded trace.
+        self.reset_count = getattr(self, "reset_count", 0) + 1
+        stim = self.current_stim_modifier.stim_array
+        target_samples = self._target_samples()
+        if stim.values.shape[0] > target_samples:
+            stim.values = stim.values[:target_samples]
+
+    def current_stim_array_has_unsimulated_tail(self) -> bool:
+        stim = self.current_stim_modifier.stim_array
+        return bool(np.any(stim.values[self._target_samples() :, :]))
 
     def focus_time_range(self, start: float, stop: float) -> None:
         self.focused_ranges.append((start, stop))
@@ -64,7 +76,13 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
     editor = _BrianEditor(project)
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    # The fixture ships a stim array with pre-authored content past the
+    # (unsimulated) start; confirm discarding it so the sweep runs from the
+    # simulation head (this also exercises the confirm-and-discard path).
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
 
     def run(seconds: float) -> None:
         b2_model.run_simulation(seconds, project.stim_arrays)
@@ -95,7 +113,7 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
     assert result_by_delta[30.0] > 0.0
     assert dialog.cmb_trace.currentText().startswith("Simulation :: ")
     assert project.stim_arrays["Exc_stimulation"].values.shape[0] > 2000
-    assert editor.cleared_all == 1
+    assert editor.reset_count >= 1
     assert b2_model.checkpoints == ["Initial state"]
 
 
@@ -111,7 +129,10 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     editor = _BrianEditor(project)
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    monkeypatch.setattr(dialog, "_prompt_existing_input_choice", lambda names: "clear")
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
+        lambda *args, **kwargs: True,
+    )
 
     def run(seconds: float) -> None:
         b2_model.run_simulation(seconds, project.stim_arrays)

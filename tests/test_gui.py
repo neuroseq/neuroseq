@@ -430,7 +430,7 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
         StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
     )
     monkeypatch.setattr(
-        StimEditor, "open_input_designer", lambda self: dynamic_calls.append(1)
+        StimEditor, "open_dynamic_input_designer", lambda self: dynamic_calls.append(1)
     )
     gui = Gui()
     qtbot.addWidget(gui)
@@ -1116,6 +1116,34 @@ def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> N
     assert window.windowTitle().endswith(" - Section / Project")
     window.close()
     gui.close()
+
+
+def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
+    qtbot: QtBot,
+) -> None:
+    """The routine dialogs (and their own plot/heatmap popups) are created
+    without a Qt parent - see StimEditor._show_routine_dialog's docstring -
+    so closing the main window would otherwise leave them open as orphaned
+    windows: findChildren() never finds them, since they were never made
+    Qt children of the main window in the first place."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.update_project(default_project())
+
+    gui.stim_editor.open_dynamic_input_designer()
+    selector = gui.stim_editor._routine_selector_dialog
+    assert selector is not None
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector._on_continue()
+    dialog = gui.stim_editor._rheobase_dialog
+    assert dialog is not None
+    assert dialog.isVisible()
+
+    gui._close_confirmed = True
+    gui.close()
+
+    assert not dialog.isVisible()
+    assert gui.stim_editor._rheobase_dialog is None
 
 
 def _make_timed_project(n_timepoints: int, dt: float = 0.01) -> Project:
@@ -4345,7 +4373,7 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "25" in qmessagebox_calls[0]["text"]
 
 
-def test_brian2_busy_notifies_input_designer(
+def test_brian2_busy_notifies_dynamic_input(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     gui = Gui()
@@ -4356,7 +4384,7 @@ def test_brian2_busy_notifies_input_designer(
     dropped: list[str] = []
     monkeypatch.setattr(
         gui.stim_editor,
-        "input_designer_simulation_failed",
+        "dynamic_input_simulation_failed",
         lambda message: dropped.append(message),
     )
 

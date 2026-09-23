@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import cast
 
@@ -12,22 +14,406 @@ from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
-from neuroseq.input_designer_dialog import StimHeatmapWindow
-from neuroseq.input_designer_dialog import _SelfRaisingDialog
-from neuroseq.input_designer_dialog import _set_native_minimized_position
-from neuroseq.input_designer_dialog import _WheelToScrollFilter
-from neuroseq.input_designer_dialog import _wrap_in_scroll_area
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
+from neuroseq.dynamic_input_blocks import append_block as _append_block_impl
+from neuroseq.dynamic_input_measurement import measure_spike_count
+from neuroseq.dynamic_input_routine import RoutineBackend
+from neuroseq.dynamic_input_routine import SimulationHost
+from neuroseq.dynamic_input_routine import backend_property
 from neuroseq.rheobase import bisection_converged
-from neuroseq.rheobase import count_spikes
 from neuroseq.rheobase import next_bracket
-from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stdp_synaptic_tuning_dialog import StimHeatmapWindow
+from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
+from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
+from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
+from neuroseq.stdp_synaptic_tuning_dialog import _wrap_in_scroll_area
+from neuroseq.stdp_synaptic_tuning_dialog import confirm_discard_unsimulated_input
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
     from neuroseq.stim import StimArray
     from neuroseq.stim_editor import StimEditor
+
+
+class RheobaseBackend(RoutineBackend):
+    """Lifecycle backend for the rheobase dialog.
+
+    Owns the Qt-free rheobase decision graph; the dialog supplies rendering,
+    trace measurement, and append-block callbacks.
+    """
+
+    def __init__(self, host: SimulationHost) -> None:
+        super().__init__(host)
+        self.config: RheobaseRunConfig | None = None
+        self.on_summarize: Callable[[], str] | None = None
+        self.on_summarize_fixed_amplitude: Callable[[], str] | None = None
+        self.low = 0.0
+        self.high = 0.0
+        self.pending_amplitude = 0.0
+        self.pulse_onset_seconds = 0.0
+        self.duration_values_ms: list[float] = []
+        self.duration_index = 0
+        self.current_duration_ms = 0.0
+        self.duration_low_ms = 0.0
+        self.duration_high_ms = 0.0
+        self.duration_stage = "idle"
+        self.rheobase: float | None = None
+        self.chronaxie_ms: float | None = None
+        self.fixed_spiking_duration_ms: float | None = None
+        self.iteration = 0
+        self.view_block_samples: int | None = None
+        self.logged_recovery_note = False
+        self.resolution_warning_logged = False
+        self.samples: list[tuple[float, float, int]] = []
+        self.thresholds: list[tuple[float, float]] = []
+
+    def _advance(self) -> None:
+        if self.on_advance is not None:
+            self.on_advance()
+
+    def begin_search(self, config: RheobaseRunConfig) -> None:
+        self.config = config
+        self.begin()
+        self.phase = "idle"
+        self.iteration = 0
+        self.view_block_samples = None
+        self.low = config.min_amplitude
+        self.high = config.max_amplitude
+        self.pending_amplitude = config.max_amplitude
+        self.pulse_onset_seconds = 0.0
+        self.duration_values_ms = [config.pulse_ms, config.max_pulse_ms]
+        self.duration_index = 0
+        self.current_duration_ms = config.pulse_ms
+        self.duration_low_ms = config.pulse_ms
+        self.duration_high_ms = config.max_pulse_ms
+        self.duration_stage = "idle"
+        self.samples = []
+        self.thresholds = []
+        self.rheobase = None
+        self.chronaxie_ms = None
+        self.fixed_spiking_duration_ms = None
+        self.logged_recovery_note = False
+        self.resolution_warning_logged = False
+        self._maybe_log_duration_resolution_warning()
+        if config.strategy == RheobaseDialog.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY:
+            self._begin_fixed_amplitude_duration_search()
+        elif (
+            config.strategy == RheobaseDialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+        ):
+            self._begin_duration_search(config.pulse_ms, "fixed duration")
+        else:
+            self._begin_strength_duration_search()
+
+    def _cfg(self) -> RheobaseRunConfig:
+        if self.config is None:
+            raise RuntimeError("Rheobase search has not been configured")
+        return self.config
+
+    def _duration_sweep_values(self) -> list[float]:
+        c = self._cfg()
+        return [c.pulse_ms, c.max_pulse_ms]
+
+    def _begin_strength_duration_search(self) -> None:
+        self.duration_stage = "rheobase"
+        self._begin_duration_search(
+            self._cfg().max_pulse_ms, "rheobase estimate at maximum duration"
+        )
+
+    def _begin_duration_search(self, duration_ms: float, description: str) -> None:
+        c = self._cfg()
+        self.current_duration_ms = self._effective_duration_ms(duration_ms)
+        self.low = c.min_amplitude
+        self.high = c.max_amplitude
+        self.iteration = 0
+        self.phase = "probe_max"
+        self._log(
+            f"Searching duration {self.current_duration_ms:.6g} ms ({description})."
+        )
+        self.probe(c.max_amplitude)
+
+    def _begin_fixed_amplitude_duration_search(self) -> None:
+        c = self._cfg()
+        self.duration_stage = "duration_probe_max"
+        self.duration_low_ms = c.pulse_ms
+        self.duration_high_ms = c.max_pulse_ms
+        self._probe_fixed_amplitude_duration(c.max_pulse_ms, "maximum duration")
+
+    def _probe_fixed_amplitude_duration(
+        self, duration_ms: float, description: str
+    ) -> None:
+        c = self._cfg()
+        self.current_duration_ms = self._effective_duration_ms(duration_ms)
+        self.phase = "duration_probe"
+        self._log(
+            f"Testing fixed amplitude {c.fixed_amplitude:.6g} at duration {self.current_duration_ms:.6g} ms ({description})."
+        )
+        self.probe(c.fixed_amplitude)
+
+    def _one_sample_ms(self) -> float:
+        return 1000.0 * self._cfg().stim_dt
+
+    def _duration_tolerance_ms(self) -> float:
+        return max(self._cfg().duration_tolerance_ms, self._one_sample_ms())
+
+    def _effective_duration_ms(self, duration_ms: float) -> float:
+        _samples, effective_ms = snap_milliseconds_to_dt(
+            duration_ms, self._cfg().stim_dt
+        )
+        return effective_ms
+
+    def _duration_threshold_exists(self, duration_ms: float) -> bool:
+        return any(abs(d - duration_ms) <= 1e-9 for d, _ in self.thresholds)
+
+    def _duration_already_sampled(self, duration_ms: float) -> bool:
+        return any(abs(d - duration_ms) <= 1e-9 for d, _, _ in self.samples)
+
+    def _maybe_log_duration_resolution_warning(self) -> None:
+        c = self._cfg()
+        if (
+            not self.resolution_warning_logged
+            and c.duration_tolerance_ms < self._one_sample_ms()
+        ):
+            self.resolution_warning_logged = True
+            self._log(
+                f"Input dt is {self._one_sample_ms():.6g} ms; durations are snapped to that grid, so finer tolerances cannot be resolved."
+            )
+
+    def probe(self, amplitude: float) -> None:
+        c = self._cfg()
+        recovery_n, _ = snap_milliseconds_to_dt(c.recovery_ms, c.stim_dt)
+        pulse_n, effective_ms = snap_milliseconds_to_dt(
+            self.current_duration_ms, c.stim_dt
+        )
+        self.current_duration_ms = effective_ms
+        tail_n, _ = snap_milliseconds_to_dt(c.response_ms, c.stim_dt)
+        samples = recovery_n + pulse_n + tail_n
+        block = np.zeros((samples, c.n_neurons), dtype=np.float32)
+        block[recovery_n : recovery_n + pulse_n, c.neuron_id] = amplitude
+        block_start = self._host.append_block(block)
+        self.pending_amplitude = amplitude
+        self.pulse_onset_seconds = (block_start + recovery_n) * c.stim_dt
+        if not self.logged_recovery_note:
+            self._log(
+                "Each probe is appended after the existing input with a recovery lead before the pulse so the membrane returns to rest."
+            )
+            self.logged_recovery_note = True
+        self._log(
+            f"Probe {len(self.samples) + 1}: testing amplitude {amplitude:.6g} at {self.current_duration_ms:.6g} ms."
+        )
+        self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
+
+    def record_probe_result(self, spike_count: int) -> None:
+        c = self._cfg()
+        amplitude = self.pending_amplitude
+        self.samples.append((self.current_duration_ms, amplitude, spike_count))
+        self._log(
+            f"Probe {len(self.samples)}: amplitude {amplitude:.6g} at {self.current_duration_ms:.6g} ms -> {'no spike' if spike_count == 0 else f'{spike_count} spikes'}."
+        )
+        self._measurement_changed()
+        if self.phase == "duration_probe":
+            self._handle_fixed_amplitude_duration_result(spike_count)
+            return
+        if self.phase == "probe_max":
+            if spike_count == 0:
+                self.finish(
+                    f"No spike at the maximum amplitude {c.max_amplitude:.6g}; increase the range."
+                )
+                return
+            self.high = c.max_amplitude
+            self.phase = "probe_min"
+            self.probe(c.min_amplitude)
+            return
+        if self.phase == "probe_min":
+            if spike_count > 0:
+                self._complete_duration_threshold(
+                    c.min_amplitude,
+                    f"Neuron spikes already at the minimum amplitude {c.min_amplitude:.6g}; threshold <= minimum.",
+                )
+                return
+            self.low = c.min_amplitude
+            self.phase = "bisect"
+            self._bisect_step()
+            return
+        if self.phase == "bisect":
+            self.low, self.high = next_bracket(
+                self.low, self.high, amplitude, spike_count > 0
+            )
+            self._bisect_step()
+
+    def _handle_fixed_amplitude_duration_result(self, spike_count: int) -> None:
+        if self.duration_stage == "duration_probe_max":
+            if spike_count == 0:
+                self._measurement_changed()
+                self.finish(
+                    self.on_summarize_fixed_amplitude()
+                    if self.on_summarize_fixed_amplitude
+                    else "Duration sweep finished."
+                )
+                return
+            self.duration_high_ms = self.current_duration_ms
+            self.duration_stage = "duration_probe_min"
+            self._probe_fixed_amplitude_duration(
+                self._cfg().pulse_ms, "minimum duration"
+            )
+            return
+        if self.duration_stage == "duration_probe_min":
+            if spike_count > 0:
+                self.fixed_spiking_duration_ms = self.current_duration_ms
+                self._measurement_changed()
+                self.finish(
+                    self.on_summarize_fixed_amplitude()
+                    if self.on_summarize_fixed_amplitude
+                    else "Duration sweep finished."
+                )
+                return
+            self.duration_low_ms = self.current_duration_ms
+            self.duration_stage = "duration_bisect"
+            self._bisect_fixed_amplitude_duration()
+            return
+        if self.duration_stage == "duration_bisect":
+            if spike_count > 0:
+                self.duration_high_ms = self.current_duration_ms
+            else:
+                self.duration_low_ms = self.current_duration_ms
+            self._bisect_fixed_amplitude_duration()
+
+    def _bisect_fixed_amplitude_duration(self) -> None:
+        if (
+            self.duration_high_ms - self.duration_low_ms
+            <= self._duration_tolerance_ms()
+            or self._duration_already_sampled(
+                self._effective_duration_ms(
+                    0.5 * (self.duration_low_ms + self.duration_high_ms)
+                )
+            )
+        ):
+            self.fixed_spiking_duration_ms = self.duration_high_ms
+            self._measurement_changed()
+            self.finish(
+                self.on_summarize_fixed_amplitude()
+                if self.on_summarize_fixed_amplitude
+                else "Duration sweep finished."
+            )
+            return
+        self._probe_fixed_amplitude_duration(
+            0.5 * (self.duration_low_ms + self.duration_high_ms), "duration bisection"
+        )
+
+    def _bisect_step(self) -> None:
+        c = self._cfg()
+        if (
+            bisection_converged(self.low, self.high, c.tolerance)
+            or self.iteration >= c.max_iterations
+        ):
+            self._complete_duration_threshold(
+                self.high,
+                f"Threshold at {self.current_duration_ms:.6g} ms ~= {self.high:.6g}.",
+            )
+            return
+        self.iteration += 1
+        self.probe(0.5 * (self.low + self.high))
+
+    def _complete_duration_threshold(self, threshold: float, message: str) -> None:
+        self.thresholds.append((self.current_duration_ms, threshold))
+        self._update_strength_duration_metrics()
+        self._measurement_changed()
+        self._log(message)
+        if (
+            self._cfg().strategy
+            == RheobaseDialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+        ):
+            self.finish(self.on_summarize() if self.on_summarize else message)
+            return
+        self._handle_strength_duration_threshold()
+
+    def _handle_strength_duration_threshold(self) -> None:
+        c = self._cfg()
+        threshold = self.thresholds[-1][1]
+        if self.duration_stage == "rheobase":
+            if c.max_pulse_ms == c.pulse_ms:
+                self.finish(
+                    self.on_summarize()
+                    if self.on_summarize
+                    else "Duration sweep finished."
+                )
+                return
+            self.duration_stage = "duration_min"
+            self._begin_duration_search(c.pulse_ms, "minimum duration bound")
+            return
+        if self.duration_stage == "duration_min":
+            if threshold <= 2.0 * (min(t for _, t in self.thresholds)):
+                self.finish(
+                    self.on_summarize()
+                    if self.on_summarize
+                    else "Duration sweep finished."
+                )
+                return
+            self.duration_low_ms = self.current_duration_ms
+            self.duration_high_ms = c.max_pulse_ms
+            self.duration_stage = "duration_chronaxie_bisect"
+            self._bisect_strength_duration()
+            return
+        if self.duration_stage == "duration_chronaxie_bisect":
+            if threshold > 2.0 * (min(t for _, t in self.thresholds)):
+                self.duration_low_ms = self.current_duration_ms
+            else:
+                self.duration_high_ms = self.current_duration_ms
+            self._bisect_strength_duration()
+
+    def _bisect_strength_duration(self) -> None:
+        if (
+            self.duration_high_ms - self.duration_low_ms
+            <= self._duration_tolerance_ms()
+            or self._duration_threshold_exists(
+                self._effective_duration_ms(
+                    0.5 * (self.duration_low_ms + self.duration_high_ms)
+                )
+            )
+        ):
+            self.finish(
+                self.on_summarize() if self.on_summarize else "Duration sweep finished."
+            )
+            return
+        self._begin_duration_search(
+            0.5 * (self.duration_low_ms + self.duration_high_ms), "duration bisection"
+        )
+
+    def _update_strength_duration_metrics(self) -> None:
+        if not self.thresholds:
+            self.rheobase = self.chronaxie_ms = None
+            return
+        pairs = sorted(self.thresholds)
+        self.rheobase = min(value for _, value in pairs)
+        target = 2.0 * self.rheobase
+        self.chronaxie_ms = None
+        for (d0, a0), (d1, a1) in zip(pairs, pairs[1:], strict=False):
+            if a0 == target:
+                self.chronaxie_ms = d0
+                return
+            if (a0 - target) * (a1 - target) <= 0.0 and a0 != a1:
+                self.chronaxie_ms = d0 + (target - a0) * (d1 - d0) / (a1 - a0)
+                return
+        if pairs[0][1] <= target:
+            self.chronaxie_ms = pairs[0][0]
+
+
+@dataclass(frozen=True)
+class RheobaseRunConfig:
+    strategy: str
+    min_amplitude: float
+    max_amplitude: float
+    fixed_amplitude: float
+    pulse_ms: float
+    max_pulse_ms: float
+    duration_tolerance_ms: float
+    recovery_ms: float
+    response_ms: float
+    neuron_id: int
+    threshold_mv: float
+    tolerance: float
+    max_iterations: int
+    stim_dt: float
+    n_neurons: int
 
 
 class RheobaseDialog(_SelfRaisingDialog):
@@ -44,36 +430,28 @@ class RheobaseDialog(_SelfRaisingDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Cached modeless routine windows must outlive transient host windows;
+        # detach an optional host parent to avoid Qt deleting the cache first.
+        if parent is not None:
+            self.setParent(None)
         self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
         self.editor = editor
         self.project = editor.project
+        self._backend = RheobaseBackend(self)
+        self._backend.on_advance = self._advance_domain
+        self._backend.on_summarize = self._final_summary
+        self._backend.on_summarize_fixed_amplitude = self._final_fixed_amplitude_summary
+        self._backend.on_log = self._append_log
+        self._backend.on_measurement = self._on_measurement_changed
+        self._backend.on_finished = self._on_backend_finished
         self._running = False
         self._awaiting_simulation = False
         self._paused = False
         self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
-        self._iteration = 0
-        self._view_block_samples: int | None = None
-        self._low = 0.0
-        self._high = 0.0
-        self._pending_amplitude = 0.0
-        self._pulse_onset_seconds = 0.0
-        self._duration_values_ms: list[float] = []
-        self._duration_index = 0
-        self._current_duration_ms = 0.0
-        self._duration_low_ms = 0.0
-        self._duration_high_ms = 0.0
-        self._duration_stage = "idle"
-        self._samples: list[tuple[float, float, int]] = []
-        self._thresholds: list[tuple[float, float]] = []
-        self._rheobase: float | None = None
-        self._chronaxie_ms: float | None = None
-        self._fixed_spiking_duration_ms: float | None = None
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
-        self._logged_recovery_note = False
-        self._resolution_warning_logged = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -257,7 +635,7 @@ class RheobaseDialog(_SelfRaisingDialog):
         )
 
         # No Qt parent for the popups - see StimHeatmapWindow's construction
-        # in input_designer_dialog.py for why (KWin/X11 groups a whole chain
+        # in stdp_synaptic_tuning_dialog.py for why (KWin/X11 groups a whole chain
         # of transient windows sharing one owner, so clicking one never
         # brings it above a sibling in the same chain).
         self.plot_window = _SelfRaisingDialog()
@@ -291,6 +669,7 @@ class RheobaseDialog(_SelfRaisingDialog):
         self.lbl_estimate = QtWidgets.QLabel("", self)
         layout.addWidget(self.lbl_estimate)
         self.log = QtWidgets.QPlainTextEdit(self)
+        self._backend.on_log = self._append_log
         self.log.setMaximumHeight(130)
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
@@ -486,8 +865,8 @@ class RheobaseDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        if not self._confirm_start_over_existing_input():
-            self._append_log("Routine cancelled; existing input kept.")
+        if not confirm_discard_unsimulated_input(self, self.editor):
+            self._append_log("Routine cancelled; unsimulated input kept.")
             return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
@@ -522,101 +901,42 @@ class RheobaseDialog(_SelfRaisingDialog):
         ):
             self._finish("Maximum pulse duration must be at least the minimum.")
             return
+        stim = self._require_stim()
+        config = RheobaseRunConfig(
+            strategy=strategy,
+            min_amplitude=min_amplitude,
+            max_amplitude=max_amplitude,
+            fixed_amplitude=self.spn_fixed_amplitude.value(),
+            pulse_ms=self.spn_pulse_ms.value(),
+            max_pulse_ms=self.spn_max_pulse_ms.value(),
+            duration_tolerance_ms=self.spn_duration_tolerance_ms.value(),
+            recovery_ms=self.spn_recovery_ms.value(),
+            response_ms=self.spn_response_ms.value(),
+            neuron_id=self.spn_neuron.value(),
+            threshold_mv=self.spn_threshold_mv.value(),
+            tolerance=self.spn_tolerance.value(),
+            max_iterations=self.spn_max_iterations.value(),
+            stim_dt=float(stim.dt),
+            n_neurons=int(stim.values.shape[1]),
+        )
+        if clear_log:
+            self.log.clear()
         self._running = True
-        self._awaiting_simulation = False
-        self._phase = "idle"
-        self._iteration = 0
-        self._view_block_samples = None
-        self._low = min_amplitude
-        self._high = max_amplitude
-        self._pending_amplitude = max_amplitude
-        self._pulse_onset_seconds = 0.0
-        self._duration_values_ms = self._duration_sweep_values()
-        self._duration_index = 0
-        self._current_duration_ms = self.spn_pulse_ms.value()
-        self._duration_low_ms = self.spn_pulse_ms.value()
-        self._duration_high_ms = self.spn_max_pulse_ms.value()
-        self._duration_stage = "idle"
-        self._samples = []
-        self._thresholds = []
-        self._rheobase = None
-        self._chronaxie_ms = None
-        self._fixed_spiking_duration_ms = None
-        self._logged_recovery_note = False
-        self._resolution_warning_logged = False
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_pause.setEnabled(True)
-        if clear_log:
-            self.log.clear()
-        self._maybe_log_duration_resolution_warning()
         self._append_log(
-            f"Estimated simulations for the current settings: "
-            f"~{self._estimated_probe_count()}."
+            f"Estimated simulations for the current settings: ~{self._estimated_probe_count()}."
         )
-        self._update_plot()
-        if fixed_amplitude:
-            self._begin_fixed_amplitude_duration_search()
-        elif fixed_duration:
-            self._begin_duration_search(self.spn_pulse_ms.value(), "fixed duration")
-        else:
-            self._begin_strength_duration_search()
-
-    def _duration_sweep_values(self) -> list[float]:
-        return [float(self.spn_pulse_ms.value()), float(self.spn_max_pulse_ms.value())]
-
-    def _begin_strength_duration_search(self) -> None:
-        self._duration_stage = "rheobase"
-        self._begin_duration_search(
-            self.spn_max_pulse_ms.value(), "rheobase estimate at maximum duration"
-        )
-
-    def _begin_duration_search(self, duration_ms: float, description: str) -> None:
-        min_amplitude = self.spn_min_amplitude.value()
-        max_amplitude = self.spn_max_amplitude.value()
-        self._current_duration_ms = self._effective_duration_ms(duration_ms)
-        self._low = min_amplitude
-        self._high = max_amplitude
-        self._iteration = 0
-        self._phase = "probe_max"
-        self._append_log(
-            f"Searching duration {self._current_duration_ms:.6g} ms ({description})."
-        )
-        self._probe(max_amplitude)
-
-    def _begin_fixed_amplitude_duration_search(self) -> None:
-        self._duration_stage = "duration_probe_max"
-        self._duration_low_ms = self.spn_pulse_ms.value()
-        self._duration_high_ms = self.spn_max_pulse_ms.value()
-        self._probe_fixed_amplitude_duration(self._duration_high_ms, "maximum duration")
-
-    def _probe_fixed_amplitude_duration(
-        self, duration_ms: float, description: str
-    ) -> None:
-        self._current_duration_ms = self._effective_duration_ms(duration_ms)
-        self._phase = "duration_probe"
-        self._append_log(
-            f"Testing fixed amplitude {self.spn_fixed_amplitude.value():.6g} "
-            f"{self._unit_label()} at duration {self._current_duration_ms:.6g} ms "
-            f"({description})."
-        )
-        self._probe(self.spn_fixed_amplitude.value())
+        self._backend.begin_search(config)
+        return
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
 
     def toggle_pause(self) -> None:
-        self._paused = not self._paused
+        self._backend.toggle_pause()
         self.btn_pause.setText("Resume" if self._paused else "Pause")
-        if self._paused:
-            self._append_log("Paused - the routine will hold after its current step.")
-            return
-        self._append_log("Resumed.")
-        if self._pending_simulation_seconds is not None:
-            seconds = self._pending_simulation_seconds
-            self._pending_simulation_seconds = None
-            self._awaiting_simulation = True
-            self.simulation_requested.emit(seconds)
 
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
@@ -629,112 +949,25 @@ class RheobaseDialog(_SelfRaisingDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
-    def _one_sample_ms(self) -> float:
-        return samples_to_milliseconds(1, self._require_stim().dt)
-
-    def _duration_tolerance_ms(self) -> float:
-        return max(self.spn_duration_tolerance_ms.value(), self._one_sample_ms())
-
-    def _effective_duration_ms(self, duration_ms: float) -> float:
-        _samples, effective_ms = snap_milliseconds_to_dt(
-            duration_ms, self._require_stim().dt
-        )
-        return effective_ms
-
-    def _duration_threshold_exists(self, duration_ms: float) -> bool:
-        return any(
-            abs(existing_duration - duration_ms) <= 1e-9
-            for existing_duration, _threshold in self._thresholds
-        )
-
-    def _duration_already_sampled(self, duration_ms: float) -> bool:
-        return any(
-            abs(existing_duration - duration_ms) <= 1e-9
-            for existing_duration, _amplitude, _spike_count in self._samples
-        )
-
-    def _maybe_log_duration_resolution_warning(self) -> None:
-        if self._resolution_warning_logged:
-            return
-        one_sample_ms = self._one_sample_ms()
-        if self.spn_duration_tolerance_ms.value() >= one_sample_ms:
-            return
-        self._resolution_warning_logged = True
-        self._append_log(
-            f"Input dt is {one_sample_ms:.6g} ms; durations are snapped to that "
-            "grid, so finer tolerances cannot be resolved."
-        )
-
-    def _probe(self, amplitude: float) -> None:
+    def append_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
-        neuron_id = self.spn_neuron.value()
-        if neuron_id >= stim.values.shape[1]:
-            self._finish(f"Neuron {neuron_id} is outside the input array.")
-            return
-        recovery_n, _recovery_ms = snap_milliseconds_to_dt(
-            self.spn_recovery_ms.value(), stim.dt
-        )
-        pulse_n, effective_ms = snap_milliseconds_to_dt(
-            self._current_duration_ms, stim.dt
-        )
-        self._current_duration_ms = effective_ms
-        tail_n, _tail_ms = snap_milliseconds_to_dt(
-            self.spn_response_ms.value(), stim.dt
-        )
-        samples = recovery_n + pulse_n + tail_n
-        block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
-        block[recovery_n : recovery_n + pulse_n, neuron_id] = amplitude
-        block_start = self._append_block(block)
-        self._pending_amplitude = amplitude
-        self._pulse_onset_seconds = (block_start + recovery_n) * stim.dt
-        if not self._logged_recovery_note:
-            self._append_log(
-                "Each probe is appended after the existing input with a recovery "
-                "lead before the pulse so the membrane returns to rest, mirroring "
-                "the STDP routine's append-and-run-forward model."
-            )
-            self._logged_recovery_note = True
-        self._append_log(
-            f"Probe {len(self._samples) + 1}: testing amplitude "
-            f"{amplitude:.6g} {self._unit_label()} at "
-            f"{self._current_duration_ms:.6g} ms."
-        )
-        self._run_to_sample(block_start + samples)
-
-    def _append_block(self, block: np.ndarray) -> int:
-        stim = self._require_stim()
-        project = self._require_project()
-        current_sample = int(np.ceil(project.b2_model.get_sim_time_secs() / stim.dt))
-        start = max(stim.values.shape[0], current_sample)
-        self.editor.apply_pattern(
-            slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
-        )
+        block_start = _append_block_impl(self.editor, stim, block)
         if self.chk_follow_input.isChecked():
             if self._view_block_samples is None:
                 self._view_block_samples = block.shape[0]
-            block_end = start + block.shape[0]
+            block_end = block_start + block.shape[0]
             history_start = max(0, block_end - self._view_block_samples)
-            history_stop = history_start + self._view_block_samples
             self.editor.focus_time_range(
-                history_start * stim.dt, history_stop * stim.dt
+                history_start * stim.dt,
+                (history_start + self._view_block_samples) * stim.dt,
             )
         self._update_stim_heatmap()
-        return start
-
-    def _run_to_sample(self, stop_sample: int) -> None:
-        stim = self._require_stim()
-        current_time = self._require_project().b2_model.get_sim_time_secs()
-        run_seconds = max(stim.dt, stop_sample * stim.dt - current_time)
-        self._request_simulation(run_seconds)
+        return block_start
 
     def _request_simulation(self, seconds: float) -> None:
-        if self._paused:
-            self._pending_simulation_seconds = seconds
-            self._append_log(
-                "Paused - next iteration queued; click Resume to continue."
-            )
-            return
-        self._awaiting_simulation = True
+        self._backend.request_simulation(seconds)
+
+    def request_simulation(self, seconds: float) -> None:
         self.simulation_requested.emit(seconds)
 
     def simulation_finished(self) -> None:
@@ -742,7 +975,10 @@ class RheobaseDialog(_SelfRaisingDialog):
             return
         if not self._awaiting_simulation:
             return
-        self._awaiting_simulation = False
+        self._backend.simulation_finished()
+
+    def _advance_domain(self) -> None:
+        assert self.project is not None
         if self._phase == "initialize_trace":
             self.refresh()
             if not self.cmb_trace.currentText():
@@ -764,198 +1000,7 @@ class RheobaseDialog(_SelfRaisingDialog):
         except ValueError as exc:
             self._finish(f"Spike measurement failed: {exc}")
             return
-        amplitude = self._pending_amplitude
-        self._samples.append((self._current_duration_ms, amplitude, spike_count))
-        self._append_log(
-            f"Probe {len(self._samples)}: amplitude {amplitude:.6g} "
-            f"{self._unit_label()} at {self._current_duration_ms:.6g} ms -> "
-            f"{self._format_spike_count(spike_count)}."
-        )
-        self._update_plot()
-        if self._phase == "duration_probe":
-            self._handle_fixed_amplitude_duration_result(spike_count)
-            return
-        if self._phase == "probe_max":
-            if spike_count == 0:
-                self._finish(
-                    "No spike at the maximum amplitude "
-                    f"{self.spn_max_amplitude.value():.6g} {self._unit_label()}; "
-                    f"increase the range for {self._current_duration_ms:.6g} ms."
-                )
-                return
-            self._high = self.spn_max_amplitude.value()
-            self._phase = "probe_min"
-            self._probe(self.spn_min_amplitude.value())
-            return
-        if self._phase == "probe_min":
-            if spike_count > 0:
-                self._complete_duration_threshold(
-                    self.spn_min_amplitude.value(),
-                    "Neuron spikes already at the minimum amplitude "
-                    f"{self.spn_min_amplitude.value():.6g} {self._unit_label()}; "
-                    "threshold <= minimum.",
-                )
-                return
-            self._low = self.spn_min_amplitude.value()
-            self._phase = "bisect"
-            self._bisect_step()
-            return
-        if self._phase == "bisect":
-            self._low, self._high = next_bracket(
-                self._low, self._high, amplitude, spike_count > 0
-            )
-            self._bisect_step()
-
-    def _handle_fixed_amplitude_duration_result(self, spike_count: int) -> None:
-        if self._duration_stage == "duration_probe_max":
-            if spike_count == 0:
-                self._update_plot()
-                self._finish(self._final_fixed_amplitude_summary())
-                return
-            self._duration_high_ms = self._current_duration_ms
-            self._duration_stage = "duration_probe_min"
-            self._probe_fixed_amplitude_duration(
-                self.spn_pulse_ms.value(), "minimum duration"
-            )
-            return
-        if self._duration_stage == "duration_probe_min":
-            if spike_count > 0:
-                self._fixed_spiking_duration_ms = self._current_duration_ms
-                self._update_plot()
-                self._finish(self._final_fixed_amplitude_summary())
-                return
-            self._duration_low_ms = self._current_duration_ms
-            self._duration_stage = "duration_bisect"
-            self._bisect_fixed_amplitude_duration()
-            return
-        if self._duration_stage == "duration_bisect":
-            if spike_count > 0:
-                self._duration_high_ms = self._current_duration_ms
-            else:
-                self._duration_low_ms = self._current_duration_ms
-            self._bisect_fixed_amplitude_duration()
-
-    def _bisect_fixed_amplitude_duration(self) -> None:
-        if (
-            self._duration_high_ms - self._duration_low_ms
-            <= self._duration_tolerance_ms()
-        ):
-            self._fixed_spiking_duration_ms = self._duration_high_ms
-            self._update_plot()
-            self._finish(self._final_fixed_amplitude_summary())
-            return
-        mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
-        snapped_mid = self._effective_duration_ms(mid)
-        if self._duration_already_sampled(snapped_mid):
-            self._fixed_spiking_duration_ms = self._duration_high_ms
-            self._update_plot()
-            self._finish(self._final_fixed_amplitude_summary())
-            return
-        self._probe_fixed_amplitude_duration(mid, "duration bisection")
-
-    def _bisect_step(self) -> None:
-        if bisection_converged(self._low, self._high, self.spn_tolerance.value()):
-            self._complete_duration_threshold(
-                self._high,
-                f"Threshold at {self._current_duration_ms:.6g} ms ~= "
-                f"{self._high:.6g} {self._unit_label()} "
-                f"(bracket [{self._low:.6g}, {self._high:.6g}]).",
-            )
-            return
-        if self._iteration >= self.spn_max_iterations.value():
-            self._complete_duration_threshold(
-                self._high,
-                "Maximum iterations reached; "
-                f"threshold at {self._current_duration_ms:.6g} ms ~= "
-                f"{self._high:.6g} {self._unit_label()}.",
-            )
-            return
-        self._iteration += 1
-        self._probe(0.5 * (self._low + self._high))
-
-    def _complete_duration_threshold(self, threshold: float, message: str) -> None:
-        self._thresholds.append((self._current_duration_ms, threshold))
-        self._update_strength_duration_metrics()
-        self._update_plot()
-        self._append_log(message)
-        strategy = self.cmb_sweeping_strategy.currentText()
-        if strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY:
-            self._finish(self._final_summary())
-            return
-        self._handle_strength_duration_threshold()
-
-    def _handle_strength_duration_threshold(self) -> None:
-        if self._duration_stage == "rheobase":
-            if self.spn_max_pulse_ms.value() == self.spn_pulse_ms.value():
-                self._finish(self._final_summary())
-                return
-            self._duration_stage = "duration_min"
-            self._begin_duration_search(
-                self.spn_pulse_ms.value(), "minimum duration bound"
-            )
-            return
-        if self._duration_stage == "duration_min":
-            target = 2.0 * self._rheobase if self._rheobase is not None else None
-            threshold = self._thresholds[-1][1]
-            if target is None or threshold <= target:
-                self._finish(self._final_summary())
-                return
-            self._duration_low_ms = self._current_duration_ms
-            self._duration_high_ms = self.spn_max_pulse_ms.value()
-            self._duration_stage = "duration_chronaxie_bisect"
-            self._bisect_strength_duration()
-            return
-        if self._duration_stage == "duration_chronaxie_bisect":
-            target = 2.0 * self._rheobase if self._rheobase is not None else None
-            threshold = self._thresholds[-1][1]
-            if target is not None and threshold > target:
-                self._duration_low_ms = self._current_duration_ms
-            else:
-                self._duration_high_ms = self._current_duration_ms
-            self._bisect_strength_duration()
-
-    def _bisect_strength_duration(self) -> None:
-        if (
-            self._duration_high_ms - self._duration_low_ms
-            <= self._duration_tolerance_ms()
-        ):
-            self._update_strength_duration_metrics()
-            self._update_plot()
-            self._finish(self._final_summary())
-            return
-        mid = 0.5 * (self._duration_low_ms + self._duration_high_ms)
-        snapped_mid = self._effective_duration_ms(mid)
-        if self._duration_threshold_exists(snapped_mid):
-            self._update_strength_duration_metrics()
-            self._update_plot()
-            self._finish(self._final_summary())
-            return
-        self._begin_duration_search(mid, "duration bisection")
-
-    def _update_strength_duration_metrics(self) -> None:
-        if not self._thresholds:
-            self._rheobase = None
-            self._chronaxie_ms = None
-            return
-        sorted_thresholds = sorted(self._thresholds, key=lambda item: item[0])
-        self._rheobase = min(threshold for _duration, threshold in sorted_thresholds)
-        target = 2.0 * self._rheobase
-        self._chronaxie_ms = None
-        if len(sorted_thresholds) < 2:
-            return
-        for (d0, a0), (d1, a1) in zip(
-            sorted_thresholds, sorted_thresholds[1:], strict=False
-        ):
-            if (a0 - target) == 0.0:
-                self._chronaxie_ms = d0
-                return
-            if (a0 - target) * (a1 - target) <= 0.0 and a0 != a1:
-                fraction = (target - a0) / (a1 - a0)
-                self._chronaxie_ms = d0 + fraction * (d1 - d0)
-                return
-        first_duration, first_threshold = sorted_thresholds[0]
-        if first_threshold <= target:
-            self._chronaxie_ms = first_duration
+        self._backend.record_probe_result(spike_count)
 
     def _final_summary(self) -> str:
         if self._rheobase is None:
@@ -982,23 +1027,17 @@ class RheobaseDialog(_SelfRaisingDialog):
         )
 
     def _measure_spikes(self, trace: TraceData) -> int:
-        neuron_id = self.spn_neuron.value()
-        matches = np.flatnonzero(trace.indices == neuron_id)
-        if matches.size == 0:
-            raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
-        trace_mv = _to_mv(trace.traces[int(matches[0])], trace.units)
-        dt_ms = 1000.0 * trace.dt
-        onset_ms = 1000.0 * self._pulse_onset_seconds
         # Count spikes over the pulse plus a fixed post-pulse margin, so the
         # window tracks the pulse instead of trailing a long fixed tail after a
         # short pulse (which could catch unrelated rebound activity).
         window_ms = self._current_duration_ms + self.spn_response_ms.value()
-        start = max(0, int(np.floor(onset_ms / dt_ms)))
-        stop = min(
-            trace_mv.size,
-            int(np.ceil((onset_ms + window_ms) / dt_ms)) + 1,
+        return measure_spike_count(
+            trace,
+            self.spn_neuron.value(),
+            self._pulse_onset_seconds,
+            window_ms,
+            self.spn_threshold_mv.value(),
         )
-        return count_spikes(trace_mv[start:stop], self.spn_threshold_mv.value())
 
     def _update_plot(self) -> None:
         self.rheobase_axes.clear()
@@ -1192,19 +1231,85 @@ class RheobaseDialog(_SelfRaisingDialog):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
-        self._running = False
-        self._awaiting_simulation = False
-        self._paused = False
-        self._pending_simulation_seconds = None
-        self._phase = "idle"
+        self._backend.finish(message)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
         self._append_log(message)
 
+    @property
+    def _running(self) -> bool:
+        return self._backend.running
+
+    @_running.setter
+    def _running(self, value: bool) -> None:
+        self._backend.running = value
+
+    @property
+    def _awaiting_simulation(self) -> bool:
+        return self._backend.awaiting_simulation
+
+    @_awaiting_simulation.setter
+    def _awaiting_simulation(self, value: bool) -> None:
+        self._backend.awaiting_simulation = value
+
+    @property
+    def _paused(self) -> bool:
+        return self._backend.paused
+
+    @_paused.setter
+    def _paused(self, value: bool) -> None:
+        self._backend.paused = value
+
+    @property
+    def _pending_simulation_seconds(self) -> float | None:
+        return self._backend.pending_simulation_seconds
+
+    @_pending_simulation_seconds.setter
+    def _pending_simulation_seconds(self, value: float | None) -> None:
+        self._backend.pending_simulation_seconds = value
+
+    @property
+    def _phase(self) -> str:
+        return self._backend.phase
+
+    @_phase.setter
+    def _phase(self, value: str) -> None:
+        self._backend.phase = value
+
+    _low = backend_property("low")
+    _high = backend_property("high")
+    _pending_amplitude = backend_property("pending_amplitude")
+    _pulse_onset_seconds = backend_property("pulse_onset_seconds")
+    _duration_values_ms = backend_property("duration_values_ms")
+    _duration_index = backend_property("duration_index")
+    _current_duration_ms = backend_property("current_duration_ms")
+    _duration_low_ms = backend_property("duration_low_ms")
+    _duration_high_ms = backend_property("duration_high_ms")
+    _duration_stage = backend_property("duration_stage")
+    _samples = backend_property("samples")
+    _thresholds = backend_property("thresholds")
+    _rheobase = backend_property("rheobase")
+    _chronaxie_ms = backend_property("chronaxie_ms")
+    _fixed_spiking_duration_ms = backend_property("fixed_spiking_duration_ms")
+    _iteration = backend_property("iteration")
+    _view_block_samples = backend_property("view_block_samples")
+    _logged_recovery_note = backend_property("logged_recovery_note")
+    _resolution_warning_logged = backend_property("resolution_warning_logged")
+
     def _append_log(self, message: str) -> None:
         self.log.appendPlainText(message)
+
+    def _on_measurement_changed(self) -> None:
+        self._update_plot()
+        self._update_stim_heatmap()
+
+    def _on_backend_finished(self, message: str) -> None:
+        self.btn_start.setEnabled(True)
+        self.btn_stop.setEnabled(False)
+        self.btn_pause.setEnabled(False)
+        self.btn_pause.setText("Pause")
 
     def _unit_label(self) -> str:
         return self.lbl_units.text() or "a.u."
@@ -1265,55 +1370,3 @@ class RheobaseDialog(_SelfRaisingDialog):
             "Estimated simulations for the current settings: "
             f"~{self._estimated_probe_count()}"
         )
-
-    def _nonempty_stim_array_names(self) -> list[str]:
-        project = self.project
-        if project is None:
-            return []
-        return [
-            name
-            for name, stim in project.stim_arrays.items()
-            if bool(np.any(stim.values))
-        ]
-
-    def _prompt_existing_input_choice(self, names: list[str]) -> str:
-        """Ask what to do about non-empty stim arrays; return the chosen action."""
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-        box.setWindowTitle("Existing input")
-        listed = "\n".join(f"  • {name}" for name in names)
-        box.setText(
-            "The routine appends its probe pulses after any existing input, which "
-            "lengthens every simulation. These input arrays already contain "
-            f"input:\n\n{listed}"
-        )
-        box.setInformativeText(
-            "Clear all input arrays first, append after the existing input, or cancel."
-        )
-        clear_button = box.addButton(
-            "Clear all input arrays", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
-        )
-        box.addButton("Append anyway", QtWidgets.QMessageBox.ButtonRole.AcceptRole)
-        cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
-        box.setDefaultButton(cancel_button)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is cancel_button or clicked is None:
-            return "cancel"
-        if clicked is clear_button:
-            return "clear"
-        return "append"
-
-    def _confirm_start_over_existing_input(self) -> bool:
-        """Warn about non-empty stim arrays; return whether to proceed."""
-        names = self._nonempty_stim_array_names()
-        if not names:
-            return True
-        choice = self._prompt_existing_input_choice(names)
-        if choice == "cancel":
-            return False
-        if choice == "clear":
-            self.editor.clear_all_stim_arrays()
-            self.refresh()
-            self._append_log("Cleared all input arrays before starting.")
-        return True

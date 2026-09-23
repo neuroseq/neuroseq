@@ -17,8 +17,12 @@ from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.dynamic_input_blocks import append_block
+from neuroseq.dynamic_input_measurement import EPSPMeasurement
+from neuroseq.dynamic_input_measurement import measure_epsp
+from neuroseq.dynamic_input_routine import RoutineBackend
+from neuroseq.dynamic_input_routine import SimulationHost
+from neuroseq.dynamic_input_routine import backend_property
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 from neuroseq.utils import get_cmap
@@ -29,11 +33,214 @@ if TYPE_CHECKING:
     from neuroseq.stim_editor import StimEditor
 
 
+class StdpSynapticTuningBackend(RoutineBackend):
+    """Lifecycle backend for the synaptic tuning dialog.
+
+    Owns the Qt-free EPSP-targeting decision graph; the dialog supplies
+    rendering, trace measurement, and append-block callbacks.
+    """
+
+    def __init__(self, host: SimulationHost) -> None:
+        super().__init__(host)
+        self.baseline_epsp: float | None = None
+        self.epsp_percentages: list[float] = []
+        self.pairing_times_ms: list[float] = []
+        self.adaptive_pairing_magnitude_ms = 0.0
+        self.probe_pulse_times: list[float] = []
+        self.iteration = 0
+        self.resolution_warning_logged = False
+        self.view_block_samples: int | None = None
+        self.config: StdpSynapticTuningRunConfig | None = None
+
+    def begin_protocol(self, config: StdpSynapticTuningRunConfig) -> None:
+        self.config = config
+        self.begin()
+        self.phase = "idle"
+        self.iteration = 0
+        self.view_block_samples = None
+        self.baseline_epsp = None
+        self.epsp_percentages = []
+        self.pairing_times_ms = []
+        self.adaptive_pairing_magnitude_ms = config.initial_pairing_time_ms
+        self.resolution_warning_logged = False
+        self._measurement_changed()
+        self.probe()
+
+    def _cfg(self) -> StdpSynapticTuningRunConfig:
+        if self.config is None:
+            raise RuntimeError("STDP tuning has not been configured")
+        return self.config
+
+    def probe(self) -> None:
+        c = self._cfg()
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(c.pulse_ms, c.stim_dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(
+            StdpSynapticTuningDialog.LEAD_MS, c.stim_dt
+        )
+        period_n, _period_ms = snap_milliseconds_to_dt(
+            StdpSynapticTuningDialog.PROBE_PERIOD_MS,
+            c.stim_dt,
+            minimum_samples=pulse_n + 1,
+        )
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            StdpSynapticTuningDialog.RESPONSE_TAIL_MS, c.stim_dt
+        )
+        samples = (
+            lead_n
+            + (StdpSynapticTuningDialog.PROBE_PULSES - 1) * period_n
+            + pulse_n
+            + tail_n
+        )
+        block = np.zeros((samples, c.n_neurons), dtype=np.float32)
+        pulse_offsets = [
+            lead_n + index * period_n
+            for index in range(StdpSynapticTuningDialog.PROBE_PULSES)
+        ]
+        for offset in pulse_offsets:
+            block[offset : offset + pulse_n, c.presynaptic_id] = c.amplitude
+        block_start = self._host.append_block(block)
+        self.probe_pulse_times = [
+            (block_start + offset) * c.stim_dt for offset in pulse_offsets
+        ]
+        self.phase = "baseline_probe" if self.baseline_epsp is None else "post_probe"
+        self._log("Appended five presynaptic probe pulses.")
+        self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
+
+    def pairing(self, potentiate: bool) -> None:
+        c = self._cfg()
+        pulse_n, _pulse_ms = snap_milliseconds_to_dt(c.pulse_ms, c.stim_dt)
+        lead_n, _lead_ms = snap_milliseconds_to_dt(
+            StdpSynapticTuningDialog.LEAD_MS, c.stim_dt
+        )
+        adaptive = (
+            c.pairing_strategy == StdpSynapticTuningDialog.ADAPTIVE_PAIRING_STRATEGY
+        )
+        self._maybe_log_pairing_resolution_warning(c.stim_dt)
+        if adaptive:
+            if len(self.epsp_percentages) > 1:
+                epsp_new = self.epsp_percentages[-1]
+                epsp_old = self.epsp_percentages[-2]
+                target_error = abs(epsp_new - c.target)
+                epsp_change = abs(epsp_new - epsp_old)
+                increment = c.pairing_increment_ms
+                if target_error > epsp_change:
+                    self.adaptive_pairing_magnitude_ms -= increment
+                else:
+                    self.adaptive_pairing_magnitude_ms += increment
+            # Keep the magnitude bounded: never below one simulation sample (so
+            # pre and post never collapse to the same time) and never above the
+            # configured spinbox maximum (so it cannot drift away unboundedly).
+            min_magnitude_ms = 1000.0 * c.stim_dt
+            max_magnitude_ms = c.max_pairing_magnitude_ms
+            self.adaptive_pairing_magnitude_ms = min(
+                max_magnitude_ms,
+                max(min_magnitude_ms, self.adaptive_pairing_magnitude_ms),
+            )
+            pairing_time_ms = (
+                self.adaptive_pairing_magnitude_ms
+                if potentiate
+                else -self.adaptive_pairing_magnitude_ms
+            )
+        else:
+            magnitude_ms = c.pairing_interval_ms
+            pairing_time_ms = magnitude_ms if potentiate else -magnitude_ms
+        gap_n, gap_ms = snap_milliseconds_to_dt(abs(pairing_time_ms), c.stim_dt)
+        pairing_time_ms = copysign(gap_ms, pairing_time_ms)
+        tail_n, _tail_ms = snap_milliseconds_to_dt(
+            StdpSynapticTuningDialog.RESPONSE_TAIL_MS, c.stim_dt
+        )
+        samples = lead_n + gap_n + pulse_n + tail_n
+        block = np.zeros((samples, c.n_neurons), dtype=np.float32)
+        pre_before_post = pairing_time_ms >= 0.0
+        first = c.presynaptic_id if pre_before_post else c.postsynaptic_id
+        second = c.postsynaptic_id if pre_before_post else c.presynaptic_id
+        block[lead_n : lead_n + pulse_n, first] = c.amplitude
+        block[lead_n + gap_n : lead_n + gap_n + pulse_n, second] = c.amplitude
+        self._host.append_block(block)
+        self.phase = "pairing"
+        self.pairing_times_ms.append(pairing_time_ms)
+        direction = (
+            "potentiation (pre → post)"
+            if pre_before_post
+            else "depression (post → pre)"
+        )
+        self._log(f"Appended one {direction} pairing at {pairing_time_ms:+.3f} ms.")
+        self._measurement_changed()
+        self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
+
+    def _maybe_log_pairing_resolution_warning(self, dt_seconds: float) -> None:
+        c = self._cfg()
+        if self.resolution_warning_logged:
+            return
+        if c.pairing_strategy != StdpSynapticTuningDialog.ADAPTIVE_PAIRING_STRATEGY:
+            return
+        one_sample_ms = 1000.0 * dt_seconds
+        if c.pairing_increment_ms >= one_sample_ms:
+            return
+        self.resolution_warning_logged = True
+        self._log(
+            f"Input dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
+            "that grid, so finer adaptive increments cannot be resolved."
+        )
+
+    def record_measurement(self, amplitude: float, units: str = "") -> None:
+        c = self._cfg()
+        if self.baseline_epsp is None:
+            if amplitude <= 0.0:
+                self.finish("Baseline EPSP must be positive before relative targeting.")
+                return
+            self.baseline_epsp = amplitude
+            percentage = 100.0
+            self._log(
+                f"Baseline EPSP: {amplitude:.6g} {units} (five-pulse average = 100%)."
+            )
+        else:
+            percentage = 100.0 * amplitude / self.baseline_epsp
+            self._log(
+                f"Current EPSP: {amplitude:.6g} {units} "
+                f"({percentage:.3f}% of baseline; change from initial "
+                f"{percentage - 100.0:+.3f}%)."
+            )
+        self.epsp_percentages.append(percentage)
+        self._measurement_changed()
+        difference = percentage - c.target
+        converged = abs(difference) < c.tolerance
+        if converged and not c.run_all_iterations:
+            self.finish("EPSP is within tolerance; target achieved.")
+            return
+        if self.iteration >= c.max_iterations:
+            self.finish("Maximum plasticity induction iterations reached.")
+            return
+        if converged:
+            self._log(
+                "EPSP is within tolerance, but the routine is configured to "
+                "run through the last iteration."
+            )
+        self.iteration += 1
+        self.pairing(potentiate=difference < 0.0)
+
+    def _advance(self) -> None:
+        if self.on_advance is not None:
+            self.on_advance()
+
+
 @dataclass(frozen=True)
-class EPSPMeasurement:
+class StdpSynapticTuningRunConfig:
+    target: float
+    tolerance: float
+    max_iterations: int
+    run_all_iterations: bool
+    pairing_strategy: str
+    pairing_interval_ms: float
+    initial_pairing_time_ms: float
+    pairing_increment_ms: float
+    max_pairing_magnitude_ms: float
+    presynaptic_id: int
+    postsynaptic_id: int
     amplitude: float
-    pulse_amplitudes: tuple[float, ...]
-    units: str = "mV"
+    pulse_ms: float
+    stim_dt: float
+    n_neurons: int
 
 
 def _set_native_minimized_position(hwnd: int, x: int, y: int) -> bool:
@@ -151,6 +358,42 @@ def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
     else:
         rgba[values != 0] = cmap(1.0)
     return rgba
+
+
+def confirm_discard_unsimulated_input(
+    dialog: QtWidgets.QWidget, editor: StimEditor
+) -> bool:
+    """Warn before starting a routine if doing so would silently discard
+    unrun input, shared by all three routine dialogs' Start handlers.
+
+    Every routine calls editor.reset_stim_array() right before it starts.
+    Stacking routines back to back - each appending after the previous
+    one's already-simulated output - never loses anything, so it needs no
+    confirmation at all. This only prompts for the one case that does:
+    nonzero content past the simulation head, which that trim would
+    otherwise drop without asking.
+    """
+    if editor.current_stim_modifier is None:
+        return True
+    if not editor.current_stim_array_has_unsimulated_tail():
+        return True
+    name = editor.current_stim_modifier.stim_array.name
+    box = QtWidgets.QMessageBox(dialog)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle("Unsimulated input")
+    box.setText(
+        f"'{name}' has pulses beyond the current simulation time. Starting "
+        "this routine discards them - it trims the array back to the "
+        "simulation head first, same as the Reset input array button."
+    )
+    box.setInformativeText("Discard them and start, or cancel.")
+    discard_button = box.addButton(
+        "Discard and start", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+    )
+    cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(cancel_button)
+    box.exec()
+    return box.clickedButton() is discard_button
 
 
 class StimHeatmapWindow(_SelfRaisingDialog):
@@ -330,7 +573,7 @@ class StimHeatmapWindow(_SelfRaisingDialog):
             spine.set_color(text)
 
 
-class InputDesignerDialog(_SelfRaisingDialog):
+class StdpSynapticTuningDialog(_SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
@@ -348,26 +591,25 @@ class InputDesignerDialog(_SelfRaisingDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
+        # Cached modeless routine windows must outlive transient host windows;
+        # detach an optional host parent to avoid Qt deleting the cache first.
+        if parent is not None:
+            self.setParent(None)
         self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
         self.editor = editor
         self.project = editor.project
+        self._backend = StdpSynapticTuningBackend(self)
+        self._backend.on_advance = self._advance_domain
+        self._backend.on_measurement = self._update_plots
         self._running = False
         self._awaiting_simulation = False
         self._paused = False
         self._pending_simulation_seconds: float | None = None
         self._phase = "idle"
-        self._iteration = 0
-        self._view_block_samples: int | None = None
-        self._probe_pulse_times: list[float] = []
-        self._baseline_epsp: float | None = None
-        self._epsp_percentages: list[float] = []
-        self._pairing_times_ms: list[float] = []
-        self._adaptive_pairing_magnitude_ms = 0.0
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
-        self._resolution_warning_logged = False
-        self.setWindowTitle("Design dynamic input")
+        self.setWindowTitle("STDP synaptic tuning")
         self.resize(640, 620)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -552,7 +794,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         # clicked. Each is still closed explicitly in closeEvent() below, so
         # nothing leaks by skipping Qt's parent-child ownership here.
         self.plot_window = _SelfRaisingDialog()
-        self.plot_window.setWindowTitle("Design dynamic input — plots")
+        self.plot_window.setWindowTitle("STDP synaptic tuning — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
         )
@@ -576,7 +818,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         # A third popup: a live, whole-history heatmap of the input pattern
         # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
         self.stim_heatmap_window = StimHeatmapWindow(
-            "Design dynamic input — stimulation pattern"
+            "STDP synaptic tuning — stimulation pattern"
         )
         self._stim_heatmap_window_positioned = False
 
@@ -585,6 +827,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
         )
         layout.addWidget(self.lbl_relative_difference)
         self.log = QtWidgets.QPlainTextEdit(self)
+        self._backend.on_log = self._append_log
         self.log.setMaximumHeight(130)
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
@@ -788,6 +1031,9 @@ class InputDesignerDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
+        if not confirm_discard_unsimulated_input(self, self.editor):
+            self._append_log("Routine cancelled; unsimulated input kept.")
+            return
         # Start from the simulation head so a long left-over stim array does not
         # make the routine simulate a huge empty tail.
         self.editor.reset_stim_array()
@@ -810,38 +1056,37 @@ class InputDesignerDialog(_SelfRaisingDialog):
         if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
             self._finish("Pre- and postsynaptic neuron IDs must differ.")
             return
-        self._running = True
-        self._iteration = 0
-        self._view_block_samples = None
-        self._baseline_epsp = None
-        self._epsp_percentages = []
-        self._pairing_times_ms = []
-        self._adaptive_pairing_magnitude_ms = self.spn_initial_pairing_time_ms.value()
-        self._resolution_warning_logged = False
+        stim = self._require_stim()
+        config = StdpSynapticTuningRunConfig(
+            target=self.spn_target.value(),
+            tolerance=self.spn_tolerance.value(),
+            max_iterations=self.spn_max_iterations.value(),
+            run_all_iterations=self.chk_run_all_iterations.isChecked(),
+            pairing_strategy=self.cmb_pairing_strategy.currentText(),
+            pairing_interval_ms=self.spn_pairing_interval_ms.value(),
+            initial_pairing_time_ms=self.spn_initial_pairing_time_ms.value(),
+            pairing_increment_ms=self.spn_pairing_increment_ms.value(),
+            max_pairing_magnitude_ms=self.spn_initial_pairing_time_ms.maximum(),
+            presynaptic_id=self.spn_presynaptic.value(),
+            postsynaptic_id=self.spn_postsynaptic.value(),
+            amplitude=self.spn_amplitude.value(),
+            pulse_ms=self.spn_pulse_ms.value(),
+            stim_dt=float(stim.dt),
+            n_neurons=int(stim.values.shape[1]),
+        )
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_pause.setEnabled(True)
         if clear_log:
             self.log.clear()
-        self._update_plots()
-        self._update_stim_heatmap()
-        self._append_probe()
+        self._backend.begin_protocol(config)
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
 
     def toggle_pause(self) -> None:
-        self._paused = not self._paused
+        self._backend.toggle_pause()
         self.btn_pause.setText("Resume" if self._paused else "Pause")
-        if self._paused:
-            self._append_log("Paused - the routine will hold after its current step.")
-            return
-        self._append_log("Resumed.")
-        if self._pending_simulation_seconds is not None:
-            seconds = self._pending_simulation_seconds
-            self._pending_simulation_seconds = None
-            self._awaiting_simulation = True
-            self.simulation_requested.emit(seconds)
 
     def _require_stim(self) -> StimArray:
         modifier = self.editor.current_stim_modifier
@@ -854,123 +1099,12 @@ class InputDesignerDialog(_SelfRaisingDialog):
             raise RuntimeError("No project is available.")
         return self.project
 
-    def _append_probe(self) -> None:
-        stim = self._require_stim()
-        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
-        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
-        period_n, _period_ms = snap_milliseconds_to_dt(
-            self.PROBE_PERIOD_MS, stim.dt, minimum_samples=pulse_n + 1
-        )
-        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
-        samples = lead_n + (self.PROBE_PULSES - 1) * period_n + pulse_n + tail_n
-        block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
-        pulse_offsets = [
-            lead_n + index * period_n for index in range(self.PROBE_PULSES)
-        ]
-        for offset in pulse_offsets:
-            block[offset : offset + pulse_n, self.spn_presynaptic.value()] = (
-                self.spn_amplitude.value()
-            )
-        block_start = self._append_block(block)
-        self._probe_pulse_times = [
-            (block_start + offset) * stim.dt for offset in pulse_offsets
-        ]
-        self._phase = "baseline_probe" if self._baseline_epsp is None else "post_probe"
-        self._append_log("Appended five presynaptic probe pulses.")
-        self._run_to_sample(block_start + samples)
-
-    def _append_pairing(self, potentiate: bool) -> None:
-        stim = self._require_stim()
-        pulse_n, _pulse_ms = snap_milliseconds_to_dt(self.spn_pulse_ms.value(), stim.dt)
-        lead_n, _lead_ms = snap_milliseconds_to_dt(self.LEAD_MS, stim.dt)
-        adaptive = (
-            self.cmb_pairing_strategy.currentText() == self.ADAPTIVE_PAIRING_STRATEGY
-        )
-        self._maybe_log_pairing_resolution_warning(stim.dt)
-        if adaptive:
-            if len(self._epsp_percentages) > 1:
-                epsp_new = self._epsp_percentages[-1]
-                epsp_old = self._epsp_percentages[-2]
-                target_error = abs(epsp_new - self.spn_target.value())
-                epsp_change = abs(epsp_new - epsp_old)
-                increment = self.spn_pairing_increment_ms.value()
-                if target_error > epsp_change:
-                    self._adaptive_pairing_magnitude_ms -= increment
-                else:
-                    self._adaptive_pairing_magnitude_ms += increment
-            # Keep the magnitude bounded: never below one simulation sample (so
-            # pre and post never collapse to the same time) and never above the
-            # configured spinbox maximum (so it cannot drift away unboundedly).
-            min_magnitude_ms = 1000.0 * stim.dt
-            max_magnitude_ms = self.spn_initial_pairing_time_ms.maximum()
-            self._adaptive_pairing_magnitude_ms = min(
-                max_magnitude_ms,
-                max(min_magnitude_ms, self._adaptive_pairing_magnitude_ms),
-            )
-            pairing_time_ms = (
-                self._adaptive_pairing_magnitude_ms
-                if potentiate
-                else -self._adaptive_pairing_magnitude_ms
-            )
-        else:
-            magnitude_ms = self.spn_pairing_interval_ms.value()
-            pairing_time_ms = magnitude_ms if potentiate else -magnitude_ms
-        gap_n, gap_ms = snap_milliseconds_to_dt(abs(pairing_time_ms), stim.dt)
-        pairing_time_ms = copysign(gap_ms, pairing_time_ms)
-        tail_n, _tail_ms = snap_milliseconds_to_dt(self.RESPONSE_TAIL_MS, stim.dt)
-        samples = lead_n + gap_n + pulse_n + tail_n
-        block = np.zeros((samples, stim.values.shape[1]), dtype=np.float32)
-        pre_before_post = pairing_time_ms >= 0.0
-        first = (
-            self.spn_presynaptic.value()
-            if pre_before_post
-            else self.spn_postsynaptic.value()
-        )
-        second = (
-            self.spn_postsynaptic.value()
-            if pre_before_post
-            else self.spn_presynaptic.value()
-        )
-        block[lead_n : lead_n + pulse_n, first] = self.spn_amplitude.value()
-        block[lead_n + gap_n : lead_n + gap_n + pulse_n, second] = (
-            self.spn_amplitude.value()
-        )
-        block_start = self._append_block(block)
-        self._phase = "pairing"
-        self._pairing_times_ms.append(pairing_time_ms)
-        direction = (
-            "potentiation (pre → post)"
-            if pre_before_post
-            else "depression (post → pre)"
-        )
-        self._append_log(
-            f"Appended one {direction} pairing at {pairing_time_ms:+.3f} ms."
-        )
-        self._update_plots()
-        self._run_to_sample(block_start + samples)
-
-    def _maybe_log_pairing_resolution_warning(self, dt_seconds: float) -> None:
-        if self._resolution_warning_logged:
-            return
-        if self.cmb_pairing_strategy.currentText() != self.ADAPTIVE_PAIRING_STRATEGY:
-            return
-        one_sample_ms = 1000.0 * dt_seconds
-        if self.spn_pairing_increment_ms.value() >= one_sample_ms:
-            return
-        self._resolution_warning_logged = True
-        self._append_log(
-            f"Input dt is {one_sample_ms:.6g} ms; pairing times are snapped to "
-            "that grid, so finer adaptive increments cannot be resolved."
-        )
+    def append_block(self, block: np.ndarray) -> int:
+        return self._append_block(block)
 
     def _append_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
-        project = self._require_project()
-        current_sample = int(np.ceil(project.b2_model.get_sim_time_secs() / stim.dt))
-        start = max(stim.values.shape[0], current_sample)
-        self.editor.apply_pattern(
-            slice(0, stim.values.shape[1]), slice(start, start + block.shape[0]), block
-        )
+        start = append_block(self.editor, stim, block)
         if self.chk_follow_input.isChecked():
             if self._view_block_samples is None:
                 # Size the live view in units of the first (probe) block so its
@@ -989,23 +1123,10 @@ class InputDesignerDialog(_SelfRaisingDialog):
         self._update_stim_heatmap()
         return start
 
-    def _run_to_sample(self, stop_sample: int) -> None:
-        stim = self._require_stim()
-        current_time = self._require_project().b2_model.get_sim_time_secs()
-        run_seconds = max(stim.dt, stop_sample * stim.dt - current_time)
-        self._request_simulation(run_seconds)
-
     def _request_simulation(self, seconds: float) -> None:
-        """Ask the host to run a simulation, recording that the designer is now
-        waiting for its result so it reacts only to its own run. If paused,
-        defer the request until the user resumes the routine."""
-        if self._paused:
-            self._pending_simulation_seconds = seconds
-            self._append_log(
-                "Paused - next iteration queued; click Resume to continue."
-            )
-            return
-        self._awaiting_simulation = True
+        self._backend.request_simulation(seconds)
+
+    def request_simulation(self, seconds: float) -> None:
         self.simulation_requested.emit(seconds)
 
     def simulation_finished(self) -> None:
@@ -1015,7 +1136,10 @@ class InputDesignerDialog(_SelfRaisingDialog):
             # A simulation the designer did not request (e.g. a manual run)
             # completed; do not advance the closed-loop protocol.
             return
-        self._awaiting_simulation = False
+        self._backend.simulation_finished()
+
+    def _advance_domain(self) -> None:
+        assert self.project is not None
         if self._phase == "initialize_trace":
             self.refresh()
             if not self._is_simulation_voltage_trace(self.cmb_trace.currentText()):
@@ -1029,7 +1153,7 @@ class InputDesignerDialog(_SelfRaisingDialog):
             self._begin_protocol(clear_log=False)
             return
         if self._phase == "pairing":
-            self._append_probe()
+            self._backend.probe()
             return
         self.refresh()
         trace_name = self.cmb_trace.currentText()
@@ -1048,91 +1172,16 @@ class InputDesignerDialog(_SelfRaisingDialog):
         except ValueError as exc:
             self._finish(f"EPSP measurement failed: {exc}")
             return
-        if self._baseline_epsp is None:
-            if measurement.amplitude <= 0.0:
-                self._finish(
-                    "Baseline EPSP must be positive before relative targeting."
-                )
-                return
-            self._baseline_epsp = measurement.amplitude
-            percentage = 100.0
-            self._append_log(
-                f"Baseline EPSP: {measurement.amplitude:.6g} {measurement.units} "
-                "(five-pulse average = 100%)."
-            )
-        else:
-            percentage = 100.0 * measurement.amplitude / self._baseline_epsp
-            self._append_log(
-                f"Current EPSP: {measurement.amplitude:.6g} {measurement.units} "
-                f"({percentage:.3f}% of baseline; change from initial "
-                f"{percentage - 100.0:+.3f}%)."
-            )
-        self._epsp_percentages.append(percentage)
-        self._update_plots()
-        difference = percentage - self.spn_target.value()
-        converged = abs(difference) < self.spn_tolerance.value()
-        if converged and not self.chk_run_all_iterations.isChecked():
-            self._finish("EPSP is within tolerance; target achieved.")
-            return
-        if self._iteration >= self.spn_max_iterations.value():
-            self._finish("Maximum plasticity induction iterations reached.")
-            return
-        if converged:
-            self._append_log(
-                "EPSP is within tolerance, but the routine is configured to "
-                "run through the last iteration."
-            )
-        self._iteration += 1
-        self._append_pairing(potentiate=difference < 0.0)
+        self._backend.record_measurement(measurement.amplitude, measurement.units)
 
     def _measure_epsps(self, trace: TraceData) -> EPSPMeasurement:
         """Associate the shared EPSP plugin's detections with probe pulses."""
-        neuron_id = self.spn_postsynaptic.value()
-        matches = np.flatnonzero(trace.indices == neuron_id)
-        if matches.size == 0:
-            raise ValueError(
-                f"Postsynaptic neuron {neuron_id} is not recorded in the "
-                "selected trace."
-            )
-        trace_mv = _to_mv(trace.traces[int(matches[0])], trace.units)
-        dt_ms = 1000.0 * trace.dt
-        baseline_ms = 12.0
-        response_ms = 40.0
-        amplitudes: list[float] = []
-        for pulse_time in self._probe_pulse_times:
-            onset_ms = 1000.0 * pulse_time
-            start_ms = max(0.0, onset_ms - baseline_ms)
-            stop_ms = onset_ms + response_ms
-            start = max(0, int(np.floor(start_ms / dt_ms)))
-            stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
-            if start >= trace_mv.size:
-                trace_duration_ms = trace_mv.size * dt_ms
-                raise ValueError(
-                    f"The selected trace ends at {trace_duration_ms:.3f} ms, "
-                    f"before the probe at {onset_ms:.3f} ms. Select the current "
-                    "simulation voltage trace and try again."
-                )
-            detection = detect_epsps(trace_mv[start:stop], dt_ms)
-            relative_onset_ms = onset_ms - start * dt_ms
-            sample_tolerance_ms = 0.5 * dt_ms
-            candidates = detection.amplitudes_mv[
-                (detection.times_ms >= relative_onset_ms - sample_tolerance_ms)
-                & (
-                    detection.times_ms
-                    <= relative_onset_ms + response_ms + sample_tolerance_ms
-                )
-            ]
-            if candidates.size == 0:
-                raise ValueError(
-                    f"No EPSP was detected after the probe at {onset_ms:.3f} ms."
-                )
-            # Attribute the dominant depolarisation in the response window to the
-            # probe. Taking the largest candidate avoids latching onto a smaller
-            # spurious deflection that happens to precede the real EPSP.
-            amplitudes.append(float(np.max(candidates)))
-        return EPSPMeasurement(
-            amplitude=float(np.mean(amplitudes)),
-            pulse_amplitudes=tuple(amplitudes),
+        return measure_epsp(
+            trace,
+            self.spn_postsynaptic.value(),
+            self._probe_pulse_times,
+            baseline_ms=12.0,
+            response_ms=40.0,
         )
 
     def _update_plots(self) -> None:
@@ -1236,16 +1285,61 @@ class InputDesignerDialog(_SelfRaisingDialog):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
-        self._running = False
-        self._awaiting_simulation = False
-        self._paused = False
-        self._pending_simulation_seconds = None
-        self._phase = "idle"
+        self._backend.finish(message)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
         self._append_log(message)
+
+    @property
+    def _running(self) -> bool:
+        return self._backend.running
+
+    @_running.setter
+    def _running(self, value: bool) -> None:
+        self._backend.running = value
+
+    @property
+    def _awaiting_simulation(self) -> bool:
+        return self._backend.awaiting_simulation
+
+    @_awaiting_simulation.setter
+    def _awaiting_simulation(self, value: bool) -> None:
+        self._backend.awaiting_simulation = value
+
+    @property
+    def _paused(self) -> bool:
+        return self._backend.paused
+
+    @_paused.setter
+    def _paused(self, value: bool) -> None:
+        self._backend.paused = value
+
+    @property
+    def _pending_simulation_seconds(self) -> float | None:
+        return self._backend.pending_simulation_seconds
+
+    @_pending_simulation_seconds.setter
+    def _pending_simulation_seconds(self, value: float | None) -> None:
+        self._backend.pending_simulation_seconds = value
+
+    @property
+    def _phase(self) -> str:
+        return self._backend.phase
+
+    @_phase.setter
+    def _phase(self, value: str) -> None:
+        self._backend.phase = value
+
+    _baseline_epsp = backend_property("baseline_epsp")
+    _epsp_percentages = backend_property("epsp_percentages")
+    _pairing_times_ms = backend_property("pairing_times_ms")
+    _adaptive_pairing_magnitude_ms = backend_property("adaptive_pairing_magnitude_ms")
+    _probe_pulse_times = backend_property("probe_pulse_times")
+    _iteration = backend_property("iteration")
+    _resolution_warning_logged = backend_property("resolution_warning_logged")
+    _view_block_samples = backend_property("view_block_samples")
 
     def _append_log(self, message: str) -> None:
         self.log.appendPlainText(message)

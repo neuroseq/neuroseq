@@ -15,6 +15,122 @@ from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import get_cmap
 
 
+class MinimumStimulusOverlay(fpl.Graphic):
+    """Marks every contiguous run of same-sign nonzero stimulus samples with
+    two shapes, one per neuron row, batched into two `pygfx.Line` objects:
+
+    - a "fill" segment spanning the run's true world-space extent (full
+      row height via `thickness_space="world"`, thickness=1.0), so a wide
+      pulse renders as one seamless block - the same shape the main heatmap
+      image would show if it weren't drawn at (near-)zero alpha for a
+      low-amplitude sample. Building one segment *per sample* instead of
+      per run (an earlier version of this overlay did) leaves a visible
+      gap between adjacent samples wherever they render narrower than the
+      pixel spacing between them, breaking a single continuous pulse into
+      what looks like a rapid train of short separate pulses.
+    - a "marker" at the run's midpoint with a fixed on-screen width
+      (`thickness_space="screen"`) spanning the same full row height, so
+      the run stays visible even if its world-space extent collapses
+      below one screen pixel when zoomed far out (the fill segment alone
+      would vanish at that point, same as the main image does).
+
+    Both materials disable depth test/write: this overlay sits above the
+    main stimulus image in z so it isn't hidden by it, but the hover-value
+    text (drawn elsewhere at a lower z) must remain readable on top of any
+    stimulus representation, and must not be culled by this overlay having
+    written a nearer depth value first.
+    """
+
+    def __init__(
+        self,
+        values: np.ndarray,
+        dt_ms: float,
+        stim_type: StimType,
+        *,
+        thickness: float,
+        z: float,
+        alpha: float = 1.0,
+    ) -> None:
+        super().__init__()
+        cmap = get_cmap(stim_type, alpha=alpha).to_mpl()
+        positive_color = np.asarray(cmap(1.0), dtype=np.float32)
+        negative_color = np.asarray(cmap(0.0), dtype=np.float32)
+
+        n_time, n_neurons = values.shape
+        fill_positions: list[list[float]] = []
+        fill_colors: list[np.ndarray] = []
+        marker_positions: list[list[float]] = []
+        marker_colors: list[np.ndarray] = []
+        for neuron in range(n_neurons):
+            row = values[:, neuron]
+            nonzero = row != 0
+            if not nonzero.any():
+                continue
+            sign = np.sign(row)
+            # A new run starts wherever the nonzero state changes, or - for
+            # bidirectional (External) stim only - the sign flips without an
+            # intervening zero sample.
+            change = np.empty(n_time, dtype=bool)
+            change[0] = True
+            change[1:] = (nonzero[1:] != nonzero[:-1]) | (
+                nonzero[1:] & nonzero[:-1] & (sign[1:] != sign[:-1])
+            )
+            run_starts = np.flatnonzero(change)
+            run_stops = np.r_[run_starts[1:], n_time]
+            for start, stop in zip(run_starts, run_stops, strict=True):
+                if not nonzero[start]:
+                    continue
+                color = positive_color if sign[start] > 0 else negative_color
+                x_start = start * dt_ms
+                x_stop = stop * dt_ms
+                fill_positions.append([x_start, float(neuron), z])
+                fill_positions.append([x_stop, float(neuron), z])
+                fill_colors.append(color)
+                fill_colors.append(color)
+                x_mid = 0.5 * (x_start + x_stop)
+                marker_positions.append([x_mid, neuron - 0.5, z])
+                marker_positions.append([x_mid, neuron + 0.5, z])
+                marker_colors.append(color)
+                marker_colors.append(color)
+
+        group = pygfx.Group()
+        if fill_positions:
+            geometry = pygfx.Geometry(
+                positions=np.asarray(fill_positions, dtype=np.float32),
+                colors=np.asarray(fill_colors, dtype=np.float32),
+            )
+            material = pygfx.LineSegmentMaterial(
+                thickness=1.0,
+                thickness_space="world",
+                color_mode="vertex",
+                aa=True,
+                depth_test=False,
+                depth_write=False,
+            )
+            self.fill_line = pygfx.Line(geometry, material)
+            group.add(self.fill_line)
+        else:
+            self.fill_line = None
+        if marker_positions:
+            geometry = pygfx.Geometry(
+                positions=np.asarray(marker_positions, dtype=np.float32),
+                colors=np.asarray(marker_colors, dtype=np.float32),
+            )
+            material = pygfx.LineSegmentMaterial(
+                thickness=thickness,
+                thickness_space="screen",
+                color_mode="vertex",
+                aa=True,
+                depth_test=False,
+                depth_write=False,
+            )
+            self.marker_line = pygfx.Line(geometry, material)
+            group.add(self.marker_line)
+        else:
+            self.marker_line = None
+        self._set_world_object(group)
+
+
 def apply_cmap_alpha(image_graphic: fpl.ImageGraphic, cmap: object) -> None:
     """`add_image()` ignores a colormap's alpha channel; write it into the
     texture directly instead (e.g. so zero-valued stim stays transparent)."""
@@ -62,8 +178,8 @@ class StimWidget(TimeseriesWidget):
         self._background_stim_arrays: list[tuple[np.ndarray, str, float, StimType]] = []
         self.keep_short_stimuli_visible = True
         self.minimum_stimulus_pixels = 4.0
-        self.minimum_size_graphic: fpl.ScatterGraphic | None = None
-        self._background_minimum_size_graphics: list[fpl.ScatterGraphic] = []
+        self.minimum_size_graphic: MinimumStimulusOverlay | None = None
+        self._background_minimum_size_graphics: list[MinimumStimulusOverlay] = []
 
     def contextMenuEvent(self, event) -> None:
         self.context_menu.exec(event.globalPos())
@@ -295,35 +411,29 @@ class StimWidget(TimeseriesWidget):
         stim_type: StimType,
         *,
         alpha: float = 1.0,
-    ) -> fpl.ScatterGraphic | None:
-        """Overlay nonzero samples with square, screen-sized markers."""
-        time_indices, neuron_indices = np.nonzero(values)
-        if time_indices.size == 0:
+    ) -> MinimumStimulusOverlay | None:
+        """Overlay nonzero samples with fixed-screen-width, full-row-height
+        vertical line segments (see MinimumStimulusOverlay).
+
+        Colors render at a fixed alpha, decoupled from magnitude (mirroring
+        _stim_pulse_rgba in stdp_synaptic_tuning_dialog.py): the whole point
+        of this overlay is to guarantee a stimulus stays visible regardless
+        of amplitude or zoom, so a low-amplitude sample must not fade toward
+        transparent the way it legitimately does in the main heatmap image -
+        that would silently defeat the guarantee for anything but
+        near-maximum-amplitude pulses.
+        """
+        if not np.any(values):
             return None
-        sample_values = values[time_indices, neuron_indices]
-        vmax = float(np.max(np.abs(values))) or 1.0
-        if stim_type == StimType.External:
-            normalized_values = (sample_values + vmax) / (2.0 * vmax)
-        else:
-            normalized_values = np.abs(sample_values) / vmax
-        colors = get_cmap(stim_type, alpha=alpha)(normalized_values).astype(np.float32)
-        positions = np.column_stack(
-            (
-                (time_indices + 0.5) * dt_ms,
-                neuron_indices,
-                np.full(time_indices.shape, self.MINIMUM_SIZE_Z),
-            )
-        ).astype(np.float32)
-        graphic = self.subplot.add_scatter(
-            positions,
-            colors=colors,
-            sizes=self.minimum_stimulus_pixels,
-            size_space="screen",
-            uniform_size=True,
-            markers="s",
-            uniform_marker=True,
-            edge_width=0.0,
+        graphic = MinimumStimulusOverlay(
+            values,
+            dt_ms,
+            stim_type,
+            thickness=self.minimum_stimulus_pixels,
+            z=self.MINIMUM_SIZE_Z,
+            alpha=alpha,
         )
+        self.subplot.add_graphic(graphic, center=False)
         graphic.visible = self.keep_short_stimuli_visible
         return graphic
 

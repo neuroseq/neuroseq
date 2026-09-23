@@ -121,7 +121,7 @@ to overwrite, or **Reset start time** to rewind the cursor.
 extend a stim array, run a simulation, analyze its traces, and decide what to
 append next. Its first routine uses five-pulse EPSP measurements and STDP
 pairings to move a postsynaptic response toward a percentage target. See the
-dedicated [Design dynamic input guide](input_designer.md) for setup, controls, the
+dedicated [Design dynamic input guide](stdp_synaptic_tuning.md) for setup, controls, the
 decision algorithm, live plots, and current limitations.
 
 ## Looping a stim array

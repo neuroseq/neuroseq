@@ -1,0 +1,790 @@
+[IMPLEMENTED] dynamic_input_shared_backend — Extract a reusable closed-loop backend for RheobaseDialog/StdpSynapticTuningDialog/StdpWindowDialog; fix append-time gap drift
+==============================================================================================================================================================
+Implemented across four rounds (see .ai_dev/reviews/dynamic_input_shared_backend.txt
+for the full history); Round 4 implemented directly in this working tree
+(not by Codex), matching the ROUND 3 design in that review file. See
+.ai_dev/specs/dynamic_input_shared_backend.md for the as-built
+documentation. Kept here for the original design rationale.
+==============================================================================================================================================================
+
+Two changes, bundled because the second is cheapest to build INTO the first
+rather than fixed three times and then deduplicated:
+
+  1. Extract the near-identical state machine / simulation-orchestration /
+     block-building / measurement logic that RheobaseDialog,
+     StdpSynapticTuningDialog, and StdpWindowDialog each currently
+     reimplement from scratch into a small set of shared, mostly-Qt-free
+     modules.
+  2. Fix a real gap-timing bug in the shared block-append step: a global,
+     user-configurable setting can silently inflate the gap between
+     consecutive appended blocks beyond what a routine's own parameters
+     configure.
+
+Explicitly NOT part of this handoff: the "follow new input" live-view
+camera behavior (`chk_follow_input`/`spn_history_blocks`/
+`_view_block_samples`, the trailing-window `focus_time_range` call in each
+dialog's `_append_block`/`_place_block`). Leave it exactly as it is today -
+migrate it unchanged, do not alter its behavior. See CHANGE 4 step 4 for
+where it plugs back in around the new shared block-builder.
+
+Files to create:
+    src/neuroseq/dynamic_input_measurement.py
+    src/neuroseq/dynamic_input_blocks.py
+    src/neuroseq/dynamic_input_routine.py
+    tests/test_dynamic_input_measurement.py
+    tests/test_dynamic_input_blocks.py
+    tests/test_dynamic_input_routine.py
+
+Files to change:
+    src/neuroseq/rheobase_dialog.py
+    src/neuroseq/stdp_synaptic_tuning_dialog.py
+    src/neuroseq/stdp_window_dialog.py
+    src/neuroseq/stim_editor.py            (typing update only)
+    tests/test_rheobase_dialog.py
+    tests/test_stdp_synaptic_tuning_dialog.py
+    tests/test_stdp_window_dialog.py
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+BACKGROUND — read before touching anything
+════════════════════════════════════════════════════════════════════════════════════════════
+
+All three dialogs implement the same "closed-loop routine" shape: append a
+stim block, ask the host app to run Brian2 forward over it, react to the
+result in `simulation_finished()` by either finishing or deciding and
+appending the next block. This was a DELIBERATE prior choice, not an
+oversight — when RheobaseDialog was built (see
+.ai_dev/handoffs/rheobase_dynamic_input_routine.txt), the handoff explicitly
+said "A full shared base class is a NON-GOAL for this handoff," to avoid
+refactor risk while the second routine was still being proven out. That
+tradeoff has now been paid off three times over (StdpWindowDialog repeated
+the same duplication again) and it's time to collect on it.
+
+Confirmed duplicated near-verbatim across all three files (same names, same
+bodies, only the internal phase-name strings differ):
+    - The run/pause/resume/finish flags: `_running`, `_awaiting_simulation`,
+      `_paused`, `_pending_simulation_seconds`, `_phase`.
+    - `_request_simulation(seconds)` / `_run_to_sample(stop_sample)`.
+    - `simulation_finished()` / `simulation_failed(message)` / `_finish(message)`.
+    - `_append_block`/`_place_block`: compute a start sample, call
+      `self.editor.apply_pattern(...)`, then a "follow" step
+      (`chk_follow_input`/`focus_time_range`) that is UNCHANGED by this
+      handoff - see CHANGE 4 step 4.
+    - The measurement plumbing: `EPSPMeasurement` (defined once, in
+      stdp_synaptic_tuning_dialog.py, and imported into stdp_window_dialog.py
+      — a dialog importing a dataclass from a sibling dialog module is
+      itself a symptom of the missing shared module), plus near-identical
+      trace-windowing bodies in `_measure_spikes` (rheobase) and
+      `_measure_epsps` (the other two).
+
+Only Qt-chrome helpers are currently shared (`_SelfRaisingDialog`,
+`_WheelToScrollFilter`, `_wrap_in_scroll_area`, `_set_native_minimized_position`,
+`StimHeatmapWindow` — all still live in stdp_synaptic_tuning_dialog.py and
+stay there, untouched by this handoff).
+
+--------------------------------------------------------------------------------
+Bug being fixed alongside the extraction: silent gap inflation
+--------------------------------------------------------------------------------
+
+`_append_block` today computes `start = max(stim.values.shape[0], current_sample)`
+where `current_sample = ceil(project.b2_model.get_sim_time_secs() / stim.dt)`.
+This is meant to always agree with the array's own length, but
+`Project.run_simulation` (project.py:1350-1368) does this BEFORE running:
+
+    self.pad_stim_arrays(
+        self.b2_model.get_sim_time_secs() + time_seconds + stim_array_padding_seconds
+    )
+
+`stim_array_padding_seconds` comes from a global, user-configurable setting
+(`Settings.stim_padding_secs`, default 0, changed via File > "Input Automatic
+Padding", gui.py:2761). `pad_stim_arrays` only ever GROWS an array
+(`ResizableReversibleAction._ensure_padded`, stim_array_modifier.py:108-110,
+confirms there is no complementary shrink anywhere in that call path). So
+whenever that setting is nonzero, every simulation run silently zero-pads the
+stim array beyond the block's intended end — while the simulation clock only
+advances by `time_seconds`. `_append_block`'s `max(...)` then prefers the
+(now inflated) array length over the true simulation clock, and the NEXT
+probe's gap silently grows by the padding amount, on top of whatever the
+routine's own recovery/response parameters configured — invisibly, with
+nothing in the log or plots showing why.
+
+The fix: trim the array back to the true simulation head, via the EXISTING
+`StimEditor.reset_stim_array()` (stim_editor.py:405-425), before every
+append — not just once at routine start, which is all that happens today.
+Its own docstring already guarantees safety: "never cuts into the recorded
+simulation (it only removes the unused trailing tail)," and it short-circuits
+cheaply (stim_editor.py:423-424) when there's nothing to trim, so calling it
+unconditionally before every block costs nothing extra in the common
+(padding=0) case and silently self-corrects in the case it doesn't.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 1 — src/neuroseq/dynamic_input_measurement.py (new, no Qt)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+Move `EPSPMeasurement` out of stdp_synaptic_tuning_dialog.py (currently at
+line 32-36) into this new module, and consolidate the two near-identical
+`_measure_epsps` bodies (stdp_synaptic_tuning_dialog.py:1078-1126,
+stdp_window_dialog.py's equivalent — grep it, same windowing math) into one
+function. `RheobaseDialog._measure_spikes` (rheobase_dialog.py:974-991) also
+moves here as `measure_spike_count`, sharing the same neuron-row/mV-lookup
+helper.
+
+    from __future__ import annotations
+
+    from dataclasses import dataclass
+
+    import brian2.numpy_ as np
+
+    from neuroseq.data import TraceData
+    from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
+    from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+    from neuroseq.rheobase import count_spikes
+
+
+    @dataclass(frozen=True)
+    class EPSPMeasurement:
+        amplitude: float
+        pulse_amplitudes: tuple[float, ...]
+        units: str = "mV"
+
+
+    class NoEpspDetected(ValueError):
+        """No EPSP was found in a probe's response window.
+
+        A ValueError subclass so existing `except ValueError:` call sites in
+        the dialogs keep working unchanged - StdpSynapticTuningDialog today
+        catches plain ValueError around its measurement call, and
+        StdpWindowDialog catches a routine-local `_NoEpspDetected`; both
+        collapse onto this one type with no observable change.
+        """
+
+
+    def _trace_row_mv(trace: TraceData, neuron_id: int) -> tuple[np.ndarray, float]:
+        matches = np.flatnonzero(trace.indices == neuron_id)
+        if matches.size == 0:
+            raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
+        trace_mv = _to_mv(trace.traces[int(matches[0])], trace.units)
+        dt_ms = 1000.0 * trace.dt
+        return trace_mv, dt_ms
+
+
+    def measure_spike_count(
+        trace: TraceData,
+        neuron_id: int,
+        onset_seconds: float,
+        window_ms: float,
+        threshold_mv: float,
+    ) -> int:
+        """Count spikes in [onset, onset + window_ms] for `neuron_id`.
+
+        Mirrors RheobaseDialog._measure_spikes's windowing exactly - the
+        caller computes `window_ms` (today:
+        `self._current_duration_ms + self.spn_response_ms.value()`).
+        """
+        trace_mv, dt_ms = _trace_row_mv(trace, neuron_id)
+        onset_ms = 1000.0 * onset_seconds
+        start = max(0, int(np.floor(onset_ms / dt_ms)))
+        stop = min(trace_mv.size, int(np.ceil((onset_ms + window_ms) / dt_ms)) + 1)
+        return count_spikes(trace_mv[start:stop], threshold_mv)
+
+
+    def measure_epsp(
+        trace: TraceData,
+        neuron_id: int,
+        probe_pulse_times_s: list[float],
+        baseline_ms: float,
+        response_ms: float,
+    ) -> EPSPMeasurement:
+        """Associate detect_epsps' detections with each probe pulse time and
+        average them. Mirrors the two existing `_measure_epsps` bodies
+        exactly, including the "largest candidate in window wins" tie-break
+        (a spurious smaller deflection must not be picked over the real
+        EPSP)."""
+        trace_mv, dt_ms = _trace_row_mv(trace, neuron_id)
+        amplitudes: list[float] = []
+        for pulse_time in probe_pulse_times_s:
+            onset_ms = 1000.0 * pulse_time
+            start_ms = max(0.0, onset_ms - baseline_ms)
+            stop_ms = onset_ms + response_ms
+            start = max(0, int(np.floor(start_ms / dt_ms)))
+            stop = min(trace_mv.size, int(np.ceil(stop_ms / dt_ms)) + 1)
+            if start >= trace_mv.size:
+                trace_duration_ms = trace_mv.size * dt_ms
+                raise NoEpspDetected(
+                    f"The selected trace ends at {trace_duration_ms:.3f} ms, "
+                    f"before the probe at {onset_ms:.3f} ms. Select the "
+                    "current simulation voltage trace and try again."
+                )
+            detection = detect_epsps(trace_mv[start:stop], dt_ms)
+            relative_onset_ms = onset_ms - start * dt_ms
+            sample_tolerance_ms = 0.5 * dt_ms
+            candidates = detection.amplitudes_mv[
+                (detection.times_ms >= relative_onset_ms - sample_tolerance_ms)
+                & (
+                    detection.times_ms
+                    <= relative_onset_ms + response_ms + sample_tolerance_ms
+                )
+            ]
+            if candidates.size == 0:
+                raise NoEpspDetected(
+                    f"No EPSP was detected after the probe at {onset_ms:.3f} ms."
+                )
+            amplitudes.append(float(np.max(candidates)))
+        return EPSPMeasurement(
+            amplitude=float(np.mean(amplitudes)),
+            pulse_amplitudes=tuple(amplitudes),
+        )
+
+Double check `detect_epsps`'s return type (`amplitudes_mv`/`times_ms` field
+names) against the actual current signature in
+`neuroseq/resources/analysis_plugins/epsp_amplitudes.py` before pasting this
+in — copy the exact field names from there, don't assume the ones above are
+still current.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 2 — src/neuroseq/dynamic_input_blocks.py (new, no Qt) — THE GAP FIX LIVES HERE
+════════════════════════════════════════════════════════════════════════════════════════════
+
+    from __future__ import annotations
+
+    from typing import Protocol
+
+    import brian2.numpy_ as np
+
+    from neuroseq.project import Project
+    from neuroseq.stim import StimArray
+
+
+    class BlockEditor(Protocol):
+        """What appending a block needs from StimEditor."""
+
+        def apply_pattern(self, neuron_slice, time_slice, new_values: np.ndarray) -> None: ...
+        def reset_stim_array(self) -> None: ...
+
+
+    def append_block(editor: BlockEditor, stim: StimArray, block: np.ndarray) -> int:
+        """Trim `stim` back to the current simulation head, then write
+        `block` immediately after it. Returns the sample index the block was
+        written at.
+
+        The trim (`editor.reset_stim_array()`) is what guarantees a
+        routine's configured inter-block gap is the ONLY thing separating
+        two blocks: without it, the project-wide "Input Automatic Padding"
+        setting can silently pad the array beyond a block's own end during a
+        simulation run, and the next block would be appended after that
+        extra padding too. reset_stim_array() only ever removes UNSIMULATED
+        trailing padding - never anything already delivered to the
+        simulation - and is a cheap no-op when there's nothing to trim, so
+        it's safe and cheap to call before every block, not just the first.
+        Because of this, the start sample is simply `stim.values.shape[0]`
+        after the trim - there is no longer a need to reconcile it against
+        the separately-computed simulation-clock sample the way the old
+        per-dialog `max(stim.values.shape[0], current_sample)` did.
+
+        Does NOT touch the live view/camera - that stays entirely the
+        calling dialog's own responsibility (its existing
+        `chk_follow_input`/`focus_time_range` logic is unchanged by this
+        handoff; call it, if at all, AFTER this function returns, exactly
+        where the dialog calls it today relative to the old
+        `_append_block`/`_place_block` body).
+        """
+        editor.reset_stim_array()
+        start = stim.values.shape[0]
+        editor.apply_pattern(
+            slice(0, stim.values.shape[1]),
+            slice(start, start + block.shape[0]),
+            block,
+        )
+        return start
+
+
+    def run_to_sample(project: Project, stim: StimArray, stop_sample: int) -> float:
+        """Seconds to simulate forward to reach `stop_sample` on `stim`'s dt."""
+        current_time = project.b2_model.get_sim_time_secs()
+        return max(stim.dt, stop_sample * stim.dt - current_time)
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 3 — src/neuroseq/dynamic_input_routine.py (new, no Qt)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+    from __future__ import annotations
+
+    from collections.abc import Callable
+    from typing import Protocol
+
+
+    class SimulationHost(Protocol):
+        """What a routine backend needs to trigger a Brian2 run."""
+
+        def request_simulation(self, seconds: float) -> None: ...
+
+
+    class DynamicInputDialog(Protocol):
+        """The contract StimEditor._dynamic_input_dialogs() (stim_editor.py,
+        see CHANGE 6) already assumes of every cached routine dialog."""
+
+        def simulation_finished(self) -> None: ...
+        def simulation_failed(self, message: str) -> None: ...
+        def refresh(self) -> None: ...
+        def apply_theme(self, theme: str) -> None: ...
+
+
+    class RoutineBackend:
+        """Run/pause/resume/finish plumbing shared by every closed-loop
+        routine.
+
+        A subclass owns its own phase graph: its `_phase`/domain-specific
+        state, and `_advance()`, which reacts to a just-finished simulation
+        for whatever phase it's currently in and either calls
+        `self.finish(...)` or does this iteration's bookkeeping and calls
+        `self.request_simulation(...)` for the next one. This class owns
+        exactly what was previously copy-pasted identically across all
+        three dialogs: the running/awaiting/paused flags, the
+        pause-then-defer-next-request behavior, and _finish's reset
+        sequence. No Qt import anywhere in this class - it is unit-testable
+        with a fake SimulationHost and no QApplication.
+        """
+
+        def __init__(self, host: SimulationHost) -> None:
+            self._host = host
+            self.running = False
+            self.awaiting_simulation = False
+            self.paused = False
+            self.pending_simulation_seconds: float | None = None
+            self.phase = "idle"
+            self.on_log: Callable[[str], None] | None = None
+            self.on_finished: Callable[[str], None] | None = None
+
+        def begin(self) -> None:
+            self.running = True
+            self.paused = False
+            self.pending_simulation_seconds = None
+
+        def toggle_pause(self) -> None:
+            self.paused = not self.paused
+            self._log(
+                "Paused - the routine will hold after its current step."
+                if self.paused
+                else "Resumed."
+            )
+            if not self.paused and self.pending_simulation_seconds is not None:
+                seconds = self.pending_simulation_seconds
+                self.pending_simulation_seconds = None
+                self.awaiting_simulation = True
+                self._host.request_simulation(seconds)
+
+        def request_simulation(self, seconds: float) -> None:
+            if self.paused:
+                self.pending_simulation_seconds = seconds
+                self._log(
+                    "Paused - next iteration queued; click Resume to continue."
+                )
+                return
+            self.awaiting_simulation = True
+            self._host.request_simulation(seconds)
+
+        def simulation_finished(self) -> None:
+            if not self.running or not self.awaiting_simulation:
+                return
+            self.awaiting_simulation = False
+            self._advance()
+
+        def simulation_failed(self, message: str) -> None:
+            if self.running and self.awaiting_simulation:
+                self.finish(f"Simulation failed: {message}")
+
+        def finish(self, message: str) -> None:
+            self.running = False
+            self.awaiting_simulation = False
+            self.paused = False
+            self.pending_simulation_seconds = None
+            self.phase = "idle"
+            self._log(message)
+            if self.on_finished is not None:
+                self.on_finished(message)
+
+        def _log(self, message: str) -> None:
+            if self.on_log is not None:
+                self.on_log(message)
+
+        def _advance(self) -> None:
+            raise NotImplementedError
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 4 — worked example: migrating RheobaseDialog (do this one FIRST, completely, before touching the other two)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+RheobaseDialog is the simplest of the three (binary search only, no
+reset/checkpoint complexity, no adaptive-pairing math), so it's the
+reference case. Read all of src/neuroseq/rheobase_dialog.py first - the
+below describes the shape of the change, not a full replacement body; you
+must preserve every bit of the existing search/bisection/duration-sweep
+decision logic exactly, only relocating and rewiring it.
+
+1. Add `RheobaseBackend(RoutineBackend)` at the top of rheobase_dialog.py
+   (or in its own nearby block), importing `RoutineBackend`/`SimulationHost`
+   from `neuroseq.dynamic_input_routine`. It owns exactly the domain state
+   currently on `RheobaseDialog`: `_low`, `_high`, `_pending_amplitude`,
+   `_pulse_onset_seconds`, `_duration_values_ms`, `_duration_index`,
+   `_current_duration_ms`, `_duration_low_ms`, `_duration_high_ms`,
+   `_duration_stage`, `_samples`, `_thresholds`, `_rheobase`,
+   `_chronaxie_ms`, `_fixed_spiking_duration_ms`, `_iteration`. Its
+   `_advance()` is the current body of `RheobaseDialog.simulation_finished()`
+   (rheobase_dialog.py:730-797) MINUS the guard at the top (lines 731-735 -
+   that guard is now `RoutineBackend.simulation_finished`'s job) and MINUS
+   the two `self.refresh()`/dialog-level calls it currently makes for the
+   "initialize_trace" phase - those stay on the dialog side (see step 3).
+
+   All of the routine-specific methods it currently calls
+   (`_probe`, `_bisect_step`, `_handle_fixed_amplitude_duration_result`,
+   `_bisect_fixed_amplitude_duration`, `_complete_duration_threshold`,
+   `_handle_strength_duration_threshold`, `_bisect_strength_duration`,
+   `_update_strength_duration_metrics`, `_begin_search`,
+   `_begin_duration_search`, `_begin_fixed_amplitude_duration_search`,
+   `_probe_fixed_amplitude_duration`, `_duration_sweep_values`,
+   `_effective_duration_ms`, `_duration_threshold_exists`,
+   `_duration_already_sampled`, `_one_sample_ms`, `_duration_tolerance_ms`)
+   move onto `RheobaseBackend` too, UNCHANGED in their internal logic - they
+   only change in that they read/write `self.low`/`self.high`/etc. (the
+   backend's own attributes, no leading underscore needed since this is now
+   an internal, non-Qt class - or keep the underscore prefix if you prefer
+   consistency with the dialog's naming; either is fine, just be
+   consistent) instead of `self._low`/`self._high` on a QDialog. Methods
+   that read widget values (`self.spn_min_amplitude.value()`,
+   `self.spn_tolerance.value()`, etc.) or write plots/log/status labels
+   (`self._append_log`, `self._update_plot`, `self._update_status_label`,
+   `self._update_stim_heatmap`) CANNOT move as-is - see step 2.
+
+2. Widget-value reads and UI updates: `RheobaseBackend` needs the current
+   spin-box VALUES but must not import qtpy. Two options, pick whichever
+   reads more naturally per call site - it's fine to mix:
+     (a) Pass needed values as parameters into the backend methods that use
+         them (e.g. `_begin_search(strategy, min_amplitude, max_amplitude,
+         ...)` instead of reading `self.spn_min_amplitude.value()`
+         directly), with `RheobaseDialog.start()`/`toggle_pause()` etc.
+         gathering the values from its own widgets and passing them through, or
+     (b) Give the backend small `Callable[[], float]` hooks set once at
+         construction (mirroring `on_log`/`on_finished` on the base class),
+         e.g. `self._backend.on_log = self._append_log`,
+         `self._backend.on_measurement = self._on_measurement` (dialog-side
+         callback that does `self._update_plot()` +
+         `self._update_status_label()` + `self._update_stim_heatmap()` in
+         one place, called by the backend after appending each sample to
+         `self.samples`).
+   For widget VALUES specifically that only change per-run (amplitude/
+   duration ranges, tolerances, thresholds, max iterations, neuron ID,
+   sweeping strategy), prefer (a): read them all once in
+   `RheobaseDialog._begin_search()` (which stays on the dialog, thin) and
+   pass them into `self._backend.begin_search(...)`. This keeps
+   `RheobaseBackend` fully Qt-free and easy to unit test.
+
+3. `RheobaseDialog` keeps: `__init__` widget construction (unchanged),
+   `start()` (thin: validates + confirms existing input + gathers widget
+   values + calls `self._backend.begin_search(...)`), `stop()`
+   (`self._backend.finish("Routine stopped.")`), `toggle_pause()`
+   (`self._backend.toggle_pause()` + update `self.btn_pause` text/log - or
+   just delegate the text update to an `on_pause_changed` hook, your call),
+   `simulation_finished()`/`simulation_failed()` (one-line delegates to
+   `self._backend.simulation_finished()`/`.simulation_failed(message)`),
+   `apply_theme`/`refresh`/`closeEvent`/`showEvent`/all the plot/heatmap
+   drawing methods, and the "initialize_trace" one-off branch (this touches
+   `self.cmb_trace`/`self.refresh()`, genuinely dialog-level - keep it in
+   `RheobaseDialog.simulation_finished()` as a pre-check BEFORE delegating
+   to the backend, exactly like today's code checks `self._phase ==
+   "initialize_trace"` before anything else).
+
+4. Block-appending: `_probe()` (rheobase_dialog.py:658-692) changes to call
+   `neuroseq.dynamic_input_blocks.append_block(self.editor, stim, block)`
+   instead of its own `self._append_block(block)`, and
+   `neuroseq.dynamic_input_blocks.run_to_sample(self._require_project(),
+   stim, block_start + samples)` instead of its own `_run_to_sample(...)`.
+   The EXISTING "follow new input" behavior
+   (`self.chk_follow_input.isChecked()` / `self._view_block_samples` /
+   `self.editor.focus_time_range(...)`, rheobase_dialog.py:702-710) AND the
+   `self._update_stim_heatmap()` call (rheobase_dialog.py:711) are
+   UNCHANGED and NOT part of what moves into the shared module - keep both
+   in `RheobaseDialog._probe()` (or wherever it ends up after the split),
+   called right after `dynamic_input_blocks.append_block(...)` returns,
+   exactly where they run today relative to the old `_append_block`'s own
+   body. `chk_follow_input`/`_view_block_samples`/the heatmap update stay on
+   the DIALOG (Qt-facing), not the backend - they read widget state and
+   call Qt-editor/Qt-widget methods, so they don't belong in the Qt-free
+   `RoutineBackend`/`dynamic_input_blocks` split at all. Delete only
+   `_append_block` and `_run_to_sample` from RheobaseDialog (their
+   trim/write/run-length math is now fully replaced by the shared module);
+   keep the follow-camera and heatmap-update lines that used to live inside
+   `_append_block`, relocated to right after the new shared call. The same
+   applies to `StdpSynapticTuningDialog`/`StdpWindowDialog` in CHANGE 5,
+   which additionally have `spn_history_blocks` in that same
+   unchanged-follow-logic block.
+
+5. Compatibility properties on `RheobaseDialog`, so the bulk of
+   tests/test_rheobase_dialog.py's existing assertions on private
+   attributes keep working unchanged. Add these AFTER `self._backend =
+   RheobaseBackend(host=self)` is constructed in `__init__`:
+
+        @property
+        def _phase(self) -> str:
+            return self._backend.phase
+
+        @_phase.setter
+        def _phase(self, value: str) -> None:
+            self._backend.phase = value
+
+        @property
+        def _running(self) -> bool:
+            return self._backend.running
+
+        @property
+        def _awaiting_simulation(self) -> bool:
+            return self._backend.awaiting_simulation
+
+        @property
+        def _low(self) -> float:
+            return self._backend.low
+
+        # ... one pair per moved attribute the existing tests reference
+        # directly (grep tests/test_rheobase_dialog.py for `dialog._` to
+        # find the full list - `_samples`, `_thresholds`, `_rheobase`,
+        # `_chronaxie_ms`, `_low`, `_high`, `_iteration`, `_duration_stage`,
+        # `_paused`, `_pending_simulation_seconds`, etc.)
+
+   Read-only properties (no setter) are fine for attributes no test ever
+   assigns directly - check before adding a setter you don't need.
+
+   `RheobaseDialog` implements `SimulationHost` implicitly by having a
+   `request_simulation(self, seconds: float) -> None` method that does what
+   `_request_simulation` used to do at the Qt-signal level:
+
+        def request_simulation(self, seconds: float) -> None:
+            self.simulation_requested.emit(seconds)
+
+   (The pause-aware deferral logic that used to live in
+   `_request_simulation` is now entirely inside `RoutineBackend` - this new
+   `request_simulation` is the raw, unconditional "emit the signal" leaf
+   the backend calls once it has already decided not to defer.)
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 5 — apply the identical pattern to StdpSynapticTuningDialog and StdpWindowDialog
+════════════════════════════════════════════════════════════════════════════════════════════
+
+Same shape as CHANGE 4 (backend subclass + compat properties + delegate
+`_append_probe`/`_append_pairing`/`_place_block` to
+`dynamic_input_blocks.append_block`/`run_to_sample` + delete the old
+`_append_block`/`_place_block`/`_request_simulation`/`_run_to_sample`/
+`simulation_finished`/`_finish` bodies from the dialog, keeping only
+one-line delegates). Each has its own domain-specific state and phase graph
+that must be preserved EXACTLY, unchanged in behavior:
+
+StdpSynapticTuningDialog -> `StdpSynapticTuningBackend(RoutineBackend)`:
+    Domain state: `_baseline_epsp`, `_epsp_percentages`, `_pairing_times_ms`,
+    `_adaptive_pairing_magnitude_ms`, `_probe_pulse_times`, `_iteration`,
+    `_resolution_warning_logged`.
+    Preserve verbatim: the adaptive-vs-fixed pairing-strategy math in
+    `_append_pairing` (input_designer... now stdp_synaptic_tuning_dialog.py,
+    the block around the `adaptive` branch that adjusts
+    `_adaptive_pairing_magnitude_ms` based on `epsp_new`/`epsp_old`/target
+    error), the baseline-vs-target convergence check in
+    `simulation_finished`, and `_maybe_log_pairing_resolution_warning`.
+    Measurement: replace its `_measure_epsps` body with a call to
+    `dynamic_input_measurement.measure_epsp(...)` (CHANGE 1) and update its
+    `except ValueError` to `except NoEpspDetected` — plain `except
+    ValueError` still works too since NoEpspDetected subclasses it, so this
+    is optional but preferred for clarity.
+
+StdpWindowDialog -> `StdpWindowBackend(RoutineBackend)`:
+    Domain state: whatever it currently tracks for the Δt sweep (grep the
+    file for its `_index`/`_delta_ts`/sweep-mode fields - it interleaves a
+    precomputed, magnitude-sorted list of Δt values via
+    `neuroseq.stdp_window.interleave_by_magnitude`).
+    Preserve verbatim: the reset-vs-continuous sweep MODE logic - unlike
+    the other two routines, this one has a "reset to baseline before each
+    point" checkpoint/restore step with its own explicit `start_sample`
+    passed into block placement (`_place_block`'s reset-mode branch). This
+    is exactly why `dynamic_input_blocks.append_block` does NOT take an
+    optional explicit `start_sample` parameter — after CHANGE 2's fix,
+    every block always starts at `stim.values.shape[0]` post-trim, which is
+    correct for BOTH modes (continuous mode already worked this way; reset
+    mode's "restore to baseline" must now be expressed as its own explicit
+    block/pattern-apply step, still followed immediately by a normal
+    `append_block` call for the probe/pairing block itself - do not
+    special-case `append_block` to accept an explicit start; keep the
+    reset step as a distinct call before it, mirroring how the routine
+    already does two separate `apply_pattern`-driving steps today for reset
+    mode).
+    Update its `except _NoEpspDetected` (the routine-local exception class)
+    to `except NoEpspDetected` from the new shared module, and delete the
+    now-redundant local `_NoEpspDetected` class definition.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+CHANGE 6 — StimEditor typing (optional but preferred)
+════════════════════════════════════════════════════════════════════════════════════════════
+
+`StimEditor._dynamic_input_dialogs()` (stim_editor.py:1236-1247) currently
+returns `list[StdpSynapticTuningDialog | RheobaseDialog | StdpWindowDialog]`.
+Update the return type to `list[DynamicInputDialog]` (importing the
+Protocol from `neuroseq.dynamic_input_routine`) — this is a pure typing
+change with zero runtime effect; do not change the method body, the
+attr_name Literal in `_show_routine_dialog`, or anything else in
+stim_editor.py's routine-dispatch logic.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+NOTES
+════════════════════════════════════════════════════════════════════════════════════════════
+
+- Do this migration ONE dialog at a time (Rheobase, then StdpSynapticTuning,
+  then StdpWindow), running that dialog's own test file plus
+  tests/test_stim_editor.py after each, before moving to the next. Do not
+  attempt all three in one pass - if something is subtly wrong in the shared
+  `RoutineBackend`/`dynamic_input_blocks` modules, better to find it on the
+  simplest dialog first.
+- `reset_stim_array()`'s trim only ever removes UNSIMULATED content. Since
+  it's now called before every block (not just at routine start), the only
+  practical thing it can ever trim mid-routine is the auto-padding described
+  in BACKGROUND (or sub-sample floating-point drift) — it should never
+  observably discard anything a user cares about. Still, add one explicit
+  test for this (see TESTS) rather than relying on that argument alone.
+- The `except ValueError` in StdpSynapticTuningDialog/StdpWindowDialog's
+  `simulation_finished` (wrapping the measurement call) does not need to
+  change even though `NoEpspDetected` is now the concrete type raised - it
+  already catches the general case and `NoEpspDetected` is a `ValueError`
+  subclass.
+- Do not change any spin-box default VALUES (recovery time, response
+  window, pulse duration, tolerances, etc.) as part of this handoff - only
+  the plumbing around them is being consolidated/fixed.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+NON-GOALS
+════════════════════════════════════════════════════════════════════════════════════════════
+
+- Changing any routine's actual decision algorithm (bisection stepping,
+  adaptive-pairing math, Δt interleaving/reset-mode logic, strength-duration
+  chronaxie fitting). This handoff relocates and consolidates plumbing only.
+- Any change to the "follow new input" live-view camera behavior
+  (`chk_follow_input`/`spn_history_blocks`/`_view_block_samples`/
+  `focus_time_range`). It stays exactly as it behaves today, just relocated
+  verbatim to sit right after the new shared `append_block` call instead of
+  inside the old per-dialog `_append_block`/`_place_block` body. Do not
+  touch `ConstrainedPanZoomController` or `StimEditor.focus_time_range` at
+  all in this handoff.
+- Changing `Project.run_simulation`/`pad_stim_arrays`/the global "Input
+  Automatic Padding" setting itself. The fix is entirely on the consuming
+  side (trim before every append), not the padding mechanism.
+- A `RoutineBackend` that also owns plot/heatmap rendering. Plot/log/status
+  updates stay dialog-side, triggered via small callback hooks
+  (`on_log`/`on_finished`/routine-specific ones you add as needed) rather
+  than the backend reaching into Qt widgets directly.
+- Renaming any public-facing routine label, window title, or button text.
+  This handoff is internal architecture plus the one gap-timing fix
+  described above - nothing user-facing changes.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+TESTS
+════════════════════════════════════════════════════════════════════════════════════════════
+
+New, Qt-free:
+    tests/test_dynamic_input_routine.py
+        - A minimal fake `RoutineBackend` subclass (or test against the
+          base class directly with `_advance` stubbed) driven through a
+          fake `SimulationHost`, covering: begin() resets state;
+          request_simulation while paused defers into
+          pending_simulation_seconds and does NOT call the host;
+          toggle_pause while a request is pending immediately fires it on
+          un-pause and sets awaiting_simulation; simulation_finished is a
+          no-op when not running or not awaiting; simulation_failed calls
+          finish with a "Simulation failed: ..." message only when running
+          and awaiting; finish resets every flag and calls on_finished.
+    tests/test_dynamic_input_blocks.py
+        - `append_block` with a fake `BlockEditor` recording calls: asserts
+          `reset_stim_array()` is called before `apply_pattern`; asserts the
+          written slice starts exactly at (fake) `stim.values.shape[0]`
+          post-trim; asserts it does NOT call anything camera/view-related
+          (the fake `BlockEditor` need not even expose a `focus_time_range`
+          method - that stays entirely out of this function's Protocol).
+        - `run_to_sample`: returns `stim.dt` (the floor) when already caught
+          up to `stop_sample`; returns the correct positive delta
+          otherwise.
+    tests/test_dynamic_input_measurement.py
+        - Port the existing measurement-focused assertions out of
+          tests/test_rheobase_dialog.py (spike counting) and
+          tests/test_stdp_synaptic_tuning_dialog.py /
+          tests/test_stdp_window_dialog.py (EPSP measurement, including the
+          NoEpspDetected paths) to call `measure_spike_count`/`measure_epsp`
+          directly with a synthetic `TraceData`, instead of only exercising
+          them indirectly through a QDialog.
+
+Per-dialog (tests/test_rheobase_dialog.py,
+tests/test_stdp_synaptic_tuning_dialog.py, tests/test_stdp_window_dialog.py):
+    - Existing tests should keep passing UNCHANGED thanks to the
+      compatibility properties (CHANGE 4 step 5) - the follow-camera feature
+      and its existing tests (e.g.
+      `test_stdp_synaptic_tuning_camera_keeps_configured_width`,
+      `test_stdp_synaptic_tuning_runs_probe_pairing_probe_and_reaches_target`'s
+      constant-focused-width assertion, `spn_history_blocks`/
+      `chk_follow_input` widget-default assertions, anything using each
+      file's `_FakeEditor.focused_ranges`) are NOT touched by this handoff
+      and must keep passing exactly as they do today. If any of them break,
+      that is a sign the follow-camera code was moved into the shared
+      module by mistake - it should not have been (see CHANGE 4 step 4).
+      Go through each file and fix only what breaks for reasons unrelated
+      to the camera (private-attribute renames covered by compat
+      properties, moved `_measure_*`/`_append_block` internals, etc.).
+    - ADD one new test per dialog file:
+        test_*_gap_is_not_inflated_by_stim_padding
+            Configure the fake project/editor's stim padding equivalent (or
+            directly grow the fake stim array's length beyond the
+            just-appended block's end, simulating what pad_stim_arrays
+            would do) between two iterations, then assert the SECOND
+            appended block's start sample is NOT pushed later than the
+            routine's own configured gap would produce - i.e. that
+            `reset_stim_array()`/the shared `append_block` absorbed the
+            extra padding rather than letting it inflate the gap. Use
+            whichever fake-editor pattern the file already has for
+            asserting on `apply_pattern`/`time_slices` call arguments.
+
+
+════════════════════════════════════════════════════════════════════════════════════════════
+VERIFICATION
+════════════════════════════════════════════════════════════════════════════════════════════
+
+    ruff check src/neuroseq/dynamic_input_measurement.py \
+               src/neuroseq/dynamic_input_blocks.py \
+               src/neuroseq/dynamic_input_routine.py \
+               src/neuroseq/rheobase_dialog.py \
+               src/neuroseq/stdp_synaptic_tuning_dialog.py \
+               src/neuroseq/stdp_window_dialog.py \
+               src/neuroseq/stim_editor.py \
+               tests/test_dynamic_input_measurement.py \
+               tests/test_dynamic_input_blocks.py \
+               tests/test_dynamic_input_routine.py \
+               tests/test_rheobase_dialog.py \
+               tests/test_stdp_synaptic_tuning_dialog.py \
+               tests/test_stdp_window_dialog.py
+    ruff format --check <same file list>
+    mypy --ignore-missing-imports <same src/ file list>
+    uv run pytest tests/test_dynamic_input_measurement.py \
+                  tests/test_dynamic_input_blocks.py \
+                  tests/test_dynamic_input_routine.py \
+                  tests/test_rheobase_dialog.py \
+                  tests/test_stdp_synaptic_tuning_dialog.py \
+                  tests/test_stdp_window_dialog.py \
+                  tests/test_stim_editor.py \
+                  tests/test_gui.py \
+                  tests/test_stim_heatmap_window.py \
+                  tests/test_routine_overview_dialog.py -v
+    uv run pytest
+
+Migrate and verify one dialog at a time (see NOTES) rather than running the
+full suite only once at the very end - a mistake in the shared
+`RoutineBackend`/`dynamic_input_blocks` modules will otherwise surface as
+confusing simultaneous failures across all three dialogs' test files at
+once, making it harder to tell which dialog's migration introduced it.

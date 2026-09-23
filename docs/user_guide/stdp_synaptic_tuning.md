@@ -1,6 +1,6 @@
-# Design dynamic input
+# STDP synaptic tuning
 
-Design dynamic input is a closed-loop stimulation feature in NeuroSeq. Unlike
+**Design dynamic input** is a closed-loop stimulation feature in NeuroSeq. Unlike
 **Design static input**, which writes a complete pattern before a simulation,
 Design dynamic input repeatedly performs three operations:
 
@@ -8,17 +8,18 @@ Design dynamic input repeatedly performs three operations:
 2. continue the Brian2 simulation, and
 3. analyze the resulting voltage trace to decide what to append next.
 
-The first supported routine targets a postsynaptic EPSP amplitude by applying
-spike-timing-dependent plasticity (STDP) pairings. The decision policy and
-protocol currently target this specific use case.
+This guide covers **STDP synaptic tuning**, a routine that targets a
+postsynaptic EPSP amplitude by applying spike-timing-dependent plasticity
+(STDP) pairings. The decision policy and protocol described below target this
+specific use case.
 
 ## Opening Design dynamic input
 
 Select the stim array that should receive the generated protocol, then click
 **Design dynamic input** in the stimulation-editor toolbar. A prompt asks which
-design routine to run; choose **Targeted STDP synaptic strength** (the only
-routine currently implemented) to open the designer. The selected array must
-have columns for both the pre- and postsynaptic neuron IDs.
+design routine to run; choose **STDP synaptic tuning** to open the designer.
+The selected array must have columns for both the pre- and postsynaptic
+neuron IDs.
 
 For a ready-to-run model, open:
 
@@ -31,14 +32,14 @@ In that example, use:
 - presynaptic neuron ID: `0`, and
 - postsynaptic neuron ID: `1`.
 
-Design dynamic input appends data; it does not clear an existing stim array. New
+STDP synaptic tuning appends data; it does not clear an existing stim array. New
 blocks are placed after both the current array end and the current simulation
 time, so generated stimulation is never inserted into the already simulated
 past.
 
 ## Closed-loop routine
 
-When **Start routine** is pressed, Design dynamic input performs the following
+When **Start routine** is pressed, STDP synaptic tuning performs the following
 sequence:
 
 1. Append five probe pulses (default 1 ms each) for the presynaptic neuron.
@@ -105,7 +106,7 @@ post below target and negative/post-before-pre above target.
 
 ## EPSP measurement
 
-Design dynamic input reuses NeuroSeq's existing **EPSP amplitudes** analysis plugin.
+STDP synaptic tuning reuses NeuroSeq's existing **EPSP amplitudes** analysis plugin.
 The plugin:
 
 - converts supported voltage units to millivolts,
@@ -113,7 +114,7 @@ The plugin:
 - measures amplitude relative to a local pre-peak baseline, and
 - rejects action-potential-sized peaks.
 
-Design dynamic input associates detections with the five known probe times and uses
+STDP synaptic tuning associates detections with the five known probe times and uses
 their mean as the current EPSP amplitude. If the selected trace does not record
 the postsynaptic neuron, or if an EPSP cannot be detected after every probe,
 the routine stops and reports the reason in its log.
@@ -122,14 +123,14 @@ the routine stops and reports the reason in its log.
 
 A freshly loaded model may not expose its simulation trace names until Brian2
 has initialized the network. If no trace is available when the routine starts,
-Design dynamic input opens **Create stimulation trace monitor** and offers to run a
+STDP synaptic tuning opens **Create stimulation trace monitor** and offers to run a
 short initialization simulation.
 
 - default duration: `0.001 s`,
 - precision: three decimal places,
 - minimum duration: `0.001 s`.
 
-After the initialization run, Design dynamic input refreshes the trace list and
+After the initialization run, STDP synaptic tuning refreshes the trace list and
 starts the EPSP routine automatically. If no trace becomes available, add a
 Brian2 `StateMonitor` for the membrane-voltage variable in **File → Edit
 model**, then try again.
