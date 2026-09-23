@@ -571,7 +571,6 @@ ConsoleWidget QPlainTextEdit, ConsoleWidget QTextEdit, ConsoleWidget QLineEdit {
     border: 1px solid %(border_dark)s;
     border-radius: 4px;
     color: %(lcd_fg)s;
-    font-family: "Monospace";
     selection-background-color: %(lcd_dim)s;
     selection-color: #ffffff;
 }

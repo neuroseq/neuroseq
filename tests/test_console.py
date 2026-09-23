@@ -6,8 +6,10 @@ import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
+from qtpy import QtGui
 
 from neuroseq import console_art
+from neuroseq import theme
 from neuroseq.console_widget import SAMPLE_CODE
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.project import Project
@@ -38,6 +40,22 @@ def test_console(qtbot: QtBot, test_project: Project) -> None:
     qtbot.keyPress(console.input, QtCore.Qt.Key.Key_Enter)
     assert np.allclose(test_project.stim_arrays["stimulus"].values, target_a)
     assert len(signals) == 2
+
+
+def test_retro_theme_preserves_console_banner_character_spacing(qtbot: QtBot) -> None:
+    console = ConsoleWidget()
+    qtbot.addWidget(console)
+    original_family = console.output.font().family()
+    console.setStyleSheet(theme.app_stylesheet(theme.RETRO))
+    console.show()
+    qtbot.waitUntil(lambda: console.isVisible())
+    assert console.output.font().family() == original_family
+    metrics = QtGui.QFontMetricsF(console.output.font())
+    assert metrics.horizontalAdvance("#") == pytest.approx(
+        metrics.horizontalAdvance(" ")
+    )
+    console.setStyleSheet("")
+    assert console.output.font().family() == original_family
 
 
 def test_console_scrolls_back_to_welcome_splash_on_startup(qtbot: QtBot) -> None:
