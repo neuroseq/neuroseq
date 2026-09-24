@@ -70,6 +70,7 @@ from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
+from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -420,7 +421,10 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000])
+        self.syscon2_panel = SysCon2Panel(parent=self)
+        self.syscon2_panel.setVisible(False)
+        split_left_right.addWidget(self.syscon2_panel)
+        split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
         self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -3274,6 +3278,7 @@ class Gui(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
+            ("&SysCon2", self.syscon2_panel, "mdi6.laser-pointer", False),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(
@@ -4219,6 +4224,7 @@ class Gui(QtWidgets.QMainWindow):
             self._external_sim_thread, 2000, "External simulation worker"
         )
         self._stop_worker_thread(self._io_thread, 10000, "IO worker")
+        self.syscon2_panel.shutdown()
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
