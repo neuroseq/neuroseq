@@ -18,11 +18,41 @@ class _BrianEditor:
         )
         self.calls: list[np.ndarray] = []
         self.focused_ranges: list[tuple[float, float]] = []
+        self.pad_calls: list[float] = []
         self.cleared = 0
 
     def clear_stim_array(self) -> None:
         self.cleared += 1
         self.current_stim_modifier.stim_array.values[:] = 0.0
+
+    def zero_current_stim_array(self) -> None:
+        self.cleared += 1
+        self.current_stim_modifier.stim_array.values[:] = 0.0
+
+    def current_stim_array_has_any_data(self) -> bool:
+        return bool(np.any(self.current_stim_modifier.stim_array.values))
+
+    def current_stim_array_last_stimulus_sample(self) -> int:
+        values = self.current_stim_modifier.stim_array.values
+        nonzero_rows = np.flatnonzero(np.any(values != 0, axis=1))
+        if nonzero_rows.size == 0:
+            return 0
+        return int(nonzero_rows[-1]) + 1
+
+    def window(self) -> SimpleNamespace:
+        return SimpleNamespace(raise_=lambda: None, activateWindow=lambda: None)
+
+    def pad_stim_array_to(self, total_length_secs: float) -> None:
+        self.pad_calls.append(total_length_secs)
+        stim = self.current_stim_modifier.stim_array
+        target_samples = int(round(total_length_secs / stim.dt))
+        if stim.values.shape[0] < target_samples:
+            pad = np.zeros(
+                (target_samples - stim.values.shape[0], stim.values.shape[1])
+            )
+            stim.values = np.vstack((stim.values, pad))
+            self.project.stim_arrays[stim.name] = stim
+            self.current_stim_modifier.stim_array = stim
 
     def _target_samples(self) -> int:
         stim = self.current_stim_modifier.stim_array
@@ -77,11 +107,16 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     # The fixture ships a stim array with pre-authored content past the
-    # (unsimulated) start; confirm discarding it so the sweep runs from the
-    # simulation head (this also exercises the confirm-and-discard path).
+    # (unsimulated) start; confirm clearing it so the sweep runs from a
+    # clean slate at the simulation head, matching the carefully controlled
+    # initial state set up above - this also exercises the
+    # confirm-start-routine path. ("Continue" would instead preserve that
+    # pre-authored content and simulate through it first, which is exactly
+    # what test_continue_preserves_existing_stimulus_in_continuous_mode
+    # covers on a fast fake model.)
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "clear",
     )
 
     def run(seconds: float) -> None:
@@ -103,7 +138,6 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
     dialog.spn_response_ms.setValue(50.0)
     dialog.spn_pulse_ms.setValue(5.0)
     dialog.spn_amplitude.setValue(100.0)
-    dialog.chk_follow_input.setChecked(False)
 
     dialog.start()
 
@@ -130,8 +164,8 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "continue",
     )
 
     def run(seconds: float) -> None:
@@ -153,7 +187,6 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     dialog.spn_recovery_ms.setValue(150.0)
     dialog.spn_pulse_ms.setValue(2.0)
     dialog.spn_amplitude.setValue(100.0)
-    dialog.chk_follow_input.setChecked(False)
 
     dialog.start()
 
@@ -161,8 +194,12 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     result_by_delta = dict(dialog._results)
     assert result_by_delta[-30.0] < 0.0  # post-before-pre depresses (LTD)
     assert result_by_delta[30.0] > 0.0  # pre-before-post potentiates (LTP)
-    # Weight mode reads the monitor, so no pre-only probe blocks are appended.
+    # Weight mode reads the monitor, so no pre-only probe blocks are appended
+    # (reset mode's own per-point zero-out write - see _restore_baseline() in
+    # stdp_window_dialog.py - is excluded here, since it is neither).
     for block in editor.calls:
+        if not np.any(block):
+            continue
         assert np.count_nonzero(block[:, 0]) > 0
         assert np.count_nonzero(block[:, 1]) > 0
     # Reset mode stored a baseline checkpoint and restored it before each point.

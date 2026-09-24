@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterable
 from dataclasses import dataclass
 from math import copysign
 from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
-from matplotlib.image import AxesImage
 from matplotlib.ticker import MultipleLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
@@ -17,15 +15,15 @@ from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input_blocks import append_block
+from neuroseq.dynamic_input_blocks import RoutineArrayCursor
+from neuroseq.dynamic_input_blocks import run_to_sample
 from neuroseq.dynamic_input_measurement import EPSPMeasurement
 from neuroseq.dynamic_input_measurement import measure_epsp
 from neuroseq.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input_routine import backend_property
-from neuroseq.stim import StimType
+from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt
-from neuroseq.utils import get_cmap
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -49,7 +47,6 @@ class StdpSynapticTuningBackend(RoutineBackend):
         self.probe_pulse_times: list[float] = []
         self.iteration = 0
         self.resolution_warning_logged = False
-        self.view_block_samples: int | None = None
         self.config: StdpSynapticTuningRunConfig | None = None
 
     def begin_protocol(self, config: StdpSynapticTuningRunConfig) -> None:
@@ -57,7 +54,6 @@ class StdpSynapticTuningBackend(RoutineBackend):
         self.begin()
         self.phase = "idle"
         self.iteration = 0
-        self.view_block_samples = None
         self.baseline_epsp = None
         self.epsp_percentages = []
         self.pairing_times_ms = []
@@ -326,8 +322,7 @@ def _wrap_in_scroll_area(
     widget: QtWidgets.QWidget, parent: QtWidgets.QWidget | None = None
 ) -> QtWidgets.QScrollArea:
     """Wrap a plot widget (already given its own minimum size) in a
-    QScrollArea, shared by every routine dialog's plots window and by
-    StimHeatmapWindow.
+    QScrollArea, shared by every routine dialog's plots window.
 
     setWidgetResizable(True) still lets the widget fill extra space when
     the window is larger than its minimum - but Qt never shrinks it below
@@ -342,235 +337,60 @@ def _wrap_in_scroll_area(
     return scroll
 
 
-def _stim_pulse_rgba(values: np.ndarray, stim_type: StimType) -> np.ndarray:
-    """Render nonzero samples as stable, saturated RGBA stimulus colors.
+def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:
+    """Ask how to start a dynamic-input routine, shared by all three routine
+    dialogs' Start handlers.
 
-    Magnitude must not make a real pulse fade toward white or transparency:
-    the heatmap is for locating input events, not comparing amplitudes. Zero
-    samples remain transparent. External inputs retain separate colors for
-    positive and negative values.
-    """
-    cmap = get_cmap(stim_type).to_mpl()
-    rgba = np.zeros((*values.shape, 4), dtype=np.float32)
-    if stim_type == StimType.External:
-        rgba[values > 0] = cmap(1.0)
-        rgba[values < 0] = cmap(0.0)
-    else:
-        rgba[values != 0] = cmap(1.0)
-    return rgba
-
-
-def confirm_discard_unsimulated_input(
-    dialog: QtWidgets.QWidget, editor: StimEditor
-) -> bool:
-    """Warn before starting a routine if doing so would silently discard
-    unrun input, shared by all three routine dialogs' Start handlers.
-
-    Every routine calls editor.reset_stim_array() right before it starts.
-    Stacking routines back to back - each appending after the previous
-    one's already-simulated output - never loses anything, so it needs no
-    confirmation at all. This only prompts for the one case that does:
-    nonzero content past the simulation head, which that trim would
-    otherwise drop without asking.
+    A stim array with no stimuli at all needs no prompt - just start. When
+    it already holds stimuli (including from a previous run of this or
+    another routine), ask whether to clear it and start from the
+    beginning, or continue appending after the last existing stimulus -
+    which keeps a previous run's progress. "Continue" only trims any
+    unsimulated tail first (a manually drawn pattern, or a routine stopped
+    mid-run), same as reset_stim_array() - it never touches simulated
+    content. Returns "clear", "continue", or "cancel".
     """
     if editor.current_stim_modifier is None:
-        return True
-    if not editor.current_stim_array_has_unsimulated_tail():
-        return True
+        return "continue"
+    if not editor.current_stim_array_has_any_data():
+        return "continue"
     name = editor.current_stim_modifier.stim_array.name
-    box = QtWidgets.QMessageBox(dialog)
+    # Parented to whichever top-level window is actually active, not to
+    # `dialog` - see clear_stim_array()'s docstring for why: the routine
+    # dialogs are created without a Qt parent (_show_routine_dialog), so a
+    # box that is not explicitly raised/activated can end up shown behind
+    # them, and this box is now shown far more often than the old
+    # unsimulated-tail-only check it replaced (every routine start on an
+    # array that already has any content, not just a rare edge case) - a
+    # modal QMessageBox stuck behind another window blocks the whole
+    # application with no visible way to dismiss it.
+    box = QtWidgets.QMessageBox(QtWidgets.QApplication.activeWindow() or dialog)
     box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-    box.setWindowTitle("Unsimulated input")
-    box.setText(
-        f"'{name}' has pulses beyond the current simulation time. Starting "
-        "this routine discards them - it trims the array back to the "
-        "simulation head first, same as the Reset input array button."
+    box.setWindowTitle("Existing input")
+    box.setText(f"'{name}' already contains stimuli.")
+    box.setInformativeText(
+        "Clear the array and start from the beginning, continue after the "
+        "last existing stimulus (keeping progress from a previous run), or "
+        "cancel."
     )
-    box.setInformativeText("Discard them and start, or cancel.")
-    discard_button = box.addButton(
-        "Discard and start", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+    clear_button = box.addButton(
+        "Clear and start over", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
+    )
+    continue_button = box.addButton(
+        "Continue after last stimulus", QtWidgets.QMessageBox.ButtonRole.AcceptRole
     )
     cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
     box.setDefaultButton(cancel_button)
+    box.show()
+    box.raise_()
+    box.activateWindow()
     box.exec()
-    return box.clickedButton() is discard_button
-
-
-class StimHeatmapWindow(_SelfRaisingDialog):
-    """A live, whole-history view (neuron ID x time) of the input pattern,
-    and below it the recorded trace(s) of the neuron(s) it targets - shared
-    by every closed-loop routine dialog (Input Designer, Rheobase, STDP
-    timing window).
-
-    Only the neuron(s) the running routine actually targets are shown, not
-    every neuron in the input array: an unrelated neuron elsewhere in the
-    array could otherwise dominate the heatmap's shared color scale,
-    fading the routine's own pulses to near-invisible even though their
-    values never changed. See _stim_pulse_rgba() for the other half of
-    that fix - decoupling color opacity from magnitude altogether.
-
-    Each of those dialogs already has its own live-follow view that pans a
-    fixed-width window and fully rebuilds its GPU image graphic on every
-    appended block - which makes it hard to visually track how the pattern
-    evolves, since it jumps and re-flashes each iteration. This window never
-    pans or rebuilds: update_view() only calls set_data/set_extent/set_clim
-    on the same Matplotlib image artist, so old blocks stay exactly where
-    they were and only the timeline extends.
-    """
-
-    def __init__(self, title: str, parent: QtWidgets.QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setWindowFlag(QtCore.Qt.WindowType.WindowMinimizeButtonHint, True)
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(2, 2, 2, 2)
-        self.plot = MatplotlibWidget(self)
-        self.plot.setMinimumSize(680, 320)
-        figure = self.plot.getFigure()
-        grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.12)
-        self.axes = figure.add_subplot(grid[0, 0])
-        self.trace_axes = figure.add_subplot(grid[1, 0], sharex=self.axes)
-        self._image: AxesImage | None = None
-        self._image_row_ids: list[int] = []
-        layout.addWidget(_wrap_in_scroll_area(self.plot, self))
-        self.resize(720, 480)
-        self._theme = theme_module.LIGHT
-        self._style_axes()
-
-    def update_view(
-        self,
-        stim: StimArray | None,
-        stim_neuron_ids: Iterable[int],
-        trace: TraceData | None = None,
-        trace_neuron_ids: Iterable[int] | None = None,
-    ) -> None:
-        stim_ids = list(stim_neuron_ids)
-        duration_ms = self._update_heatmap(stim, stim_ids)
-        self._update_traces(
-            trace,
-            stim_ids if trace_neuron_ids is None else list(trace_neuron_ids),
-            duration_ms,
-        )
-        self.plot.draw()
-
-    def _update_heatmap(self, stim: StimArray | None, neuron_ids: list[int]) -> float:
-        axes = self.axes
-        ids = sorted({int(i) for i in neuron_ids})
-        if stim is None or not ids:
-            return 0.0
-        values = stim.values  # (n_time, n_neurons)
-        ids = [i for i in ids if 0 <= i < values.shape[1]]
-        if values.shape[0] == 0 or not ids:
-            return 0.0
-        selected = values[:, ids]
-        dt_ms = float(stim.dt) * 1000.0
-        duration_ms = values.shape[0] * dt_ms
-        n_rows = len(ids)
-        rgba = _stim_pulse_rgba(selected.T, stim.stim_type)
-        extent = (0.0, duration_ms, -0.5, n_rows - 0.5)
-        if self._image is None or self._image_row_ids != ids:
-            if self._image is not None:
-                self._image.remove()
-            self._image = axes.imshow(
-                rgba,
-                aspect="auto",
-                origin="lower",
-                extent=extent,
-                interpolation="nearest",
-            )
-            self._image_row_ids = ids
-            axes.set_yticks(range(n_rows))
-            axes.set_yticklabels([str(i) for i in ids])
-            self._style_heatmap_axes()
-        image = self._image
-        assert image is not None
-        image.set_data(rgba)
-        image.set_extent(extent)
-        axes.set_xlim(0.0, duration_ms)
-        axes.set_ylim(-0.5, n_rows - 0.5)
-        return duration_ms
-
-    def _update_traces(
-        self, trace: TraceData | None, neuron_ids: list[int], window_ms: float
-    ) -> None:
-        axes = self.trace_axes
-        axes.clear()
-        ids = sorted({int(i) for i in neuron_ids})
-        if trace is not None and ids and window_ms > 0.0:
-            dt_ms = float(trace.dt) * 1000.0
-            n_samples = trace.traces.shape[1]
-            window_samples = min(n_samples, max(1, round(window_ms / dt_ms)))
-            start = n_samples - window_samples
-            # Align to the same relative timeline as the heatmap (both end
-            # at "now"), rather than plotting the trace's own full absolute
-            # history: a StateMonitor keeps recording from whenever it was
-            # created, which can be far longer than this routine's own
-            # stim array (reset_stim_array() trims that back to a fresh,
-            # much shorter start) - showing the full trace then squeezed
-            # the routine's own pulses into a sliver of the shared x-axis.
-            time_ms = (np.arange(start, n_samples, dtype=np.float64) - start) * dt_ms
-            for neuron_id in ids:
-                matches = np.flatnonzero(trace.indices == neuron_id)
-                if matches.size == 0:
-                    continue
-                axes.plot(
-                    time_ms,
-                    trace.traces[int(matches[0]), start:],
-                    label=f"Neuron {neuron_id}",
-                    linewidth=1.2,
-                )
-            if axes.lines:
-                axes.legend(loc="upper right", fontsize=8, frameon=False)
-        self._style_trace_axes(units=trace.units if trace is not None else "")
-
-    def position_below(self, reference: QtWidgets.QWidget) -> None:
-        """Place this window just under `reference`, clamped to the
-        available screen so stacking windows vertically can't push this one
-        off-screen (it was originally placed unconditionally below the
-        plots window, which landed past the bottom edge on shorter
-        displays)."""
-        x = reference.x()
-        y = reference.y() + reference.height() + 20
-        screen = reference.screen() or QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            x = min(max(x, available.left()), available.right() - self.width())
-            y = min(max(y, available.top()), available.bottom() - self.height())
-        self.move(x, y)
-
-    def apply_theme(self, theme: str) -> None:
-        self._theme = theme_module.normalize_theme(theme)
-        self._style_axes()
-        self.plot.draw()
-
-    def _style_axes(self) -> None:
-        self._style_heatmap_axes()
-        self._style_trace_axes()
-        face, _text = theme_module.mpl_colors(self._theme)
-        figure = self.plot.getFigure()
-        figure.set_facecolor(face)
-        figure.subplots_adjust(
-            left=0.09, right=0.98, bottom=0.11, top=0.97, hspace=0.12
-        )
-
-    def _style_heatmap_axes(self) -> None:
-        face, text = theme_module.mpl_colors(self._theme)
-        axes = self.axes
-        axes.set_facecolor(face)
-        axes.set_ylabel("Neuron ID", color=text)
-        axes.tick_params(colors=text, labelbottom=False)
-        for spine in axes.spines.values():
-            spine.set_color(text)
-
-    def _style_trace_axes(self, units: str = "") -> None:
-        face, text = theme_module.mpl_colors(self._theme)
-        axes = self.trace_axes
-        axes.set_facecolor(face)
-        axes.set_xlabel("Time (ms)", color=text)
-        axes.set_ylabel(units or "Trace", color=text)
-        axes.tick_params(colors=text)
-        for spine in axes.spines.values():
-            spine.set_color(text)
+    clicked = box.clickedButton()
+    if clicked is clear_button:
+        return "clear"
+    if clicked is continue_button:
+        return "continue"
+    return "cancel"
 
 
 class StdpSynapticTuningDialog(_SelfRaisingDialog):
@@ -601,6 +421,7 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self._backend = StdpSynapticTuningBackend(self)
         self._backend.on_advance = self._advance_domain
         self._backend.on_measurement = self._update_plots
+        self._backend.on_finished = self._on_backend_finished
         self._running = False
         self._awaiting_simulation = False
         self._paused = False
@@ -609,6 +430,8 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
+        self._array_cursor: RoutineArrayCursor | None = None
+        self._append_start_sample = 0
         self.setWindowTitle("STDP synaptic tuning")
         self.resize(640, 620)
 
@@ -711,20 +534,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
             "Continue plasticity induction after the EPSP enters the target "
             "tolerance, stopping only at the maximum iteration count."
         )
-        self.chk_follow_input = QtWidgets.QCheckBox(
-            "Follow new input on each iteration", self
-        )
-        self.chk_follow_input.setChecked(True)
-        self.spn_history_blocks = QtWidgets.QSpinBox(self)
-        self.spn_history_blocks.setRange(0, 100)
-        self.spn_history_blocks.setValue(3)
-        self.spn_history_blocks.setSuffix(" blocks")
-        self.spn_history_blocks.setToolTip(
-            "Live-view width, in multiples of a five-pulse probe-block length, "
-            "held constant as blocks are appended so the view does not jitter "
-            "when shorter pairing blocks are added. Zero shows one probe-block "
-            "length (the newest block)."
-        )
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Presynaptic neuron ID:", self.spn_presynaptic)
         form.addRow("Postsynaptic neuron ID:", self.spn_postsynaptic)
@@ -743,8 +552,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         form.addRow("Tolerance window (deadband):", self.spn_tolerance)
         form.addRow("Maximum plasticity induction iterations:", self.spn_max_iterations)
         form.addRow("Stopping rule:", self.chk_run_all_iterations)
-        form.addRow("Live view:", self.chk_follow_input)
-        form.addRow("Visible history:", self.spn_history_blocks)
         parameters_layout.addLayout(form)
         # Wrap the parameters in a scroll area so they scroll instead of being
         # squished into unreadable rows on short screens.
@@ -806,13 +613,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self.difference_plot = self.epsp_plot
         plot_layout.addWidget(_wrap_in_scroll_area(self.epsp_plot, self.plot_window))
         self.plot_window.resize(720, 640)
-
-        # A third popup: a live, whole-history heatmap of the input pattern
-        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
-        self.stim_heatmap_window = StimHeatmapWindow(
-            "STDP synaptic tuning — stimulation pattern"
-        )
-        self._stim_heatmap_window_positioned = False
 
         self.lbl_relative_difference = QtWidgets.QLabel(
             "Relative difference from target: waiting for baseline", self
@@ -921,12 +721,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
-        self.stim_heatmap_window.show()
-        if not self._stim_heatmap_window_positioned:
-            self._stim_heatmap_window_positioned = True
-            self.stim_heatmap_window.position_below(self.plot_window)
-        self.stim_heatmap_window.raise_()
-        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         # The dialog is cached and reused, so closing only hides it. Stop any
@@ -935,7 +729,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
-        self.stim_heatmap_window.close()
         super().closeEvent(event)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
@@ -1021,23 +814,77 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        if not confirm_discard_unsimulated_input(self, self.editor):
-            self._append_log("Routine cancelled; unsimulated input kept.")
+        choice = confirm_start_routine(self, self.editor)
+        if choice == "cancel":
+            self._append_log("Routine cancelled.")
             return
-        # Start from the simulation head so a long left-over stim array does not
-        # make the routine simulate a huge empty tail.
-        self.editor.reset_stim_array()
-        if not self._is_simulation_voltage_trace(self.cmb_trace.currentText()):
-            duration = 0.001
+        stim = self._require_stim()
+        project = self._require_project()
+        prepare_seconds = 0.0
+        if choice == "clear":
+            self.editor.zero_current_stim_array()
+            # Trim the (now all-zero) tail back to the simulation head, same
+            # as reset_stim_array() always did - there is nothing real left
+            # to lose, so "start from the beginning" means right after
+            # whatever has actually been simulated so far (0 for a fresh
+            # project), not literally sample 0 if some has already run.
+            self.editor.reset_stim_array()
+            target_secs = max(project.b2_model.get_sim_time_secs(), float(stim.dt))
+            self._append_start_sample = seconds_to_samples_nearest(
+                target_secs, float(stim.dt)
+            )
+        else:
+            # Continue after the last existing stimulus - not the
+            # simulation head, which can be well behind it (e.g. an example
+            # project's pre-authored stim array that has never been
+            # simulated in this session). Using the simulation head here
+            # would make reset_stim_array() silently discard that
+            # pre-existing content instead of preserving it.
+            self._append_start_sample = (
+                self.editor.current_stim_array_last_stimulus_sample()
+            )
+            last_stimulus_secs = self._append_start_sample * float(stim.dt)
+            current_sim_secs = project.b2_model.get_sim_time_secs()
+            if last_stimulus_secs > current_sim_secs + float(stim.dt) * 0.5:
+                # The network has to actually run through that pre-existing
+                # content before the routine starts appending and measuring
+                # after it.
+                prepare_seconds = run_to_sample(
+                    project, stim, self._append_start_sample
+                )
+        # Get this dialog and its plots out of the way so the user can watch
+        # the stim array and traces fill up as the routine runs. Z-order
+        # hints (lower()/raise()) are not reliably honored by every window
+        # manager - especially for a window that still has focus from the
+        # Start click - so minimizing is used instead, since window state is
+        # enforced by the OS/WM rather than merely requested. Restored
+        # automatically when the routine finishes (_on_backend_finished).
+        self.showMinimized()
+        self.plot_window.showMinimized()
+        main_window = self.editor.window()
+        if main_window is not None:
+            main_window.raise_()
+            main_window.activateWindow()
+        needs_trace_init = not self._is_simulation_voltage_trace(
+            self.cmb_trace.currentText()
+        )
+        if needs_trace_init or prepare_seconds > 0.0:
+            duration = max(prepare_seconds, 0.001)
             self._running = True
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_pause.setEnabled(True)
-            self._append_log(
-                f"Running an initial {duration:.3f} s simulation to create "
-                "trace monitors."
-            )
+            if prepare_seconds > 0.0:
+                self._append_log(
+                    f"Simulating {duration:.3f} s to catch up to the "
+                    "existing stimuli before the protocol starts."
+                )
+            else:
+                self._append_log(
+                    f"Running an initial {duration:.3f} s simulation to "
+                    "create trace monitors."
+                )
             self._request_simulation(duration)
             return
         self._begin_protocol(clear_log=True)
@@ -1063,6 +910,12 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
             pulse_ms=self.spn_pulse_ms.value(),
             stim_dt=float(stim.dt),
             n_neurons=int(stim.values.shape[1]),
+        )
+        initial_estimate_seconds = (
+            config.pairing_interval_ms + config.pulse_ms
+        ) / 1000.0
+        self._array_cursor = RoutineArrayCursor(
+            self._append_start_sample, initial_estimate_seconds
         )
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
@@ -1093,25 +946,10 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         return self._append_block(block)
 
     def _append_block(self, block: np.ndarray) -> int:
+        if self._array_cursor is None:
+            raise RuntimeError("No routine is running.")
         stim = self._require_stim()
-        start = append_block(self.editor, stim, block)
-        if self.chk_follow_input.isChecked():
-            if self._view_block_samples is None:
-                # Size the live view in units of the first (probe) block so its
-                # width stays constant as blocks are appended; using each block's
-                # own length would make the view jitter when the shorter pairing
-                # blocks are added.
-                self._view_block_samples = block.shape[0]
-            visible_blocks = max(1, self.spn_history_blocks.value())
-            visible_samples = visible_blocks * self._view_block_samples
-            block_end = start + block.shape[0]
-            history_start = max(0, block_end - visible_samples)
-            history_stop = history_start + visible_samples
-            self.editor.focus_time_range(
-                history_start * stim.dt, history_stop * stim.dt
-            )
-        self._update_stim_heatmap()
-        return start
+        return self._array_cursor.place_block(self.editor, stim, block)
 
     def _request_simulation(self, seconds: float) -> None:
         self._backend.request_simulation(seconds)
@@ -1249,26 +1087,11 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self.difference_axes.set_xlabel("")
         self.pairing_time_axes.set_xlabel("Measurement / iteration", color=text)
 
-    def _update_stim_heatmap(self) -> None:
-        modifier = self.editor.current_stim_modifier
-        stim = modifier.stim_array if modifier is not None else None
-        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
-        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
-
-    def _heatmap_trace(self) -> TraceData | None:
-        if self.project is None:
-            return None
-        trace_name = self.cmb_trace.currentText()
-        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
-            return None
-        return self.project.get_data(trace_name, TraceData)
-
     def apply_theme(self, theme: str) -> None:
         """Recolor every Matplotlib canvas for the application theme."""
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.epsp_plot.draw()
-        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
@@ -1276,11 +1099,26 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
 
     def _finish(self, message: str) -> None:
         self._backend.finish(message)
+        self._append_log(message)
+
+    def _on_backend_finished(self, message: str) -> None:
+        # The backend can call finish() on itself (e.g. target reached)
+        # without going through this dialog's _finish(), so this callback -
+        # wired to RoutineBackend.on_finished - is the one hook guaranteed to
+        # run on every completion path; it is what actually resets the
+        # buttons and trims any padding placed ahead of the routine's last
+        # block, so a stopped or completed run never leaves a long empty
+        # tail. It is also what restores the dialog and its plots after
+        # start() minimized them out of the way of the stim array/traces.
+        del message
+        self.showNormal()
+        self.plot_window.showNormal()
+        self.editor.reset_stim_array()
+        self._array_cursor = None
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
-        self._append_log(message)
 
     @property
     def _running(self) -> bool:
@@ -1329,7 +1167,6 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
     _probe_pulse_times = backend_property("probe_pulse_times")
     _iteration = backend_property("iteration")
     _resolution_warning_logged = backend_property("resolution_warning_logged")
-    _view_block_samples = backend_property("view_block_samples")
 
     def _append_log(self, message: str) -> None:
         self.log.appendPlainText(message)

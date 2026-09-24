@@ -41,11 +41,12 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     qtbot.addWidget(dialog)
 
     # The fixture ships a stim array with pre-authored content past the
-    # (unsimulated) start; confirm discarding it so the probes run from the
-    # simulation head (this also exercises the confirm-and-discard path).
+    # (unsimulated) start; confirm continuing (which trims that unsimulated
+    # tail) so the probes run from the simulation head - this also exercises
+    # the confirm-start-routine path.
     monkeypatch.setattr(
-        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.rheobase_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "continue",
     )
 
     def run(seconds: float) -> None:
@@ -66,7 +67,6 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     dialog.spn_max_amplitude.setValue(100.0)  # nS
     dialog.spn_tolerance.setValue(0.5)  # nS bracket
     dialog.spn_max_iterations.setValue(30)
-    dialog.chk_follow_input.setChecked(False)
 
     # start() drives the whole search synchronously through the connected slot.
     dialog.start()

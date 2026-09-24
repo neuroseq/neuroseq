@@ -444,6 +444,68 @@ class StimEditor(QtWidgets.QWidget):
         n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
         return bool(np.any(stim.values[n_keep:, :]))
 
+    def current_stim_array_has_any_data(self) -> bool:
+        """Does the current stim array contain any nonzero stimuli at all?
+
+        Used before starting a design routine to decide whether to ask the
+        user how to start (clear the array, or continue after the last
+        existing stimulus) - an empty array needs no such prompt.
+        """
+        if self.current_stim_modifier is None:
+            return False
+        return bool(np.any(self.current_stim_modifier.stim_array.values))
+
+    def current_stim_array_last_stimulus_sample(self) -> int:
+        """Sample index right after the last nonzero row in the current stim
+        array (0 if it has no stimuli at all).
+
+        Used by "continue after last stimulus" so a design routine resumes
+        appending where the array's actual content ends - not where the
+        simulation happens to be. Those can differ: a stim array may hold
+        pre-authored content (e.g. an example project's designed pattern)
+        that has never been simulated in this session, and reset_stim_array()
+        would discard exactly that content, mistaking it for an unused tail.
+        """
+        if self.current_stim_modifier is None:
+            return 0
+        values = self.current_stim_modifier.stim_array.values
+        nonzero_rows = np.flatnonzero(np.any(values != 0, axis=1))
+        if nonzero_rows.size == 0:
+            return 0
+        return int(nonzero_rows[-1]) + 1
+
+    def zero_current_stim_array(self) -> None:
+        """Set every value in the current stim array to zero, without prompting.
+
+        Undoable via the modifier's action stack, like every other edit.
+        Used by clear_stim_array() (after its own confirmation) and by
+        design routines that start by clearing the array (after the
+        shared confirm-start-routine prompt has already asked once).
+        """
+        if self.current_stim_modifier is None:
+            return
+        new_values = np.zeros_like(self.current_stim_modifier.stim_array.values)
+        self.replace_stim_values_with_undo(
+            self.current_stim_modifier.stim_array.name, new_values
+        )
+
+    def pad_stim_array_to(self, total_length_secs: float) -> None:
+        """Pad the current stim array's timeline forward to ``total_length_secs``.
+
+        A no-op if the array is already at least that long. Used by design
+        routines to keep a buffer of already-padded (unsimulated) space
+        ahead of the point where they are appending blocks, so the live
+        view has room to show upcoming inserts without resizing - and
+        therefore moving the camera - on every single block.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        stim = self.current_stim_modifier.stim_array
+        current_secs = float(stim.dt) * stim.values.shape[0]
+        if total_length_secs <= current_secs + float(stim.dt) * 0.5:
+            return
+        self._apply_pad(total_length_secs)
+
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction
     ) -> None:
@@ -1135,8 +1197,7 @@ class StimEditor(QtWidgets.QWidget):
             != QtWidgets.QMessageBox.StandardButton.Yes
         ):
             return
-        new_values = np.zeros_like(self.current_stim_modifier.stim_array.values)
-        self.replace_stim_values_with_undo(name, new_values)
+        self.zero_current_stim_array()
         pattern_dialog = getattr(self, "_pattern_dialog", None)
         if pattern_dialog is not None:
             pattern_dialog.reset_start_time()

@@ -68,6 +68,7 @@ class _FakeEditor:
         self.calls: list[np.ndarray] = []
         self.time_slices: list[slice] = []
         self.cleared = 0
+        self.pad_calls: list[float] = []
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -81,6 +82,11 @@ class _FakeEditor:
     def clear_stim_array(self) -> None:
         self.cleared += 1
 
+    def zero_current_stim_array(self) -> None:
+        self.cleared += 1
+        stim = self.current_stim_modifier.stim_array
+        stim.values = np.zeros_like(stim.values)
+
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
@@ -90,6 +96,31 @@ class _FakeEditor:
         n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
         return bool(np.any(stim.values[n_keep:, :]))
 
+    def current_stim_array_has_any_data(self) -> bool:
+        return bool(np.any(self.current_stim_modifier.stim_array.values))
+
+    def current_stim_array_last_stimulus_sample(self) -> int:
+        values = self.current_stim_modifier.stim_array.values
+        nonzero_rows = np.flatnonzero(np.any(values != 0, axis=1))
+        if nonzero_rows.size == 0:
+            return 0
+        return int(nonzero_rows[-1]) + 1
+
+    def window(self) -> SimpleNamespace:
+        return SimpleNamespace(raise_=lambda: None, activateWindow=lambda: None)
+
+    def _ensure_len(self, n_samples: int) -> None:
+        stim = self.current_stim_modifier.stim_array
+        if stim.values.shape[0] < n_samples:
+            pad = n_samples - stim.values.shape[0]
+            stim.values = np.pad(stim.values, ((0, pad), (0, 0)))
+            self.project.stim_arrays[stim.name] = stim
+
+    def pad_stim_array_to(self, total_length_secs: float) -> None:
+        self.pad_calls.append(total_length_secs)
+        stim = self.current_stim_modifier.stim_array
+        self._ensure_len(round(total_length_secs / stim.dt))
+
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:
@@ -97,11 +128,7 @@ class _FakeEditor:
         self.time_slices.append(time_slice)
         self.calls.append(values.copy())
         stim = self.current_stim_modifier.stim_array
-        stop = int(time_slice.stop)
-        if stop > stim.values.shape[0]:
-            pad = np.zeros((stop - stim.values.shape[0], stim.values.shape[1]))
-            stim.values = np.vstack((stim.values, pad))
-            self.project.stim_arrays[stim.name] = stim
+        self._ensure_len(int(time_slice.stop))
         stim.values[time_slice, :] = values
 
 
@@ -113,6 +140,14 @@ def _make_dialog(qtbot) -> tuple[_FakeProject, _FakeEditor, StdpWindowDialog]:
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     return project, editor, dialog
+
+
+def _real_blocks(editor: "_FakeEditor") -> list[np.ndarray]:
+    """The actual probe/pairing blocks, excluding reset-mode's per-point
+    zero-out write (see _restore_baseline() in stdp_window_dialog.py) - that
+    write goes through the same apply_pattern() path as every other block,
+    but is entirely zero, so filtering it out is unambiguous."""
+    return [block for block in editor.calls if np.any(block)]
 
 
 def _finish_sweep(dialog: StdpWindowDialog, limit: int = 200) -> None:
@@ -194,7 +229,7 @@ def test_pairings_per_point_applies_n_pairings_then_one_probe(
     _finish_sweep(dialog)
 
     assert len(dialog._results) == 4
-    assert len(editor.calls) == 1 + 4 * (3 + 1)
+    assert len(_real_blocks(editor)) == 1 + 4 * (3 + 1)
     assert "pairing 3/3" in dialog.log.toPlainText()
 
 
@@ -212,6 +247,12 @@ def test_continuous_mode_appends_each_block_forward(qtbot, monkeypatch) -> None:
     assert len(starts) == len(set(starts))
     # No checkpoints in continuous mode.
     assert _project.stored_checkpoints == []
+    # Continuous mode grows forward through a RoutineArrayCursor, so the
+    # array gets padded ahead (and the camera focused) at least once.
+    assert editor.pad_calls
+    assert editor.focused_ranges
+    assert dialog._array_cursor is None  # cleared once the sweep finished
+    assert editor.reset_count >= 1  # leftover padding trimmed on finish
 
 
 def test_reset_mode_restores_baseline_and_overwrites_region(qtbot, monkeypatch) -> None:
@@ -230,6 +271,13 @@ def test_reset_mode_restores_baseline_and_overwrites_region(qtbot, monkeypatch) 
     starts = [time_slice.start for time_slice in editor.time_slices]
     assert min(starts) == 0
     assert max(starts) < sum(block.shape[0] for block in editor.calls)
+    # Unlike continuous mode, reset mode pads the region it will reuse
+    # exactly once, up front - every point overwrites the same space
+    # rather than growing forward, so there is nothing to re-pad or jump
+    # the camera for.
+    assert len(editor.pad_calls) == 1
+    assert len(editor.focused_ranges) == 1
+    assert dialog._array_cursor is None
 
 
 def test_pairing_only_on_pre_and_post_columns(qtbot, monkeypatch) -> None:
@@ -243,7 +291,7 @@ def test_pairing_only_on_pre_and_post_columns(qtbot, monkeypatch) -> None:
 
     dialog.start()
     dialog.simulation_finished()
-    pairing = editor.calls[1]
+    pairing = _real_blocks(editor)[1]  # [0] is the baseline probe
 
     assert np.count_nonzero(pairing[:, 0]) > 0
     assert np.count_nonzero(pairing[:, 1]) > 0
@@ -294,33 +342,69 @@ def test_estimate_matches_run_count(qtbot) -> None:
     assert "~13" in dialog.lbl_estimate.text()
 
 
-def test_confirms_and_discards_unsimulated_tail_before_start(
+def test_continue_preserves_existing_stimulus_in_continuous_mode(
     qtbot, monkeypatch
 ) -> None:
+    """ "Continue" keeps existing stimulus content - even content that has
+    never been simulated - rather than discarding it. Continuous mode is
+    selected explicitly: reset mode always anchors to the actual simulation
+    head (see test_reset_mode_restores_baseline_and_overwrites_region), so
+    this is where "continue" vs. "clear" actually changes the cursor."""
     _project, editor, dialog = _make_dialog(qtbot)
-    # Past the simulation head (0.0) - reset_stim_array() would discard this,
-    # so starting must be confirmed first.
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    dialog.cmb_sweep_mode.setCurrentText(dialog.CONTINUOUS_MODE)
+    monkeypatch.setattr(
+        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "continue",
+    )
+    _patch_directional_measurement(monkeypatch, dialog)
+
+    dialog.start()
+
+    # The fake simulation never advances its own clock, so the routine must
+    # catch it up to the pre-existing stimulus before appending any probes.
+    assert editor.calls == []
+    assert dialog._running
+    assert dialog._phase == "initialize_trace"
+    # "Continue" itself never trims - unlike "clear" it does not touch the
+    # array at all before appending.
+    assert getattr(editor, "reset_count", 0) == 0
+
+    dialog.simulation_finished()
+
+    assert len(editor.calls) == 1
+    assert editor.current_stim_modifier.stim_array.values[5, 0] == 1.0
+    assert editor.time_slices[0].start == 6  # right after the last stimulus
+
+
+def test_clear_zeroes_existing_input_before_start(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "clear",
     )
     _patch_directional_measurement(monkeypatch, dialog)
 
     dialog.start()
 
     assert len(editor.calls) == 1
-    # reset_stim_array(), called right after confirming, is what actually
-    # discards the unsimulated tail.
-    assert editor.reset_count >= 1
+    assert editor.cleared == 1
+    # Trimmed back to the simulation head afterwards, same as reset_stim_array()
+    # always did - there is nothing real left to lose once the array is zeroed.
+    assert getattr(editor, "reset_count", 0) == 1
+    # Default sweep mode is reset-mode, which always anchors to the actual
+    # simulation head (here 0, the fake's constant sim time) regardless of
+    # clear/continue - "clear" only matters for continuous mode's cursor.
+    assert editor.time_slices[0].start == 0
 
 
-def test_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
+def test_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: False,
+        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "cancel",
     )
 
     dialog.start()
@@ -329,11 +413,11 @@ def test_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
     assert editor.calls == []
 
 
-def test_no_warning_when_stim_array_has_no_unsimulated_tail(qtbot, monkeypatch) -> None:
-    """Content at (or before) the simulation head never needs confirming -
-    this is what lets routines stack back to back without interruption."""
+def test_no_warning_when_stim_array_is_empty(qtbot, monkeypatch) -> None:
+    """An all-zero array needs no start-routine prompt at all -
+    confirm_start_routine() itself short-circuits to "continue" without
+    showing any dialog, so a sweep starts immediately."""
     _project, editor, dialog = _make_dialog(qtbot)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
     _patch_directional_measurement(monkeypatch, dialog)
 
     dialog.start()
@@ -411,86 +495,6 @@ def test_stdp_window_plot_window_is_scrollable(qtbot) -> None:
     assert scroll_areas[0].widgetResizable()
 
 
-def test_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
-    _project, _editor, dialog = _make_dialog(qtbot)
-    qtbot.addWidget(dialog.stim_heatmap_window)
-
-    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
-    assert dialog.stim_heatmap_window.isWindow()
-
-    dialog.show()
-    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
-    dialog.close()
-    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
-
-
-def test_updates_stim_heatmap_as_blocks_are_appended(qtbot, monkeypatch) -> None:
-    _project, editor, dialog = _make_dialog(qtbot)
-    _patch_directional_measurement(monkeypatch, dialog)
-
-    dialog.start()
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    stim = editor.current_stim_modifier.stim_array
-    assert image.get_array().shape[1] == stim.values.shape[0]
-
-
-def test_stim_heatmap_shows_only_targeted_neurons_and_traces(
-    qtbot, monkeypatch
-) -> None:
-    _project, editor, dialog = _make_dialog(qtbot)
-    _patch_directional_measurement(monkeypatch, dialog)
-    stim = editor.current_stim_modifier.stim_array
-    # a much bigger, unrelated pulse on neuron 2 (not targeted by this
-    # sweep, which targets the default presynaptic=0/postsynaptic=1) must
-    # not wash out the targeted neurons' own pulses in the heatmap's color
-    # scale.
-    stim.values[0, 2] = 1000.0
-
-    dialog.start()
-
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    array = image.get_array()
-    assert array is not None
-    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
-    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
-    assert labels == ["0", "1"]
-    # every one of the targeted neurons' own nonzero samples is fully
-    # opaque, regardless of the much bigger unrelated pulse on neuron 2
-    # (alpha is no longer proportional to magnitude at all)
-    own_values = stim.values[:, [0, 1]].T
-    assert np.array_equal(array[..., 3] > 0, own_values != 0)
-
-    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
-    assert len(trace_lines) == 2
-
-
-def test_forwards_theme_to_stim_heatmap(qtbot) -> None:
-    _project, _editor, dialog = _make_dialog(qtbot)
-
-    dialog.apply_theme(theme.DARK)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
-    dialog.apply_theme(theme.LIGHT)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
-
-
-def test_weight_readout_mode_leaves_stim_heatmap_traces_empty(qtbot) -> None:
-    """In weight-readout mode there's no voltage trace selected (cmb_trace
-    is hidden) - the relevant readout is synaptic weight, not a per-neuron
-    voltage trace, so the popup's trace panel should stay empty rather than
-    plot a stale/irrelevant trace."""
-    project, editor, dialog = _make_dialog(qtbot)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
-    _use_weight_readout(project, dialog)
-
-    dialog._update_stim_heatmap()
-
-    assert len(dialog.stim_heatmap_window.trace_axes.lines) == 0
-    # the heatmap itself still shows the targeted neurons' input pattern
-    assert dialog.stim_heatmap_window._image is not None
-
-
 def test_matplotlib_plots_follow_theme(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
 
@@ -555,7 +559,7 @@ def test_weight_readout_sweeps_without_probes(qtbot, monkeypatch) -> None:
     for delta_t, percent in dialog._results:
         assert percent > 0.0 if delta_t > 0.0 else percent < 0.0
     # Every appended block is a two-column pairing (no pre-only probe blocks).
-    for block in editor.calls:
+    for block in _real_blocks(editor):
         assert np.count_nonzero(block[:, 0]) > 0
         assert np.count_nonzero(block[:, 1]) > 0
     assert "% weight" in dialog.log.toPlainText()
@@ -617,7 +621,7 @@ def test_delta_t_recorded_as_effective_grid_value(qtbot, monkeypatch) -> None:
     _finish_sweep(dialog)
 
     assert dialog._results == [(20.0, pytest.approx(10.0))]
-    pairing = editor.calls[1]
+    pairing = _real_blocks(editor)[1]  # [0] is the baseline probe
     pre_sample = int(np.flatnonzero(pairing[:, 0])[0])
     post_sample = int(np.flatnonzero(pairing[:, 1])[0])
     assert post_sample - pre_sample == 20

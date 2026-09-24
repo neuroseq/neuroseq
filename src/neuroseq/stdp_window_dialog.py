@@ -16,24 +16,25 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input_blocks import append_block
+from neuroseq.dynamic_input_blocks import RoutineArrayCursor
+from neuroseq.dynamic_input_blocks import run_to_sample
 from neuroseq.dynamic_input_measurement import EPSPMeasurement
 from neuroseq.dynamic_input_measurement import NoEpspDetected
 from neuroseq.dynamic_input_measurement import measure_epsp
 from neuroseq.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input_routine import backend_property
-from neuroseq.stdp_synaptic_tuning_dialog import StimHeatmapWindow
 from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
 from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
 from neuroseq.stdp_synaptic_tuning_dialog import _wrap_in_scroll_area
-from neuroseq.stdp_synaptic_tuning_dialog import confirm_discard_unsimulated_input
+from neuroseq.stdp_synaptic_tuning_dialog import confirm_start_routine
 from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
 from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
 from neuroseq.stim_timing import samples_to_milliseconds
+from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 # Backwards-compatible import for callers/tests that used the former local
@@ -65,7 +66,6 @@ class StdpWindowBackend(RoutineBackend):
         self.results: list[tuple[float, float]] = []
         self.epsp_trajectory: list[float] = []
         self.probe_pulse_times: list[float] = []
-        self.view_block_samples: int | None = None
         self.checkpoint: str | None = None
         self.baseline_sample = 0
         self.point_start = 0
@@ -94,7 +94,6 @@ class StdpWindowBackend(RoutineBackend):
         self.results = []
         self.epsp_trajectory = []
         self.probe_pulse_times = []
-        self.view_block_samples = None
         self.saturation_warned = False
         self.phase = "idle"
         if weight_baseline is not None:
@@ -320,6 +319,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._backend.on_advance = self._advance_domain
         self._backend.on_measurement = self._update_plot
         self._backend.on_restore_baseline = self._restore_baseline
+        self._backend.on_finished = self._on_backend_finished
         self._running = False
         self._awaiting_simulation = False
         self._paused = False
@@ -329,6 +329,9 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
         self._plot_window_positioned = False
+        self._array_cursor: RoutineArrayCursor | None = None
+        self._append_start_sample = 0
+        self._point_span_end_sample = 0
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -430,14 +433,6 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.spn_response_ms.setRange(0.001, 100_000.0)
         self.spn_response_ms.setValue(50.0)
         self.spn_response_ms.setSuffix(" ms")
-        self.chk_follow_input = QtWidgets.QCheckBox(
-            "Follow new input on each iteration", self
-        )
-        self.chk_follow_input.setChecked(True)
-        self.spn_history_blocks = QtWidgets.QSpinBox(self)
-        self.spn_history_blocks.setRange(0, 100)
-        self.spn_history_blocks.setValue(3)
-        self.spn_history_blocks.setSuffix(" blocks")
 
         form.addRow("Readout:", self.cmb_readout)
         form.addRow("Sweep mode:", self.cmb_sweep_mode)
@@ -457,8 +452,6 @@ class StdpWindowDialog(_SelfRaisingDialog):
         form.addRow("Recovery time (ms):", self.spn_recovery_ms)
         self.lbl_response = QtWidgets.QLabel("Post-pulse window (ms):", self)
         form.addRow(self.lbl_response, self.spn_response_ms)
-        form.addRow("Live view:", self.chk_follow_input)
-        form.addRow("Visible history:", self.spn_history_blocks)
         parameters_layout.addLayout(form)
 
         self.parameters_scroll = QtWidgets.QScrollArea(self)
@@ -495,10 +488,11 @@ class StdpWindowDialog(_SelfRaisingDialog):
             lambda _index: self._update_estimate()
         )
 
-        # No Qt parent for the popups - see StimHeatmapWindow's construction
-        # in stdp_synaptic_tuning_dialog.py for why (KWin/X11 groups a whole chain
-        # of transient windows sharing one owner, so clicking one never
-        # brings it above a sibling in the same chain).
+        # No Qt parent for this popup: a parent sets WM_TRANSIENT_FOR, and
+        # some window managers (observed on KWin/X11) then treat the whole
+        # chain of transient windows sharing one owner as a single "raise
+        # group" - clicking one never brings it above a sibling in the same
+        # chain.
         self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
@@ -514,13 +508,6 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.trajectory_axes = figure.add_subplot(grid[1, 0])
         plot_layout.addWidget(_wrap_in_scroll_area(self.window_plot, self.plot_window))
         self.plot_window.resize(720, 560)
-
-        # A third popup: a live, whole-history heatmap of the input pattern
-        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
-        self.stim_heatmap_window = StimHeatmapWindow(
-            "STDP timing window (LTP/LTD vs Δt) — stimulation pattern"
-        )
-        self._stim_heatmap_window_positioned = False
 
         self.lbl_status = QtWidgets.QLabel("STDP window: waiting for baseline", self)
         layout.addWidget(self.lbl_status)
@@ -614,36 +601,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
-        self.stim_heatmap_window.show()
-        if not self._stim_heatmap_window_positioned:
-            self._stim_heatmap_window_positioned = True
-            self.stim_heatmap_window.position_below(self.plot_window)
-        self.stim_heatmap_window.raise_()
-        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
-        self.stim_heatmap_window.close()
         super().closeEvent(event)
-
-    def _update_stim_heatmap(self) -> None:
-        modifier = self.editor.current_stim_modifier
-        stim = modifier.stim_array if modifier is not None else None
-        target_ids = (self.spn_presynaptic.value(), self.spn_postsynaptic.value())
-        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
-
-    def _heatmap_trace(self) -> TraceData | None:
-        # In weight-readout mode there's no voltage trace selected (cmb_trace
-        # is hidden) - the relevant readout is synaptic weight, not a
-        # per-neuron voltage trace, so leave the popup's trace panel empty.
-        if self.project is None or self._weight_mode():
-            return None
-        trace_name = self.cmb_trace.currentText()
-        if not trace_name or not self._is_simulation_voltage_trace(trace_name):
-            return None
-        return self.project.get_data(trace_name, TraceData)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)
@@ -777,12 +740,59 @@ class StdpWindowDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        if not confirm_discard_unsimulated_input(self, self.editor):
-            self._append_log("Routine cancelled; unsimulated input kept.")
+        choice = confirm_start_routine(self, self.editor)
+        if choice == "cancel":
+            self._append_log("Routine cancelled.")
             return
-        # Start from the simulation head so a long left-over stim array does not
-        # make the routine simulate a huge empty tail.
-        self.editor.reset_stim_array()
+        stim = self._require_stim()
+        project = self._require_project()
+        prepare_seconds = 0.0
+        if choice == "clear":
+            self.editor.zero_current_stim_array()
+            # Trim the (now all-zero) tail back to the simulation head, same
+            # as reset_stim_array() always did - there is nothing real left
+            # to lose, so "start from the beginning" means right after
+            # whatever has actually been simulated so far (0 for a fresh
+            # project), not literally sample 0 if some has already run.
+            self.editor.reset_stim_array()
+            target_secs = max(project.b2_model.get_sim_time_secs(), float(stim.dt))
+            self._append_start_sample = seconds_to_samples_nearest(
+                target_secs, float(stim.dt)
+            )
+        else:
+            # Continue after the last existing stimulus - not the
+            # simulation head, which can be well behind it (e.g. an example
+            # project's pre-authored stim array that has never been
+            # simulated in this session). Using the simulation head here
+            # would make reset_stim_array() silently discard that
+            # pre-existing content instead of preserving it. (Only matters
+            # for continuous mode - reset mode always anchors to the
+            # simulation head itself, by design.)
+            self._append_start_sample = (
+                self.editor.current_stim_array_last_stimulus_sample()
+            )
+            last_stimulus_secs = self._append_start_sample * float(stim.dt)
+            current_sim_secs = project.b2_model.get_sim_time_secs()
+            if last_stimulus_secs > current_sim_secs + float(stim.dt) * 0.5:
+                # The network has to actually run through that pre-existing
+                # content before the routine starts appending and measuring
+                # after it.
+                prepare_seconds = run_to_sample(
+                    project, stim, self._append_start_sample
+                )
+        # Get this dialog and its plots out of the way so the user can watch
+        # the stim array and traces fill up as the routine runs. Z-order
+        # hints (lower()/raise()) are not reliably honored by every window
+        # manager - especially for a window that still has focus from the
+        # Start click - so minimizing is used instead, since window state is
+        # enforced by the OS/WM rather than merely requested. Restored
+        # automatically when the routine finishes (_on_backend_finished).
+        self.showMinimized()
+        self.plot_window.showMinimized()
+        main_window = self.editor.window()
+        if main_window is not None:
+            main_window.raise_()
+            main_window.activateWindow()
         if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
             self._finish("Pre- and postsynaptic neuron IDs must differ.")
             return
@@ -798,7 +808,8 @@ class StdpWindowDialog(_SelfRaisingDialog):
             needs_init = not self._is_simulation_voltage_trace(
                 self.cmb_trace.currentText()
             )
-        if needs_init:
+        if needs_init or prepare_seconds > 0.0:
+            duration = max(prepare_seconds, 0.001)
             self._running = True
             self._phase = (
                 "initialize_weight" if self._weight_mode() else "initialize_trace"
@@ -806,10 +817,17 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_pause.setEnabled(True)
-            self._append_log(
-                "Running an initial 0.001 s simulation to create monitors."
-            )
-            self._request_simulation(0.001)
+            if prepare_seconds > 0.0:
+                self._append_log(
+                    f"Simulating {duration:.3f} s to catch up to the "
+                    "existing stimuli before the sweep starts."
+                )
+            else:
+                self._append_log(
+                    f"Running an initial {duration:.3f} s simulation to "
+                    "create monitors."
+                )
+            self._request_simulation(duration)
             return
         self._begin_sweep(clear_log=True)
 
@@ -857,6 +875,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._checkpoint = None
         self._baseline_sample = 0
         self._point_start = 0
+        self._array_cursor = None
         if self._reset_mode():
             project = self._require_project()
             self._baseline_sample = int(
@@ -865,6 +884,37 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._point_start = self._baseline_sample
             self._checkpoint = f"STDP window baseline {id(self)}"
             project.b2_model.store(self._checkpoint)
+            # Reset mode reuses the same array region for every Δt point (each
+            # rewinds to this checkpoint), so - unlike the append-forward
+            # routines - the padded window is sized exactly once, to fit the
+            # worst-case point, and never needs to grow or jump afterwards.
+            worst_case_gap_ms = max(abs(config.dt_min_ms), abs(config.dt_max_ms))
+            point_span_seconds = (
+                config.pairings_per_point
+                * (
+                    config.recovery_ms
+                    + worst_case_gap_ms
+                    + config.pulse_ms
+                    + config.response_ms
+                )
+                / 1000.0
+            )
+            baseline_seconds = self._baseline_sample * float(stim.dt)
+            self.editor.pad_stim_array_to(baseline_seconds + point_span_seconds)
+            self._point_span_end_sample = stim.values.shape[0]
+            self.editor.focus_time_range(
+                baseline_seconds, baseline_seconds + point_span_seconds
+            )
+        else:
+            probe_estimate_ms = (
+                config.recovery_ms
+                + (StdpWindowDialog.PROBE_PULSES - 1) * StdpWindowDialog.PROBE_PERIOD_MS
+                + config.pulse_ms
+                + config.response_ms
+            )
+            self._array_cursor = RoutineArrayCursor(
+                self._append_start_sample, probe_estimate_ms / 1000.0
+            )
         weight_baseline: float | None = None
         if self._weight_mode():
             weight_baseline = self._read_synapse_weight()
@@ -895,18 +945,40 @@ class StdpWindowDialog(_SelfRaisingDialog):
         return self._place_block(block)
 
     def _restore_baseline(self) -> None:
-        """Reset mode: rewind the network to the baseline checkpoint."""
+        """Reset mode: rewind the network to the baseline checkpoint and
+        clear the point's stim region.
+
+        Every point reuses the same (padded-once) region, so a point with
+        fewer or shorter pairings than the previous one must not inherit
+        that previous point's leftover pulses past its own end - clearing
+        the whole region before writing keeps it honest without resizing
+        the array (and therefore without moving the camera) between points.
+        """
         if self._checkpoint is not None:
             self._require_project().b2_model.restore(self._checkpoint)
         self._point_start = self._baseline_sample
+        stim = self._require_stim()
+        if self._point_span_end_sample > self._baseline_sample:
+            zeros = np.zeros(
+                (
+                    self._point_span_end_sample - self._baseline_sample,
+                    stim.values.shape[1],
+                ),
+                dtype=np.float32,
+            )
+            self.editor.apply_pattern(
+                slice(0, stim.values.shape[1]),
+                slice(self._baseline_sample, self._point_span_end_sample),
+                zeros,
+            )
 
     def _place_block(self, block: np.ndarray) -> int:
         stim = self._require_stim()
         if self._reset_mode():
-            # A reset point deliberately reuses the baseline region. Trim any
-            # automatic padding first, then preserve the checkpoint's fixed
-            # placement semantics.
-            self.editor.reset_stim_array()
+            # A reset point deliberately reuses the baseline region, already
+            # cleared and padded once in _restore_baseline() /
+            # _begin_sweep() - blocks are just written in place at the
+            # point's own cursor.
             start = self._point_start
             self.editor.apply_pattern(
                 slice(0, stim.values.shape[1]),
@@ -914,21 +986,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
                 block,
             )
             self._point_start = start + block.shape[0]
-        else:
-            start = append_block(self.editor, stim, block)
-        if self.chk_follow_input.isChecked():
-            if self._view_block_samples is None:
-                self._view_block_samples = block.shape[0]
-            visible_blocks = max(1, self.spn_history_blocks.value())
-            visible_samples = visible_blocks * self._view_block_samples
-            block_end = start + block.shape[0]
-            history_start = max(0, block_end - visible_samples)
-            history_stop = history_start + visible_samples
-            self.editor.focus_time_range(
-                history_start * stim.dt, history_stop * stim.dt
-            )
-        self._update_stim_heatmap()
-        return start
+            return start
+        if self._array_cursor is None:
+            raise RuntimeError("No routine is running.")
+        return self._array_cursor.place_block(self.editor, stim, block)
 
     def _request_simulation(self, seconds: float) -> None:
         self._backend.request_simulation(seconds)
@@ -1205,7 +1266,6 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.window_plot.draw()
-        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
@@ -1213,11 +1273,26 @@ class StdpWindowDialog(_SelfRaisingDialog):
 
     def _finish(self, message: str) -> None:
         self._backend.finish(message)
+        self._append_log(message)
+
+    def _on_backend_finished(self, message: str) -> None:
+        # The backend can call finish() on itself (e.g. sweep complete)
+        # without going through this dialog's _finish(), so this callback -
+        # wired to RoutineBackend.on_finished - is the one hook guaranteed to
+        # run on every completion path; it is what actually resets the
+        # buttons and trims any padding placed ahead of the routine's last
+        # block, so a stopped or completed run never leaves a long empty
+        # tail. It is also what restores the dialog and its plots after
+        # start() minimized them out of the way of the stim array/traces.
+        del message
+        self.showNormal()
+        self.plot_window.showNormal()
+        self.editor.reset_stim_array()
+        self._array_cursor = None
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
-        self._append_log(message)
 
     @property
     def _running(self) -> bool:
@@ -1268,7 +1343,6 @@ class StdpWindowDialog(_SelfRaisingDialog):
     _results = backend_property("results")
     _epsp_trajectory = backend_property("epsp_trajectory")
     _probe_pulse_times = backend_property("probe_pulse_times")
-    _view_block_samples = backend_property("view_block_samples")
     _checkpoint = backend_property("checkpoint")
     _baseline_sample = backend_property("baseline_sample")
     _point_start = backend_property("point_start")

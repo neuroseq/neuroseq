@@ -11,7 +11,6 @@ from neuroseq import theme
 from neuroseq.data import TraceData
 from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
-from neuroseq.stdp_synaptic_tuning_dialog import _stim_pulse_rgba
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import seconds_to_samples_nearest
@@ -51,7 +50,9 @@ class _FakeEditor:
         )
         self.current_stim_modifier = SimpleNamespace(stim_array=stim)
         self.calls: list[np.ndarray] = []
+        self.time_slices: list[slice] = []
         self.cleared = 0
+        self.pad_calls: list[float] = []
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -65,6 +66,11 @@ class _FakeEditor:
     def clear_stim_array(self) -> None:
         self.cleared += 1
 
+    def zero_current_stim_array(self) -> None:
+        self.cleared += 1
+        stim = self.current_stim_modifier.stim_array
+        stim.values = np.zeros_like(stim.values)
+
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
@@ -74,13 +80,39 @@ class _FakeEditor:
         n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
         return bool(np.any(stim.values[n_keep:, :]))
 
+    def current_stim_array_has_any_data(self) -> bool:
+        return bool(np.any(self.current_stim_modifier.stim_array.values))
+
+    def current_stim_array_last_stimulus_sample(self) -> int:
+        values = self.current_stim_modifier.stim_array.values
+        nonzero_rows = np.flatnonzero(np.any(values != 0, axis=1))
+        if nonzero_rows.size == 0:
+            return 0
+        return int(nonzero_rows[-1]) + 1
+
+    def window(self) -> SimpleNamespace:
+        return SimpleNamespace(raise_=lambda: None, activateWindow=lambda: None)
+
+    def _ensure_len(self, n_samples: int) -> None:
+        stim = self.current_stim_modifier.stim_array
+        if stim.values.shape[0] < n_samples:
+            pad = n_samples - stim.values.shape[0]
+            stim.values = np.pad(stim.values, ((0, pad), (0, 0)))
+
+    def pad_stim_array_to(self, total_length_secs: float) -> None:
+        self.pad_calls.append(total_length_secs)
+        stim = self.current_stim_modifier.stim_array
+        self._ensure_len(round(total_length_secs / stim.dt))
+
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:
-        del neuron_slice, time_slice
+        del neuron_slice
+        self.time_slices.append(time_slice)
         self.calls.append(values.copy())
         stim = self.current_stim_modifier.stim_array
-        stim.values = np.vstack((stim.values, values))
+        self._ensure_len(time_slice.stop)
+        stim.values[time_slice.start : time_slice.stop, :] = values
 
 
 def test_stdp_synaptic_tuning_runs_probe_pairing_probe_and_reaches_target(
@@ -117,8 +149,11 @@ def test_stdp_synaptic_tuning_runs_probe_pairing_probe_and_reaches_target(
 
     dialog.simulation_finished()
     assert len(editor.calls) == 3
-    focused_widths = [stop - start for start, stop in editor.focused_ranges]
-    assert focused_widths == pytest.approx([focused_widths[0]] * 3)
+    # The camera is only refocused when the array is padded ahead again, not
+    # once per block; this routine alternates long probe blocks and short
+    # pairing blocks, so the running-average pad width itself varies a lot
+    # between pads - just check padding (and therefore focusing) happened.
+    assert editor.focused_ranges
     dialog.simulation_finished()
 
     assert not dialog._running
@@ -126,6 +161,11 @@ def test_stdp_synaptic_tuning_runs_probe_pairing_probe_and_reaches_target(
     assert "target achieved" in dialog.log.toPlainText()
     assert "absolute 5.000%" in dialog.lbl_relative_difference.text()
     assert measured_neurons[0] == 1
+    # record_measurement() called self.finish() on the backend directly,
+    # bypassing the dialog's own stop()/_finish() - _on_backend_finished,
+    # wired as RoutineBackend.on_finished, is what actually ran the cleanup.
+    assert dialog._array_cursor is None
+    assert editor.reset_count >= 1
 
 
 def test_stdp_synaptic_tuning_uses_post_pre_pairing_for_depression(
@@ -151,16 +191,16 @@ def test_stdp_synaptic_tuning_uses_post_pre_pairing_for_depression(
     assert "depression" in dialog.log.toPlainText()
 
 
-def test_stdp_synaptic_tuning_no_warning_when_stim_array_has_no_unsimulated_tail(
+def test_stdp_synaptic_tuning_no_warning_when_stim_array_is_empty(
     qtbot, monkeypatch
 ) -> None:
-    """Content at (or before) the simulation head never needs confirming -
-    this is what lets routines stack back to back without interruption."""
+    """An all-zero array needs no start-routine prompt at all -
+    confirm_start_routine() itself short-circuits to "continue" without
+    showing any dialog, so a routine starts immediately."""
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
     monkeypatch.setattr(
         dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
     )
@@ -170,29 +210,57 @@ def test_stdp_synaptic_tuning_no_warning_when_stim_array_has_no_unsimulated_tail
     assert editor.calls
 
 
-def test_stdp_synaptic_tuning_cancel_keeps_unsimulated_input(
-    qtbot, monkeypatch
-) -> None:
+def test_stdp_synaptic_tuning_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    # Past the simulation head (0.0) - reset_stim_array() would discard this,
-    # so starting must be confirmed first.
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: False,
+        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "cancel",
     )
 
     dialog.start()
 
     assert not dialog._running
     assert editor.calls == []
-    assert "unsimulated input kept" in dialog.log.toPlainText()
+    assert "cancelled" in dialog.log.toPlainText()
 
 
-def test_stdp_synaptic_tuning_confirms_and_discards_unsimulated_tail_before_start(
+def test_stdp_synaptic_tuning_continue_after_existing_input(qtbot, monkeypatch) -> None:
+    project = _FakeProject()
+    editor = _FakeEditor(project)
+    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
+    qtbot.addWidget(dialog)
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "continue",
+    )
+    monkeypatch.setattr(
+        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
+    )
+
+    dialog.start()
+
+    # The fake simulation never advances its own clock, so the routine must
+    # catch it up to the pre-existing stimulus before appending any probes.
+    assert editor.calls == []
+    assert dialog._running
+    assert dialog._phase == "initialize_trace"
+    # "Continue" itself never trims - unlike "clear" it does not touch the
+    # array at all before appending.
+    assert getattr(editor, "reset_count", 0) == 0
+
+    dialog.simulation_finished()
+
+    assert editor.calls
+    assert editor.current_stim_modifier.stim_array.values[5, 0] == 1.0
+    assert editor.time_slices[0].start == 6  # right after the last stimulus
+
+
+def test_stdp_synaptic_tuning_clear_zeroes_existing_input_before_start(
     qtbot, monkeypatch
 ) -> None:
     project = _FakeProject()
@@ -201,8 +269,8 @@ def test_stdp_synaptic_tuning_confirms_and_discards_unsimulated_tail_before_star
     qtbot.addWidget(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "clear",
     )
     monkeypatch.setattr(
         dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
@@ -211,30 +279,36 @@ def test_stdp_synaptic_tuning_confirms_and_discards_unsimulated_tail_before_star
     dialog.start()
 
     assert editor.calls
-    # reset_stim_array(), called right after confirming, is what actually
-    # discards the unsimulated tail.
-    assert editor.reset_count >= 1
+    assert editor.cleared == 1
+    # Trimmed back to the simulation head afterwards, same as reset_stim_array()
+    # always did - there is nothing real left to lose once the array is zeroed.
+    assert getattr(editor, "reset_count", 0) == 1
+    # Starts from (almost) the very beginning - reset_stim_array()'s own
+    # convention keeps at least one baseline sample rather than an empty
+    # array, so this is 1 sample in, not literally 0.
+    assert editor.time_slices[0].start == 1
 
 
-@pytest.mark.parametrize("visible_blocks", [0, 3])
-def test_stdp_synaptic_tuning_camera_keeps_configured_width(
-    qtbot, visible_blocks: int
+def test_stdp_synaptic_tuning_pads_ahead_and_focuses_camera_once_on_first_probe(
+    qtbot,
 ) -> None:
     project = _FakeProject()
     editor = _FakeEditor(project)
     dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
-    dialog.spn_history_blocks.setValue(visible_blocks)
 
     dialog.start()
 
-    block_samples = editor.calls[0].shape[0]
-    expected_blocks = max(1, visible_blocks)
-    expected_width = expected_blocks * block_samples
-    expected_start = max(0, 10 + block_samples - expected_width)
-    assert editor.focused_ranges == [
-        (expected_start * 0.001, (expected_start + expected_width) * 0.001)
-    ]
+    assert len(editor.pad_calls) == 1
+    assert len(editor.focused_ranges) == 1
+    stim = editor.current_stim_modifier.stim_array
+    # The initial pad estimate is based on a pairing block's length
+    # (pairing_interval_ms + pulse_ms), not a probe's - the first block is
+    # always a probe, which is much longer (5 pulses), so it commonly
+    # exceeds that first pad on its own; apply_pattern's own safety-net
+    # padding (ResizableReversibleAction._ensure_padded) covers the rest,
+    # same as it always has.
+    assert stim.values.shape[0] >= editor.time_slices[0].stop
 
 
 def test_stdp_synaptic_tuning_protocol_defaults(qtbot) -> None:
@@ -249,7 +323,6 @@ def test_stdp_synaptic_tuning_protocol_defaults(qtbot) -> None:
     assert dialog.spn_initial_pairing_time_ms.isHidden()
     assert dialog.spn_pairing_increment_ms.isHidden()
     assert dialog.spn_tolerance.value() == 1.0
-    assert dialog.spn_history_blocks.value() == 3
     assert dialog.spn_amplitude.value() == 100.0
     assert dialog.spn_pulse_ms.value() == 5.0
     assert not dialog.chk_run_all_iterations.isChecked()
@@ -830,120 +903,6 @@ def test_stdp_synaptic_tuning_pairing_time_recorded_as_effective_grid_value(
 
     assert dialog._pairing_times_ms == [10.0, -10.0]
     assert "pairing times are snapped" in dialog.log.toPlainText()
-
-
-def test_stdp_synaptic_tuning_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
-    project = _FakeProject()
-    editor = _FakeEditor(project)
-    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
-    qtbot.addWidget(dialog)
-    qtbot.addWidget(dialog.stim_heatmap_window)
-
-    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
-    assert dialog.stim_heatmap_window.isWindow()
-    assert dialog.stim_heatmap_window.plot.window() is dialog.stim_heatmap_window
-
-    dialog.show()
-    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
-    # See test_stim_heatmap_window.py for the off-screen clamping this relies on.
-    screen = dialog.screen() or QtWidgets.QApplication.primaryScreen()
-    available = screen.availableGeometry()
-    pos = dialog.stim_heatmap_window.pos()
-    assert available.left() <= pos.x() <= available.right()
-    assert available.top() <= pos.y() <= available.bottom()
-    dialog.close()
-    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
-
-
-def test_stdp_synaptic_tuning_updates_stim_heatmap_as_blocks_are_appended(
-    qtbot, monkeypatch
-) -> None:
-    project = _FakeProject()
-    editor = _FakeEditor(project)
-    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
-    qtbot.addWidget(dialog)
-    monkeypatch.setattr(
-        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
-    )
-
-    dialog.start()
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    stim = editor.current_stim_modifier.stim_array
-    assert image.get_array().shape[1] == stim.values.shape[0]
-
-    dialog.simulation_finished()  # appends a pairing block, growing the array
-    # the same image artist is reused (updated in place), not rebuilt/replaced
-    assert dialog.stim_heatmap_window._image is image
-    assert image.get_array().shape[1] == stim.values.shape[0]
-
-
-def test_stdp_synaptic_tuning_stim_heatmap_shows_only_targeted_neurons_and_traces(
-    qtbot, monkeypatch
-) -> None:
-    project = _FakeProject()
-    editor = _FakeEditor(project)
-    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
-    qtbot.addWidget(dialog)
-    monkeypatch.setattr(
-        dialog, "_measure_epsps", lambda trace: EPSPMeasurement(2.0, (2.0,) * 5)
-    )
-    # Widen the input array to 3 neurons and seed a much bigger, unrelated
-    # pulse on neuron 2 (not targeted by this routine, which targets the
-    # default presynaptic=0/postsynaptic=1) - it must not wash out the
-    # targeted neurons' own pulses in the heatmap's color scale.
-    stim = editor.current_stim_modifier.stim_array
-    stim.values = np.zeros((stim.values.shape[0], 3), dtype=np.float32)
-    stim.values[0, 2] = 1000.0
-    project.trace.traces = np.zeros(
-        (3, project.trace.traces.shape[1]), dtype=np.float32
-    )
-    project.trace.traces[1, :] = -55.0
-    project.trace.indices = np.array([0, 1, 2])
-    dialog.refresh()
-
-    dialog.start()
-
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    array = image.get_array()
-    assert array is not None
-    assert array.shape[0] == 2  # only presynaptic (0) and postsynaptic (1)
-    labels = [t.get_text() for t in dialog.stim_heatmap_window.axes.get_yticklabels()]
-    assert labels == ["0", "1"]
-    # every one of the targeted neurons' own nonzero samples is fully
-    # opaque, regardless of the much bigger unrelated pulse on neuron 2
-    # (alpha is no longer proportional to magnitude at all)
-    own_values = stim.values[:, [0, 1]].T
-    assert np.array_equal(array[..., 3] > 0, own_values != 0)
-
-    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
-    assert len(trace_lines) == 2
-    plotted = {tuple(np.unique(line.get_ydata())) for line in trace_lines}
-    assert plotted == {(0.0,), (-55.0,)}
-
-
-def test_stdp_synaptic_tuning_forwards_theme_to_stim_heatmap(qtbot) -> None:
-    project = _FakeProject()
-    editor = _FakeEditor(project)
-    dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
-    qtbot.addWidget(dialog)
-
-    dialog.apply_theme(theme.DARK)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
-    dialog.apply_theme(theme.LIGHT)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
-
-
-def test_stim_heatmap_colors_do_not_fade_with_pulse_magnitude() -> None:
-    values = np.array([[0.0, 0.01, 1.0, -2.0]])
-
-    rgba = _stim_pulse_rgba(values, StimType.Excitation)
-
-    assert np.array_equal(rgba[0, 0], [0.0, 0.0, 0.0, 0.0])
-    assert np.array_equal(rgba[0, 1], rgba[0, 2])
-    assert rgba[0, 1, 3] == 1.0
-    assert rgba[0, 3, 3] == 1.0
 
 
 def test_stdp_synaptic_tuning_pause_defers_next_simulation_and_resets_on_finish(
