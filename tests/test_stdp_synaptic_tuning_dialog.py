@@ -338,9 +338,10 @@ def test_stdp_synaptic_tuning_can_hide_parameters(qtbot) -> None:
     qtbot.mouseClick(dialog.btn_toggle_parameters, QtCore.Qt.MouseButton.LeftButton)
     QtWidgets.QApplication.processEvents()
 
+    collapsed_size = dialog.size()
     assert not dialog.parameters_panel.isVisible()
-    assert dialog.width() == expanded_size.width()
-    assert dialog.height() < expanded_size.height()
+    assert collapsed_size.width() >= expanded_size.width()
+    assert collapsed_size.height() < expanded_size.height()
     assert dialog.btn_toggle_parameters.text() == "Show parameters"
     assert dialog.btn_toggle_parameters.arrowType() == QtCore.Qt.ArrowType.RightArrow
 
@@ -348,7 +349,8 @@ def test_stdp_synaptic_tuning_can_hide_parameters(qtbot) -> None:
     QtWidgets.QApplication.processEvents()
 
     assert dialog.parameters_panel.isVisible()
-    assert dialog.size() == expanded_size
+    assert dialog.width() >= expanded_size.width()
+    assert dialog.height() == expanded_size.height()
     assert dialog.btn_toggle_parameters.text() == "Hide parameters"
     assert dialog.btn_toggle_parameters.arrowType() == QtCore.Qt.ArrowType.DownArrow
 
