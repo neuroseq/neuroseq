@@ -159,6 +159,26 @@ def test_current_experiment_masks_with_mapping_are_default(qtbot):
     assert dialog._selected_mapping() == {4: 0, 7: 1}
 
 
+def test_selected_mapping_reconstructs_linear_offset(qtbot):
+    """Regression test for #554's Linear-strategy blind spot: a Linear
+    import stores only linear_offset, not a materialized
+    stimulus_to_cellpose_mapping, so _selected_mapping() used to read a bare
+    None there and import under an unintended identity mapping instead of
+    the offset the user actually selected."""
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.stimulus_to_cellpose_mapping = None
+    cellpose_import.mapping_strategy = "Linear"
+    cellpose_import.linear_offset = 2
+    cellpose_import.original_cellpose_ids = np.array([0, 1, 2, 3], dtype=np.int32)
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    assert dialog._use_loaded_radio.isChecked()
+    assert dialog._selected_mapping() == {0: 2, 1: 3, 2: 0, 3: 1}
+
+
 def test_third_radio_selected_resolves_to_none_masks(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
@@ -427,11 +447,74 @@ def test_finalize_roi_average_imports_raw_trace_only(qtbot, mocker):
     traces = dialog.imported_data[0]
     assert traces.name == "Simply averaged ROI traces"
     np.testing.assert_array_equal(traces.traces, result.F)
+    # raw_cellpose_ids must be populated (issue #554) - without it,
+    # Project.remap_cellpose_indices() has nothing to re-resolve indices from
+    # and silently skips this trace forever once the Cellpose mapping changes.
+    n_neurons = result.F.shape[0]
+    np.testing.assert_array_equal(
+        traces.raw_cellpose_ids, np.arange(n_neurons, dtype=np.uint32)
+    )
+    np.testing.assert_array_equal(traces.indices, np.arange(n_neurons, dtype=np.uint32))
     assert dialog.experiment_duration == pytest.approx(
         result.F.shape[1] / dialog._fs_spin.value()
     )
     information.assert_called_once()
     accept.assert_called_once()
+
+
+def test_finalize_roi_average_trace_indices_follow_mapping_after_remap(qtbot, mocker):
+    """Regression test for #554: changing the Cellpose mapping strategy after
+    importing via the (default) "Simply average from ROI" pipeline left the
+    already-imported trace's displayed indices stuck on the old mapping,
+    because it never got a raw_cellpose_ids array for remap_cellpose_indices()
+    to work from."""
+    from neuroseq.data import Experiment
+    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.project import Project
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping={0: 0, 1: 1, 2: 2, 3: 3},
+    )
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    result = _make_pipeline_result()
+    result.extra["pipeline"] = "roi_average"
+    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+    traces = dialog.imported_data[0]
+    np.testing.assert_array_equal(
+        traces.indices, np.array([0, 1, 2, 3], dtype=np.uint32)
+    )
+
+    project = Project()
+    project.cellpose_data = cellpose_import
+    project.add_experiment(
+        Experiment("exp", dialog.experiment_duration, [0.0], [traces])
+    )
+
+    # Mapping strategy changes - Cellpose id 0 is now stim 3, id 3 is now stim 0.
+    project.cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        stimulus_to_cellpose_mapping={3: 0, 1: 1, 2: 2, 0: 3},
+    )
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    np.testing.assert_array_equal(
+        traces.indices, np.array([3, 1, 2, 0], dtype=np.uint32)
+    )
 
 
 def test_seg_file_source_sets_new_cellpose_result_after_finalize(

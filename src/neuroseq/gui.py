@@ -37,6 +37,7 @@ from neuroseq.data_widget import DataWidget
 from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
+from neuroseq.example_projects import getting_started_project
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.exporter_igor2 import export_igor2_csv
 from neuroseq.exporter_igor2 import export_igor2_ibw
@@ -610,10 +611,18 @@ class Gui(QtWidgets.QMainWindow):
 
     def _activate_tab_index(self, index: int, reset_controller: bool = False) -> None:
         if 0 <= self._active_tab_index < len(self.tabs):
+            outgoing_project = self.tabs[self._active_tab_index]
             # Remember where the outgoing tab's playback position was, so
             # switching back to it later restores this instead of showing
             # whatever the (shared) time slider happens to display.
-            self.tabs[self._active_tab_index].last_time_ms = self.time_slider.t_ms
+            outgoing_project.last_time_ms = self.time_slider.t_ms
+            # Same idea for the Spatial Footprints selection - it lives on
+            # the one shared _spatial_footprint_state, so without this it
+            # gets wiped by set_data() the moment another tab becomes active
+            # (issue #555).
+            outgoing_project.selected_cellpose_ids = set(
+                self._spatial_footprint_state.selected_cellpose_ids
+            )
         self._active_tab_index = index
         self.update_project(self.tabs[index], reset_controller=reset_controller)
 
@@ -647,7 +656,10 @@ class Gui(QtWidgets.QMainWindow):
 
     def _remove_tab(self, index: int) -> None:
         if len(self.tabs) == 1:
-            self.update_project(default_project(), reset_controller=True)
+            # Closing the last tab can't leave the window with no project at
+            # all, and a blank default_project() would strand the user with
+            # nothing to look at - open the Getting Started example instead.
+            self.update_project(getting_started_project(), reset_controller=True)
             return
         del self.tabs[index]
         self.tab_bar.removeTab(index)
@@ -1293,6 +1305,10 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(self.project.cellpose_data)
+            # set_data() above always clears the (shared) selection state;
+            # restore this project's own remembered one - see the matching
+            # save in _activate_tab_index (issue #555).
+            self._spatial_footprint_state.set_selected(project.selected_cellpose_ids)
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(
@@ -1809,6 +1825,17 @@ class Gui(QtWidgets.QMainWindow):
             if action is not None:
                 action.setEnabled(bool(enabled))
 
+    def _iter_menu_actions(self, menu: QtWidgets.QMenu) -> list[QtWidgets.QAction]:
+        """Recursively collect every leaf action in ``menu``, including submenus'."""
+        actions: list[QtWidgets.QAction] = []
+        for action in menu.actions():
+            submenu = action.menu()
+            if submenu is not None:
+                actions.extend(self._iter_menu_actions(submenu))
+            else:
+                actions.append(action)
+        return actions
+
     def _set_io_actions_enabled(self, enabled: bool) -> None:
         """Gate file-IO entry points while a save/load/simulation worker is running.
 
@@ -1819,11 +1846,24 @@ class Gui(QtWidgets.QMainWindow):
         always targets the tab that was active when it was dispatched, so
         switching/closing/opening tabs mid-task would let its completion
         callback land on the wrong tab's now-active widgets.
+
+        ``QMenu.setEnabled``/``QToolBar.setEnabled`` only grey out the
+        container and block mouse interaction with it -- the ``QAction``s
+        inside keep their own ``enabled`` state, so a ``Qt.WindowShortcut``
+        such as Ctrl+N/Ctrl+O/Ctrl+E still fires even while the File menu
+        looks disabled. Disable every action reachable from the File menu
+        (each one doubles as its toolbar button, since ``add_action``
+        shares one ``QAction`` between the two) so the shortcuts are
+        blocked too.
         """
         for attr in ("menu_file", "toolbar_file", "tab_bar"):
             target = getattr(self, attr, None)
             if target is not None:
                 target.setEnabled(bool(enabled))
+        menu_file = getattr(self, "menu_file", None)
+        if menu_file is not None:
+            for action in self._iter_menu_actions(menu_file):
+                action.setEnabled(bool(enabled))
         self._set_simulation_actions_enabled(bool(enabled))
 
     def _dispatch_io_task(
@@ -2028,6 +2068,29 @@ class Gui(QtWidgets.QMainWindow):
 
         def _on_brian2_finished(_result: object) -> None:
             self.logger.info("Brian2 simulation finished.")
+            if self.project is not project:
+                # The active tab changed while this simulation was running.
+                # Its results are already saved on ``project`` (run_simulation
+                # mutated it directly), but the shared stim_editor/controllers
+                # now belong to a different project: refreshing them, or
+                # telling stim_editor's Design dynamic input dialogs the
+                # simulation finished, would apply this tab's results (or
+                # continuation) to whatever project the user switched to.
+                self.logger.warning(
+                    "Active tab changed during Brian2 simulation; results "
+                    f"were saved to '{self._tab_label_for(project)}' but its "
+                    "view was not refreshed and no Design dynamic input "
+                    "continuation was triggered for it."
+                )
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Simulation finished",
+                    "The simulation finished after a project switch.\n"
+                    f"Results were saved to '{self._tab_label_for(project)}', "
+                    "the project that started it, not the project currently "
+                    "open. Switch back to it to see the update.",
+                )
+                return
             visible_time_range = self.controller.current_time_range()
             self._update_data(keep_undo_history=True)
             if visible_time_range is not None:

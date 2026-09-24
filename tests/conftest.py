@@ -124,8 +124,17 @@ def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
 
     def _make_callback(name: str) -> Callable:
         # this function has the same calling interface as the qmessagebox static methods like information()
-        def _mock(parent: Any, title: str, text: str) -> None:
-            # but instead of displaying the message box it just appends the supplied arguments to the calls list
+        def _mock(
+            parent: Any, title: str, text: str, *args: Any, **kwargs: Any
+        ) -> None:
+            # but instead of displaying the message box it just appends the supplied arguments to the calls list.
+            # *args/**kwargs absorb the optional `buttons`/`defaultButton` arguments
+            # some call sites pass (e.g. _prompt_save_before_close's Save/Discard/
+            # Cancel prompt) - without them, that call raised a TypeError here,
+            # and since it can fire from closeEvent() during Qt's own widget
+            # teardown (e.g. qtbot's end-of-test auto-close), an exception
+            # escaping a Qt virtual method override there risks aborting the
+            # whole process rather than just failing the test.
             calls.append({"name": name, "title": title, "text": text})
 
         return _mock

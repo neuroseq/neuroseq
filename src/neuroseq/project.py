@@ -23,6 +23,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
@@ -164,6 +165,14 @@ class Project:
         # each project's own playback position instead of sharing one global
         # slider value; not persisted to the saved archive.
         self.last_time_ms: int = 0
+
+        # Cell(s) selected in the Spatial Footprints panel while this
+        # project's tab was active. Transient GUI state, per-project like
+        # last_time_ms - the panel's selection lives on one shared
+        # SpatialFootprintState, so without this it would be wiped by
+        # set_data() the moment another tab becomes active (issue #555); not
+        # persisted to the saved archive.
+        self.selected_cellpose_ids: set[int] = set()
 
         # External-simulation function state. `external_simulate_path` is either
         # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
@@ -762,11 +771,7 @@ class Project:
             mapping collides for their raw ids) - those are left unchanged rather than
             raising, so the caller can surface a warning.
         """
-        mapping = (
-            self.cellpose_data.stimulus_to_cellpose_mapping
-            if self.cellpose_data is not None
-            else None
-        )
+        mapping = resolve_stimulus_to_cellpose_mapping(self.cellpose_data)
         failed: list[str] = []
         for name, experiment in self.experiments.items():
             for datum in experiment.data:

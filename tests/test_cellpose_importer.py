@@ -6,9 +6,11 @@ import numpy as np
 from PIL import Image
 
 from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importer_cellpose import load_background_image
+from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.utils import neuron_indices_to_colors
 
 """
@@ -306,6 +308,73 @@ def test_linear_mapping_offset_starts_at_zero():
     original_ids = np.array([1, 3, 4, 7], dtype=np.int32)
     mapping = generate_linear_stimulus_mapping(original_ids, offset=3)
     assert mapping == {0: 3, 1: 4, 2: 7, 3: 1}
+
+
+def _cellpose_result(
+    *,
+    original_cellpose_ids: np.ndarray | None = None,
+    stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+    mapping_strategy: str | None = None,
+    linear_offset: int | None = None,
+) -> CellposeImportResult:
+    return CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=original_cellpose_ids,
+        stimulus_to_cellpose_mapping=stimulus_to_cellpose_mapping,
+        mapping_strategy=mapping_strategy,
+        linear_offset=linear_offset,
+    )
+
+
+def test_resolve_stimulus_to_cellpose_mapping_reconstructs_linear_offset():
+    """Regression test for #554's Linear-strategy blind spot: only
+    linear_offset is stored for a Linear import (no materialized
+    stimulus_to_cellpose_mapping), so reading the mapping field directly
+    looks like "no mapping" and silently drops the offset."""
+    result = _cellpose_result(
+        original_cellpose_ids=np.array([1, 3, 4, 7], dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+        mapping_strategy="Linear",
+        linear_offset=3,
+    )
+
+    assert resolve_stimulus_to_cellpose_mapping(result) == {
+        0: 3,
+        1: 4,
+        2: 7,
+        3: 1,
+    }
+
+
+def test_resolve_stimulus_to_cellpose_mapping_passes_through_custom_mapping():
+    result = _cellpose_result(
+        stimulus_to_cellpose_mapping={4: 0, 7: 1},
+        mapping_strategy="Custom",
+    )
+
+    assert resolve_stimulus_to_cellpose_mapping(result) == {4: 0, 7: 1}
+
+
+def test_resolve_stimulus_to_cellpose_mapping_defaults_missing_strategy_to_linear():
+    """Projects saved before ``mapping_strategy`` existed have it as None -
+    inferred as Linear, matching the same inference already used elsewhere
+    (e.g. CellposeImportDialog._apply_existing_mapping)."""
+    result = _cellpose_result(
+        original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+        mapping_strategy=None,
+        linear_offset=None,
+    )
+
+    assert resolve_stimulus_to_cellpose_mapping(result) == {0: 0, 1: 1, 2: 2}
+
+
+def test_resolve_stimulus_to_cellpose_mapping_handles_none():
+    assert resolve_stimulus_to_cellpose_mapping(None) is None
 
 
 def test_custom_mapping_parsing_edge_cases():

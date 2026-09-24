@@ -27,6 +27,7 @@ from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
+from neuroseq.gui import ToolbarProgressWidget
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
@@ -1210,6 +1211,90 @@ def test_switching_to_tab_with_no_stim_arrays_still_updates_time_slider_range(
     gui.close()
 
 
+def test_closing_the_only_dirty_tab_prompts_to_save_then_opens_example_project(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    assert len(gui.tabs) == 1
+    gui.project.mark_dirty()
+
+    warn_calls: list[tuple] = []
+
+    def _fake_warning(*args, **kwargs):
+        warn_calls.append(args)
+        return QtWidgets.QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+
+    gui._close_tab(0)
+
+    assert len(warn_calls) == 1  # asked about saving before replacing the tab
+    assert len(gui.tabs) == 1
+    assert gui.project.project_name == "Getting Started Project"
+    gui.close()
+
+
+def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
+    monkeypatch: MonkeyPatch, qtbot: QtBot
+) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    assert len(gui.tabs) == 1
+    assert not gui.project.dirty
+
+    warn_calls: list[tuple] = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: warn_calls.append(args),
+    )
+
+    gui._close_tab(0)
+
+    assert warn_calls == []  # nothing unsaved, so no prompt was needed
+    assert len(gui.tabs) == 1
+    assert gui.project.project_name == "Getting Started Project"
+    gui.close()
+
+
+def test_switching_project_tabs_restores_each_tabs_own_spatial_footprint_selection(
+    qtbot: QtBot,
+) -> None:
+    """Regression test for #555: the Spatial Footprints panel's selection
+    lives on one shared SpatialFootprintState (see SpatialFootprintWidget's
+    ``state`` parameter), and set_data() - called on every tab switch -
+    always clears it. Switching tabs used to silently deselect whatever the
+    user had selected, even when switching straight back."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    tab0_project = gui.project
+    tab0_project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui.update_project(tab0_project)
+
+    tab1_project = Project()
+    tab1_project.cellpose_data = _make_gui_cellpose_result(mapping=None)
+    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == set()
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {2}
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == set()
+    assert tab1_project.selected_cellpose_ids == {2}  # remembered on the way out
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {1}
+
+    gui._activate_tab_index(1, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {2}  # restored
+
+    gui._activate_tab_index(0, reset_controller=True)
+    assert gui._spatial_footprint_state.selected_cellpose_ids == {1}  # restored
+    gui.close()
+
+
 def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
@@ -1897,6 +1982,35 @@ def test_gui_simulate_and_playback(
     gui.close()
 
 
+class _MainThreadCancelTrigger(QtCore.QObject):
+    """Relay ``BackgroundIOWorker.progress`` (emitted on the worker thread)
+    into a ``canceled`` emission that runs on the main thread, the way a
+    real Cancel-button click would.
+
+    Connecting the worker's cross-thread signal straight to a plain lambda
+    (as this test used to) runs that lambda - and therefore its
+    ``progress_dialog.canceled.emit()`` call, and everything ``_on_cancel``
+    does in response, including direct QWidget mutations - on whichever
+    thread emits ``progress``. Qt's AutoConnection can only auto-queue a
+    cross-thread call onto a *QObject* receiver's own thread; a bare
+    function/lambda has no thread affinity for it to detect, so PyQt just
+    runs it synchronously, in-thread, instead. A bound method of a QObject
+    living on the main thread (this class) gives AutoConnection something
+    to detect, so it correctly queues the call onto the main thread instead
+    - avoiding a background-thread QWidget mutation that is undefined
+    behaviour in Qt and has been observed to hang/crash intermittently on
+    macOS CI specifically (never reproduced on Linux, which tends to
+    tolerate the violation silently)."""
+
+    def __init__(self, progress_dialog: ToolbarProgressWidget) -> None:
+        super().__init__()
+        self._progress_dialog = progress_dialog
+
+    @QtCore.Slot(int)
+    def trigger(self, _value: int) -> None:
+        self._progress_dialog.canceled.emit()
+
+
 def test_gui_simulate_and_cancel(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
@@ -1911,7 +2025,8 @@ def test_gui_simulate_and_cancel(
     gui.btn_continue_simulation_clicked()
     assert gui._io_worker is not None
     # cancel simulation on first progress update
-    gui._io_worker.progress.connect(lambda _: gui.progress_dialog.canceled.emit())
+    cancel_trigger = _MainThreadCancelTrigger(gui.progress_dialog)
+    gui._io_worker.progress.connect(cancel_trigger.trigger)
 
     _wait_for_brian2_simulation(qtbot, gui)
 
@@ -1923,6 +2038,82 @@ def test_gui_simulate_and_cancel(
     # isVisible() isn't asserted here.
     assert gui.progress_dialog.isHidden()
     assert QtWidgets.QApplication.overrideCursor() is None
+    gui.close()
+
+
+def test_file_menu_shortcuts_are_disabled_during_a_running_io_task(
+    qtbot: QtBot, test_project: Project
+) -> None:
+    """Regression test for #556: ``_set_io_actions_enabled`` used to only
+    disable the File menu/toolbar/tab bar *containers*.  Disabling a QMenu
+    or QToolBar greys it out and blocks mouse clicks, but each QAction it
+    holds keeps its own ``enabled`` flag - so a Qt.WindowShortcut such as
+    Ctrl+N/Ctrl+O/Ctrl+E kept firing even while the File menu looked
+    disabled, letting a user open/switch tabs while a Brian2 simulation
+    (or any other IO task) was still running for the previously active
+    tab."""
+    gui = Gui()
+    gui.load_project(test_project)
+    qtbot.addWidget(gui)
+
+    actions = gui._iter_menu_actions(gui.menu_file)
+    assert any(a.shortcut().toString() == "Ctrl+N" for a in actions)
+    assert all(a.isEnabled() for a in actions)
+
+    gui._set_io_actions_enabled(False)
+    assert gui.menu_file.isEnabled() is False
+    assert all(not a.isEnabled() for a in gui._iter_menu_actions(gui.menu_file))
+
+    gui._set_io_actions_enabled(True)
+    assert gui.menu_file.isEnabled() is True
+    assert all(a.isEnabled() for a in gui._iter_menu_actions(gui.menu_file))
+    gui.close()
+
+
+def test_brian2_simulation_finish_does_not_touch_a_different_tab(
+    monkeypatch: MonkeyPatch,
+    qtbot: QtBot,
+    test_project: Project,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Regression test for #556: if the active tab changes while a Brian2
+    simulation is running (e.g. through the shortcut bypass fixed above),
+    its completion callback used to unconditionally refresh the shared
+    widgets from ``self.project`` and tell stim_editor's Design dynamic
+    input dialogs the simulation finished - both of which, by then, belong
+    to whichever *other* tab is active, not the one that was simulated."""
+    gui = Gui()
+    gui.load_project(test_project)
+    qtbot.addWidget(gui)
+    simulated_project = gui.project
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.2", True))
+
+    gui.btn_continue_simulation_clicked()
+    assert gui._io_worker is not None
+
+    # Switch tabs while the simulation for `simulated_project` is still
+    # running on the worker thread - this is exactly what the (now fixed)
+    # shortcut bypass let a user do despite the "disabled" File menu/tab bar.
+    other_project = default_project()
+    gui._open_project_in_new_tab(other_project, reset_controller=True)
+    assert gui.project is other_project
+
+    _wait_for_brian2_simulation(qtbot, gui)
+
+    # The simulation still ran to completion and its results live on the
+    # project that was actually simulated...
+    assert float(simulated_project.b2_model.network.t) > 0
+
+    # ...but the other (now active) tab was left alone: no combo-box entries
+    # borrowed from the simulated project, and the user was told where the
+    # results actually went instead of the change silently landing elsewhere.
+    assert gui.project is other_project
+    assert gui.cmb_trace.count() == 0
+    assert any(
+        call["name"] == "information" and "project switch" in call["text"]
+        for call in qmessagebox_calls
+    )
+    gui._close_confirmed = True
     gui.close()
 
 
@@ -2145,6 +2336,35 @@ def test_prompt_save_before_close_skips_prompt_when_no_tab_is_dirty(
 
     assert warning_calls == []
     assert fake_gui._close_confirmed
+
+
+def test_qmessagebox_calls_fixture_accepts_the_buttons_and_default_button_args(
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Regression test: _prompt_save_before_close/_prompt_save_before_action
+    call QMessageBox.warning(self, title, text, buttons, default_button) -
+    5 positional args. The qmessagebox_calls fixture's mock used to accept
+    only 3, so a dirty tab's close/save prompt raised a TypeError from
+    inside a Qt event handler (e.g. closeEvent, or qtbot's end-of-test
+    auto-close of a leftover widget) - a real crash risk, since an exception
+    escaping a Qt virtual method override there is undefined behaviour
+    rather than a normal test failure."""
+    QtWidgets.QMessageBox.warning(
+        None,
+        "Close tab",
+        "Closing this tab will discard any unsaved changes.",
+        QtWidgets.QMessageBox.StandardButton.Save
+        | QtWidgets.QMessageBox.StandardButton.Discard
+        | QtWidgets.QMessageBox.StandardButton.Cancel,
+        QtWidgets.QMessageBox.StandardButton.Save,
+    )
+    assert qmessagebox_calls == [
+        {
+            "name": "warning",
+            "title": "Close tab",
+            "text": "Closing this tab will discard any unsaved changes.",
+        }
+    ]
 
 
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:

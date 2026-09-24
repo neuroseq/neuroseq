@@ -1264,6 +1264,57 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
     default_trace_widget.close()
 
 
+def test_zooming_the_default_controller_propagates_to_a_locked_widget(
+    qtbot: QtBot,
+) -> None:
+    """Regression test for #564: zooming (e.g. the +/- buttons, or the mouse
+    wheel) used to silently drop the new width/position for any widget
+    locked to the controller being zoomed, because
+    ConstrainedPanZoomController._set_camera_state() mutated the connected
+    scrollbars - which synchronously and reentrantly triggers the locked
+    widget's axis sync - before the new state was actually committed/pushed
+    to the camera, so that reentrant read saw stale data and propagated it
+    (a no-op) instead of the just-applied zoom."""
+    default_controller = ConstrainedPanZoomController()
+    default_x_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Horizontal)
+    default_y_scrollbar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
+    default_controller.connect_x_scroll_bar(default_x_scrollbar)
+    default_controller.connect_y_scroll_bar(default_y_scrollbar)
+
+    default_trace_widget = TraceWidget(controller=default_controller)
+    qtbot.addWidget(default_trace_widget)
+    default_trace_widget.show()
+    qtbot.waitUntil(lambda: default_trace_widget.isVisible())
+
+    local_controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(
+        controller=local_controller,
+        default_controller=default_controller,
+        show_axis_link_controls=True,
+    )
+    trace_widget.set_default_scroll_bars(default_x_scrollbar, default_y_scrollbar)
+    qtbot.addWidget(trace_widget)
+    trace_widget.show()
+    qtbot.waitUntil(lambda: trace_widget.isVisible())
+
+    default_controller.set_limits(5.0, 20)
+    local_controller.set_limits(5.0, 20)
+    assert trace_widget.x_locked
+
+    before_width = float(default_controller._get_camera_state()["width"])
+    # Same call the X zoom-in button makes (timeseries_widget.py's
+    # x_btn_zoom_in), i.e. a real zoom rather than a direct _set_camera_state.
+    default_controller.zoom((0.5, 0.0), ())
+    after_width = float(default_controller._get_camera_state()["width"])
+    assert after_width < before_width  # sanity check: the zoom actually applied
+
+    local_width = float(local_controller._get_camera_state()["width"])
+    assert local_width == pytest.approx(after_width, rel=0.01)
+
+    trace_widget.close()
+    default_trace_widget.close()
+
+
 def test_region_of_interest_select_slice_label_uses_override_range(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
