@@ -2307,6 +2307,35 @@ def test_prompt_save_before_close_skips_prompt_when_no_tab_is_dirty(
     assert fake_gui._close_confirmed
 
 
+def test_qmessagebox_calls_fixture_accepts_the_buttons_and_default_button_args(
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    """Regression test: _prompt_save_before_close/_prompt_save_before_action
+    call QMessageBox.warning(self, title, text, buttons, default_button) -
+    5 positional args. The qmessagebox_calls fixture's mock used to accept
+    only 3, so a dirty tab's close/save prompt raised a TypeError from
+    inside a Qt event handler (e.g. closeEvent, or qtbot's end-of-test
+    auto-close of a leftover widget) - a real crash risk, since an exception
+    escaping a Qt virtual method override there is undefined behaviour
+    rather than a normal test failure."""
+    QtWidgets.QMessageBox.warning(
+        None,
+        "Close tab",
+        "Closing this tab will discard any unsaved changes.",
+        QtWidgets.QMessageBox.StandardButton.Save
+        | QtWidgets.QMessageBox.StandardButton.Discard
+        | QtWidgets.QMessageBox.StandardButton.Cancel,
+        QtWidgets.QMessageBox.StandardButton.Save,
+    )
+    assert qmessagebox_calls == [
+        {
+            "name": "warning",
+            "title": "Close tab",
+            "text": "Closing this tab will discard any unsaved changes.",
+        }
+    ]
+
+
 def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     collect_calls = [0]
     generator_calls = [0]
