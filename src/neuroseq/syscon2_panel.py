@@ -58,12 +58,23 @@ class SysCon2Panel(QtWidgets.QWidget):
     # ---- UI construction ----
 
     def _build_ui(self) -> None:
-        layout = QtWidgets.QVBoxLayout(self)
+        outer_layout = QtWidgets.QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QtWidgets.QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+
+        content = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content)
         layout.addWidget(self._build_connection_group())
         layout.addWidget(self._build_sequence_manager_group())
         layout.addWidget(self._build_holo4d_group())
         layout.addWidget(self._build_laser_group())
         layout.addStretch(1)
+
+        scroll_area.setWidget(content)
+        outer_layout.addWidget(scroll_area)
 
     def _build_connection_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Connection")
