@@ -27,6 +27,7 @@ from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
+from neuroseq.gui import ToolbarProgressWidget
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
@@ -1981,6 +1982,35 @@ def test_gui_simulate_and_playback(
     gui.close()
 
 
+class _MainThreadCancelTrigger(QtCore.QObject):
+    """Relay ``BackgroundIOWorker.progress`` (emitted on the worker thread)
+    into a ``canceled`` emission that runs on the main thread, the way a
+    real Cancel-button click would.
+
+    Connecting the worker's cross-thread signal straight to a plain lambda
+    (as this test used to) runs that lambda - and therefore its
+    ``progress_dialog.canceled.emit()`` call, and everything ``_on_cancel``
+    does in response, including direct QWidget mutations - on whichever
+    thread emits ``progress``. Qt's AutoConnection can only auto-queue a
+    cross-thread call onto a *QObject* receiver's own thread; a bare
+    function/lambda has no thread affinity for it to detect, so PyQt just
+    runs it synchronously, in-thread, instead. A bound method of a QObject
+    living on the main thread (this class) gives AutoConnection something
+    to detect, so it correctly queues the call onto the main thread instead
+    - avoiding a background-thread QWidget mutation that is undefined
+    behaviour in Qt and has been observed to hang/crash intermittently on
+    macOS CI specifically (never reproduced on Linux, which tends to
+    tolerate the violation silently)."""
+
+    def __init__(self, progress_dialog: ToolbarProgressWidget) -> None:
+        super().__init__()
+        self._progress_dialog = progress_dialog
+
+    @QtCore.Slot(int)
+    def trigger(self, _value: int) -> None:
+        self._progress_dialog.canceled.emit()
+
+
 def test_gui_simulate_and_cancel(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
@@ -1995,7 +2025,8 @@ def test_gui_simulate_and_cancel(
     gui.btn_continue_simulation_clicked()
     assert gui._io_worker is not None
     # cancel simulation on first progress update
-    gui._io_worker.progress.connect(lambda _: gui.progress_dialog.canceled.emit())
+    cancel_trigger = _MainThreadCancelTrigger(gui.progress_dialog)
+    gui._io_worker.progress.connect(cancel_trigger.trigger)
 
     _wait_for_brian2_simulation(qtbot, gui)
 
