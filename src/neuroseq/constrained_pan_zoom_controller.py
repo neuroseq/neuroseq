@@ -177,7 +177,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
                     max_width,
                 )
             )
-            self._set_scroll_bar_size(self.x_scroll_bar, new_state["width"] / max_width)
             for grid_line in self.grid_lines:
                 if grid_line is not None:
                     grid_line.set_current_time_extent(new_state["width"])
@@ -191,9 +190,6 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
                     min_height,
                     max_height,
                 )
-            )
-            self._set_scroll_bar_size(
-                self.y_scroll_bar, new_state["height"] / max_height
             )
         else:
             new_state["height"] = float(current_state["height"])
@@ -214,11 +210,28 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             )
         )
         new_state["position"] = (x, y, pos_z)
+        # Commit the clamped state - and push it all the way to the real
+        # camera - *before* touching the scrollbars below.
+        # QScrollBar.setValue()/setPageStep()/setMaximum() emit valueChanged/
+        # rangeChanged synchronously, and any axis locked to this controller
+        # (TimeseriesWidget/DataWidget's _sync_axis) reacts to that signal by
+        # reentrantly reading this very controller's state back via
+        # _get_camera_state(). Outside of an active pygfx gesture (e.g. a
+        # scrollbar drag, or this method being called directly) that read
+        # goes straight to the camera, not the pending state dict, so it
+        # only sees the new value once _update_cameras() has actually run.
+        # Mutating the scrollbars first - before either had happened - meant
+        # that reentrant read saw stale pre-update data, so a locked axis
+        # silently kept the previous width/position instead of picking up
+        # the zoom/pan that was just applied (issue #564).
+        super()._set_camera_state(new_state)
+        self._update_cameras()
+        self._set_scroll_bar_size(self.x_scroll_bar, new_state["width"] / max_width)
+        self._set_scroll_bar_size(self.y_scroll_bar, new_state["height"] / max_height)
         self._set_scroll_bar_position(self.x_scroll_bar, (x - half_width) / max_width)
         self._set_scroll_bar_position(
             self.y_scroll_bar, 1 - (y + 0.5 + half_height) / max_height
         )
-        super()._set_camera_state(new_state)
         self._notify_state_change()
 
     def _set_scroll_bar_position(
