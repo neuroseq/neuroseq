@@ -135,6 +135,5 @@ class SpikeWidget(TimeseriesWidget):
             colors=neuron_indices_to_colors(data.spike_indices),
             sizes=7,
             size_space="screen",
-            uniform_size=True,
         )
         self.post_set_data()

@@ -227,7 +227,6 @@ class HeatmapWidget(FPLWidget):
             vmin=vmin,
             vmax=vmax,
             cmap="viridis",
-            isolated_buffer=False,
         )
         self.hlut = fpl.HistogramLUTTool(display_slice, self.ig)
         self.subplot.docks["right"].add_graphic(self.hlut)

@@ -531,7 +531,6 @@ class TraceWidget(TimeseriesWidget):
         self.graphic = self.subplot.add_line_collection(
             line_data,
             colors=neuron_indices_to_colors(self.data.indices),
-            uniform_colors=True,
             thickness=2,
         )
         self._apply_visible_neuron_layout()
