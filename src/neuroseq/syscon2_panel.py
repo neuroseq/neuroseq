@@ -31,6 +31,34 @@ _START_CONDITIONS = ["auto", "trigger1", "trigger2"]
 _TRIGGER_BEHAVIORS = ["rising", "falling"]
 
 
+class _NoScrollSpinBox(QtWidgets.QSpinBox):
+    """Only reacts to the wheel while focused, so scrolling the panel's QScrollArea
+    doesn't silently change the value when the cursor merely passes over it.
+    """
+
+    def wheelEvent(self, event: QtGui.QWheelEvent | None) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        elif event is not None:
+            event.ignore()
+
+
+class _NoScrollDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent | None) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        elif event is not None:
+            event.ignore()
+
+
+class _NoScrollComboBox(QtWidgets.QComboBox):
+    def wheelEvent(self, event: QtGui.QWheelEvent | None) -> None:
+        if self.hasFocus():
+            super().wheelEvent(event)
+        elif event is not None:
+            event.ignore()
+
+
 class SysCon2Panel(QtWidgets.QWidget):
     def __init__(
         self,
@@ -161,21 +189,41 @@ class SysCon2Panel(QtWidgets.QWidget):
         group = QtWidgets.QGroupBox("Holo4D")
         layout = QtWidgets.QVBoxLayout(group)
 
+        self.btn_toggle_holo4d_advanced = QtWidgets.QToolButton()
+        self.btn_toggle_holo4d_advanced.setText("Advanced options")
+        self.btn_toggle_holo4d_advanced.setCheckable(True)
+        self.btn_toggle_holo4d_advanced.setChecked(False)
+        self.btn_toggle_holo4d_advanced.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.btn_toggle_holo4d_advanced.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.btn_toggle_holo4d_advanced.toggled.connect(
+            self._on_holo4d_advanced_toggled
+        )
+        layout.addWidget(self.btn_toggle_holo4d_advanced)
+
+        self.holo4d_advanced_panel = QtWidgets.QWidget()
+        advanced_layout = QtWidgets.QVBoxLayout(self.holo4d_advanced_panel)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+
         self.holo4d_state_label = QtWidgets.QLabel("State: unknown")
-        layout.addWidget(self.holo4d_state_label)
+        advanced_layout.addWidget(self.holo4d_state_label)
 
         form = QtWidgets.QFormLayout()
-        self.runs_spinbox = QtWidgets.QSpinBox()
+        self.runs_spinbox = _NoScrollSpinBox()
         self.runs_spinbox.setRange(0, 1_000_000)
         self.runs_spinbox.setSpecialValueText("Endless (0)")
         form.addRow("Runs:", self.runs_spinbox)
-        self.start_condition_combo = QtWidgets.QComboBox()
+        self.start_condition_combo = _NoScrollComboBox()
         self.start_condition_combo.addItems(_START_CONDITIONS)
         form.addRow("Start condition:", self.start_condition_combo)
-        self.trigger_behavior_combo = QtWidgets.QComboBox()
+        self.trigger_behavior_combo = _NoScrollComboBox()
         self.trigger_behavior_combo.addItems(_TRIGGER_BEHAVIORS)
         form.addRow("Trigger behavior:", self.trigger_behavior_combo)
-        layout.addLayout(form)
+        advanced_layout.addLayout(form)
+
+        self.holo4d_advanced_panel.setVisible(False)
+        layout.addWidget(self.holo4d_advanced_panel)
 
         button_row = QtWidgets.QHBoxLayout()
         self.btn_holo4d_upload = QtWidgets.QPushButton("Upload")
@@ -204,18 +252,31 @@ class SysCon2Panel(QtWidgets.QWidget):
         layout.addLayout(refresh_row)
 
         form = QtWidgets.QFormLayout()
-        self.device_combo = QtWidgets.QComboBox()
+        self.device_combo = _NoScrollComboBox()
         self.device_combo.currentTextChanged.connect(self._on_device_changed)
         form.addRow("Device:", self.device_combo)
-        self.description_combo = QtWidgets.QComboBox()
+        self.description_combo = _NoScrollComboBox()
         form.addRow("Lightsource:", self.description_combo)
-        self.intensity_spinbox = QtWidgets.QDoubleSpinBox()
+        self.intensity_spinbox = _NoScrollDoubleSpinBox()
         self.intensity_spinbox.setRange(0.0, 1_000_000.0)
         self.intensity_spinbox.setDecimals(3)
         form.addRow("Intensity:", self.intensity_spinbox)
         layout.addLayout(form)
 
-        button_row = QtWidgets.QHBoxLayout()
+        self.btn_toggle_laser_advanced = QtWidgets.QToolButton()
+        self.btn_toggle_laser_advanced.setText("Advanced laser controls")
+        self.btn_toggle_laser_advanced.setCheckable(True)
+        self.btn_toggle_laser_advanced.setChecked(False)
+        self.btn_toggle_laser_advanced.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.btn_toggle_laser_advanced.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.btn_toggle_laser_advanced.toggled.connect(self._on_laser_advanced_toggled)
+        layout.addWidget(self.btn_toggle_laser_advanced)
+
+        self.laser_advanced_panel = QtWidgets.QWidget()
+        advanced_row = QtWidgets.QHBoxLayout(self.laser_advanced_panel)
+        advanced_row.setContentsMargins(0, 0, 0, 0)
         self.btn_emission_on = QtWidgets.QPushButton("Emission ON")
         self.btn_emission_on.clicked.connect(
             lambda: self._on_set_emission_clicked(True)
@@ -232,19 +293,23 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_shutter_close.clicked.connect(
             lambda: self._on_set_shutter_clicked(False)
         )
-        self.btn_set_intensity = QtWidgets.QPushButton("Set Intensity")
-        self.btn_set_intensity.clicked.connect(self._on_set_intensity_clicked)
-        self.btn_refresh_status = QtWidgets.QPushButton("Get Status")
-        self.btn_refresh_status.clicked.connect(self._on_refresh_status_clicked)
         for btn in (
             self.btn_emission_on,
             self.btn_emission_off,
             self.btn_shutter_open,
             self.btn_shutter_close,
-            self.btn_set_intensity,
-            self.btn_refresh_status,
         ):
-            button_row.addWidget(btn)
+            advanced_row.addWidget(btn)
+        self.laser_advanced_panel.setVisible(False)
+        layout.addWidget(self.laser_advanced_panel)
+
+        button_row = QtWidgets.QHBoxLayout()
+        self.btn_set_intensity = QtWidgets.QPushButton("Set Intensity")
+        self.btn_set_intensity.clicked.connect(self._on_set_intensity_clicked)
+        self.btn_refresh_status = QtWidgets.QPushButton("Get Status")
+        self.btn_refresh_status.clicked.connect(self._on_refresh_status_clicked)
+        button_row.addWidget(self.btn_set_intensity)
+        button_row.addWidget(self.btn_refresh_status)
         layout.addLayout(button_row)
 
         self.lightsource_status_label = QtWidgets.QLabel("")
@@ -417,6 +482,12 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     # ---- Holo4D ----
 
+    def _on_holo4d_advanced_toggled(self, checked: bool) -> None:
+        self.holo4d_advanced_panel.setVisible(checked)
+        self.btn_toggle_holo4d_advanced.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if checked else QtCore.Qt.ArrowType.RightArrow
+        )
+
     def _on_holo4d_upload_clicked(self) -> None:
         runs = self.runs_spinbox.value()
 
@@ -446,6 +517,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._submit("holo4d.stop", task)
 
     # ---- Laser ----
+
+    def _on_laser_advanced_toggled(self, checked: bool) -> None:
+        self.laser_advanced_panel.setVisible(checked)
+        self.btn_toggle_laser_advanced.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if checked else QtCore.Qt.ArrowType.RightArrow
+        )
 
     def _on_refresh_lightsources_clicked(self) -> None:
         def task(client: SysCon2Client) -> object:

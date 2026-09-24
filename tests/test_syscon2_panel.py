@@ -5,6 +5,7 @@ import sys
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 import neuroseq.syscon2_connection_manager as connection_manager_module
@@ -255,8 +256,6 @@ def test_send_to_syscon2_opens_dialog_with_current_project(
 def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
     panel: SysCon2Panel, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
-    from qtpy import QtGui
-
     fake = FakeTransport([encode_string("OK"), encode_string("pushed.seq\r\n")])
     _connect(panel, qtbot, monkeypatch, fake)
 
@@ -286,3 +285,93 @@ def test_dialog_sequence_generated_shows_error_for_unloadable_image(
     panel._show_preview(str(bogus_path))
 
     assert "Could not load preview" in panel.preview_label.text()
+
+
+def _wheel_event(delta_y: int = 120):
+    return QtGui.QWheelEvent(
+        QtCore.QPointF(0, 0),
+        QtCore.QPointF(0, 0),
+        QtCore.QPoint(0, 0),
+        QtCore.QPoint(0, delta_y),
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.KeyboardModifier.NoModifier,
+        QtCore.Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+
+
+def test_scrolling_over_unfocused_spinbox_does_not_change_its_value(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    panel.runs_spinbox.setValue(5)
+    assert not panel.runs_spinbox.hasFocus()
+
+    panel.runs_spinbox.wheelEvent(_wheel_event())
+
+    assert panel.runs_spinbox.value() == 5
+
+
+def test_scrolling_over_focused_spinbox_still_changes_its_value(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.btn_toggle_holo4d_advanced.setChecked(True)  # runs_spinbox starts hidden
+    panel.runs_spinbox.setValue(5)
+    panel.runs_spinbox.setFocus()
+    qtbot.waitUntil(lambda: panel.runs_spinbox.hasFocus(), timeout=2000)
+
+    panel.runs_spinbox.wheelEvent(_wheel_event())
+
+    assert panel.runs_spinbox.value() == 6
+
+
+def test_scrolling_over_unfocused_combo_box_does_not_change_selection(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    panel.start_condition_combo.setCurrentIndex(0)
+    assert not panel.start_condition_combo.hasFocus()
+
+    panel.start_condition_combo.wheelEvent(_wheel_event())
+
+    assert panel.start_condition_combo.currentIndex() == 0
+
+
+def test_holo4d_advanced_options_hidden_by_default_and_toggle_reveals_them(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    panel.show()
+    qtbot.waitExposed(panel)
+    assert not panel.holo4d_advanced_panel.isVisible()
+    assert not panel.btn_toggle_holo4d_advanced.isChecked()
+
+    panel.btn_toggle_holo4d_advanced.setChecked(True)
+
+    assert panel.holo4d_advanced_panel.isVisible()
+    assert panel.btn_toggle_holo4d_advanced.arrowType() == QtCore.Qt.ArrowType.DownArrow
+
+    panel.btn_toggle_holo4d_advanced.setChecked(False)
+
+    assert not panel.holo4d_advanced_panel.isVisible()
+    assert (
+        panel.btn_toggle_holo4d_advanced.arrowType() == QtCore.Qt.ArrowType.RightArrow
+    )
+
+
+def test_laser_advanced_controls_hidden_by_default_and_toggle_reveals_them(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    panel.show()
+    qtbot.waitExposed(panel)
+    assert not panel.laser_advanced_panel.isVisible()
+    assert not panel.btn_toggle_laser_advanced.isChecked()
+
+    panel.btn_toggle_laser_advanced.setChecked(True)
+
+    assert panel.laser_advanced_panel.isVisible()
+    assert panel.btn_toggle_laser_advanced.arrowType() == QtCore.Qt.ArrowType.DownArrow
+
+    panel.btn_toggle_laser_advanced.setChecked(False)
+
+    assert not panel.laser_advanced_panel.isVisible()
+    assert panel.btn_toggle_laser_advanced.arrowType() == QtCore.Qt.ArrowType.RightArrow
