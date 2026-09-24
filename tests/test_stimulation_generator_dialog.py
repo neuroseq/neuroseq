@@ -647,33 +647,7 @@ def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
 # ---------------------------------------------------------------------------
 
 
-def test_stimulation_generator_dialog_shows_error_for_wrong_dt(
-    qtbot: QtBot,
-    qmessagebox_calls: list[dict[str, str]],
-) -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
-    project = Project()
-    stim = StimArray(
-        name="stim",
-        stim_type=StimType.Excitation,
-        values=values,
-        units="1",
-        dt=0.001,  # wrong dt
-    )
-    project.add_stim_array(stim)
-    project.cellpose_data = _cellpose_result()
-    dialog = StimulationGeneratorDialog(project)
-    qtbot.addWidget(dialog)
-
-    dialog.check_sanity_button.click()
-
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "critical"
-    assert "sanity check failed" in qmessagebox_calls[0]["title"].lower()
-
-
-def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
+def test_stimulation_generator_dialog_cancels_on_wrong_dt(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
@@ -693,11 +667,43 @@ def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
 
-    # Override _show_scrollable_message to simulate clicking "Fix dt"
     monkeypatch.setattr(
         StimulationGeneratorDialog,
-        "_show_scrollable_message",
-        lambda *a, **kw: True,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.CANCEL,
+    )
+
+    dialog.check_sanity_button.click()
+
+    # Cancelling leaves the array untouched and shows no further message boxes.
+    assert project.stim_arrays["stim"].dt == pytest.approx(0.001)
+    assert not qmessagebox_calls
+
+
+def test_stimulation_generator_dialog_clears_array_when_dt_fix_choice_is_clear(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    project = Project()
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,  # wrong dt
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result()
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.CLEAR,
     )
 
     dialog.check_sanity_button.click()
@@ -705,6 +711,51 @@ def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
     assert project.stim_arrays["stim"].dt == pytest.approx(_SYSCON2_TTL_PULSE_QUANTUM_S)
     assert np.all(project.stim_arrays["stim"].values == 0.0)
     # Confirmation info message shown after fixing
+    assert any(c["name"] == "information" for c in qmessagebox_calls)
+
+
+def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    # old_dt is exactly half the SysCon2 tick, so the resample mapping is unambiguous
+    # (see test_resample_stim_values_to_dt_downsamples_via_nearest_neighbor).
+    old_dt = _SYSCON2_TTL_PULSE_QUANTUM_S / 2
+    values = np.zeros((10, 1), dtype=np.float32)
+    values[2:6, 0] = 1.0
+    project = _build_project(values.copy(), mapping={0: 0})
+    project.stim_arrays["stim"].dt = old_dt  # force the mismatch _build_project avoids
+    _patch_no_slm_violations(monkeypatch)
+
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.RESAMPLE,
+    )
+    sanity_calls: list[object] = []
+
+    def _fake_check_sanity(*args, **kwargs):
+        sanity_calls.append(args)
+        return _build_sanity_report(is_valid=True, export_report=_build_export_report())
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        _fake_check_sanity,
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.check_sanity_button.click()
+
+    stim = project.stim_arrays["stim"]
+    assert stim.dt == pytest.approx(_SYSCON2_TTL_PULSE_QUANTUM_S)
+    assert stim.values.shape == (5, 1)
+    assert list(stim.values[:, 0]) == [0.0, 1.0, 1.0, 0.0, 0.0]
+    # The pipeline must not stop after resampling -- it should reach the full sanity
+    # check below, proving the other conditions are still evaluated on the new array.
+    assert sanity_calls
     assert any(c["name"] == "information" for c in qmessagebox_calls)
 
 

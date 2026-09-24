@@ -22,6 +22,7 @@ from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
@@ -1195,6 +1196,57 @@ def test_find_initial_slm_load_violation_detects_too_early_first_stimulus() -> N
     assert violation is not None
     assert violation.first_active_idx == 0
     assert violation.required_start_idx == 32
+
+
+def test_resample_stim_values_to_dt_downsamples_via_nearest_neighbor() -> None:
+    # old_dt=0.001s, new_dt=0.002s (exactly double): each new tick lands exactly on an
+    # even-indexed old sample (0*0.001, 2*0.001, 4*0.001, ...), so the expected mapping is
+    # unambiguous -- no rounding-parity edge cases to worry about.
+    values = np.zeros((10, 1), dtype=np.float32)
+    values[2:6, 0] = 1.0  # active at old indices 2, 3, 4, 5
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=0.001
+    )
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.002)
+
+    assert n_new == 5
+    assert new_values.shape == (5, 1)
+    # new sample i maps to old index 2*i -> old[0,2,4,6,8] -> [0, 1, 1, 0, 0]
+    assert list(new_values[:, 0]) == [0.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_resample_stim_values_to_dt_preserves_total_duration_when_upsampling() -> None:
+    values = np.zeros((5, 1), dtype=np.float32)
+    values[2, 0] = 1.0
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=0.002
+    )
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.001)
+
+    # duration = 5 * 0.002s = 0.01s -> round(0.01 / 0.001) = 10 new samples
+    assert n_new == 10
+    assert new_values.shape == (10, 1)
+    # the original pulse at old index 2 (t=0.004s) should still be "on" somewhere near
+    # the corresponding new index (t=0.004s / 0.001s = 4).
+    assert new_values[4, 0] == 1.0
+
+
+def test_resample_stim_values_to_dt_rejects_non_2d_input() -> None:
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.zeros((10, 1), dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    stim_array.values = np.zeros(
+        10, dtype=np.float32
+    )  # set after construction: 1D, invalid
+
+    with pytest.raises(ValueError, match="2D"):
+        resample_stim_values_to_dt(stim_array, new_dt=0.002)
 
 
 def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None:

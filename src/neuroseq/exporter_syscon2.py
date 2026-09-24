@@ -2326,6 +2326,43 @@ def find_initial_slm_load_violation(
     )
 
 
+def resample_stim_values_to_dt(
+    stim_array: StimArray,
+    *,
+    new_dt: float,
+) -> tuple[np.ndarray, int]:
+    """Nearest-neighbor resample a stim array's values onto a new timestep.
+
+    Each output tick takes the value of whichever original sample is nearest to it in real
+    time, preserving the real-world duration and pulse pattern as closely as the new grid
+    allows. Nearest-neighbor (rather than linear interpolation) matches these near-binary
+    trigger/intensity pulses -- interpolating between "off" and "on" would invent fractional
+    intermediate values that don't correspond to a real hardware state.
+
+    Returns:
+      (new_values, new_n_timepoints)
+    """
+    if stim_array.values.ndim != 2:
+        raise ValueError("Input array values must be 2D (timepoints x neurons)")
+    if stim_array.dt <= 0:
+        raise ValueError("Input array dt must be positive")
+    if new_dt <= 0:
+        raise ValueError("new_dt must be positive")
+
+    old_dt = float(stim_array.dt)
+    n_old = stim_array.values.shape[0]
+    duration_s = n_old * old_dt
+    n_new = max(1, int(round(duration_s / new_dt)))
+    new_sample_times = np.arange(n_new) * new_dt
+    nearest_old_idx = np.clip(
+        np.round(new_sample_times / old_dt).astype(np.intp), 0, n_old - 1
+    )
+    new_values = np.array(
+        stim_array.values[nearest_old_idx], dtype=np.float32, copy=True
+    )
+    return new_values, n_new
+
+
 def shift_stim_values_right_for_initial_slm_load(
     stim_array: StimArray,
     *,

@@ -27,6 +27,7 @@ from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
@@ -328,6 +329,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         SHIFT_RIGHT = "shift_right"
         CANCEL = "cancel"
 
+    class _DtFixChoice(Enum):
+        CLEAR = "clear"
+        RESAMPLE = "resample"
+        CANCEL = "cancel"
+
     def _update_stim_info(self) -> None:
         """Update the stimulation info label based on current selection."""
         stim_name = self.stim_combo.currentText()
@@ -507,18 +513,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
         # 0. dt check — always first; wrong dt makes all other fixes meaningless.
         if abs(stim_array.dt - _SYSCON2_TTL_PULSE_QUANTUM_S) > 1e-9:
-            error_msg = (
-                "Input sanity check failed.\n\nErrors:\n"
-                f"SysCon2 export requires stim_array.dt == {_SYSCON2_TTL_PULSE_QUANTUM_S} s. "
-                f"Got {stim_array.dt} s ({stim_array.dt * 1e6:.4f} µs)."
+            dt_choice = self._prompt_dt_fix_choice(
+                current_dt=stim_array.dt, required_dt=_SYSCON2_TTL_PULSE_QUANTUM_S
             )
-            fix_clicked = self._show_scrollable_message(
-                "Sanity Check Failed",
-                error_msg,
-                QtWidgets.QMessageBox.Icon.Critical,
-                extra_button_text="Fix dt",
-            )
-            if fix_clicked:
+            if dt_choice == self._DtFixChoice.CANCEL:
+                return
+
+            if dt_choice == self._DtFixChoice.CLEAR:
                 stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
                 blank_values = np.zeros_like(stim_array.values)
                 self._replace_stim_values_preserving_undo(stim_name, blank_values)
@@ -543,7 +544,41 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                     stim_name,
                     _SYSCON2_TTL_PULSE_QUANTUM_S,
                 )
-            return
+                return
+
+            # RESAMPLE: unlike every other fix here, this changes the array's timepoint
+            # count, so it can't go through the undo-preserving replace path (which
+            # requires matching shape). Mutate the StimArray directly, then let
+            # Project.update_limits() re-derive dependent state (max_time_secs etc.) --
+            # deliberately NOT returning here, so the checks below re-validate the
+            # resampled pattern rather than trusting it's still clean.
+            old_dt = stim_array.dt
+            n_old = stim_array.values.shape[0]
+            new_values, n_new = resample_stim_values_to_dt(
+                stim_array, new_dt=_SYSCON2_TTL_PULSE_QUANTUM_S
+            )
+            stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+            stim_array.values = new_values
+            self.project.update_limits()
+            self.project.mark_dirty()
+            stim_array = self.project.stim_arrays[stim_name]
+            parent_widget = self.parentWidget()
+            stim_editor = (
+                getattr(parent_widget, "stim_editor", None)
+                if parent_widget is not None
+                else None
+            )
+            if stim_editor is not None and hasattr(stim_editor, "select_stim"):
+                stim_editor.select_stim(stim_name)
+            self._log_status(
+                "Resampled stim '%s' from dt=%s s (%d samples) to dt=%s s "
+                "(%d samples) via nearest-neighbor.",
+                stim_name,
+                old_dt,
+                n_old,
+                _SYSCON2_TTL_PULSE_QUANTUM_S,
+                n_new,
+            )
 
         # --- Pre-sanity SLM violation checks ---
         # 1. Initial SLM load: stim starts before SLM has had time to load.
@@ -814,6 +849,46 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         if clicked == space_button:
             return self._SlmOffOnFixChoice.SPACE_RIGHT
         return self._SlmOffOnFixChoice.CANCEL
+
+    def _prompt_dt_fix_choice(
+        self,
+        *,
+        current_dt: float,
+        required_dt: float,
+    ) -> _DtFixChoice:
+        text_lines = [
+            f"SysCon2 export requires stim_array.dt == {required_dt} s "
+            f"({required_dt * 1e6:.4f} µs per tick).",
+            f"Got {current_dt} s ({current_dt * 1e6:.4f} µs per tick).",
+            "",
+            "Choose how to resolve:",
+            "1) Clear array: set dt and blank all stimuli — you redraw from scratch.",
+            "2) Resample: nearest-neighbor resample the existing pattern onto the new "
+            "tick grid, preserving it as closely as the new grid allows. This replaces "
+            "the array directly and cannot be undone with Ctrl+Z, unlike the other "
+            "fixes in this dialog.",
+            "3) Cancel",
+        ]
+        msg_box = QtWidgets.QMessageBox(self)
+        msg_box.setIcon(QtWidgets.QMessageBox.Icon.Critical)
+        msg_box.setWindowTitle("dt Mismatch")
+        msg_box.setText("\n".join(text_lines))
+
+        clear_button = msg_box.addButton(
+            "Clear Array", QtWidgets.QMessageBox.ButtonRole.ActionRole
+        )
+        resample_button = msg_box.addButton(
+            "Resample (Nearest-Neighbor)", QtWidgets.QMessageBox.ButtonRole.ActionRole
+        )
+        cancel_button = msg_box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+        msg_box.setDefaultButton(cancel_button)
+        msg_box.exec()
+        clicked = msg_box.clickedButton()
+        if clicked == clear_button:
+            return self._DtFixChoice.CLEAR
+        if clicked == resample_button:
+            return self._DtFixChoice.RESAMPLE
+        return self._DtFixChoice.CANCEL
 
     def _prompt_slm_gap_fix_choice(
         self,
