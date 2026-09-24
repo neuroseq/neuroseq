@@ -280,6 +280,32 @@ def generate_linear_stimulus_mapping(
     return {stim_id: cellpose_id for stim_id, cellpose_id in enumerate(mapped_ids)}
 
 
+def resolve_stimulus_to_cellpose_mapping(
+    cellpose_data: CellposeImportResult | None,
+) -> dict[int, int] | None:
+    """Resolve the mapping actually in effect for `cellpose_data`.
+
+    The "Linear" mapping strategy never materializes a
+    `stimulus_to_cellpose_mapping` dict - only its `linear_offset` is stored
+    (see `CellposeImportDialog._import_data`) - so reading
+    `stimulus_to_cellpose_mapping` directly for a Linear import looks
+    indistinguishable from "no mapping at all" and gets silently treated as
+    pure identity, dropping any nonzero offset. Reconstruct it here instead.
+    """
+    if cellpose_data is None:
+        return None
+    mapping = cellpose_data.stimulus_to_cellpose_mapping
+    if mapping:
+        return mapping
+    strategy = cellpose_data.mapping_strategy or "Linear"
+    if strategy != "Linear":
+        return mapping
+    return generate_linear_stimulus_mapping(
+        cellpose_data.original_cellpose_ids,
+        int(cellpose_data.linear_offset or 0),
+    )
+
+
 def prepare_cellpose_traces(
     traces: np.ndarray,
     *,

@@ -1083,6 +1083,44 @@ def test_remap_cellpose_indices_reports_experiments_with_invalid_mapping() -> No
     np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
 
 
+def test_remap_cellpose_indices_applies_linear_offset() -> None:
+    """Regression test for #554's Linear-strategy blind spot: the "Linear"
+    mapping strategy stores only linear_offset, not a materialized
+    stimulus_to_cellpose_mapping, so remap_cellpose_indices() used to read a
+    bare None there and silently treat it as no mapping (pure identity),
+    dropping the offset entirely."""
+    project = Project()
+    project.cellpose_data = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1, 2, 3], dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+        mapping_strategy="Linear",
+        linear_offset=2,
+    )
+    trace_data = TraceData(
+        "traces",
+        np.zeros((4, 10), dtype=np.float32),
+        np.array([0, 1, 2, 3], dtype=np.uint32),
+        "mV",
+        0.1,
+        np.array([0, 1, 2, 3], dtype=np.uint32),
+    )
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
+
+    failed = project.remap_cellpose_indices()
+
+    assert failed == []
+    # Linear offset 2 over ids [0,1,2,3] -> [2,3,0,1] (see
+    # generate_linear_stimulus_mapping), applied to raw ids [0,1,2,3].
+    np.testing.assert_array_equal(
+        trace_data.indices, np.array([2, 3, 0, 1], dtype=np.uint32)
+    )
+
+
 def test_stim_array_rename() -> None:
     arr = np.random.rand(1000, 30)
     project = Project()

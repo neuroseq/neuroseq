@@ -26,6 +26,7 @@ from qtpy.compat import getopenfilename
 from neuroseq.data import Data
 from neuroseq.importer_cellpose import CellPoseImporter
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
@@ -755,8 +756,7 @@ class TifImportDialog(QtWidgets.QDialog):
         """Return the experiment mapping only for its stored Cellpose masks."""
         if not self._use_loaded_radio.isChecked() or self._cellpose_import is None:
             return None
-        mapping = self._cellpose_import.stimulus_to_cellpose_mapping
-        return mapping if isinstance(mapping, dict) else None
+        return resolve_stimulus_to_cellpose_mapping(self._cellpose_import)
 
     # -- Pipeline launch ----------------------------------------------------
     def _start_pipeline(self) -> None:

@@ -23,6 +23,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
@@ -770,11 +771,7 @@ class Project:
             mapping collides for their raw ids) - those are left unchanged rather than
             raising, so the caller can surface a warning.
         """
-        mapping = (
-            self.cellpose_data.stimulus_to_cellpose_mapping
-            if self.cellpose_data is not None
-            else None
-        )
+        mapping = resolve_stimulus_to_cellpose_mapping(self.cellpose_data)
         failed: list[str] = []
         for name, experiment in self.experiments.items():
             for datum in experiment.data:

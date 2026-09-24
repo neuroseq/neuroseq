@@ -159,6 +159,26 @@ def test_current_experiment_masks_with_mapping_are_default(qtbot):
     assert dialog._selected_mapping() == {4: 0, 7: 1}
 
 
+def test_selected_mapping_reconstructs_linear_offset(qtbot):
+    """Regression test for #554's Linear-strategy blind spot: a Linear
+    import stores only linear_offset, not a materialized
+    stimulus_to_cellpose_mapping, so _selected_mapping() used to read a bare
+    None there and import under an unintended identity mapping instead of
+    the offset the user actually selected."""
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.stimulus_to_cellpose_mapping = None
+    cellpose_import.mapping_strategy = "Linear"
+    cellpose_import.linear_offset = 2
+    cellpose_import.original_cellpose_ids = np.array([0, 1, 2, 3], dtype=np.int32)
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+
+    assert dialog._use_loaded_radio.isChecked()
+    assert dialog._selected_mapping() == {0: 2, 1: 3, 2: 0, 3: 1}
+
+
 def test_third_radio_selected_resolves_to_none_masks(qtbot):
     from neuroseq.tif_import_dialog import TifImportDialog
 
