@@ -94,8 +94,10 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             state["maintain_aspect"] = False
             state["depth_range"] = None
             self.initialized = True
+        # _set_camera_state() already pushes the new state to the camera
+        # itself (see its docstring) - an extra _update_cameras() here would
+        # just be a redundant, wasted re-render on every call.
         self._set_camera_state(state)
-        self._update_cameras()
 
     def focus_neuron_range(self, start_index: int, stop_index: int) -> None:
         start_index = int(start_index)
@@ -116,8 +118,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             float(start_index) + 0.5 * visible_neurons - 0.5,
             float(state["position"][2]),
         )
+        # See set_limits() - _set_camera_state() already pushes to the camera.
         self._set_camera_state(state)
-        self._update_cameras()
 
     def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
         """Move the shared plot camera to a time interval, in seconds."""
@@ -143,8 +145,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
             float(state["position"][1]),
             float(state["position"][2]),
         )
+        # See set_limits() - _set_camera_state() already pushes to the camera.
         self._set_camera_state(state)
-        self._update_cameras()
 
     def current_time_range(self) -> tuple[float, float] | None:
         """Return the visible time interval in seconds, if a camera is attached."""
@@ -162,6 +164,9 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         - update the scroll bars if they are connected
         - hide or show sub-gridlines based on the current zoom level
         - Clamps the width/height and position.
+        - Pushes the result to the actual camera (calls _update_cameras()
+          itself - see below) - callers should NOT call _update_cameras()
+          again afterward, that would just re-render for nothing.
         """
         current_state = self._get_camera_state()
         min_width = float(self.min_width)
