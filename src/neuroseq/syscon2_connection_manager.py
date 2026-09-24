@@ -56,6 +56,7 @@ class SysCon2ConnectionManager(QtCore.QObject):
         self._thread = QtCore.QThread()
         self.moveToThread(self._thread)
         self._thread.started.connect(self._on_thread_started)
+        self._thread.finished.connect(self._on_thread_finished)
         self._request_connect.connect(self._handle_connect)
         self._request_disconnect.connect(self._handle_disconnect)
         self._request_command.connect(self._handle_command)
@@ -90,6 +91,16 @@ class SysCon2ConnectionManager(QtCore.QObject):
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._poll_state)
         self._timer.start(self._poll_interval_ms)
+
+    @QtCore.Slot()
+    def _on_thread_finished(self) -> None:
+        # ``finished`` is emitted from within the worker thread's own event loop just
+        # before it stops, so this runs on the correct thread to stop the timer --
+        # unlike relying on Python GC to destroy it later (typically from the GUI
+        # thread), which trips Qt's "timers cannot be stopped from another thread".
+        if self._timer is not None:
+            self._timer.stop()
+            self._timer = None
 
     @QtCore.Slot()
     def _handle_connect(self) -> None:
