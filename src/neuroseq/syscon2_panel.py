@@ -10,14 +10,20 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
+from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.syscon2_client import LightsourceStatus
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +41,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self._manager = manager if manager is not None else SysCon2ConnectionManager()
+        self._project: Project | None = None
         self._connected = False
         self._lightsources: dict[str, list[str]] = {}
         self._result_handlers: dict[str, Callable[[object], None]] = {
             "sequence_manager.get_sequences": self._on_sequences,
+            "sequence_manager.import": self._on_sequence_imported,
             "laser.get_lightsources": self._on_lightsources,
             "laser.get_status": self._on_lightsource_status,
         }
@@ -46,6 +54,9 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._build_ui()
         self._wire_manager_signals()
         self._update_connection_ui()
+
+    def set_project(self, project: Project | None) -> None:
+        self._project = project
 
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
@@ -69,6 +80,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         layout = QtWidgets.QVBoxLayout(content)
         layout.addWidget(self._build_connection_group())
         layout.addWidget(self._build_sequence_manager_group())
+        layout.addWidget(self._build_preview_group())
         layout.addWidget(self._build_holo4d_group())
         layout.addWidget(self._build_laser_group())
         layout.addStretch(1)
@@ -92,6 +104,14 @@ class SysCon2Panel(QtWidgets.QWidget):
     def _build_sequence_manager_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Sequence Manager")
         layout = QtWidgets.QVBoxLayout(group)
+
+        self.btn_send_to_syscon2 = QtWidgets.QPushButton("Send to SysCon2…")
+        self.btn_send_to_syscon2.setToolTip(
+            "Open the stimulation export dialog and, once it generates a script, "
+            "push it straight into SysCon2's sequence manager."
+        )
+        self.btn_send_to_syscon2.clicked.connect(self._on_send_to_syscon2_clicked)
+        layout.addWidget(self.btn_send_to_syscon2)
 
         self.sequence_list = QtWidgets.QListWidget()
         layout.addWidget(self.sequence_list)
@@ -126,6 +146,15 @@ class SysCon2Panel(QtWidgets.QWidget):
         target_row.addWidget(self.btn_import_sequence)
         layout.addLayout(target_row)
 
+        return group
+
+    def _build_preview_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox("Preview")
+        layout = QtWidgets.QVBoxLayout(group)
+        self.preview_label = QtWidgets.QLabel("No preview yet.")
+        self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.preview_label.setWordWrap(True)
+        layout.addWidget(self.preview_label)
         return group
 
     def _build_holo4d_group(self) -> QtWidgets.QGroupBox:
@@ -300,6 +329,9 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.sequence_list.clear()
         self.sequence_list.addItems(sequences)
 
+    def _on_sequence_imported(self, _result: object) -> None:
+        self._on_refresh_sequences_clicked()
+
     def _selected_sequence_path(self) -> str | None:
         item = self.sequence_list.currentItem()
         return item.text() if item is not None else None
@@ -351,6 +383,37 @@ class SysCon2Panel(QtWidgets.QWidget):
             return None
 
         self._submit("sequence_manager.import", task)
+
+    def _on_send_to_syscon2_clicked(self) -> None:
+        if self._project is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No project", "No active project to export a stimulus from."
+            )
+            return
+        dialog = StimulationGeneratorDialog(self._project, parent=self.window())
+        dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
+        dialog.exec()
+
+    def _on_dialog_sequence_generated(
+        self, seq_path: str, overview_png_path: str
+    ) -> None:
+        self._show_preview(overview_png_path)
+        target = self.target_directory_edit.text().strip()
+
+        def task(client: SysCon2Client) -> object:
+            client.sequence_manager.import_sequence(seq_path, target)
+            return None
+
+        self._submit("sequence_manager.import", task)
+
+    def _show_preview(self, png_path: str) -> None:
+        pixmap = QtGui.QPixmap(png_path)
+        if pixmap.isNull():
+            self.preview_label.setText(f"Could not load preview image:\n{png_path}")
+            return
+        self.preview_label.setPixmap(
+            pixmap.scaledToWidth(400, QtCore.Qt.TransformationMode.SmoothTransformation)
+        )
 
     # ---- Holo4D ----
 

@@ -4,8 +4,10 @@ import logging
 import pathlib
 from enum import Enum
 from typing import TYPE_CHECKING
+from typing import cast
 
 import brian2.numpy_ as np
+from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
@@ -48,6 +50,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
     - Configure export settings
     - Generate and save scripts to a specified folder
     """
+
+    #: Emitted after a script is successfully written to disk, with the generated
+    #: ``.seq`` file path and its timeline overview PNG path -- lets a caller (e.g. the
+    #: SysCon2 panel) act on the freshly generated files without polling the filesystem.
+    sequence_generated = QtCore.Signal(str, str)
 
     def __init__(
         self,
@@ -427,6 +434,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 export_report.entity_lanes,
                 export_report.generated_objects,
             )
+            self.sequence_generated.emit(str(script_path), str(overview_path))
 
             report_lines = [
                 f"Successfully generated script in:\n{self.output_folder}",
@@ -733,14 +741,20 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         text_edit.setReadOnly(True)
 
         button_box = QtWidgets.QDialogButtonBox(dlg)
-        ok_button = button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        ok_button = cast(
+            QtWidgets.QPushButton,
+            button_box.addButton(QtWidgets.QDialogButtonBox.StandardButton.Ok),
+        )
         ok_button.clicked.connect(dlg.accept)
 
         extra_clicked = [False]
         if extra_button_text is not None:
-            extra_btn = button_box.addButton(
-                extra_button_text,
-                QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+            extra_btn = cast(
+                QtWidgets.QPushButton,
+                button_box.addButton(
+                    extra_button_text,
+                    QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+                ),
             )
 
             def _on_extra() -> None:

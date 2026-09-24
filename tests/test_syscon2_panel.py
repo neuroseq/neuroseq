@@ -8,6 +8,8 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq.syscon2_connection_manager as connection_manager_module
+import neuroseq.syscon2_panel as syscon2_panel_module
+from neuroseq.project import Project
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
 from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.syscon2_protocol import encode_string
@@ -220,3 +222,67 @@ def test_command_failure_shows_warning(
 
     warning.assert_called_once()
     assert "device busy" in warning.call_args.args[-1]
+
+
+def test_send_to_syscon2_without_project_shows_warning(
+    panel: SysCon2Panel, qtbot: QtBot, mocker
+) -> None:
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+
+    qtbot.mouseClick(panel.btn_send_to_syscon2, QtCore.Qt.MouseButton.LeftButton)
+
+    warning.assert_called_once()
+    dialog_cls.assert_not_called()
+
+
+def test_send_to_syscon2_opens_dialog_with_current_project(
+    panel: SysCon2Panel, qtbot: QtBot, mocker
+) -> None:
+    project = Project()
+    panel.set_project(project)
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+
+    qtbot.mouseClick(panel.btn_send_to_syscon2, QtCore.Qt.MouseButton.LeftButton)
+
+    dialog_cls.assert_called_once_with(project, parent=panel.window())
+    dialog_cls.return_value.sequence_generated.connect.assert_called_once_with(
+        panel._on_dialog_sequence_generated
+    )
+    dialog_cls.return_value.exec.assert_called_once()
+
+
+def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
+    panel: SysCon2Panel, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    from qtpy import QtGui
+
+    fake = FakeTransport([encode_string("OK"), encode_string("pushed.seq\r\n")])
+    _connect(panel, qtbot, monkeypatch, fake)
+
+    png_path = tmp_path / "preview_overview.png"
+    QtGui.QPixmap(10, 10).save(str(png_path))
+    seq_path = str(tmp_path / "pushed.seq")
+
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+        panel._on_dialog_sequence_generated(seq_path, str(png_path))
+
+    pixmap = panel.preview_label.pixmap()
+    assert pixmap is not None and not pixmap.isNull()
+
+    assert b"ImportSequence" in fake.sent[0]
+    assert seq_path.encode() in fake.sent[0]
+
+    qtbot.waitUntil(lambda: panel.sequence_list.count() == 1, timeout=2000)
+    assert panel.sequence_list.item(0).text() == "pushed.seq"
+
+
+def test_dialog_sequence_generated_shows_error_for_unloadable_image(
+    panel: SysCon2Panel, qtbot: QtBot, tmp_path
+) -> None:
+    bogus_path = tmp_path / "not_an_image.png"
+    bogus_path.write_text("not a png")
+
+    panel._show_preview(str(bogus_path))
+
+    assert "Could not load preview" in panel.preview_label.text()

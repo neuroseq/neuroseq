@@ -604,6 +604,39 @@ def test_stimulation_generator_dialog_generate_writes_seq_and_overview_png(
     assert seq_path.exists()
     assert png_path.exists()
     assert png_path.stat().st_size > 0
+
+
+def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
+    qtbot: QtBot,
+    tmp_path: Path,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    _DT_S = 0.0005208125  # SysCon2 tick quantum required for export
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0  # active pulse inside a valid SLM window
+    project = Project()
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.folder_edit.setText(str(tmp_path))
+    dialog.name_edit.setText("live_export")
+
+    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+        dialog._generate_scripts()
+
+    assert blocker.args == [
+        str(tmp_path / "live_export.seq"),
+        str(tmp_path / "live_export_overview.png"),
+    ]
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "scripts generated" in qmessagebox_calls[0]["title"].lower()

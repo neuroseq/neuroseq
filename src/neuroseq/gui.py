@@ -1294,6 +1294,7 @@ class Gui(QtWidgets.QMainWindow):
             self.spike_controller.reset()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1312,6 +1313,7 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
