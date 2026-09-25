@@ -780,15 +780,18 @@ class StdpWindowDialog(_SelfRaisingDialog):
                 prepare_seconds = run_to_sample(
                     project, stim, self._append_start_sample
                 )
-        # Get this dialog and its plots out of the way so the user can watch
-        # the stim array and traces fill up as the routine runs. Z-order
-        # hints (lower()/raise()) are not reliably honored by every window
-        # manager - especially for a window that still has focus from the
-        # Start click - so minimizing is used instead, since window state is
+        # Get this dialog out of the way so the user can watch the stim
+        # array and traces fill up as the routine runs. Z-order hints
+        # (lower()/raise()) are not reliably honored by every window manager
+        # - especially for a window that still has focus from the Start
+        # click - so minimizing is used instead, since window state is
         # enforced by the OS/WM rather than merely requested. Restored
         # automatically when the routine finishes (_on_backend_finished).
+        # The plot window is left alone: minimizing/restoring it churns its
+        # live matplotlib canvas's Qt window state, which on macOS can fire
+        # a deferred redraw after the canvas is gone - a real crash seen in
+        # CI, not just a maybe.
         self.showMinimized()
-        self.plot_window.showMinimized()
         main_window = self.editor.window()
         if main_window is not None:
             main_window.raise_()
@@ -1282,11 +1285,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
         # run on every completion path; it is what actually resets the
         # buttons and trims any padding placed ahead of the routine's last
         # block, so a stopped or completed run never leaves a long empty
-        # tail. It is also what restores the dialog and its plots after
-        # start() minimized them out of the way of the stim array/traces.
+        # tail. It is also what restores the dialog after start() minimized
+        # it out of the way of the stim array/traces.
         del message
         self.showNormal()
-        self.plot_window.showNormal()
         self.editor.reset_stim_array()
         self._array_cursor = None
         self.btn_start.setEnabled(True)
