@@ -604,7 +604,7 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
         assert line.offset[1] == pytest.approx(
             trace_widget._neuron_id_to_display_row[idx]
         )
-        assert np.allclose(line.colors, colormap[data.indices[i]])
+        assert np.allclose(line.colors.value, colormap[data.indices[i]])
     # now set same data with same indices in a different order
     data.indices = np.array([15, 6, 11, 1, 0], dtype=np.uint32)
     trace_widget.set_data(data)
@@ -613,7 +613,7 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
         assert line.offset[1] == pytest.approx(
             trace_widget._neuron_id_to_display_row[idx]
         )
-        assert np.allclose(line.colors, colormap[data.indices[i]])
+        assert np.allclose(line.colors.value, colormap[data.indices[i]])
 
 
 def test_trace_widget_y_tick_labels_show_real_neuron_id(qtbot: QtBot) -> None:

@@ -22,3 +22,11 @@ def test_measurement_rejects_missing_epsp() -> None:
     )
     with pytest.raises(NoEpspDetected):
         measure_epsp(trace, 2, [0.02], baseline_ms=5.0, response_ms=10.0)
+
+
+def test_measurement_rejects_trace_that_ends_before_probe() -> None:
+    trace = TraceData(
+        "trace", np.full((1, 10), -70.0, dtype=np.float32), np.array([2]), "mV", 0.001
+    )
+    with pytest.raises(ValueError, match="ends at .* before the probe"):
+        measure_epsp(trace, 2, [0.02], baseline_ms=5.0, response_ms=10.0)

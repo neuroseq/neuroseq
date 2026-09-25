@@ -374,9 +374,7 @@ class CalciumVideoWidget(FPLWidget):
                 colors=(1.0, 0.0, 0.0, 1.0),
                 sizes=16,
                 size_space="screen",
-                uniform_size=True,
                 markers="x",
-                uniform_marker=True,
                 edge_width=1.0,
             )
             self.cross_graphic = self._cross_graphic

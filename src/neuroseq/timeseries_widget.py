@@ -49,6 +49,7 @@ class TimeseriesWidget(FPLWidget):
         object, object, bool, object, object
     )  # data, analysis type, new window, neuron slice, time slice
     escape_pressed = QtCore.Signal()
+    selection_changed = QtCore.Signal()
     neuron_hovered = QtCore.Signal(object)  # int | None - the real neuron/stim id
 
     SUPPORTS_DETACH = True
@@ -897,6 +898,7 @@ class TimeseriesWidget(FPLWidget):
         self.selected_neuron_slice = None
         self.roi.visible = False
         self.selection_in_progress = False
+        self.selection_changed.emit()
 
     def _display_slice_to_real_range(self, display_slice: slice) -> tuple[int, int]:
         """Translate a display-row slice (as produced by mouse-driven selection)
@@ -941,6 +943,7 @@ class TimeseriesWidget(FPLWidget):
         )
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = slice(real_start, real_stop)
+        self.selection_changed.emit()
         self.logger.debug(
             f"Selecting neurons {self.selected_neuron_slice} (display {neuron_index_slice}) and times {time_index_slice}"
         )

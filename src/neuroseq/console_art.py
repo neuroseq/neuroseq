@@ -46,7 +46,8 @@ def _render_line(text: str) -> list[str]:
         gap = " " if index else ""
         for row in range(_GLYPH_ROWS):
             rows[row] += gap + glyph[row]
-    return [row.rstrip() for row in rows]
+    # Each row is centered independently; keep the full character grid.
+    return rows
 
 
 def welcome_banner() -> list[str]:

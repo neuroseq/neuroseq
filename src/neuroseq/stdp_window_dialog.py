@@ -336,16 +336,24 @@ class StdpWindowDialog(_SelfRaisingDialog):
         layout = QtWidgets.QVBoxLayout(self)
         layout.setSpacing(6)
 
-        info_form = QtWidgets.QFormLayout()
+        info_row = QtWidgets.QHBoxLayout()
         self.lbl_stim_name = QtWidgets.QLabel("-", self)
+        self.lbl_stim_size = QtWidgets.QLabel("-", self)
         self.lbl_stim_units = QtWidgets.QLabel("-", self)
         self.lbl_stim_dt = QtWidgets.QLabel("-", self)
         self.lbl_stim_neurons = QtWidgets.QLabel("-", self)
-        info_form.addRow("Input array:", self.lbl_stim_name)
-        info_form.addRow("Units:", self.lbl_stim_units)
-        info_form.addRow("dt:", self.lbl_stim_dt)
-        info_form.addRow("Neurons:", self.lbl_stim_neurons)
-        layout.addLayout(info_form)
+        for title, value in (
+            ("Input array:", self.lbl_stim_name),
+            ("Size:", self.lbl_stim_size),
+            ("Units:", self.lbl_stim_units),
+            ("Neurons:", self.lbl_stim_neurons),
+            ("dt:", self.lbl_stim_dt),
+        ):
+            info_row.addWidget(QtWidgets.QLabel(title, self))
+            info_row.addWidget(value)
+            info_row.addSpacing(8)
+        info_row.addStretch()
+        layout.addLayout(info_row)
 
         self.btn_toggle_parameters = QtWidgets.QToolButton(self)
         self.btn_toggle_parameters.setText("Hide parameters")
@@ -693,12 +701,14 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self.spn_postsynaptic.setMaximum(maximum)
             self.lbl_units.setText(stim.units)
             self.lbl_stim_name.setText(stim.name)
+            self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
             self.lbl_stim_dt.setText(f"{stim.dt * 1000.0:g} ms")
             self.lbl_stim_neurons.setText(str(n_neurons))
         else:
             self.lbl_units.setText("")
             self.lbl_stim_name.setText("-")
+            self.lbl_stim_size.setText("-")
             self.lbl_stim_units.setText("-")
             self.lbl_stim_dt.setText("-")
             self.lbl_stim_neurons.setText("-")

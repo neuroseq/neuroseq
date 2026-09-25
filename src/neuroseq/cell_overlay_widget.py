@@ -457,7 +457,6 @@ class OverlayView(FullScreenFPLWidget):
                 edge_colors=(1.0, 1.0, 1.0, 1.0),
                 sizes=8,
                 size_space="screen",
-                uniform_size=True,
                 uniform_color=True,
             )
             self._square_handles.append(handle)
@@ -488,7 +487,6 @@ class OverlayView(FullScreenFPLWidget):
                 edge_colors=(1.0, 1.0, 1.0, 1.0),
                 sizes=8,
                 size_space="screen",
-                uniform_size=True,
                 uniform_color=True,
             )
             self._circle_handles.append(handle)

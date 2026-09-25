@@ -512,6 +512,8 @@ class Gui(QtWidgets.QMainWindow):
         self.custom_analysis_widget.setVisible(False)
         # heatmap / custom analysis widget / console
         split_vertical.addWidget(split_left_right)
+        # Reserve 25% of the initial workspace height for the console row.
+        split_vertical.setSizes([750, 250])
         main_horizontal_layout.addWidget(split_vertical)
         outer_widget = QtWidgets.QWidget()
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)

@@ -85,64 +85,27 @@ def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> No
     stim_editor.close()
 
 
-def test_drawing_actions_sit_directly_under_draw_mode_button(qtbot: QtBot) -> None:
-    """Draw input / Erase input / Set input value/length… are specific to Draw
-
-    mode, so they sit right after the Draw mode toggle - between it and
-    Select mode - rather than far below near Undo/Redo (issue #535).
-    """
+def test_left_toolbar_groups_history_modes_and_settings(qtbot: QtBot) -> None:
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
 
-    texts = [a.text() for a in toolbar.actions()]
-    draw_mode_index = texts.index("Draw mode (1)")
-    select_mode_index = texts.index("Select mode (2)")
-    assert texts[draw_mode_index + 1 : select_mode_index] == [
-        "Draw input",
-        "Erase input",
-        "Set input value/length…",
-    ]
-    stim_editor.close()
-
-
-def test_selection_actions_sit_directly_under_select_mode_button(
-    qtbot: QtBot,
-) -> None:
-    """Select all / Copy / Cut / Paste / etc. are specific to Select mode, so
-
-    they sit right after the Select mode toggle - the mirror image of the
-    drawing tools under Draw mode - rather than far below near Undo/Redo
-    (issue #535).
-    """
-    cmb_stim = QtWidgets.QComboBox()
-    toolbar = QtWidgets.QToolBar()
-    controller = ConstrainedPanZoomController()
-    stim_editor = StimEditor(controller, cmb_stim, toolbar)
-    qtbot.addWidget(stim_editor)
-
-    actions = toolbar.actions()
-    texts = [a.text() for a in actions]
-    select_mode_index = texts.index("Select mode (2)")
-    # Create/Edit/Delete/Clear stim array, Trim to Mapped Neurons, Pad/Trim/
-    # Loop stim array, Design static/dynamic input, and Show all stim arrays
-    # all moved out of this toolbar (issue #535), so the next thing here
-    # after the selection actions is Undo.
-    undo_index = texts.index("Undo (Ctrl+Z)")
-    assert actions[undo_index - 1].isSeparator()
-    assert texts[select_mode_index + 1 : undo_index - 1] == [
-        "Set amplitude",
-        "Select all (Ctrl+A)",
-        "Copy (Ctrl+C)",
-        "Cut (Ctrl+X)",
-        "Paste (Ctrl+V)",
-        "Paste inverted (Ctrl+Shift+V)",
-        "Save to file",
-        "Load from file",
-        "Delete selected input region",
-    ]
+    for mode, settings in (
+        (InteractMode.DRAW, stim_editor.actions_draw),
+        (InteractMode.SELECT, stim_editor.actions_edit),
+    ):
+        stim_editor.set_mode(mode)
+        actions = [action for action in toolbar.actions() if action.isVisible()]
+        assert actions[:2] == [stim_editor.action_undo, stim_editor.action_redo]
+        assert actions[2].isSeparator()
+        assert actions[3:5] == [
+            stim_editor.action_draw_mode,
+            stim_editor.action_select_mode,
+        ]
+        assert actions[5].isSeparator()
+        assert actions[6:] == settings
     stim_editor.close()
 
 
@@ -284,8 +247,16 @@ def test_set_selected_stim_amplitude(qtbot, monkeypatch, amplitude):
     assert action in editor.toolbar.actions()
     assert not action.isEnabled()
     editor.set_mode(InteractMode.SELECT)
-    assert action.isEnabled()
+    assert not action.isEnabled()
+    assert action.text() == "Set amplitude to selected input"
     editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    assert action.isEnabled()
+    editor.stim_widget.unselect_neurons()
+    assert not action.isEnabled()
+    editor.stim_widget.select_neurons(slice(1, 1), slice(2, 5))
+    assert not action.isEnabled()
+    editor.stim_widget.select_neurons(slice(1, 3), slice(2, 5))
+    assert action.isEnabled()
 
     def get_amplitude(*args):
         assert "mV" in args[2]

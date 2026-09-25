@@ -5,6 +5,7 @@ from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
+import matplotlib.pyplot as plt
 from pyqtgraph.console.repl_widget import ReplWidget
 from qtpy import QtCore
 from qtpy import QtGui
@@ -27,7 +28,7 @@ project.dt                           # canonical sample interval (s)
 
 # ── Input arrays ───────────────────────────────────────────────
 list(project.stim_arrays.keys())     # names of all input arrays
-sa = project.stim_arrays['MyStim']   # get one input array
+sa = project.stim_arrays['stimulus'] # get one input array
 sa.values                            # numpy array, shape (time, neuron)
 sa.dt                                # sample interval (s)
 sa.units                             # e.g. 'pA'
@@ -78,6 +79,7 @@ exp.data                             # list of TraceData / SpikeData objects
 # ── Utilities ─────────────────────────────────────────────────
 np                                   # numpy (already imported)
 b2                                   # brian2 (already imported)
+plt                                  # matplotlib.pyplot (already imported)
 """
 
 
@@ -93,6 +95,7 @@ class ConsoleWidget(ReplWidget):
         self.namespace_dict: dict[str, Any] = {
             "np": np,
             "b2": b2,
+            "plt": plt,
             "project": None,
         }
         # Word-wrap would reflow the fixed character grid of the splash art
@@ -100,6 +103,11 @@ class ConsoleWidget(ReplWidget):
         # narrower than the content - scroll horizontally instead, like a
         # terminal does.
         self.output.setLineWrapMode(QtWidgets.QTextEdit.LineWrapMode.NoWrap)
+        text_option = self.output.document().defaultTextOption()
+        text_option.setFlags(
+            text_option.flags() | QtGui.QTextOption.Flag.IncludeTrailingSpaces
+        )
+        self.output.document().setDefaultTextOption(text_option)
         self._print_intro()
 
         # Create button layout
@@ -214,6 +222,7 @@ class ConsoleWidget(ReplWidget):
 
     def _show_sample_code(self) -> None:
         dlg = QtWidgets.QDialog(self)
+        dlg.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.setWindowTitle("Console: sample python code")
         dlg.resize(620, 480)
         layout = QtWidgets.QVBoxLayout(dlg)
@@ -233,11 +242,12 @@ class ConsoleWidget(ReplWidget):
         )
         close_btn.rejected.connect(dlg.reject)
         layout.addWidget(close_btn)
-        dlg.exec()
+        dlg.show()
 
     def _show_console_history(self) -> None:
         """Show a dialog with the console command history."""
         dlg = QtWidgets.QDialog(self)
+        dlg.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         dlg.setWindowTitle("Console: command history")
         dlg.resize(620, 480)
         layout = QtWidgets.QVBoxLayout(dlg)
@@ -263,7 +273,7 @@ class ConsoleWidget(ReplWidget):
         )
         close_btn.rejected.connect(dlg.reject)
         layout.addWidget(close_btn)
-        dlg.exec()
+        dlg.show()
 
     def set_project(self, project: Project) -> None:
         self.namespace_dict["project"] = project

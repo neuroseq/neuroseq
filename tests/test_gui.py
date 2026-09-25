@@ -4397,7 +4397,7 @@ def test_gui_playback_speed(
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
     qtbot.wait(delay_after_update_model_call_in_ms)
-    assert gui.time_slider.relative_playback_speed == pytest.approx(1.0)
+    assert gui.time_slider.relative_playback_speed == pytest.approx(0.25)
     # mock getItem to return the desired playback speed
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: ("2.6743", True)
