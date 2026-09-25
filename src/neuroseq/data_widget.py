@@ -297,8 +297,10 @@ class DataWidget(QtWidgets.QWidget):
                         float(target_state["position"][2]),
                     ),
                 }
+            # _set_camera_state() already pushes the new state to the
+            # camera itself - an extra _update_cameras() here would just be
+            # a redundant, wasted re-render on every sync.
             target_controller._set_camera_state(new_state)
-            target_controller._update_cameras()
         finally:
             self._sync_in_progress = False
 

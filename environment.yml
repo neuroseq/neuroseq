@@ -24,5 +24,11 @@ dependencies:
   - pytest-timeout
   - pip
   - pip:
-      - fastplotlib
-      - igor2
+      # Pinned to the same versions uv.lock resolves for the pypi-based CI
+      # jobs (see pyproject.toml/uv.lock) - conda-forge otherwise pip
+      # installs these unpinned, so this job silently picks up whatever is
+      # newest on PyPI on a given day rather than the versions the app is
+      # actually developed/tested against. That drift is what broke this
+      # job with a fastplotlib API change unrelated to any code change here.
+      - fastplotlib==0.6.1
+      - igor2==0.5.13
