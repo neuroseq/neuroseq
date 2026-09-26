@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.project import Project
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 
@@ -11,6 +12,85 @@ def dialog(qtbot):
     widget = SyntheticDataDialog(Project())
     qtbot.addWidget(widget)
     return widget
+
+
+@pytest.mark.parametrize("rate", [1000, 3000, 10000])
+def test_patch_sampling_rate(dialog, rate):
+    t = np.arange(10000) / 10000
+    source = TraceData(
+        "source",
+        np.array([np.sin(2 * np.pi * 50 * t), np.ones(t.size)]),
+        np.array([0, 1]),
+        "mV",
+        0.0001,
+    )
+    original = source.traces.copy()
+    dialog.patch_sampling_rate_spinbox.setValue(rate)
+    result = dialog._generate_synthetic_patch_clamp_traces(source, np.array([1, 0]), 0)
+    assert result is not None
+    traces, dt = result
+    assert dt == pytest.approx(1 / rate)
+    assert traces.shape == (2, rate)
+    np.testing.assert_allclose(traces[0], 1, atol=0.002)
+    output_t = np.arange(rate) * dt
+    np.testing.assert_allclose(
+        traces[1, 20:-20], np.sin(2 * np.pi * 50 * output_t[20:-20]), atol=0.003
+    )
+    np.testing.assert_array_equal(source.traces, original)
+
+
+def test_patch_downsampling_suppresses_aliasing(dialog):
+    t = np.arange(10000) / 10000
+    source = TraceData(
+        "source", np.sin(2 * np.pi * 1800 * t)[None, :], np.array([0]), "mV", 0.0001
+    )
+    dialog.patch_sampling_rate_spinbox.setValue(1000)
+    result = dialog._generate_synthetic_patch_clamp_traces(source, None, 0)
+    assert result is not None
+    assert np.max(np.abs(result[0][0, 20:-20])) < 0.01
+
+
+def test_patch_sampling_rejects_upsampling(dialog, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        "neuroseq.synthetic_data_dialog.QtWidgets.QMessageBox.warning",
+        lambda *args: warnings.append(args),
+    )
+    source = TraceData("source", np.ones((1, 10)), np.array([0]), "mV", 0.01)
+    dialog.patch_sampling_rate_spinbox.setValue(1000)
+    assert dialog._generate_synthetic_patch_clamp_traces(source, None, 0) is None
+    assert "100 Hz" in warnings[0][2]
+
+
+def test_patch_add_and_export_use_output_rate(dialog, monkeypatch, tmp_path):
+    source = TraceData("source", np.ones((1, 10000)), np.array([0]), "mV", 0.0001)
+    monkeypatch.setattr(dialog.model, "get_data", lambda *args: source)
+    dialog.data_patch_clamp_combo.addItem("source")
+    dialog.data_patch_clamp_combo.setCurrentText("source")
+    dialog.patch_sampling_rate_spinbox.setValue(3000)
+    dialog.noise_spinbox.setValue(0)
+    added = []
+    monkeypatch.setattr(
+        dialog.model, "add_experimental_data", lambda name, data: added.extend(data)
+    )
+    monkeypatch.setattr(
+        "neuroseq.synthetic_data_dialog.QtWidgets.QMessageBox.information",
+        lambda *args: None,
+    )
+    dialog._add_patch_clamp_to_project()
+    assert added[0].dt == pytest.approx(1 / 3000)
+    assert added[0].traces.shape == (1, 3000)
+    for extension in ("npy", "csv"):
+        path = tmp_path / f"traces.{extension}"
+        monkeypatch.setattr(
+            "neuroseq.synthetic_data_dialog.QtWidgets.QFileDialog.getSaveFileName",
+            lambda *args, path=path: (str(path), ""),
+        )
+        dialog._export_patch_clamp_data()
+        values = (
+            np.load(path) if extension == "npy" else np.loadtxt(path, delimiter=",")
+        )
+        np.testing.assert_allclose(values.reshape(1, -1), added[0].traces)
 
 
 def test_indicator_controls(dialog):

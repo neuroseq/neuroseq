@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from fractions import Fraction
 
 import brian2 as b2
 import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
+from scipy.signal import resample_poly
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
@@ -83,6 +85,19 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         noise_layout.addWidget(noise_label)
         noise_layout.addWidget(self.noise_spinbox)
         data_patch_clamp_group_layout.addLayout(noise_layout)
+
+        sampling_layout = QtWidgets.QHBoxLayout()
+        sampling_layout.addWidget(QtWidgets.QLabel("Output sampling rate (Hz):"))
+        self.patch_sampling_rate_spinbox = QtWidgets.QDoubleSpinBox()
+        self.patch_sampling_rate_spinbox.setDecimals(2)
+        self.patch_sampling_rate_spinbox.setRange(0.01, 1_000_000.0)
+        self.patch_sampling_rate_spinbox.setValue(1000.0)
+        self.patch_sampling_rate_spinbox.setToolTip(
+            "Sampling rate of the generated patch-clamp traces. Must not exceed "
+            "the source rate. Low-pass filtering prevents aliasing when downsampling."
+        )
+        sampling_layout.addWidget(self.patch_sampling_rate_spinbox)
+        data_patch_clamp_group_layout.addLayout(sampling_layout)
 
         # Index selector
         index_layout = QtWidgets.QHBoxLayout()
@@ -616,8 +631,8 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         trace_data: TraceData,
         indices: np.ndarray | None,
         noise_amplitude: float,
-    ) -> np.ndarray | None:
-        """Filter trace data by indices and add Gaussian noise.
+    ) -> tuple[np.ndarray, float] | None:
+        """Select and downsample traces, then add Gaussian measurement noise.
 
         Args:
             trace_data: The trace data to filter.
@@ -626,8 +641,33 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             noise_amplitude: Standard deviation of Gaussian noise to add (in mV).
 
         Returns:
-            The filtered and noised traces, or None if validation fails.
+            The generated traces and sample interval, or None if validation fails.
         """
+        sampling_rate = self.patch_sampling_rate_spinbox.value()
+        if not np.isfinite(trace_data.dt) or trace_data.dt <= 0:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid Sampling Rate",
+                "The source sample interval must be positive.",
+            )
+            return None
+        if sampling_rate > 1.0 / trace_data.dt and not np.isclose(
+            sampling_rate * trace_data.dt, 1.0, rtol=1e-12, atol=0
+        ):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid Sampling Rate",
+                f"Output sampling rate must not exceed the source rate "
+                f"({1.0 / trace_data.dt:g} Hz).",
+            )
+            return None
+        ratio = Fraction(sampling_rate * trace_data.dt).limit_denominator(1_000_000)
+        if ratio.numerator == 0:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Sampling Rate", "The requested sampling rate is too low."
+            )
+            return None
+        output_dt = trace_data.dt * ratio.denominator / ratio.numerator
         # Check if trace data has non-consecutive indices
         if len(trace_data.indices) > 1:
             indices_diff = np.diff(trace_data.indices)
@@ -662,13 +702,22 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             # Export all traces if no indices specified
             traces_to_export = trace_data.traces
 
-        # Add gaussian noise with amplitude from the noise spinbox
+        if ratio.numerator != ratio.denominator:
+            traces_to_export = resample_poly(
+                traces_to_export,
+                ratio.numerator,
+                ratio.denominator,
+                axis=1,
+                padtype="edge",
+            )
+
+        # Add measurement noise at the output rate, preserving its requested SD.
         noise_amplitude_with_units = noise_amplitude * b2.mV
         traces_to_export = traces_to_export + np.random.normal(
             0, noise_amplitude_with_units, traces_to_export.shape
         )
 
-        return traces_to_export
+        return traces_to_export, output_dt
 
     def _export_patch_clamp_data(self) -> None:
         """Export selected trace data to a file."""
@@ -696,11 +745,12 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             return
 
         # Filter and add noise to traces
-        traces_to_export = self._generate_synthetic_patch_clamp_traces(
+        generated = self._generate_synthetic_patch_clamp_traces(
             trace_data, indices, self.noise_spinbox.value()
         )
-        if traces_to_export is None:
+        if generated is None:
             return
+        traces_to_export, output_dt = generated
 
         # Open file dialog
 
@@ -724,7 +774,10 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
             self.logger.info(f"Exported patch clamp data to {file_path}")
             QtWidgets.QMessageBox.information(
-                self, "Export Successful", f"Patch clamp data exported to:\n{file_path}"
+                self,
+                "Export Successful",
+                f"Patch clamp data exported to:\n{file_path}\n"
+                f"Sampling rate: {1.0 / output_dt:g} Hz",
             )
         except Exception as e:
             self.logger.error(f"Failed to export patch clamp data: {e}")
@@ -758,11 +811,12 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             return
 
         # Filter and add noise to traces
-        traces_to_add = self._generate_synthetic_patch_clamp_traces(
+        generated = self._generate_synthetic_patch_clamp_traces(
             trace_data, indices, self.noise_spinbox.value()
         )
-        if traces_to_add is None:
+        if generated is None:
             return
+        traces_to_add, output_dt = generated
 
         # Determine the indices for the new data
         new_indices = indices if indices is not None else trace_data.indices
@@ -780,7 +834,7 @@ class SyntheticDataDialog(QtWidgets.QDialog):
             name="Patch clamp",
             traces=traces_to_add,
             indices=new_indices,
-            dt=trace_data.dt,
+            dt=output_dt,
             units=trace_data.units,
         )
 

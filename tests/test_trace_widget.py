@@ -667,6 +667,51 @@ def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
     trace_widget.close()
 
 
+@pytest.mark.parametrize(
+    "units,sample,expected",
+    [
+        ("1", 1000.0, "1e+03 1"),
+        ("a.u.", 1000.0, "1e+03 a.u."),
+        ("mV", -0.065, "-65 mV"),
+        ("", -0.065, "-65 mV"),
+    ],
+)
+def test_trace_widget_hover_value_units(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    units: str,
+    sample: float,
+    expected: str,
+) -> None:
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([0.0, 0.0, 0.0]),
+    )
+    # Switch from voltage to the requested units to also check scale reset.
+    for trace_units, value in [("mV", -0.065), (units, sample)]:
+        widget.set_data(
+            TraceData(
+                name="Hover test",
+                traces=np.full((1, 10), value, dtype=np.float32),
+                indices=np.array([0], dtype=np.uint32),
+                dt=0.001,
+                units=trace_units,
+            )
+        )
+    widget.pointer_move(None)
+    assert captured["t"] == f"Neuron 0\n{expected}"
+    assert isinstance(widget.data, TraceData)
+    np.testing.assert_allclose(widget.data.traces, sample)
+    widget.close()
+
+
 def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
