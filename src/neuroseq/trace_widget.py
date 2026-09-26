@@ -511,8 +511,10 @@ class TraceWidget(TimeseriesWidget):
         )
         self.data = data
         self.data_values = data.traces.T
-        self.data_values_scale = 1000.0
         self.units = data.units if data.units else "mV"
+        # Voltage traces use the existing volts-to-millivolts convention.
+        # Fluorescence and other trace types already contain display values.
+        self.data_values_scale = 1000.0 if self.units == "mV" else 1.0
         self._all_neuron_ids = sorted({int(i) for i in data.indices})
         self._greyed_neuron_ids = set(self._state.greyed_neuron_ids)
         self._rebuild_visible_neuron_mapping()
