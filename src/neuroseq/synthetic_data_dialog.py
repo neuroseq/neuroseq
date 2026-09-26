@@ -227,6 +227,28 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         df_f_var_layout.addWidget(self.df_f_var_spinbox)
         data_imaging_group_layout.addLayout(df_f_var_layout)
 
+        response_layout = QtWidgets.QHBoxLayout()
+        response_layout.addWidget(QtWidgets.QLabel("Indicator response:"))
+        self.indicator_response_combo = QtWidgets.QComboBox()
+        self.indicator_response_combo.addItem("Exponential decay", "decay")
+        self.indicator_response_combo.addItem("Rise and decay", "rise_decay")
+        response_layout.addWidget(self.indicator_response_combo)
+        data_imaging_group_layout.addLayout(response_layout)
+
+        rise_layout = QtWidgets.QHBoxLayout()
+        rise_layout.addWidget(QtWidgets.QLabel("Rise time constant (s):"))
+        self.rise_time_spinbox = QtWidgets.QDoubleSpinBox()
+        self.rise_time_spinbox.setRange(0.001, 10.0)
+        self.rise_time_spinbox.setDecimals(3)
+        self.rise_time_spinbox.setSingleStep(0.001)
+        self.rise_time_spinbox.setValue(0.01)
+        self.rise_time_spinbox.setToolTip(
+            "Rise time constant, not time to peak. Must be shorter than decay time. "
+            "dF/F sets the peak response to an isolated spike."
+        )
+        rise_layout.addWidget(self.rise_time_spinbox)
+        data_imaging_group_layout.addLayout(rise_layout)
+
         # Decay time constant selector
         decay_layout = QtWidgets.QHBoxLayout()
         decay_label = QtWidgets.QLabel("Decay time (s):")
@@ -313,6 +335,15 @@ class SyntheticDataDialog(QtWidgets.QDialog):
         imaging_buttons_layout.addWidget(self.btn_add_imaging)
         data_imaging_group_layout.addLayout(imaging_buttons_layout)
 
+        self.indicator_validation_label = QtWidgets.QLabel()
+        data_imaging_group_layout.addWidget(self.indicator_validation_label)
+        self.indicator_response_combo.currentIndexChanged.connect(
+            self._update_indicator_controls
+        )
+        self.rise_time_spinbox.valueChanged.connect(self._update_indicator_controls)
+        self.decay_time_spinbox.valueChanged.connect(self._update_indicator_controls)
+        self._update_indicator_controls()
+
         data_imaging_group.setLayout(data_imaging_group_layout)
         layout.addWidget(data_imaging_group)
 
@@ -338,6 +369,20 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         # Initial preview update
         self._update_preview()
+
+    def _update_indicator_controls(self) -> None:
+        """Enable rise settings and prevent generation with invalid kinetics."""
+        use_rise = self.indicator_response_combo.currentData() == "rise_decay"
+        self.rise_time_spinbox.setEnabled(use_rise)
+        valid = (
+            not use_rise
+            or self.rise_time_spinbox.value() < self.decay_time_spinbox.value()
+        )
+        self.indicator_validation_label.setText(
+            "" if valid else "Rise time must be shorter than decay time."
+        )
+        self.btn_export_imaging.setEnabled(valid)
+        self.btn_add_imaging.setEnabled(valid)
 
     def _parse_indices(self, index_string: str) -> np.ndarray | None:
         """Parse comma-separated indices and ranges into a numpy array.
@@ -412,6 +457,32 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         return decayed_traces
 
+    def _apply_rise_and_decay(
+        self, traces: np.ndarray, dt: float, rise_time: float, decay_time: float
+    ) -> np.ndarray:
+        """Filter spike amplitudes with a peak-normalized biexponential kernel.
+
+        Each spike starts at zero and reaches its supplied amplitude at the
+        continuous-time kernel peak. Overlapping responses add linearly.
+        """
+        if not 0 < rise_time < decay_time:
+            raise ValueError("Rise time must be positive and shorter than decay time.")
+        rate_difference = 1 / rise_time - 1 / decay_time
+        peak_time = np.log1p((decay_time - rise_time) / rise_time) / rate_difference
+        peak = np.exp(-peak_time / decay_time) * (
+            -np.expm1(-peak_time * rate_difference)
+        )
+        decay_factor = np.exp(-dt / decay_time)
+        rise_factor = np.exp(-dt / rise_time)
+        decay_state = np.zeros(traces.shape[0])
+        rise_state = np.zeros(traces.shape[0])
+        result = np.zeros_like(traces, dtype=float)
+        for t in range(traces.shape[1]):
+            decay_state = decay_factor * decay_state + traces[:, t]
+            rise_state = rise_factor * rise_state + traces[:, t]
+            result[:, t] = (decay_state - rise_state) / peak
+        return result
+
     def _generate_synthetic_imaging_traces(
         self,
         spike_data: SpikeData,
@@ -463,14 +534,15 @@ class SyntheticDataDialog(QtWidgets.QDialog):
 
         imaging_traces = imaging_traces[indices]
 
-        # Apply decay dynamics: each element is based on previous value * decay factor
-        # Rising time is ignored as at sampling rate of 30 Hz it is negligible for most practical purposes
-        # quenching factor is also ignored for now (short experiments with low photobleaching approximation)
-        # both will incroduce extra terms in the apply_temporal_decay function
-        decay_factor = np.exp(
-            -dt / decay_time_constant
-        )  # Constant multiplication factor for temporal decay
-        imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor) + 1
+        # Apply indicator dynamics before sampling; photobleaching is ignored.
+        if self.indicator_response_combo.currentData() == "rise_decay":
+            imaging_traces = self._apply_rise_and_decay(
+                imaging_traces, dt, self.rise_time_spinbox.value(), decay_time_constant
+            )
+        else:
+            decay_factor = np.exp(-dt / decay_time_constant)
+            imaging_traces = self._apply_temporal_decay(imaging_traces, decay_factor)
+        imaging_traces += 1
 
         # Downsample to imaging sampling rate
         # The mean of the signal can vary depending on downsampling strategy
