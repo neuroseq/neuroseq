@@ -348,10 +348,14 @@ class StimWidget(TimeseriesWidget):
         dialog.resize(1000, 650)
         layout = QtWidgets.QVBoxLayout(dialog)
         figure = Figure(layout="tight", facecolor="none")
+        # Omit background patches entirely, including when savefig settings
+        # override the figure's facecolor during toolbar export.
+        figure.patch.set_visible(False)
         canvas = FigureCanvasQTAgg(figure)
         layout.addWidget(NavigationToolbar2QT(canvas, dialog))
         layout.addWidget(canvas)
         ax = figure.add_subplot(111, facecolor="none")
+        ax.patch.set_visible(False)
 
         arrays: list[tuple[np.ndarray, float, StimType, float]] = []
         if self.show_background_graphics:

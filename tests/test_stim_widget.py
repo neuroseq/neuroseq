@@ -88,8 +88,16 @@ def test_stim_vector_preview(qtbot, tmp_path, stim_type, selected):
         (0.5, 1.5) if selected else (cy - state["height"] / 2, cy + state["height"] / 2)
     )
     output = tmp_path / "stim.svg"
-    canvas.figure.savefig(output)
-    assert "<image" not in output.read_text(encoding="utf-8")
+    from matplotlib import rc_context
+
+    with rc_context({"savefig.facecolor": "white", "savefig.edgecolor": "white"}):
+        canvas.figure.savefig(output)
+    svg = output.read_text(encoding="utf-8")
+    assert "<image" not in svg
+    assert 'id="patch_1"' in svg  # Axis spines remain visible.
+    assert "fill: #ffffff" not in svg
+    assert not canvas.figure.patch.get_visible()
+    assert not ax.patch.get_visible()
     dialog.close()
     widget.set_background_data_visible(False)
     dialog = widget.preview_stimuli()
