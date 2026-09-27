@@ -219,10 +219,11 @@ def flush_qt_deferred_deletes():
     # firing later, against a canvas whose C++ side has since been deleted,
     # raises RuntimeError inside a Qt-invoked slot in a way that crashes the
     # interpreter outright instead of surfacing as a catchable exception -
-    # so this has to happen first, not just once, since processing one
-    # round of events can itself schedule more.
-    for _ in range(3):
-        process_events()
+    # so this has to happen first. One round is enough for that already-
+    # queued callback; looping here just to be extra safe would multiply a
+    # real per-call cost (a native event-loop pump, not a cheap no-op) across
+    # every test in the suite for no real benefit.
+    process_events()
     for widget in list(top_level_widgets()):
         try:
             widget.close()
@@ -233,8 +234,7 @@ def flush_qt_deferred_deletes():
         None,
         QtCore.QEvent.Type.DeferredDelete,
     )
-    for _ in range(3):
-        process_events()
+    process_events()
 
 
 # use temporary path for storing user settings
