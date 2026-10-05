@@ -127,7 +127,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
 
         self.segmentation_run_group = QtWidgets.QGroupBox(
-            "Select file (single or multiframe TIFF)"
+            "Select file (single or multiframe TIFF, or PNG)"
         )
         cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
         cellpose_button_layout.addWidget(QtWidgets.QLabel("Model:"))
@@ -144,8 +144,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "Select file for segmentation…"
         )
         self.annotate_tiff_button.setToolTip(
-            "Select a mean-fluorescence TIFF and immediately segment it with "
-            "the Cellpose model chosen above. Results are saved beside the TIFF."
+            "Select a mean-fluorescence TIFF or a PNG snapshot and "
+            "immediately segment it with the Cellpose model chosen above. "
+            "Results are saved beside the selected file."
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
@@ -1266,13 +1267,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self._load_segmentation_file(filename)
 
     def _annotate_mean_tiff(self) -> None:
-        """Select and immediately annotate a mean-fluorescence TIFF with the
-        Cellpose model chosen in the one-button segmentation pane."""
+        """Select and immediately annotate a mean-fluorescence TIFF or a
+        single PNG snapshot with the Cellpose model chosen in the one-button
+        segmentation pane."""
         filename, _ = getopenfilename(
             self,
-            "Select mean fluorescence TIFF",
+            "Select image for segmentation",
             "",
-            "TIFF files (*.tif *.tiff);;All files (*)",
+            "Image files (*.tif *.tiff *.png);;TIFF files (*.tif *.tiff);;"
+            "PNG files (*.png);;All files (*)",
         )
         if not filename:
             return
@@ -1284,17 +1287,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             return
 
-        try:
-            from neuroseq.cellpose_annotation import tiff_frame_count
+        from neuroseq.cellpose_annotation import TIFF_SUFFIXES
 
-            frame_count = tiff_frame_count(filename)
-        except Exception as exc:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid TIFF file",
-                f"Could not inspect {filename}:\n{exc}",
-            )
-            return
+        frame_count = 1
+        if Path(filename).suffix.lower() in TIFF_SUFFIXES:
+            try:
+                from neuroseq.cellpose_annotation import tiff_frame_count
+
+                frame_count = tiff_frame_count(filename)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid TIFF file",
+                    f"Could not inspect {filename}:\n{exc}",
+                )
+                return
         if frame_count > 1:
             sampled_count = len(range(0, min(frame_count, 300), 2))
             QtWidgets.QMessageBox.information(

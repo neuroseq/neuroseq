@@ -364,6 +364,46 @@ def test_annotate_mean_tiff_uses_selected_cellpose_model(
     annotate.assert_called_once_with(str(image_path), model_name="cpsam_v2")
 
 
+def test_annotate_mean_tiff_accepts_a_png_snapshot(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """Feature (#566): one-button segmentation used to only accept TIFFs -
+    a PNG snapshot should go straight through without the multi-frame TIFF
+    inspection/averaging path (which can't parse a PNG)."""
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    image_path = tmp_path / "snapshot.png"
+    segmentation_path = tmp_path / "snapshot_seg.npy"
+    mask_path = tmp_path / "snapshot_cp_masks.png"
+    Image.fromarray(np.zeros((6, 6), dtype=np.uint8)).save(image_path)
+    segmentation = np.zeros((6, 6), dtype=np.int32)
+    segmentation[1:3, 1:3] = 1
+    np.save(segmentation_path, segmentation)
+
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.getopenfilename",
+        return_value=(str(image_path), ""),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, mask_path),
+    )
+    tiff_frame_count = mocker.patch(
+        "neuroseq.cellpose_annotation.tiff_frame_count",
+    )
+
+    dialog._annotate_mean_tiff()
+
+    tiff_frame_count.assert_not_called()
+    annotate.assert_called_once_with(str(image_path), model_name="cpsam")
+    assert dialog.image_path == image_path
+    assert dialog.segmentation_path == segmentation_path
+
+
 def test_annotate_multiframe_tiff_explains_averaging(
     tmp_path, qtbot: QtBot, mocker, qmessagebox_calls
 ) -> None:

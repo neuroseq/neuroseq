@@ -13,6 +13,11 @@ from neuroseq.gpu import torch_gpu_status
 MAX_SOURCE_FRAMES = 300
 FRAME_STEP = 2
 
+TIFF_SUFFIXES = (".tif", ".tiff")
+# .jpg/.jpeg deliberately excluded - lossy compression isn't appropriate for
+# quantitative segmentation (see issue #568).
+SEGMENTATION_IMAGE_SUFFIXES = (*TIFF_SUFFIXES, ".png")
+
 # Model identifiers accepted by cellpose.models.CellposeModel(pretrained_model=...)
 # in the pinned cellpose version. "cpsam" is listed first (rather than cellpose's
 # own new default of "cpsam_v2") so NeuroSeq's one-button segmentation keeps
@@ -28,8 +33,13 @@ def tiff_frame_count(image_path: str | Path) -> int:
 
 
 def load_annotation_image(image_path: str | Path) -> np.ndarray:
-    """Load a single image or average sampled pages from a TIFF stack."""
+    """Load a single image, or average sampled pages from a TIFF stack."""
     path = Path(image_path)
+    if path.suffix.lower() not in TIFF_SUFFIXES:
+        # A single still image (e.g. PNG) - nothing to average over.
+        with Image.open(path) as image:
+            return np.asarray(image)
+
     frame_count = tiff_frame_count(path)
     if frame_count <= 1:
         with Image.open(path) as image:
@@ -45,7 +55,8 @@ def annotate_mean_fluorescence_tiff(
     *,
     model_name: str = "cpsam",
 ) -> tuple[Path, Path]:
-    """Annotate a TIFF and save Cellpose GUI and mask outputs beside it.
+    """Annotate a TIFF or PNG image and save Cellpose GUI and mask outputs
+    beside it.
 
     Returns the standard ``*_seg.npy`` file and the ``*_cp_masks.png`` mask.
     Cellpose is imported lazily so NeuroSeq can still show a useful GUI error if
