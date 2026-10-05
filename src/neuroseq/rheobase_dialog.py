@@ -14,19 +14,20 @@ from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input_blocks import append_block as _append_block_impl
+from neuroseq.dynamic_input_blocks import RoutineArrayCursor
+from neuroseq.dynamic_input_blocks import run_to_sample
 from neuroseq.dynamic_input_measurement import measure_spike_count
 from neuroseq.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input_routine import backend_property
 from neuroseq.rheobase import bisection_converged
 from neuroseq.rheobase import next_bracket
-from neuroseq.stdp_synaptic_tuning_dialog import StimHeatmapWindow
 from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
 from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
 from neuroseq.stdp_synaptic_tuning_dialog import _wrap_in_scroll_area
-from neuroseq.stdp_synaptic_tuning_dialog import confirm_discard_unsimulated_input
+from neuroseq.stdp_synaptic_tuning_dialog import confirm_start_routine
+from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
@@ -61,7 +62,6 @@ class RheobaseBackend(RoutineBackend):
         self.chronaxie_ms: float | None = None
         self.fixed_spiking_duration_ms: float | None = None
         self.iteration = 0
-        self.view_block_samples: int | None = None
         self.logged_recovery_note = False
         self.resolution_warning_logged = False
         self.samples: list[tuple[float, float, int]] = []
@@ -76,7 +76,6 @@ class RheobaseBackend(RoutineBackend):
         self.begin()
         self.phase = "idle"
         self.iteration = 0
-        self.view_block_samples = None
         self.low = config.min_amplitude
         self.high = config.max_amplitude
         self.pending_amplitude = config.max_amplitude
@@ -452,6 +451,8 @@ class RheobaseDialog(_SelfRaisingDialog):
         self._theme = theme_module.LIGHT
         self._expanded_height: int | None = None
         self._compact_height: int | None = None
+        self._array_cursor: RoutineArrayCursor | None = None
+        self._append_start_sample = 0
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -571,10 +572,6 @@ class RheobaseDialog(_SelfRaisingDialog):
         self.spn_max_iterations = QtWidgets.QSpinBox(self)
         self.spn_max_iterations.setRange(1, 10_000)
         self.spn_max_iterations.setValue(25)
-        self.chk_follow_input = QtWidgets.QCheckBox(
-            "Follow new input on each iteration", self
-        )
-        self.chk_follow_input.setChecked(True)
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Sweeping strategy:", self.cmb_sweeping_strategy)
         form.addRow("Neuron ID:", self.spn_neuron)
@@ -596,7 +593,6 @@ class RheobaseDialog(_SelfRaisingDialog):
         form.addRow("Post-pulse window (ms):", self.spn_response_ms)
         form.addRow("Spike threshold (mV):", self.spn_threshold_mv)
         form.addRow("Maximum iterations:", self.spn_max_iterations)
-        form.addRow("Live view:", self.chk_follow_input)
         parameters_layout.addLayout(form)
 
         self.parameters_scroll = QtWidgets.QScrollArea(self)
@@ -634,10 +630,11 @@ class RheobaseDialog(_SelfRaisingDialog):
             self._update_sweeping_strategy_controls
         )
 
-        # No Qt parent for the popups - see StimHeatmapWindow's construction
-        # in stdp_synaptic_tuning_dialog.py for why (KWin/X11 groups a whole chain
-        # of transient windows sharing one owner, so clicking one never
-        # brings it above a sibling in the same chain).
+        # No Qt parent for this popup: a parent sets WM_TRANSIENT_FOR, and
+        # some window managers (observed on KWin/X11) then treat the whole
+        # chain of transient windows sharing one owner as a single "raise
+        # group" - clicking one never brings it above a sibling in the same
+        # chain.
         self.plot_window = _SelfRaisingDialog()
         self.plot_window.setWindowTitle("Minimal input for spiking (rheobase) — plots")
         self.plot_window.setWindowFlag(
@@ -656,13 +653,6 @@ class RheobaseDialog(_SelfRaisingDialog):
             _wrap_in_scroll_area(self.rheobase_plot, self.plot_window)
         )
         self.plot_window.resize(720, 560)
-
-        # A third popup: a live, whole-history heatmap of the input pattern
-        # (neuron ID x time) - see StimHeatmapWindow's docstring for why.
-        self.stim_heatmap_window = StimHeatmapWindow(
-            "Minimal input for spiking (rheobase) — stimulation pattern"
-        )
-        self._stim_heatmap_window_positioned = False
 
         self.lbl_status = QtWidgets.QLabel("Rheobase: waiting for first probe", self)
         layout.addWidget(self.lbl_status)
@@ -759,33 +749,12 @@ class RheobaseDialog(_SelfRaisingDialog):
             self._plot_window_positioned = True
             self.plot_window.move(self.x() + self.width() + 20, self.y())
         self.plot_window.raise_()
-        self.stim_heatmap_window.show()
-        if not self._stim_heatmap_window_positioned:
-            self._stim_heatmap_window_positioned = True
-            self.stim_heatmap_window.position_below(self.plot_window)
-        self.stim_heatmap_window.raise_()
-        self._update_stim_heatmap()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         if self._running:
             self._finish("Routine stopped (dialog closed).")
         self.plot_window.close()
-        self.stim_heatmap_window.close()
         super().closeEvent(event)
-
-    def _update_stim_heatmap(self) -> None:
-        modifier = self.editor.current_stim_modifier
-        stim = modifier.stim_array if modifier is not None else None
-        target_ids = (self.spn_neuron.value(),)
-        self.stim_heatmap_window.update_view(stim, target_ids, self._heatmap_trace())
-
-    def _heatmap_trace(self) -> TraceData | None:
-        if self.project is None:
-            return None
-        trace_name = self.cmb_trace.currentText()
-        if not trace_name:
-            return None
-        return self.project.get_data(trace_name, TraceData)
 
     def changeEvent(self, event: QtCore.QEvent | None) -> None:
         super().changeEvent(event)
@@ -865,23 +834,78 @@ class RheobaseDialog(_SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        if not confirm_discard_unsimulated_input(self, self.editor):
-            self._append_log("Routine cancelled; unsimulated input kept.")
+        choice = confirm_start_routine(self, self.editor)
+        if choice == "cancel":
+            self._append_log("Routine cancelled.")
             return
-        # Start from the simulation head so a long left-over stim array does not
-        # make the routine simulate a huge empty tail.
-        self.editor.reset_stim_array()
-        if not self.cmb_trace.currentText():
-            duration = 0.001
+        stim = self._require_stim()
+        project = self._require_project()
+        prepare_seconds = 0.0
+        if choice == "clear":
+            self.editor.zero_current_stim_array()
+            # Trim the (now all-zero) tail back to the simulation head, same
+            # as reset_stim_array() always did - there is nothing real left
+            # to lose, so "start from the beginning" means right after
+            # whatever has actually been simulated so far (0 for a fresh
+            # project), not literally sample 0 if some has already run.
+            self.editor.reset_stim_array()
+            target_secs = max(project.b2_model.get_sim_time_secs(), float(stim.dt))
+            self._append_start_sample = seconds_to_samples_nearest(
+                target_secs, float(stim.dt)
+            )
+        else:
+            # Continue after the last existing stimulus - not the
+            # simulation head, which can be well behind it (e.g. an example
+            # project's pre-authored stim array that has never been
+            # simulated in this session). Using the simulation head here
+            # would make reset_stim_array() silently discard that
+            # pre-existing content instead of preserving it.
+            self._append_start_sample = (
+                self.editor.current_stim_array_last_stimulus_sample()
+            )
+            last_stimulus_secs = self._append_start_sample * float(stim.dt)
+            current_sim_secs = project.b2_model.get_sim_time_secs()
+            if last_stimulus_secs > current_sim_secs + float(stim.dt) * 0.5:
+                # The network has to actually run through that pre-existing
+                # content before the routine starts appending and measuring
+                # after it.
+                prepare_seconds = run_to_sample(
+                    project, stim, self._append_start_sample
+                )
+        # Get this dialog out of the way so the user can watch the stim
+        # array and traces fill up as the routine runs. Z-order hints
+        # (lower()/raise()) are not reliably honored by every window manager
+        # - especially for a window that still has focus from the Start
+        # click - so minimizing is used instead, since window state is
+        # enforced by the OS/WM rather than merely requested. Restored
+        # automatically when the routine finishes (_on_backend_finished).
+        # The plot window is left alone: minimizing/restoring it churns its
+        # live matplotlib canvas's Qt window state, which on macOS can fire
+        # a deferred redraw after the canvas is gone - a real crash seen in
+        # CI, not just a maybe.
+        self.showMinimized()
+        main_window = self.editor.window()
+        if main_window is not None:
+            main_window.raise_()
+            main_window.activateWindow()
+        needs_trace_init = not self.cmb_trace.currentText()
+        if needs_trace_init or prepare_seconds > 0.0:
+            duration = max(prepare_seconds, 0.001)
             self._running = True
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
             self.btn_pause.setEnabled(True)
-            self._append_log(
-                f"Running an initial {duration:.3f} s simulation to create "
-                "trace monitors."
-            )
+            if prepare_seconds > 0.0:
+                self._append_log(
+                    f"Simulating {duration:.3f} s to catch up to the "
+                    "existing stimuli before the search starts."
+                )
+            else:
+                self._append_log(
+                    f"Running an initial {duration:.3f} s simulation to "
+                    "create trace monitors."
+                )
             self._request_simulation(duration)
             return
         self._begin_search(clear_log=True)
@@ -919,6 +943,12 @@ class RheobaseDialog(_SelfRaisingDialog):
             stim_dt=float(stim.dt),
             n_neurons=int(stim.values.shape[1]),
         )
+        initial_estimate_seconds = (
+            config.recovery_ms + config.pulse_ms + config.response_ms
+        ) / 1000.0
+        self._array_cursor = RoutineArrayCursor(
+            self._append_start_sample, initial_estimate_seconds
+        )
         if clear_log:
             self.log.clear()
         self._running = True
@@ -950,19 +980,10 @@ class RheobaseDialog(_SelfRaisingDialog):
         return self.project
 
     def append_block(self, block: np.ndarray) -> int:
+        if self._array_cursor is None:
+            raise RuntimeError("No routine is running.")
         stim = self._require_stim()
-        block_start = _append_block_impl(self.editor, stim, block)
-        if self.chk_follow_input.isChecked():
-            if self._view_block_samples is None:
-                self._view_block_samples = block.shape[0]
-            block_end = block_start + block.shape[0]
-            history_start = max(0, block_end - self._view_block_samples)
-            self.editor.focus_time_range(
-                history_start * stim.dt,
-                (history_start + self._view_block_samples) * stim.dt,
-            )
-        self._update_stim_heatmap()
-        return block_start
+        return self._array_cursor.place_block(self.editor, stim, block)
 
     def _request_simulation(self, seconds: float) -> None:
         self._backend.request_simulation(seconds)
@@ -1224,7 +1245,6 @@ class RheobaseDialog(_SelfRaisingDialog):
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
         self.rheobase_plot.draw()
-        self.stim_heatmap_window.apply_theme(theme)
 
     def simulation_failed(self, message: str) -> None:
         if self._running and self._awaiting_simulation:
@@ -1294,7 +1314,6 @@ class RheobaseDialog(_SelfRaisingDialog):
     _chronaxie_ms = backend_property("chronaxie_ms")
     _fixed_spiking_duration_ms = backend_property("fixed_spiking_duration_ms")
     _iteration = backend_property("iteration")
-    _view_block_samples = backend_property("view_block_samples")
     _logged_recovery_note = backend_property("logged_recovery_note")
     _resolution_warning_logged = backend_property("resolution_warning_logged")
 
@@ -1303,9 +1322,19 @@ class RheobaseDialog(_SelfRaisingDialog):
 
     def _on_measurement_changed(self) -> None:
         self._update_plot()
-        self._update_stim_heatmap()
 
     def _on_backend_finished(self, message: str) -> None:
+        # The backend can call finish() on itself (e.g. search converged)
+        # without going through this dialog's _finish(), so this callback -
+        # wired to RoutineBackend.on_finished - is the one hook guaranteed to
+        # run on every completion path; it is what actually resets the
+        # buttons and trims any padding placed ahead of the routine's last
+        # block, so a stopped or completed run never leaves a long empty
+        # tail. It is also what restores the dialog after start() minimized
+        # it out of the way of the stim array/traces.
+        self.showNormal()
+        self.editor.reset_stim_array()
+        self._array_cursor = None
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)

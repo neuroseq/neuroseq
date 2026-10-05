@@ -207,14 +207,27 @@ def flush_qt_deferred_deletes():
     top_level_widgets = getattr(qapplication_class, "topLevelWidgets", None)
     if not callable(top_level_widgets):
         return
+    process_events = getattr(app, "processEvents", None)
+    if not callable(process_events):
+        return
+    # Let anything already scheduled during the test - notably a matplotlib
+    # Qt backend's draw_idle(), queued via QTimer.singleShot(0, ...) from a
+    # .draw() call - actually run while every widget is still alive, before
+    # closing/deleting any of them below. On some platforms (seen on macOS
+    # CI; not reproduced under Linux's offscreen QPA platform) that callback
+    # firing later, against a canvas whose C++ side has since been deleted,
+    # raises RuntimeError inside a Qt-invoked slot in a way that crashes the
+    # interpreter outright instead of surfacing as a catchable exception -
+    # so this has to happen first. One round is enough for that already-
+    # queued callback; looping here just to be extra safe would multiply a
+    # real per-call cost (a native event-loop pump, not a cheap no-op) across
+    # every test in the suite for no real benefit.
+    process_events()
     for widget in list(top_level_widgets()):
         try:
             widget.close()
         except RuntimeError:
             continue
-    process_events = getattr(app, "processEvents", None)
-    if not callable(process_events):
-        return
     process_events()
     QtCore.QCoreApplication.sendPostedEvents(
         None,

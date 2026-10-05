@@ -50,6 +50,7 @@ class _FakeEditor:
         self.calls: list[np.ndarray] = []
         self.time_slices: list[slice] = []
         self.cleared = 0
+        self.pad_calls: list[float] = []
         self.focused_ranges: list[tuple[float, float]] = []
         self.controller = SimpleNamespace(
             focus_time_range=lambda start, stop: self.focused_ranges.append(
@@ -63,6 +64,11 @@ class _FakeEditor:
     def clear_stim_array(self) -> None:
         self.cleared += 1
 
+    def zero_current_stim_array(self) -> None:
+        self.cleared += 1
+        stim = self.current_stim_modifier.stim_array
+        stim.values = np.zeros_like(stim.values)
+
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
@@ -72,6 +78,30 @@ class _FakeEditor:
         n_keep = seconds_to_samples_nearest(target_secs, float(stim.dt))
         return bool(np.any(stim.values[n_keep:, :]))
 
+    def current_stim_array_has_any_data(self) -> bool:
+        return bool(np.any(self.current_stim_modifier.stim_array.values))
+
+    def current_stim_array_last_stimulus_sample(self) -> int:
+        values = self.current_stim_modifier.stim_array.values
+        nonzero_rows = np.flatnonzero(np.any(values != 0, axis=1))
+        if nonzero_rows.size == 0:
+            return 0
+        return int(nonzero_rows[-1]) + 1
+
+    def window(self) -> SimpleNamespace:
+        return SimpleNamespace(raise_=lambda: None, activateWindow=lambda: None)
+
+    def _ensure_len(self, n_samples: int) -> None:
+        stim = self.current_stim_modifier.stim_array
+        if stim.values.shape[0] < n_samples:
+            pad = n_samples - stim.values.shape[0]
+            stim.values = np.pad(stim.values, ((0, pad), (0, 0)))
+
+    def pad_stim_array_to(self, total_length_secs: float) -> None:
+        self.pad_calls.append(total_length_secs)
+        stim = self.current_stim_modifier.stim_array
+        self._ensure_len(round(total_length_secs / stim.dt))
+
     def apply_pattern(
         self, neuron_slice: slice, time_slice: slice, values: np.ndarray
     ) -> None:
@@ -79,7 +109,8 @@ class _FakeEditor:
         self.time_slices.append(time_slice)
         self.calls.append(values.copy())
         stim = self.current_stim_modifier.stim_array
-        stim.values = np.vstack((stim.values, values))
+        self._ensure_len(time_slice.stop)
+        stim.values[time_slice.start : time_slice.stop, :] = values
 
 
 def _make_dialog(qtbot) -> tuple[_FakeProject, _FakeEditor, RheobaseDialog]:
@@ -147,7 +178,51 @@ def test_rheobase_appends_each_probe_forward(qtbot, monkeypatch) -> None:
     # overwriting a fixed region, so block starts strictly increase.
     assert starts == sorted(starts)
     assert len(set(starts)) == len(starts)
-    assert starts[0] >= 10  # after the pre-existing 10-sample stim array
+    # The fixture's stim array is 10 samples but entirely zero, so there is
+    # no "last stimulus" to continue after - probes start at sample 0.
+    assert starts[0] == 0
+
+
+def test_rheobase_pads_ahead_and_focuses_camera_once_on_first_probe(
+    qtbot, monkeypatch
+) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    # One pad call (ahead of the first block) and one matching camera focus -
+    # the array-cursor plumbing is exercised, not just a bare append.
+    assert len(editor.pad_calls) == 1
+    assert len(editor.focused_ranges) == 1
+    stim = editor.current_stim_modifier.stim_array
+    assert stim.values.shape[0] > editor.time_slices[0].stop
+
+
+def test_rheobase_trims_leftover_padding_when_search_converges_on_its_own(
+    qtbot, monkeypatch
+) -> None:
+    """The backend can call finish() on itself (search converged) without
+    going through the dialog's own stop()/_finish() path; _on_backend_finished
+    - wired as RoutineBackend.on_finished - must still run and trim any
+    padding placed ahead of the last block."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_spikes", lambda trace: int(dialog._pending_amplitude >= 2.6)
+    )
+    dialog.spn_tolerance.setValue(0.1)
+
+    dialog.start()
+    _finish_search(dialog)
+
+    assert not dialog._running
+    assert dialog._array_cursor is None
+    # reset_stim_array() (which trims any padding still ahead of the
+    # simulation head) is what StimEditor uses for the actual trim; here we
+    # only need to know _on_backend_finished actually reached it.
+    assert editor.reset_count >= 1
 
 
 def test_rheobase_sweeping_strategy_controls(qtbot) -> None:
@@ -402,74 +477,6 @@ def test_rheobase_plots_open_in_separate_window(qtbot) -> None:
     assert dialog.rheobase_plot.window() is dialog.plot_window
 
 
-def test_rheobase_stim_heatmap_opens_in_its_own_window(qtbot) -> None:
-    _project, _editor, dialog = _make_dialog(qtbot)
-    qtbot.addWidget(dialog.stim_heatmap_window)
-
-    assert dialog.stim_heatmap_window not in (dialog, dialog.plot_window)
-    assert dialog.stim_heatmap_window.isWindow()
-
-    dialog.show()
-    qtbot.waitUntil(lambda: dialog.stim_heatmap_window.isVisible())
-    dialog.close()
-    qtbot.waitUntil(lambda: not dialog.stim_heatmap_window.isVisible())
-
-
-def test_rheobase_updates_stim_heatmap_as_blocks_are_appended(qtbot) -> None:
-    _project, editor, dialog = _make_dialog(qtbot)
-
-    dialog.start()
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    stim = editor.current_stim_modifier.stim_array
-    assert image.get_array().shape[1] == stim.values.shape[0]
-
-    _finish_search(dialog)
-    # the same image artist is reused (updated in place), not rebuilt, and
-    # reflects the array's final, grown length
-    assert dialog.stim_heatmap_window._image is image
-    assert image.get_array().shape[1] == stim.values.shape[0]
-
-
-def test_rheobase_stim_heatmap_shows_only_targeted_neuron_and_its_trace(
-    qtbot,
-) -> None:
-    _project, editor, dialog = _make_dialog(qtbot)
-    stim = editor.current_stim_modifier.stim_array
-    # a much bigger, unrelated pulse on neuron 1 (not targeted by this
-    # search, which targets neuron 0) must not wash out neuron 0's own,
-    # much smaller pulses in the heatmap's color scale.
-    stim.values[0, 1] = 1000.0
-    assert dialog.spn_neuron.value() == 0
-
-    dialog.start()
-
-    image = dialog.stim_heatmap_window._image
-    assert image is not None
-    array = image.get_array()
-    assert array is not None
-    assert array.shape[0] == 1  # only the targeted neuron's row
-    assert dialog.stim_heatmap_window.axes.get_yticklabels()[0].get_text() == "0"
-    # every one of neuron 0's own nonzero samples is fully opaque, regardless
-    # of the much bigger unrelated pulse on neuron 1 (alpha is no longer
-    # proportional to magnitude at all - see _stim_pulse_rgba())
-    own_values = stim.values[:, [0]].T
-    assert np.array_equal(array[..., 3] > 0, own_values != 0)
-
-    trace_lines = dialog.stim_heatmap_window.trace_axes.lines
-    assert len(trace_lines) == 1
-    assert np.all(np.asarray(trace_lines[0].get_ydata()) == -70.0)
-
-
-def test_rheobase_forwards_theme_to_stim_heatmap(qtbot) -> None:
-    _project, _editor, dialog = _make_dialog(qtbot)
-
-    dialog.apply_theme(theme.DARK)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#1e1e1e"
-    dialog.apply_theme(theme.LIGHT)
-    assert to_hex(dialog.stim_heatmap_window.axes.get_facecolor()) == "#ffffff"
-
-
 def test_rheobase_initializes_missing_trace_then_starts_search(
     qtbot, monkeypatch
 ) -> None:
@@ -519,14 +526,12 @@ def test_rheobase_matplotlib_plots_follow_theme(qtbot) -> None:
     assert to_hex(dialog.search_axes.get_facecolor()) == "#ffffff"
 
 
-def test_rheobase_no_warning_when_stim_array_has_no_unsimulated_tail(
-    qtbot, monkeypatch
-) -> None:
-    """Content at (or before) the simulation head never needs confirming -
-    this is what lets routines stack back to back without interruption."""
+def test_rheobase_no_warning_when_stim_array_is_empty(qtbot, monkeypatch) -> None:
+    """An all-zero array needs no start-routine prompt at all -
+    confirm_start_routine() itself short-circuits to "continue" without
+    showing any dialog, so a routine starts immediately."""
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
-    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()
@@ -534,15 +539,49 @@ def test_rheobase_no_warning_when_stim_array_has_no_unsimulated_tail(
     assert len(editor.calls) >= 1
 
 
-def test_rheobase_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
+def test_rheobase_continue_preserves_existing_stimulus_and_catches_up_simulation(
+    qtbot, monkeypatch
+) -> None:
+    """ "Continue" keeps existing stimulus content - even content that has
+    never been simulated (e.g. an example project's pre-authored pattern) -
+    rather than discarding it as an "unsimulated tail". When the simulation
+    has not run over that content yet, it is caught up first so the network
+    actually experiences it before probes are appended after it."""
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
-    # Past the simulation head - reset_stim_array() would discard this, so
-    # starting must be confirmed first.
+    editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
+    monkeypatch.setattr(
+        "neuroseq.rheobase_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "continue",
+    )
+    monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
+
+    dialog.start()
+
+    # The fake simulation never advances its own clock, so the routine must
+    # catch it up before appending any probes - not jump straight to the
+    # search as it would if the simulation were already at the last sample.
+    assert editor.calls == []
+    assert dialog._running
+    assert dialog._phase == "initialize_trace"
+    # "Continue" itself never trims - unlike "clear" it does not touch the
+    # array at all before appending.
+    assert getattr(editor, "reset_count", 0) == 0
+
+    _finish_search(dialog)
+
+    assert editor.calls
+    assert editor.current_stim_modifier.stim_array.values[0, 0] == 1.0
+    assert editor.time_slices[0].start == 1  # right after the last stimulus
+
+
+def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: False,
+        "neuroseq.rheobase_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "cancel",
     )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
@@ -550,27 +589,30 @@ def test_rheobase_cancel_keeps_unsimulated_input(qtbot, monkeypatch) -> None:
 
     assert not dialog._running
     assert editor.calls == []
-    assert "unsimulated input kept" in dialog.log.toPlainText()
+    assert "cancelled" in dialog.log.toPlainText()
 
 
-def test_rheobase_confirms_and_discards_unsimulated_tail_before_start(
-    qtbot, monkeypatch
-) -> None:
+def test_rheobase_clear_zeroes_existing_input_before_start(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     _use_fixed_duration_strategy(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.rheobase_dialog.confirm_discard_unsimulated_input",
-        lambda *args, **kwargs: True,
+        "neuroseq.rheobase_dialog.confirm_start_routine",
+        lambda *args, **kwargs: "clear",
     )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
 
     dialog.start()
 
     assert len(editor.calls) >= 1
-    # reset_stim_array(), called right after confirming, is what actually
-    # discards the unsimulated tail.
-    assert editor.reset_count >= 1
+    assert editor.cleared == 1
+    # Trimmed back to the simulation head afterwards, same as reset_stim_array()
+    # always did - there is nothing real left to lose once the array is zeroed.
+    assert getattr(editor, "reset_count", 0) == 1
+    # Starts from (almost) the very beginning - reset_stim_array()'s own
+    # convention keeps at least one baseline sample rather than an empty
+    # array, so this is 1 sample in, not literally 0.
+    assert editor.time_slices[0].start == 1
 
 
 def test_rheobase_estimate_updates_with_settings(qtbot) -> None:
