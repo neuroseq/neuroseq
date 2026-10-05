@@ -7,6 +7,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+import neuroseq.timeseries_widget
 from neuroseq import theme
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
@@ -1573,3 +1574,140 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
     assert state.receivers(state.data_changed) == baseline_data
     assert state.receivers(state.greyed_changed) == baseline_greyed
     view_a.close()
+
+
+def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    class _AcceptedDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            self.neuron_ids = list(neuron_ids)
+            self.checked_ids = set(checked_ids)
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Accepted)
+
+        @property
+        def selected_neuron_ids(self) -> list[int]:
+            return [1, 3]
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    def _capture(*args):
+        captured["args"] = args
+
+    trace_widget.custom_analysis_requested.connect(_capture)
+    with qtbot.waitSignal(trace_widget.custom_analysis_requested):
+        pearson_action.trigger()
+
+    assert captured["args"][3] == [1, 3]
+
+
+def test_trace_widget_pearson_correlation_prechecks_current_selection(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    seen_checked_ids: dict = {}
+
+    class _CapturingDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            seen_checked_ids["ids"] = set(checked_ids)
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget.select_neurons(slice(1, 3), None)
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    pearson_action.trigger()
+
+    assert seen_checked_ids["ids"] == {1, 2}
+
+
+def test_trace_widget_pearson_correlation_cancelled_dialog_emits_nothing(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    class _RejectedDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    received = []
+    trace_widget.custom_analysis_requested.connect(lambda *args: received.append(args))
+    pearson_action.trigger()
+    qtbot.wait(20)
+
+    assert received == []
+
+
+def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
+    qtbot: QtBot, monkeypatch, make_spike_data
+) -> None:
+    """Pearson correlation only applies to TraceData (see
+    CustomAnalysisWidget.set_data) - the dialog must not open for a
+    SpikeWidget, since the chosen subset would be passed as a non-contiguous
+    list into SpikeData's slice-only neuron filtering and crash."""
+
+    def _unexpected_dialog(*args, **kwargs):
+        raise AssertionError("NeuronSubsetDialog should not open for SpikeData")
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _unexpected_dialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    spike_widget = SpikeWidget(controller)
+    qtbot.addWidget(spike_widget)
+    spike_widget.set_data(make_spike_data())
+    spike_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in spike_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    with qtbot.waitSignal(spike_widget.custom_analysis_requested):
+        pearson_action.trigger()

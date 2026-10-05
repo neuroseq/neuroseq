@@ -21,6 +21,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
+from neuroseq.neuron_subset_dialog import NeuronSubsetDialog
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.text import Text
@@ -512,20 +513,54 @@ class TimeseriesWidget(FPLWidget):
     ) -> None:
         add_action(
             str(analysis_type),
-            lambda *args, _analysis_type=analysis_type: (
-                self.custom_analysis_requested.emit(
-                    self.data,
-                    _analysis_type,
-                    self._open_analysis_in_new_window,
-                    self.selected_neuron_slice,
-                    self.selected_time_slice,
-                )
+            lambda *args, _analysis_type=analysis_type: self._trigger_analysis(
+                _analysis_type
             ),
             self.context_menu,
             None,
             self,
             icon=icon_name,
         )
+
+    def _trigger_analysis(
+        self, analysis_type: CustomAnalysisType | AnalysisPlugin
+    ) -> None:
+        neuron_slice: slice | Iterable[int] | None = self.selected_neuron_slice
+        if (
+            analysis_type == CustomAnalysisType.PearsonCorrelation
+            and isinstance(self.data, TraceData)
+            and self._visible_neuron_ids
+        ):
+            subset = self._pick_neuron_subset(self.selected_neuron_slice)
+            if subset is None:
+                return
+            neuron_slice = subset
+        self.custom_analysis_requested.emit(
+            self.data,
+            analysis_type,
+            self._open_analysis_in_new_window,
+            neuron_slice,
+            self.selected_time_slice,
+        )
+
+    def _pick_neuron_subset(self, neuron_slice: slice | None) -> list[int] | None:
+        """Let the user narrow the neurons an analysis runs on down to an
+        arbitrary (not necessarily contiguous) subset, pre-checked from
+        whatever neuron range is currently selected (or all visible neurons,
+        if nothing is selected). Returns None if the dialog was cancelled."""
+        if isinstance(neuron_slice, slice):
+            checked_ids = {
+                neuron_id
+                for neuron_id in self._visible_neuron_ids
+                if (neuron_slice.start is None or neuron_id >= neuron_slice.start)
+                and (neuron_slice.stop is None or neuron_id < neuron_slice.stop)
+            }
+        else:
+            checked_ids = set(self._visible_neuron_ids)
+        dialog = NeuronSubsetDialog(self._visible_neuron_ids, checked_ids, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.selected_neuron_ids
 
     def _set_open_analysis_in_new_window(self, checked: bool) -> None:
         self._open_analysis_in_new_window = checked

@@ -7,6 +7,7 @@ import logging
 import pathlib
 import threading
 from collections.abc import Callable
+from collections.abc import Sequence
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -560,7 +561,7 @@ class Gui(QtWidgets.QMainWindow):
             tuple[
                 TraceData | SpikeData | SynapseData,
                 CustomAnalysisType | AnalysisPlugin | None,
-                slice | None,
+                slice | Sequence[int] | None,
                 slice | None,
             ]
             | None
@@ -680,7 +681,7 @@ class Gui(QtWidgets.QMainWindow):
         data: TraceData | SpikeData | SynapseData,
         analysis_type: CustomAnalysisType | AnalysisPlugin | None,
         new_window: bool,
-        neuron_slice: slice | None,
+        neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ):
         if new_window:
