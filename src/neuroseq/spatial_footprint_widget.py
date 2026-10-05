@@ -163,6 +163,12 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_shapes_checkbox)
         checkbox_layout.addStretch(1)
+        # So the file a segmentation came from isn't forgotten once the
+        # import dialog is closed (#553) - full path on hover, since a long
+        # filename would otherwise crowd the checkboxes out.
+        self.source_file_label = QtWidgets.QLabel("")
+        self.source_file_label.setStyleSheet("color: palette(mid);")
+        checkbox_layout.addWidget(self.source_file_label)
         self.checkbox_container = QtWidgets.QWidget()
         self.checkbox_container.setLayout(checkbox_layout)
         self.checkbox_container.setVisible(False)
@@ -278,11 +284,17 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._update_checkbox_visibility()
             self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
+            self.source_file_label.setText("")
+            self.source_file_label.setToolTip("")
             return
 
         self._update_empty_state_visibility()
         self._update_overlay_visibility()
         self._update_checkbox_visibility()
+        self.source_file_label.setText(
+            f"Segmented from: {cellpose_data.image_path.name}"
+        )
+        self.source_file_label.setToolTip(str(cellpose_data.image_path))
         self._base_legend = compute_segmentation_legend(
             cellpose_data.segmentation_array
         )
