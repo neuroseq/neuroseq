@@ -14,6 +14,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
 from neuroseq.importer_cellpose import AOIRole
 from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellPoseImporter
@@ -129,13 +130,22 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "Select file (single or multiframe TIFF)"
         )
         cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
+        cellpose_button_layout.addWidget(QtWidgets.QLabel("Model:"))
+        self.cellpose_model_combo = QtWidgets.QComboBox()
+        self.cellpose_model_combo.addItems(CELLPOSE_MODEL_NAMES)
+        self.cellpose_model_combo.setToolTip(
+            "Cellpose segmentation model used for one-button segmentation. "
+            "cpsam_v2 offers higher sensitivity than cpsam on low "
+            "signal-to-noise fields of view, at a similar runtime cost."
+        )
+        cellpose_button_layout.addWidget(self.cellpose_model_combo)
         cellpose_button_layout.addStretch()
         self.annotate_tiff_button = QtWidgets.QPushButton(
             "Select file for segmentation…"
         )
         self.annotate_tiff_button.setToolTip(
             "Select a mean-fluorescence TIFF and immediately segment it with "
-            "the Cellpose cpsam model. Results are saved beside the TIFF."
+            "the Cellpose model chosen above. Results are saved beside the TIFF."
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
@@ -1256,7 +1266,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self._load_segmentation_file(filename)
 
     def _annotate_mean_tiff(self) -> None:
-        """Select and immediately annotate a mean-fluorescence TIFF with cpsam."""
+        """Select and immediately annotate a mean-fluorescence TIFF with the
+        Cellpose model chosen in the one-button segmentation pane."""
         filename, _ = getopenfilename(
             self,
             "Select mean fluorescence TIFF",
@@ -1301,7 +1312,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
 
             segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
-                filename, model_name="cpsam"
+                filename, model_name=self.cellpose_model_combo.currentText()
             )
             self._load_image_file(filename)
             self._load_segmentation_file(str(segmentation_path))

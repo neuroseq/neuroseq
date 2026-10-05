@@ -308,6 +308,20 @@ def test_stimulation_suppression_selector_uses_project_stim_arrays(qtbot):
     assert dialog._stim_array_combo.currentData() is stim
 
 
+def test_stimulation_suppression_checkbox_unchecked_with_no_stim_arrays(qtbot):
+    """Regression (#580): with no input arrays in the project, the checkbox
+    used to stay disabled *and* checked, so the user couldn't untick it even
+    though it reads as "suppression is on"."""
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None, stim_arrays={})
+    qtbot.addWidget(dialog)
+    dialog.show()
+
+    assert not dialog._suppress_stimulation_artefact_checkbox.isEnabled()
+    assert not dialog._suppress_stimulation_artefact_checkbox.isChecked()
+
+
 def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
     from neuroseq.tif_import_dialog import TifImportDialog
 

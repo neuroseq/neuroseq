@@ -330,6 +330,40 @@ def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, moc
     assert dialog.segmentation_path_label.text() == segmentation_path.name
 
 
+def test_annotate_mean_tiff_uses_selected_cellpose_model(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """Regression (#579): one-button segmentation always ran cpsam - the
+    model picked in the pane's combo box should now be passed through."""
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    image_path = tmp_path / "mean_fluorescence.tif"
+    segmentation_path = tmp_path / "mean_fluorescence_seg.npy"
+    mask_path = tmp_path / "mean_fluorescence_cp_masks.png"
+    Image.fromarray(np.zeros((6, 6), dtype=np.uint8)).save(image_path)
+    segmentation = np.zeros((6, 6), dtype=np.int32)
+    segmentation[1:3, 1:3] = 1
+    np.save(segmentation_path, segmentation)
+
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.getopenfilename",
+        return_value=(str(image_path), ""),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, mask_path),
+    )
+    dialog.cellpose_model_combo.setCurrentText("cpsam_v2")
+
+    dialog._annotate_mean_tiff()
+
+    annotate.assert_called_once_with(str(image_path), model_name="cpsam_v2")
+
+
 def test_annotate_multiframe_tiff_explains_averaging(
     tmp_path, qtbot: QtBot, mocker, qmessagebox_calls
 ) -> None:

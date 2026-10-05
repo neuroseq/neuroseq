@@ -528,6 +528,11 @@ class TifImportDialog(QtWidgets.QDialog):
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
         if not has_stim_arrays:
+            # Disabled-but-still-checked reads as "suppression is on and you
+            # can't turn it off", which isn't true (there's no input array to
+            # suppress against) and left the user unable to even see the
+            # checkbox reflect that (#580).
+            self._suppress_stimulation_artefact_checkbox.setChecked(False)
             self._suppress_stimulation_artefact_checkbox.setToolTip(
                 "No input arrays are available in the current project."
             )

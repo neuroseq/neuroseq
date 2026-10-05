@@ -13,6 +13,13 @@ from neuroseq.gpu import torch_gpu_status
 MAX_SOURCE_FRAMES = 300
 FRAME_STEP = 2
 
+# Model identifiers accepted by cellpose.models.CellposeModel(pretrained_model=...)
+# in the pinned cellpose version. "cpsam" is listed first (rather than cellpose's
+# own new default of "cpsam_v2") so NeuroSeq's one-button segmentation keeps
+# producing the same results existing users already rely on unless they
+# deliberately switch models.
+CELLPOSE_MODEL_NAMES = ("cpsam", "cpsam_v2", "cpdino", "cpdino-vitb")
+
 
 def tiff_frame_count(image_path: str | Path) -> int:
     """Return the number of pages in the selected TIFF."""
