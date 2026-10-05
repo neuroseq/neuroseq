@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import brian2.numpy_ as np
 import pygfx
 import pytest
@@ -147,6 +149,157 @@ def test_trace_preview_uses_selected_region(
     assert ax.get_ylim() == pytest.approx(
         (cy - state["height"] / 2, cy + state["height"] / 2)
     )
+    dialog.close()
+
+
+def _make_fake_click_event(ax, line, index: int, button: int = 1):
+    """A minimal stand-in for matplotlib's MouseEvent - _on_click only reads
+    .button, .inaxes, .xdata, .x and .y, so a real button_press_event isn't
+    needed to exercise it directly. Pixel coordinates are the line's own
+    data point transformed through the real axes transform, so the
+    nearest-line hit-test in _on_click resolves to exactly that point."""
+    x_point = float(line.get_xdata()[index])
+    y_point = float(line.get_ydata()[index])
+    disp_x, disp_y = ax.transData.transform((x_point, y_point))
+    return SimpleNamespace(button=button, inaxes=ax, xdata=x_point, x=disp_x, y=disp_y)
+
+
+def test_trace_preview_amplitude_markers_require_two_points_on_same_trace(
+    qtbot, make_trace_data
+) -> None:
+    """Feature (#547): a single placed point isn't enough to report an
+    amplitude yet - only once a second point lands on the *same* trace."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+
+    expected_point = (float(line.get_xdata()[3]), float(line.get_ydata()[3]))
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+
+    assert dialog._amplitude_points[0] == [expected_point]
+    assert "one point placed" in dialog._amplitude_label.text()
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_measure_delta_between_last_two_points(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(
+        make_trace_data(
+            n_neurons=1,
+            n_timestamps=10,
+            indices=np.array([0], dtype=np.uint32),
+            dt=0.002,
+        )
+    )
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    (line,) = ax.get_lines()
+    dialog._place_points_checkbox.setChecked(True)
+
+    dialog._on_click(_make_fake_click_event(ax, line, index=2))
+    dialog._on_click(_make_fake_click_event(ax, line, index=7))
+
+    points = dialog._amplitude_points[0]
+    assert len(points) == 2
+    expected_dy = abs(points[1][1] - points[0][1])
+    expected_dt = abs(points[1][0] - points[0][0])  # x data is already in ms
+    label_text = dialog._amplitude_label.text()
+    assert f"{expected_dy:.4g}" in label_text
+    assert f"{expected_dt:.1f} ms" in label_text
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_only_hit_the_nearest_trace(
+    qtbot, make_trace_data
+) -> None:
+    """Regression (#547): traces are stacked only ~1 plot-unit apart, which
+    at typical preview zoom levels is well within a naive pixel pick radius
+    of each other. A click meant for one trace must not also register a
+    point on its neighbour."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line0 = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+
+    dialog._on_click(_make_fake_click_event(ax, line0, index=4))
+
+    assert set(dialog._amplitude_points.keys()) == {0}
+    assert len(dialog._amplitude_points[0]) == 1
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_ignored_when_placement_disabled(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    assert not dialog._place_points_checkbox.isChecked()
+
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+
+    assert dialog._amplitude_points == {}
+    dialog.close()
+
+
+def test_trace_preview_clear_points_resets_markers_and_label(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+    dialog._on_click(_make_fake_click_event(ax, line, index=5))
+    assert dialog._amplitude_points
+    assert dialog._clear_points_button.isEnabled()
+
+    dialog._clear_points_button.click()
+
+    assert dialog._amplitude_points == {}
+    assert "Check" in dialog._amplitude_label.text()
+    assert not dialog._clear_points_button.isEnabled()
     dialog.close()
 
 

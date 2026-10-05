@@ -492,8 +492,126 @@ class TraceWidget(TimeseriesWidget):
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Neuron index (normalized traces)")
         ax.set_title(self.data.name)
+
+        self._wire_amplitude_markers(dialog, layout, canvas, ax)
+
         dialog.show()
         return dialog
+
+    def _wire_amplitude_markers(
+        self,
+        dialog: QtWidgets.QDialog,
+        layout: QtWidgets.QVBoxLayout,
+        canvas,
+        ax,
+    ) -> None:
+        """Let the user click points directly on a trace preview's curves and
+        read off the amplitude (and time) between the last two points placed
+        on the same curve - see #547. Points/markers only live for the
+        preview dialog's lifetime; nothing is persisted. Amplitude is in the
+        same normalized/offset units the preview itself plots (see
+        get_normalized_trace_data()), so it's only meaningful between two
+        points on the *same* curve, never across neurons."""
+        points_by_neuron: dict[int, list[tuple[float, float]]] = {}
+        markers_by_neuron: dict[int, list] = {}
+
+        amplitude_label = QtWidgets.QLabel(
+            "Check “Place amplitude markers”, then click two points on the same trace."
+        )
+        place_points_checkbox = QtWidgets.QCheckBox("Place amplitude markers")
+        clear_points_button = QtWidgets.QPushButton("Clear points")
+        clear_points_button.setEnabled(False)
+
+        def _clear_points() -> None:
+            for markers in markers_by_neuron.values():
+                for marker in markers:
+                    marker.remove()
+            points_by_neuron.clear()
+            markers_by_neuron.clear()
+            amplitude_label.setText(
+                "Check “Place amplitude markers”, then click two "
+                "points on the same trace."
+            )
+            clear_points_button.setEnabled(False)
+            canvas.draw_idle()
+
+        # matplotlib's own picker (Artist.set_picker() + "pick_event") fires
+        # once per artist whose contains() test passes within tolerance, not
+        # just the nearest one - with traces stacked a plot-unit apart this
+        # let one click register points on several neighbouring neurons at
+        # once. Hit-test manually instead, in screen pixels, and only ever
+        # accept the single closest line within PICK_RADIUS_PIXELS.
+        PICK_RADIUS_PIXELS = 10
+
+        def _nearest_point_on_line(line, event) -> tuple[float, float, float] | None:
+            x_data = line.get_xdata()
+            if len(x_data) == 0 or event.xdata is None:
+                return None
+            index = int(np.argmin(np.abs(np.asarray(x_data) - event.xdata)))
+            x_point, y_point = float(x_data[index]), float(line.get_ydata()[index])
+            disp_x, disp_y = ax.transData.transform((x_point, y_point))
+            distance = math.hypot(disp_x - event.x, disp_y - event.y)
+            return (distance, x_point, y_point)
+
+        def _on_click(event) -> None:
+            if not place_points_checkbox.isChecked():
+                return
+            if event.button != 1 or event.inaxes is not ax:
+                return
+            best: tuple[float, int, float, float] | None = None
+            for line in ax.get_lines():
+                gid = line.get_gid() or ""
+                if not gid.startswith("trace_"):
+                    continue
+                hit = _nearest_point_on_line(line, event)
+                if hit is None:
+                    continue
+                distance, x_point, y_point = hit
+                if distance > PICK_RADIUS_PIXELS:
+                    continue
+                if best is None or distance < best[0]:
+                    best = (distance, int(gid.removeprefix("trace_")), x_point, y_point)
+            if best is None:
+                return
+            _, neuron_id, x_point, y_point = best
+            (marker,) = ax.plot(
+                x_point, y_point, "o", color="black", markersize=6, zorder=5
+            )
+            points_by_neuron.setdefault(neuron_id, []).append((x_point, y_point))
+            markers_by_neuron.setdefault(neuron_id, []).append(marker)
+            clear_points_button.setEnabled(True)
+
+            points = points_by_neuron[neuron_id]
+            if len(points) >= 2:
+                (x0, y0), (x1, y1) = points[-2], points[-1]
+                amplitude_label.setText(
+                    f"Neuron {neuron_id}: Δ amplitude = {abs(y1 - y0):.4g} "
+                    f"(normalized trace units), Δt = {abs(x1 - x0):.1f} ms"
+                )
+            else:
+                amplitude_label.setText(
+                    f"Neuron {neuron_id}: one point placed - click another "
+                    "point on the same trace to measure amplitude."
+                )
+            canvas.draw_idle()
+
+        canvas.mpl_connect("button_press_event", _on_click)
+        clear_points_button.clicked.connect(_clear_points)
+
+        controls_layout = QtWidgets.QHBoxLayout()
+        controls_layout.addWidget(place_points_checkbox)
+        controls_layout.addWidget(clear_points_button)
+        controls_layout.addWidget(amplitude_label, 1)
+        layout.addLayout(controls_layout)
+
+        # Exposed for tests - invoking _on_click directly with a fake click
+        # event is far more robust than driving real Qt mouse events through
+        # a matplotlib canvas.
+        dialog._on_click = _on_click  # type: ignore[attr-defined]
+        dialog._amplitude_points = points_by_neuron  # type: ignore[attr-defined]
+        dialog._amplitude_label = amplitude_label  # type: ignore[attr-defined]
+        dialog._place_points_checkbox = place_points_checkbox  # type: ignore[attr-defined]
+        dialog._clear_points_button = clear_points_button  # type: ignore[attr-defined]
 
     def set_data(
         self,
