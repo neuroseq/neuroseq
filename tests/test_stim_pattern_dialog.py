@@ -407,3 +407,51 @@ def test_dialog_ramp_visible_in_both_scopes(qtbot: QtBot) -> None:
     assert dialog.radio_ramp.isVisible()
     dialog.radio_scope_specific.setChecked(True)
     assert dialog.radio_ramp.isVisible()
+
+
+def test_dialog_sequential_visible_in_both_scopes(qtbot: QtBot) -> None:
+    """Feature (#582): Sequential used to only be selectable for "All
+    neurons" scope."""
+    editor, project = _make_editor(qtbot)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_all.setChecked(True)
+    assert dialog.radio_sequential.isVisible()
+    dialog.radio_scope_specific.setChecked(True)
+    assert dialog.radio_sequential.isVisible()
+
+
+def test_dialog_apply_sequential_specific_neurons_writes_only_those_columns(
+    qtbot: QtBot,
+) -> None:
+    editor, project = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_specific.setChecked(True)
+    # parse_neuron_indices sorts/dedupes the typed text (same as every other
+    # pattern), so "3, 1" fires neuron 1 first, then 3.
+    dialog.edit_neuron_indices.setText("3, 1")
+    dialog.radio_sequential.setChecked(True)
+    dialog.spin_magnitude.setValue(0.8)
+    dialog.btn_apply.click()
+
+    expected = generate_sequential(10, 100, 18, 0.8, 0.001, neuron_index=[1, 3])
+    np.testing.assert_allclose(
+        project.stim_arrays["a"].values[: expected.shape[0], :], expected
+    )
+    for col in [0, 2, 4, 5, 6, 7, 8, 9]:
+        assert np.all(project.stim_arrays["a"].values[:, col] == 0.0)
+
+
+def test_dialog_sequential_hides_repeats_in_both_scopes(qtbot: QtBot) -> None:
+    editor, project = _make_editor(qtbot)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_all.setChecked(True)
+    dialog.radio_sequential.setChecked(True)
+    assert not dialog.lbl_repeats.isVisible()
+
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("0")
+    dialog.radio_sequential.setChecked(True)
+    assert not dialog.lbl_repeats.isVisible()
