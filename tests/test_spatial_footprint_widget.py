@@ -784,6 +784,40 @@ def test_set_active_stim_ids_is_a_noop_when_unchanged() -> None:
     assert emitted == [frozenset({1, 2})]
 
 
+def test_targeted_cellpose_ids_resolves_via_mapping() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+
+    state.set_targeted_stim_ids({0, 1})
+
+    assert state.targeted_cellpose_ids == {2, 1}
+
+
+def test_targeted_stim_ids_cleared_when_data_changes() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result())
+    state.set_targeted_stim_ids({0})
+    assert state.targeted_stim_ids == frozenset({0})
+
+    state.set_data(_cellpose_result())
+
+    assert state.targeted_stim_ids == frozenset()
+
+
+def test_set_targeted_stim_ids_is_a_noop_when_unchanged() -> None:
+    state = SpatialFootprintState()
+    state.set_data(_cellpose_result())
+    emitted = []
+    state.targeted_stim_ids_changed.connect(
+        lambda: emitted.append(state.targeted_stim_ids)
+    )
+
+    state.set_targeted_stim_ids({1, 2})
+    state.set_targeted_stim_ids({2, 1})  # same set, different order
+
+    assert emitted == [frozenset({1, 2})]
+
+
 def test_selecting_a_cell_does_not_hide_it_when_unmapped_cells_collide_with_its_id(
     qtbot: QtBot,
 ) -> None:
@@ -961,6 +995,44 @@ def test_active_stim_id_boosts_the_cell_brightness(qtbot: QtBot) -> None:
         after_image[segmentation == 0], before_image[segmentation == 0]
     )
     widget.close()
+    widget.close()
+
+
+def test_show_targets_checkbox_draws_and_hides_crosses(qtbot: QtBot) -> None:
+    """Feature (#582): a neuron targeted by the sequence last sent to
+    SysCon2 gets a red cross in the Spatial Footprints panel, matching the
+    Video tab's existing stimulation-cross idiom; unticking "Show targets"
+    hides it without forgetting the target set."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = np.zeros((8, 8), dtype=np.int32)
+    segmentation[:, 4:] = 1
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((8, 8, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 0, 1: 1},
+    )
+    widget.set_data(result)
+    overlay_view = widget.overlay_widget.overlay_view
+    assert overlay_view._target_cross_graphic is None
+
+    widget._state.set_targeted_stim_ids({1})  # -> cellpose cell 1
+
+    assert overlay_view._target_cross_graphic is not None
+    cross_xy = np.asarray(overlay_view._target_cross_graphic.data.value)[0, :2]
+    np.testing.assert_allclose(cross_xy, overlay_view._label_centers[1])
+
+    widget.show_targets_checkbox.setChecked(False)
+
+    assert overlay_view._target_cross_graphic is None
+
+    widget.show_targets_checkbox.setChecked(True)
+
+    assert overlay_view._target_cross_graphic is not None
     widget.close()
 
 

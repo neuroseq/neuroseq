@@ -53,9 +53,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
     """
 
     #: Emitted after a script is successfully written to disk, with the generated
-    #: ``.seq`` file path and its timeline overview PNG path -- lets a caller (e.g. the
-    #: SysCon2 panel) act on the freshly generated files without polling the filesystem.
-    sequence_generated = QtCore.Signal(str, str)
+    #: ``.seq`` file path, its timeline overview PNG path, and the frozenset[int] of
+    #: stim ids with any nonzero value anywhere in the exported array (the sequence's
+    #: full targeted-neuron set) -- lets a caller (e.g. the SysCon2 panel) act on the
+    #: freshly generated files, and know who they target, without polling the
+    #: filesystem or re-deriving it from the array itself.
+    sequence_generated = QtCore.Signal(str, str, object)
 
     def __init__(
         self,
@@ -440,7 +443,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 export_report.entity_lanes,
                 export_report.generated_objects,
             )
-            self.sequence_generated.emit(str(script_path), str(overview_path))
+            targeted_stim_ids = frozenset(
+                int(stim_id)
+                for stim_id in np.flatnonzero(np.any(stim_array.values != 0, axis=0))
+            )
+            self.sequence_generated.emit(
+                str(script_path), str(overview_path), targeted_stim_ids
+            )
 
             report_lines = [
                 f"Successfully generated script in:\n{self.output_folder}",

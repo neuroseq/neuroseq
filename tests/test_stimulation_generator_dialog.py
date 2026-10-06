@@ -636,10 +636,41 @@ def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
     assert blocker.args == [
         str(tmp_path / "live_export.seq"),
         str(tmp_path / "live_export_overview.png"),
+        frozenset({0}),
     ]
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "scripts generated" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_stimulation_generator_dialog_sequence_generated_targets_every_active_neuron(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    """The targeted-neuron set in sequence_generated is every stim id with
+    any nonzero value anywhere in the exported array, not just the first
+    one - see #582's "whole sequence" semantics (SysCon2 gives no live
+    playback position to narrow it down further)."""
+    _DT_S = 0.0005208125
+    values = np.zeros((64, 3), dtype=np.float32)
+    values[10:13, 0] = 1.0
+    values[40:43, 2] = 1.0
+    project = Project()
+    stim = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0, 1: 1, 2: 2})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.folder_edit.setText(str(tmp_path))
+    dialog.name_edit.setText("multi_target_export")
+
+    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+        dialog._generate_scripts()
+
+    assert blocker.args[2] == frozenset({0, 2})
 
 
 # ---------------------------------------------------------------------------

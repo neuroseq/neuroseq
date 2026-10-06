@@ -294,6 +294,19 @@ def _find_action(menu: QtWidgets.QMenu, text: str) -> QtWidgets.QAction:
     return next(a for a in menu.actions() if a.text().replace("&", "") == text)
 
 
+def test_syscon2_panel_targets_drive_spatial_footprint_crosses(qtbot: QtBot) -> None:
+    """Feature (#582): whichever sequence SysCon2Panel last sent to SysCon2
+    should mark its targeted neurons with a cross in the Spatial Footprints
+    panel - wired via the shared SpatialFootprintState, not a direct
+    reference between the two widgets."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.syscon2_panel.targets_changed.emit(frozenset({2, 5}))
+
+    assert gui._spatial_footprint_state.targeted_stim_ids == frozenset({2, 5})
+
+
 def test_gui_open_fiji_and_cellpose_buttons(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:

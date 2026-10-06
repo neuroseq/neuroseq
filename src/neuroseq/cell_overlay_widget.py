@@ -186,6 +186,9 @@ class OverlayView(FullScreenFPLWidget):
         self._label_centers: dict[int, tuple[float, float]] = {}
         self._label_graphics: dict[int, LabelGraphics] = {}
         self._label_segmentation_id: int | None = None
+        self._target_cellpose_ids: frozenset[int] = frozenset()
+        self._show_targets = False
+        self._target_cross_graphic: ScatterGraphic | None = None
         self._segmentation_shape: tuple[int, int] | None = None
         self.base_camera_state: CameraState | None = None
         self.zoom_factor = 1
@@ -392,6 +395,58 @@ class OverlayView(FullScreenFPLWidget):
         self._lasso_line = None
         self._clear_label_graphics()
         self._clear_aoi_graphics()
+        # Same reasoning as _lasso_line above: subplot.clear() already
+        # dropped it from the render tree.
+        self._target_cross_graphic = None
+
+    def set_target_overlay(
+        self,
+        cellpose_ids: Iterable[int] | None,
+        *,
+        show: bool,
+    ) -> None:
+        """Mark each given cellpose id with a red "x" cross at its label
+        center, the same visual idiom CalciumVideoWidget already uses for
+        currently-stimulated cells - see its _set_crosses()."""
+        self._target_cellpose_ids = frozenset(cellpose_ids or ())
+        self._show_targets = show
+        positions = [
+            self._label_centers[cell_id]
+            for cell_id in self._target_cellpose_ids
+            if cell_id in self._label_centers
+        ]
+        if not show or not positions:
+            if self._target_cross_graphic is not None:
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(self._target_cross_graphic)
+                self._target_cross_graphic = None
+            return
+        data = np.column_stack(
+            (
+                np.asarray(positions, dtype=np.float32),
+                np.full(len(positions), 210.0, dtype=np.float32),
+            )
+        )
+        if self._target_cross_graphic is not None:
+            cross_data = self._target_cross_graphic.data
+            cross_data_value = getattr(cross_data, "value", cross_data)
+            cross_count = np.asarray(cross_data_value).shape[0]
+            if cross_count != len(data):
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(self._target_cross_graphic)
+                self._target_cross_graphic = None
+        if self._target_cross_graphic is None:
+            self._target_cross_graphic = self.subplot.add_scatter(
+                data,
+                colors=(1.0, 0.0, 0.0, 1.0),
+                sizes=16,
+                size_space="screen",
+                markers="x",
+                edge_width=1.0,
+            )
+        else:
+            self._target_cross_graphic.data = data
+            self._target_cross_graphic.visible = True
 
     def set_aoi_shapes(
         self,
@@ -1540,6 +1595,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self._aoi_config = clone_aoi_config(config)
         self._show_aoi = show
         self.overlay_view.set_aoi_shapes(self._aoi_config, self._show_aoi)
+
+    def set_target_overlay(
+        self,
+        cellpose_ids: Iterable[int] | None,
+        *,
+        show: bool,
+    ) -> None:
+        self.overlay_view.set_target_overlay(cellpose_ids, show=show)
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None

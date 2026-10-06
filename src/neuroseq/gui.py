@@ -423,6 +423,13 @@ class Gui(QtWidgets.QMainWindow):
         split_left_right.addWidget(self.chat_widget)
         self.syscon2_panel = SysCon2Panel(parent=self)
         self.syscon2_panel.setVisible(False)
+        # Mark, with a cross in the Spatial Footprints panel, every neuron
+        # targeted by whichever sequence was most recently sent to SysCon2 -
+        # see SysCon2Panel.targets_changed's docstring for why this can't be
+        # a live hardware readout.
+        self.syscon2_panel.targets_changed.connect(
+            self._spatial_footprint_state.set_targeted_stim_ids
+        )
         split_left_right.addWidget(self.syscon2_panel)
         split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked

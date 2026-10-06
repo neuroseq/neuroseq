@@ -264,7 +264,7 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
     seq_path = str(tmp_path / "pushed.seq")
 
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
-        panel._on_dialog_sequence_generated(seq_path, str(png_path))
+        panel._on_dialog_sequence_generated(seq_path, str(png_path), frozenset({1, 2}))
 
     pixmap = panel.preview_label.pixmap()
     assert pixmap is not None and not pixmap.isNull()
@@ -274,6 +274,19 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
 
     qtbot.waitUntil(lambda: panel.sequence_list.count() == 1, timeout=2000)
     assert panel.sequence_list.item(0).text() == "pushed.seq"
+
+
+def test_dialog_sequence_generated_emits_targets_changed(
+    panel: SysCon2Panel, qtbot: QtBot
+) -> None:
+    """Feature (#582): the Spatial Footprints panel learns which neurons a
+    newly generated/sent sequence targets via this signal."""
+    with qtbot.waitSignal(panel.targets_changed, timeout=1000) as blocker:
+        panel._on_dialog_sequence_generated(
+            "unused.seq", "unused.png", frozenset({3, 5})
+        )
+
+    assert blocker.args == [frozenset({3, 5})]
 
 
 def test_dialog_sequence_generated_shows_error_for_unloadable_image(

@@ -60,6 +60,14 @@ class _NoScrollComboBox(QtWidgets.QComboBox):
 
 
 class SysCon2Panel(QtWidgets.QWidget):
+    #: Emitted with the frozenset[int] of stim ids targeted by whichever
+    #: sequence was most recently generated and sent to SysCon2 - lets a
+    #: caller (gui.py) reflect it elsewhere, e.g. as crosses in the Spatial
+    #: Footprints panel. Not a live hardware readout (SysCon2's SCI protocol
+    #: has no "which spots are illuminated right now" query) - just "who's in
+    #: the sequence currently loaded there."
+    targets_changed = QtCore.Signal(object)
+
     def __init__(
         self,
         parent: QtWidgets.QWidget | None = None,
@@ -460,9 +468,13 @@ class SysCon2Panel(QtWidgets.QWidget):
         dialog.exec()
 
     def _on_dialog_sequence_generated(
-        self, seq_path: str, overview_png_path: str
+        self,
+        seq_path: str,
+        overview_png_path: str,
+        targeted_stim_ids: frozenset[int],
     ) -> None:
         self._show_preview(overview_png_path)
+        self.targets_changed.emit(targeted_stim_ids)
         target = self.target_directory_edit.text().strip()
 
         def task(client: SysCon2Client) -> object:
