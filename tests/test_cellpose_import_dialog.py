@@ -297,6 +297,43 @@ def test_manual_click_mode_turns_off_when_switching_strategy(
     dialog.close()
 
 
+def test_show_aoi_checkbox_draws_read_only_shapes_under_custom(
+    tmp_path, qtbot: QtBot
+) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    view = dialog.overlay_widget.overlay_view
+    _select_mapping_strategy(dialog, "Custom")
+
+    assert not dialog.show_aoi_in_custom_checkbox.isChecked()
+    assert not view._aoi_visible
+
+    dialog.show_aoi_in_custom_checkbox.setChecked(True)
+    assert view._aoi_visible
+    assert view._aoi_config is not None
+    assert not view.aoi_editable
+
+    dialog.show_aoi_in_custom_checkbox.setChecked(False)
+    assert not view._aoi_visible
+    dialog.close()
+
+
+def test_show_aoi_checkbox_does_not_leak_into_other_strategies_or_result(
+    tmp_path, qtbot: QtBot
+) -> None:
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    view = dialog.overlay_widget.overlay_view
+    _select_mapping_strategy(dialog, "Custom")
+    dialog.show_aoi_in_custom_checkbox.setChecked(True)
+
+    _select_mapping_strategy(dialog, "Linear")
+    assert not view._aoi_visible
+
+    _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
+    assert view._aoi_visible
+    assert view.aoi_editable
+    dialog.close()
+
+
 def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, mocker):
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)

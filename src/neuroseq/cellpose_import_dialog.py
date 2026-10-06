@@ -283,6 +283,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.manual_click_clear_button.setAutoDefault(False)
         self.manual_click_clear_button.clicked.connect(self._clear_manual_click_order)
         manual_click_layout.addWidget(self.manual_click_clear_button)
+        # Read-only reference while clicking cells in order: lets the user
+        # see where the Areas of Interest sit (as configured under the
+        # "Custom with areas of interest" strategy) without switching to it.
+        self.show_aoi_in_custom_checkbox = QtWidgets.QCheckBox("Show areas of interest")
+        self.show_aoi_in_custom_checkbox.setToolTip(
+            "Draw the areas of interest on the viewer as a reference while "
+            "choosing the cell order. They are not editable here and do not "
+            'affect the mapping - set them under "Custom with areas of '
+            'interest".'
+        )
+        self.show_aoi_in_custom_checkbox.toggled.connect(
+            self._update_aoi_overlay_visibility
+        )
+        manual_click_layout.addWidget(self.show_aoi_in_custom_checkbox)
         manual_click_layout.addStretch(1)
         self.manual_click_row_widget = QtWidgets.QWidget()
         self.manual_click_row_widget.setLayout(manual_click_layout)
@@ -787,7 +801,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if is_aoi:
             self._regenerate_aoi_mapping()
         else:
-            self.overlay_widget.set_aoi_overlay(None, show=False)
+            self._update_aoi_overlay_visibility()
 
         # Update preview if data is loaded
         if (
@@ -1182,10 +1196,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._update_preview_mapping()
 
     def _update_aoi_overlay_visibility(self, *_args) -> None:
-        is_aoi = self._get_mapping_strategy() == CUSTOM_AOI_STRATEGY
+        strategy = self._get_mapping_strategy()
+        is_aoi = strategy == CUSTOM_AOI_STRATEGY
+        # Under plain Custom the shapes are only a reference for the click
+        # order: drawn on request, and never draggable (a drag there would
+        # change nothing, since the mapping doesn't use them).
+        is_reference = (
+            strategy == "Custom" and self.show_aoi_in_custom_checkbox.isChecked()
+        )
+        if is_reference:
+            self._ensure_aoi_defaults()
+        self.overlay_widget.set_aoi_editable(is_aoi)
         self.overlay_widget.set_aoi_overlay(
-            self._current_aoi_config() if is_aoi else None,
-            show=is_aoi and self.show_shapes_checkbox.isChecked(),
+            self._current_aoi_config() if (is_aoi or is_reference) else None,
+            show=(is_aoi and self.show_shapes_checkbox.isChecked()) or is_reference,
         )
 
     def _on_overlay_aoi_geometry_changed(self, config: AreasOfInterestConfig) -> None:
