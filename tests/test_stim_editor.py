@@ -1033,6 +1033,52 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     assert focused_ranges == [(0, 1)]
 
 
+def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> None:
+    """Regression: a fix that resamples a stim array to a new dt (SysCon2's
+    "Check Input Sanity" dialog) replaces stim_array.values with a
+    differently-shaped array while the *same* modifier stays selected, then
+    calls select_stim() to refresh. Since current_stim_modifier was already
+    that modifier, the refresh used to be skipped entirely, leaving
+    stim_widget showing a stale (now wrong-shaped) texture - the next write
+    into it crashed with a numpy broadcast error."""
+    modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((2266, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    set_data_calls: list[np.ndarray] = []
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: set_data_calls.append(stim_array.values),
+        set_background_data=lambda stim_array: None,
+        # Still showing the old, pre-resample shape.
+        data_values=np.zeros((1180, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": modifier},
+        current_stim_modifier=modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
+
+    assert len(set_data_calls) == 1
+    assert set_data_calls[0].shape == (2266, 10)
+
+
 def test_create_stim_array_defaults_to_selected_stim_dt(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:

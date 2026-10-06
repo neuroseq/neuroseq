@@ -586,9 +586,22 @@ class StimEditor(QtWidgets.QWidget):
 
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
-        if (
-            stim_name in self.stims_dict
-            and self.current_stim_modifier != self.stims_dict[stim_name]
+        target_modifier = self.stims_dict.get(stim_name)
+        # A fix that resamples a stim array to a new dt (see the SysCon2
+        # "Check Input Sanity" dialog) replaces stim_array.values with a
+        # differently-shaped array while leaving the same modifier selected
+        # - refresh the widget in that case too, not just on an actual
+        # selection change. Without this, stim_widget's graphic texture
+        # stays the old shape, and the next write into it (e.g. a later
+        # sanity fix in the same check) raises a numpy broadcast error.
+        displayed_values = getattr(self.stim_widget, "data_values", None)
+        shape_changed = (
+            target_modifier is not None
+            and displayed_values is not None
+            and displayed_values.shape != target_modifier.stim_array.values.shape
+        )
+        if target_modifier is not None and (
+            self.current_stim_modifier != target_modifier or shape_changed
         ):
             old_dt_seconds = self._current_stim_dt_seconds()
             new_dt_seconds = float(self.stims_dict[stim_name].stim_array.dt)
