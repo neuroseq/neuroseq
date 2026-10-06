@@ -1520,6 +1520,17 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self.overlay_image = overlay_image
         self.overlay_view.set_overlay_image(overlay_image)
 
+    def set_base_image(self, base_image: np.ndarray | None) -> None:
+        """Swap the raw (uncolored) FOV shown when "Show segmentation" is
+        off, without a full overlay rebuild."""
+        self.base_image = base_image
+        if (
+            not self.show_segmentation
+            and base_image is not None
+            and self.overlay_view.overlay_image is not None
+        ):
+            self.overlay_view.set_overlay_image(base_image)
+
     def set_aoi_overlay(
         self,
         config: AreasOfInterestConfig | None,

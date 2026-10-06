@@ -347,3 +347,51 @@ def test_experiment_json_normalizes_quantity_times_to_float(tmp_path: Path) -> N
     assert read["e"].duration == pytest.approx(10.0)
     assert all(isinstance(t, float) for t in read["e"].timepoints)
     assert np.allclose(read["e"].timepoints, [0.0, 2.5, 5.0])
+
+
+def _cellpose_result_for_io(display_range: tuple[int, int] | None):
+    from neuroseq.importer_cellpose import CellposeImportResult
+
+    return CellposeImportResult(
+        image_path=Path("fov.png"),
+        segmentation_array=np.zeros((4, 4), dtype=np.int32),
+        overlay_image=np.zeros((4, 4, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        background_image=np.full((4, 4, 3), 90, dtype=np.uint8),
+        display_range=display_range,
+    )
+
+
+@pytest.mark.parametrize("display_range", [None, (30, 200)])
+def test_cellpose_display_range_round_trips(
+    tmp_path: Path, display_range: tuple[int, int] | None
+) -> None:
+    read = _save_and_reload_json(
+        {"c": _cellpose_result_for_io(display_range)}, tmp_path
+    )
+
+    assert read["c"].display_range == display_range
+
+
+def test_cellpose_missing_display_range_key_defaults_to_none(tmp_path: Path) -> None:
+    """Archives saved before display_range existed lack the key entirely."""
+    new_file = tmp_path / "new.nseq"
+    with zipfile.ZipFile(new_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        io.append_to_zip({"c": _cellpose_result_for_io((30, 200))}, "data", zf)
+    legacy_file = tmp_path / "legacy.nseq"
+    with (
+        zipfile.ZipFile(new_file) as src,
+        zipfile.ZipFile(legacy_file, "w", zipfile.ZIP_DEFLATED) as dst,
+    ):
+        for name in src.namelist():
+            content = src.read(name)
+            if name == "data.json":
+                payload = json.loads(content)
+                del payload["c"]["display_range"]
+                content = json.dumps(payload).encode()
+            dst.writestr(name, content)
+    with zipfile.ZipFile(legacy_file) as zf:
+        loaded = io.load_from_zip("data", zf)
+
+    assert loaded["c"].display_range is None

@@ -65,6 +65,10 @@ class CellposeImportResult:
     # toggle actually change anything) without depending on image_path
     # still pointing at a reachable file.
     background_image: np.ndarray | None = None
+    # (minimum, maximum) brightness/contrast display window over the 0-255
+    # FOV intensity range, set from the Spatial Footprints panel. Display
+    # only - None (or the full range) means the FOV is shown unadjusted.
+    display_range: tuple[int, int] | None = None
 
 
 def load_background_image(image_path: Path) -> np.ndarray | None:
@@ -257,6 +261,7 @@ def clone_cellpose_result(
             if result.background_image is None
             else np.array(result.background_image, copy=True)
         ),
+        display_range=getattr(result, "display_range", None),
     )
 
 

@@ -1823,26 +1823,6 @@ def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
     assert widget.calcium_video_widget.remove_button.text() == "Remove imaging data"
 
 
-def test_source_file_label_shows_and_clears_with_cellpose_data(qtbot: QtBot) -> None:
-    """Feature (#553): the file a segmentation came from should stay visible
-    in the docked Cell segmentation panel, not just while the import dialog
-    happens to be open."""
-    widget = SpatialFootprintWidget()
-    qtbot.addWidget(widget)
-
-    assert widget.source_file_label.text() == ""
-
-    widget.set_data(_cellpose_result())
-
-    assert widget.source_file_label.text() == "Segmented from: cellpose.png"
-    assert widget.source_file_label.toolTip() == str(Path("cellpose.png"))
-
-    widget.set_data(None)
-
-    assert widget.source_file_label.text() == ""
-    assert widget.source_file_label.toolTip() == ""
-
-
 def test_video_none_stim_source_disables_stimulation_crosses(qtbot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)

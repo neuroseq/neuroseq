@@ -8,6 +8,9 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from scipy.ndimage import binary_erosion
 
+from neuroseq.brightness_contrast import BrightnessContrastDialog
+from neuroseq.brightness_contrast import DisplayRange
+from neuroseq.brightness_contrast import apply_display_range
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
@@ -21,6 +24,8 @@ SELECTION_OUTLINE_THICKNESS = 2
 UNSELECTED_CELL_BRIGHTNESS = 0.5
 HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
 ACTIVE_STIM_BRIGHTNESS_BOOST = 1.8
+# CellPoseImporter.generate_overlay's default blend of cell color over the FOV.
+OVERLAY_CELL_OPACITY = 0.5
 
 
 class _PanelLayout(QtWidgets.QVBoxLayout):
@@ -162,13 +167,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_shapes_checkbox.setEnabled(False)
         self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_shapes_checkbox)
+        self.brightness_contrast_button = QtWidgets.QPushButton("Brightness/Contrast…")
+        self.brightness_contrast_button.setToolTip(
+            "Adjust the display brightness/contrast of the FOV image "
+            "(display only - the image data is not changed)"
+        )
+        self.brightness_contrast_button.clicked.connect(
+            self._show_brightness_contrast_dialog
+        )
+        checkbox_layout.addWidget(self.brightness_contrast_button)
         checkbox_layout.addStretch(1)
-        # So the file a segmentation came from isn't forgotten once the
-        # import dialog is closed (#553) - full path on hover, since a long
-        # filename would otherwise crowd the checkboxes out.
-        self.source_file_label = QtWidgets.QLabel("")
-        self.source_file_label.setStyleSheet("color: palette(mid);")
-        checkbox_layout.addWidget(self.source_file_label)
         self.checkbox_container = QtWidgets.QWidget()
         self.checkbox_container.setLayout(checkbox_layout)
         self.checkbox_container.setVisible(False)
@@ -224,6 +232,8 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout.addWidget(self.checkbox_container)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
+        self._brightness_contrast_dialog: BrightnessContrastDialog | None = None
+        self._adjusted_cache: tuple[tuple, np.ndarray | None, np.ndarray] | None = None
         # Keep the connection handles (not just the callables) so close() can
         # sever them precisely: a signal-to-signal connection like the third
         # one below can't be disconnected by passing the callable again (e.g.
@@ -242,6 +252,9 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._state.hovered_stim_id_changed.connect(self._on_state_hovered_changed),
             self._state.active_stim_ids_changed.connect(
                 self._on_state_active_stim_ids_changed
+            ),
+            self._state.display_range_changed.connect(
+                self._on_state_display_range_changed
             ),
         ]
         self.calcium_video_widget = CalciumVideoWidget(parent=self.tabs)
@@ -284,17 +297,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._update_checkbox_visibility()
             self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
-            self.source_file_label.setText("")
-            self.source_file_label.setToolTip("")
             return
 
+        if self._brightness_contrast_dialog is not None:
+            self._brightness_contrast_dialog.set_image(cellpose_data.background_image)
+            self._brightness_contrast_dialog.set_display_range(
+                self._display_range, emit=False
+            )
         self._update_empty_state_visibility()
         self._update_overlay_visibility()
         self._update_checkbox_visibility()
-        self.source_file_label.setText(
-            f"Segmented from: {cellpose_data.image_path.name}"
-        )
-        self.source_file_label.setToolTip(str(cellpose_data.image_path))
         self._base_legend = compute_segmentation_legend(
             cellpose_data.segmentation_array
         )
@@ -372,29 +384,102 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             # additional color graphic - the composed image itself already
             # has cell colors baked in (CellPoseImporter.generate_overlay),
             # so there'd be nothing visibly different to fall back to.
-            base_image=self._cellpose_data.background_image,
+            base_image=self._adjusted_images()[0],
         )
+
+    def _show_brightness_contrast_dialog(self) -> None:
+        dialog = self._brightness_contrast_dialog
+        if dialog is None:
+            dialog = BrightnessContrastDialog(self)
+            dialog.range_changed.connect(self._on_dialog_range_changed)
+            self._brightness_contrast_dialog = dialog
+        cellpose_data = self._cellpose_data
+        dialog.set_image(
+            None if cellpose_data is None else cellpose_data.background_image
+        )
+        dialog.set_display_range(self._display_range, emit=False)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    @property
+    def _display_range(self) -> DisplayRange:
+        stored = self._state.display_range
+        return DisplayRange() if stored is None else DisplayRange.clamped(*stored)
+
+    def _on_dialog_range_changed(self, display_range: DisplayRange) -> None:
+        # Stored on the shared state (and so the project), which re-renders
+        # every view bound to it - including this one.
+        self._state.set_display_range(
+            None
+            if display_range.is_identity
+            else (display_range.minimum, display_range.maximum)
+        )
+
+    def _on_state_display_range_changed(self) -> None:
+        if self._cellpose_data is None:
+            return
+        if self._brightness_contrast_dialog is not None:
+            self._brightness_contrast_dialog.set_display_range(
+                self._display_range, emit=False
+            )
+        # Image-only updates: no label/legend rebuild per slider tick.
+        background, _ = self._adjusted_images()
+        self.overlay_widget.set_overlay_image(self._composed_overlay_image())
+        self.overlay_widget.set_base_image(background)
+
+    def _adjusted_images(self) -> tuple[np.ndarray | None, np.ndarray]:
+        """(FOV background, overlay) with the brightness/contrast window
+        applied to the FOV only - cell colors keep their exact legend colors.
+
+        The overlay is the FOV blended with cell color inside segmented
+        pixels (see CellPoseImporter.generate_overlay), so the FOV's change
+        is added back at the weight it carries there: 1 outside cells,
+        1 - OVERLAY_CELL_OPACITY inside.
+        """
+        cellpose_data = self._cellpose_data
+        assert cellpose_data is not None
+        background = cellpose_data.background_image
+        overlay = cellpose_data.overlay_image
+        if self._display_range.is_identity or background is None:
+            return background, overlay
+        if background.shape != overlay.shape or background.dtype != np.uint8:
+            return background, overlay
+        key = (id(background), id(overlay), self._display_range)
+        if self._adjusted_cache is not None and self._adjusted_cache[0] == key:
+            return self._adjusted_cache[1], self._adjusted_cache[2]
+        adjusted_background = apply_display_range(background, self._display_range)
+        weight = np.where(
+            cellpose_data.segmentation_array > 0, 1.0 - OVERLAY_CELL_OPACITY, 1.0
+        ).astype(np.float32)[..., np.newaxis]
+        delta = adjusted_background.astype(np.float32) - background.astype(np.float32)
+        adjusted_overlay = np.clip(
+            overlay.astype(np.float32) + delta * weight, 0, 255
+        ).astype(np.uint8)
+        self._adjusted_cache = (key, adjusted_background, adjusted_overlay)
+        return adjusted_background, adjusted_overlay
 
     def _composed_overlay_image(self) -> np.ndarray:
         cellpose_data = self._cellpose_data
         assert cellpose_data is not None
         hovered_cellpose_id = self._state.hovered_cellpose_id
         active_cellpose_ids = self._state.active_cellpose_ids
+        base_overlay = self._adjusted_images()[1]
         if (
             not self._selected_cellpose_ids
             and hovered_cellpose_id is None
             and not active_cellpose_ids
         ):
-            return cellpose_data.overlay_image
+            return base_overlay
 
-        image = np.array(cellpose_data.overlay_image, copy=True)
+        image = np.array(base_overlay, copy=True)
         segmentation = cellpose_data.segmentation_array
         if self._selected_cellpose_ids:
             self._dim_unselected_cells(image, segmentation, self._selected_cellpose_ids)
         for cellpose_id in active_cellpose_ids:
             self._boost_cell_brightness(
                 image,
-                cellpose_data.overlay_image,
+                base_overlay,
                 segmentation,
                 cellpose_id,
                 ACTIVE_STIM_BRIGHTNESS_BOOST,
@@ -402,7 +487,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         if hovered_cellpose_id is not None:
             self._boost_cell_brightness(
                 image,
-                cellpose_data.overlay_image,
+                base_overlay,
                 segmentation,
                 hovered_cellpose_id,
                 HOVERED_CELL_BRIGHTNESS_BOOST,
@@ -524,6 +609,8 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             with contextlib.suppress(TypeError, RuntimeError):
                 self._state.disconnect(connection)  # type: ignore[call-arg]
         self._state_connections = []
+        if self._brightness_contrast_dialog is not None:
+            self._brightness_contrast_dialog.close()
         overlay_widget = getattr(self, "overlay_widget", None)
         if overlay_widget is not None:
             overlay_widget.close()
