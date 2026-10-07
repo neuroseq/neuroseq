@@ -10,6 +10,7 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stdp_window_dialog import _NoEpspDetected
@@ -57,6 +58,7 @@ class _FakeProject:
 class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
+        self.stimulation_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -681,3 +683,147 @@ def test_stdp_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
     assert dialog._pending_simulation_seconds is None
     assert not dialog.btn_pause.isEnabled()
     assert dialog.btn_pause.text() == "Pause"
+
+
+class _FakeHost(QtCore.QObject):
+    block_sent = QtCore.Signal(object)
+    block_failed = QtCore.Signal(str)
+    block_completed = QtCore.Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.phase = "idle"
+        self.sent: list[tuple[int, int, bool]] = []
+
+    def send_block(
+        self, project, stim, start, stop, label="block", *, preserve_amplitude=False
+    ):
+        self.sent.append((start, stop, preserve_amplitude))
+        self.phase = "awaiting_acquisition"
+        self.block_sent.emit(None)
+        return True
+
+    def acquisition_imported(self) -> None:
+        self.phase = "idle"
+        self.block_completed.emit()
+
+    def cancel(self) -> None:
+        self.phase = "idle"
+
+
+def _syscon2_dialog(qtbot):
+    project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+    host = _FakeHost()
+    editor.stimulation_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    dialog.spn_amplitude.setValue(0.8)
+    dialog.spn_dt_points.setValue(2)
+    dialog.chk_include_zero.setChecked(True)
+    dialog.spn_dt_min_ms.setValue(-10.0)
+    dialog.spn_dt_max_ms.setValue(10.0)
+    dialog.spn_response_ms.setValue(60.0)
+    return project, editor, dialog, host
+
+
+def _import_calcium(project, dialog, name: str, amplitude: float) -> None:
+    block_start = dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+    dt = 1 / 30
+    values = np.zeros((3, 600), dtype=np.float32)
+    for onset in dialog._probe_pulse_times:
+        idx = int((onset - block_start) / dt) + 1
+        values[1, idx : idx + 2] = amplitude
+    project.traces[name] = TraceData(name, values, np.array([0, 1, 2]), "dF/F", dt)
+    dialog.refresh()
+    dialog.cmb_trace.setCurrentText(name)
+
+
+def test_syscon2_target_forces_continuous_calcium_mode(qtbot) -> None:
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert not dialog._reset_mode()
+    assert not dialog._weight_mode()
+    assert not dialog.cmb_sweep_mode.isEnabled()
+    assert not dialog.cmb_readout.isEnabled()
+
+
+def test_syscon2_target_unavailable_without_host(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    assert not dialog.cmb_target.model().item(1).isEnabled()
+
+
+def test_syscon2_sweep_runs_from_imported_calcium_traces(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace  # something selectable at start
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    assert dialog._running
+
+    responses = iter([1.0, 1.5, 0.5])  # baseline, then one probe per dt point
+    for i in range(30):
+        if not dialog._running:
+            break
+        assert dialog.btn_data_imported.isEnabled()
+        if dialog._phase != "pair":
+            _import_calcium(project, dialog, f"rec{i}", next(responses))
+        dialog.btn_data_imported.click()
+
+    assert not dialog._running
+    assert [round(p) for _dt, p in dialog._backend.results] == [50, -67]
+    assert all(preserve for _a, _b, preserve in host.sent)
+    # baseline probe + (pair + probe) per dt point
+    assert len(host.sent) == 5
+    assert not dialog.btn_data_imported.isEnabled()
+
+
+def test_syscon2_pairing_block_needs_no_new_dataset(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    _import_calcium(project, dialog, "base", 1.0)
+    dialog.btn_data_imported.click()
+    assert dialog._phase == "pair"
+    sent = len(host.sent)
+    # A second click on the pairing block advances without any dataset change.
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == sent + 1
+    assert dialog._phase == "baseline_probe" or dialog._phase == "probe"
+
+
+def test_syscon2_reused_trace_does_not_advance(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    _import_calcium(project, dialog, "base", 1.0)
+    dialog.btn_data_imported.click()  # baseline measured, pairing sent
+    dialog.btn_data_imported.click()  # pairing done, probe sent
+    sent = len(host.sent)
+    dialog.cmb_trace.setCurrentText("base")  # stale: same as baseline probe
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == sent
+    assert dialog._running
+    assert dialog.btn_data_imported.isEnabled()
+
+
+def test_syscon2_failure_finishes_sweep(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    host.block_failed.emit("pipe closed")
+    assert not dialog._running
+
+
+def test_syscon2_rejects_amplitude_above_one_and_wrong_dt(qtbot) -> None:
+    project, editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.spn_amplitude.setValue(5.0)
+    dialog.start()
+    assert not host.sent and not dialog._running
+    dialog.spn_amplitude.setValue(0.5)
+    editor.current_stim_modifier.stim_array.dt = 0.001
+    dialog.start()
+    assert not host.sent and not dialog._running

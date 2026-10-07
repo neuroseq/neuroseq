@@ -13,6 +13,7 @@ from neuroseq.stdp_window_dialog import StdpWindowDialog
 class _BrianEditor:
     def __init__(self, project) -> None:
         self.project = project
+        self.stimulation_host = None
         self.current_stim_modifier = SimpleNamespace(
             stim_array=project.stim_arrays["Exc_stimulation"]
         )
