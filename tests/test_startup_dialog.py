@@ -60,7 +60,7 @@ def test_startup_dialog_example_button_loads_getting_started_project(
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
 
 
-def test_startup_dialog_new_project_button_creates_a_truly_blank_project(
+def test_startup_dialog_new_project_button_creates_a_blank_project_with_5s_stim(
     qtbot: QtBot, tmp_config_dir
 ) -> None:
     dialog = StartupDialog(GuiSettings())
@@ -69,8 +69,15 @@ def test_startup_dialog_new_project_button_creates_a_truly_blank_project(
     dialog.btn_new.click()
 
     assert isinstance(dialog.chosen_project, Project)
-    assert dialog.chosen_project.stim_arrays == {}
     assert dialog.chosen_project.b2_model.neurongroups == {}
+    # #584: a blank 5 s input array to draw on straight away.
+    assert list(dialog.chosen_project.stim_arrays) == ["stimulus"]
+    stim = dialog.chosen_project.stim_arrays["stimulus"]
+    assert stim.values.shape == (5000, 10)
+    assert stim.dt == 0.001
+    assert not stim.values.any()
+    assert dialog.chosen_project.max_time_secs == 5.0
+    assert not dialog.chosen_project.dirty
     assert dialog.chosen_filename is None
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -149,3 +156,20 @@ def test_startup_dialog_double_clicking_recent_sets_chosen_filename(
     assert dialog.chosen_filename == str(existing)
     assert dialog.chosen_project is None
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
+
+
+def test_gui_opens_the_blank_startup_project_with_its_stim_array_selected(
+    qtbot: QtBot,
+) -> None:
+    from neuroseq.gui import Gui
+    from neuroseq.startup_dialog import new_blank_project
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.load_project(new_blank_project())
+
+    modifier = gui.stim_editor.current_stim_modifier
+    assert modifier is not None
+    assert modifier.stim_array.name == "stimulus"
+    assert modifier.stim_array.values.shape == (5000, 10)
+    gui.close()
