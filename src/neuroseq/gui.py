@@ -430,6 +430,7 @@ class Gui(QtWidgets.QMainWindow):
         self.syscon2_panel.targets_changed.connect(
             self._spatial_footprint_state.set_targeted_stim_ids
         )
+        self.syscon2_panel.set_current_stim_provider(self._current_stim_array)
         split_left_right.addWidget(self.syscon2_panel)
         split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
@@ -464,6 +465,7 @@ class Gui(QtWidgets.QMainWindow):
             self.trace_controller.focus_time_range
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.stimulation_host = self.syscon2_panel.stimulation_host
         self.stim_editor.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )

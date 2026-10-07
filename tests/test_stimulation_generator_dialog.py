@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
+import neuroseq.syscon2_export_service as syscon2_export_service_module
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import OverlappingPulseGroupViolation
@@ -279,7 +280,7 @@ def test_stimulation_generator_dialog_generate_passes_spiralling_checkbox(
         return "nohash\n", _build_export_report()
 
     monkeypatch.setattr(
-        stimulation_generator_dialog_module,
+        syscon2_export_service_module,
         "generate_syscon2_sequence_text",
         _fake_generate_syscon2_sequence_text,
     )
@@ -350,7 +351,7 @@ def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
         return "nohash\n", _build_export_report()
 
     monkeypatch.setattr(
-        stimulation_generator_dialog_module,
+        syscon2_export_service_module,
         "generate_syscon2_sequence_text",
         _fake_generate_syscon2_sequence_text,
     )

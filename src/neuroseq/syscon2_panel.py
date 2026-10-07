@@ -17,10 +17,15 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.stim import StimArray
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.syscon2_client import LightsourceStatus
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.syscon2_export_service import SysconExportError
+from neuroseq.syscon2_export_service import SysconExportSettings
+from neuroseq.syscon2_export_service import export_stim_array
+from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -80,6 +85,10 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._project: Project | None = None
         self._connected = False
         self._lightsources: dict[str, list[str]] = {}
+        self._current_stim_provider: Callable[[], StimArray | None] | None = None
+        #: Export options of the last successful dialog export; reused by the one-click button.
+        self._export_settings: SysconExportSettings | None = None
+        self._active_dialog: StimulationGeneratorDialog | None = None
         self._result_handlers: dict[str, Callable[[object], None]] = {
             "sequence_manager.get_sequences": self._on_sequences,
             "sequence_manager.import": self._on_sequence_imported,
@@ -91,8 +100,31 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._wire_manager_signals()
         self._update_connection_ui()
 
+        #: Hardware counterpart of the Brian2 simulation host for dynamic input routines.
+        self.stimulation_host = SysCon2StimulationHost(
+            self._manager.submit,
+            settings_provider=lambda: self._export_settings,
+            target_directory_provider=lambda: self.target_directory_edit.text().strip(),
+            parent=self,
+        )
+        self._manager.command_finished.connect(
+            self.stimulation_host.on_command_finished
+        )
+        self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
+
     def set_project(self, project: Project | None) -> None:
         self._project = project
+        self._export_settings = None
+
+    def set_current_stim_provider(
+        self, provider: Callable[[], StimArray | None]
+    ) -> None:
+        """Tell the panel how to look up the stim array currently shown in the editor."""
+        self._current_stim_provider = provider
+
+    @property
+    def export_settings(self) -> SysconExportSettings | None:
+        return self._export_settings
 
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
@@ -258,6 +290,17 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         refresh_row.addWidget(self.btn_refresh_lightsources)
         layout.addLayout(refresh_row)
+
+        self.btn_export_current = QtWidgets.QPushButton(
+            "Export current array to SysCon2"
+        )
+        self.btn_export_current.setToolTip(
+            "Export the input array currently shown in the editor with the settings of "
+            "the last 'Send to SysCon2...' export, and import it into SysCon2. Opens the "
+            "export dialog first if there are no settings yet."
+        )
+        self.btn_export_current.clicked.connect(self._on_export_current_clicked)
+        layout.addWidget(self.btn_export_current)
 
         form = QtWidgets.QFormLayout()
         self.device_combo = _NoScrollComboBox()
@@ -464,8 +507,50 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
             return
         dialog = StimulationGeneratorDialog(self._project, parent=self.window())
+        if self._export_settings is not None:
+            dialog.apply_settings(self._export_settings)
         dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
-        dialog.exec()
+        self._active_dialog = dialog
+        try:
+            dialog.exec()
+        finally:
+            self._active_dialog = None
+
+    def _on_export_current_clicked(self) -> None:
+        if self._project is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No project", "No active project to export a stimulus from."
+            )
+            return
+        if self._export_settings is None:
+            self._on_send_to_syscon2_clicked()
+            return
+        stim_array = (
+            self._current_stim_provider()
+            if self._current_stim_provider is not None
+            else None
+        )
+        if stim_array is None:
+            QtWidgets.QMessageBox.warning(
+                self, "No input array", "Select an input array in the editor first."
+            )
+            return
+        try:
+            result = export_stim_array(
+                self._project,
+                stim_array,
+                self._export_settings,
+                self.stimulation_host.output_dir,
+                f"{stim_array.name}_current",
+            )
+        except (SysconExportError, ValueError, OSError) as exc:
+            QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
+            return
+        self._on_dialog_sequence_generated(
+            str(result.seq_path),
+            str(result.overview_png_path),
+            result.targeted_stim_ids,
+        )
 
     def _on_dialog_sequence_generated(
         self,
@@ -473,6 +558,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         overview_png_path: str,
         targeted_stim_ids: frozenset[int],
     ) -> None:
+        if self._active_dialog is not None:
+            self._export_settings = self._active_dialog.export_settings()
         self._show_preview(overview_png_path)
         self.targets_changed.emit(targeted_stim_ids)
         target = self.target_directory_edit.text().strip()

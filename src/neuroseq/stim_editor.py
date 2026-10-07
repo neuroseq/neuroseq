@@ -40,6 +40,7 @@ from neuroseq.stim_timing import seconds_to_samples_ceil
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_widget import StimWidget
+from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
@@ -103,6 +104,8 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog: StimPatternDialog | None = None
         self._stdp_synaptic_tuning_dialog: StdpSynapticTuningDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
+        #: Set by the main window; routine dialogs offer a SysCon2 target when present.
+        self.stimulation_host: SysCon2StimulationHost | None = None
         self._stdp_window_dialog: StdpWindowDialog | None = None
         self._routine_selector_dialog: RoutineSelectorDialog | None = None
         self._dynamic_input_theme = "light"

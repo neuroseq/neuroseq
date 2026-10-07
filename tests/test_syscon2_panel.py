@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 
+import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
@@ -11,7 +12,11 @@ from qtpy import QtWidgets
 import neuroseq.syscon2_connection_manager as connection_manager_module
 import neuroseq.syscon2_panel as syscon2_panel_module
 from neuroseq.project import Project
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.syscon2_export_service import SysconExportResult
+from neuroseq.syscon2_export_service import SysconExportSettings
 from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.syscon2_protocol import encode_string
 
@@ -388,3 +393,75 @@ def test_laser_advanced_controls_hidden_by_default_and_toggle_reveals_them(
 
     assert not panel.laser_advanced_panel.isVisible()
     assert panel.btn_toggle_laser_advanced.arrowType() == QtCore.Qt.ArrowType.RightArrow
+
+
+def _settings() -> SysconExportSettings:
+    return SysconExportSettings(config_text="nohash\nversion=3\n")
+
+
+def test_export_current_without_settings_opens_dialog(
+    panel: SysCon2Panel, qtbot: QtBot, mocker
+) -> None:
+    panel.set_project(Project())
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+
+    qtbot.mouseClick(panel.btn_export_current, QtCore.Qt.MouseButton.LeftButton)
+
+    dialog_cls.return_value.exec.assert_called_once()
+
+
+def test_dialog_export_remembers_settings_and_preloads_next_dialog(
+    panel: SysCon2Panel, mocker
+) -> None:
+    panel.set_project(Project())
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    dialog = dialog_cls.return_value
+    dialog.export_settings.return_value = _settings()
+    dialog.exec.side_effect = lambda: panel._on_dialog_sequence_generated(
+        "x.seq", "x.png", frozenset()
+    )
+
+    panel._on_send_to_syscon2_clicked()
+    assert panel.export_settings == _settings()
+
+    panel._on_send_to_syscon2_clicked()
+    dialog.apply_settings.assert_called_once_with(_settings())
+
+
+def test_export_current_uses_remembered_settings_and_imports(
+    panel: SysCon2Panel, mocker, tmp_path
+) -> None:
+    panel.set_project(Project())
+    panel._export_settings = _settings()
+    stim = StimArray("a", StimType.External, np.ones((4, 2)), "", 0.001)
+    panel.set_current_stim_provider(lambda: stim)
+    result = SysconExportResult(
+        tmp_path / "a.seq", tmp_path / "a.png", frozenset({0, 1}), mocker.Mock()
+    )
+    export = mocker.patch.object(
+        syscon2_panel_module, "export_stim_array", return_value=result
+    )
+    handler = mocker.patch.object(panel, "_on_dialog_sequence_generated")
+
+    panel._on_export_current_clicked()
+
+    assert export.call_args.args[1:3] == (stim, _settings())
+    handler.assert_called_once_with(
+        str(result.seq_path), str(result.overview_png_path), frozenset({0, 1})
+    )
+
+
+def test_export_current_failure_warns_and_does_not_import(
+    panel: SysCon2Panel, mocker
+) -> None:
+    panel.set_project(Project())
+    panel._export_settings = _settings()
+    stim = StimArray("a", StimType.External, np.zeros((4, 2)), "", 0.001)
+    panel.set_current_stim_provider(lambda: stim)
+    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    handler = mocker.patch.object(panel, "_on_dialog_sequence_generated")
+
+    panel._on_export_current_clicked()
+
+    warning.assert_called_once()
+    handler.assert_not_called()

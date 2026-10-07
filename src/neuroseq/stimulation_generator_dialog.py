@@ -25,7 +25,6 @@ from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
-from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
@@ -35,6 +34,8 @@ from neuroseq.icon_manager import icons
 from neuroseq.power_lut import PowerLut
 from neuroseq.power_lut import parse_power_lut_text
 from neuroseq.power_lut import resolve_power_lut
+from neuroseq.syscon2_export_service import SysconExportSettings
+from neuroseq.syscon2_export_service import generate_sequence_text
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -1105,24 +1106,35 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         del (
             stim_name
         )  # currently used only for UI; exporter works on selected StimArray
-        config_data = self.config_data_edit.toPlainText()
-        return generate_syscon2_sequence_text(
-            stim_array,
-            cellpose_data,
-            template_text=config_data,
-            tick_resolution_us=500,
-            active_threshold=0.0,
-            binary_intensity=1.0,
-            force_binary_intensity=self.binary_mode_checkbox.isChecked(),
-            active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
-            spiralling=self.spiralling_checkbox.isChecked(),
-            target_power_mw=self.target_power_spin.value(),
-            power_lut=self._selected_power_lut(),
-            stimulation_spots_per_roi=(
-                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
-            ),
-            stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
+        return generate_sequence_text(
+            self.project, stim_array, self.export_settings(), cellpose_data
         )
+
+    def export_settings(self) -> SysconExportSettings:
+        """Snapshot of the export options currently shown in the dialog."""
+        return SysconExportSettings(
+            config_text=self.config_data_edit.toPlainText(),
+            force_binary_intensity=self.binary_mode_checkbox.isChecked(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            ten_spots_per_roi=self.ten_spots_per_roi_checkbox.isChecked(),
+            spot_algorithm=str(self.spot_algorithm_combo.currentData()),
+            laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            target_power_mw=self.target_power_spin.value(),
+        )
+
+    def apply_settings(self, settings: SysconExportSettings) -> None:
+        """Preload the dialog with previously used export options."""
+        self.config_data_edit.setPlainText(settings.config_text)
+        self.binary_mode_checkbox.setChecked(settings.force_binary_intensity)
+        self.spiralling_checkbox.setChecked(settings.spiralling)
+        self.ten_spots_per_roi_checkbox.setChecked(settings.ten_spots_per_roi)
+        index = self.spot_algorithm_combo.findData(settings.spot_algorithm)
+        if index >= 0:
+            self.spot_algorithm_combo.setCurrentIndex(index)
+        index = self.laser_combo.findData(settings.laser_wavelength_nm)
+        if index >= 0:
+            self.laser_combo.setCurrentIndex(index)
+        self.target_power_spin.setValue(settings.target_power_mw)
 
     def _selected_laser_wavelength_nm(self) -> int:
         current_data = self.laser_combo.currentData()

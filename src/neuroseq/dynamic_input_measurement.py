@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import brian2.numpy_ as np
 
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
@@ -79,3 +80,22 @@ def measure_epsp(
             )
         amplitudes.append(float(np.max(candidates)))
     return EPSPMeasurement(float(np.mean(amplitudes)), tuple(amplitudes))
+
+
+def measure_calcium_spike_count(
+    spikes: SpikeData,
+    neuron_id: int,
+    onset_seconds: float,
+    window_ms: float,
+) -> int:
+    """Count deconvolved spikes of ``neuron_id`` in ``[onset, onset + window]``.
+
+    ``onset_seconds`` is relative to the start of the acquisition that produced ``spikes``.
+    """
+    stop_seconds = onset_seconds + window_ms / 1000.0
+    in_window = (
+        (spikes.spike_indices == neuron_id)
+        & (spikes.spike_times >= onset_seconds)
+        & (spikes.spike_times <= stop_seconds)
+    )
+    return int(np.count_nonzero(in_window))
