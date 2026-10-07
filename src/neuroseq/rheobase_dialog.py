@@ -1187,6 +1187,7 @@ class RheobaseDialog(_SelfRaisingDialog):
     def _advance_syscon2(self) -> None:
         assert self.project is not None
         self.refresh()
+        self._select_newest_if_stale(self.cmb_spikes)
         name = self.cmb_spikes.currentText()
         if not name:
             self.btn_data_imported.setEnabled(True)
@@ -1212,6 +1213,17 @@ class RheobaseDialog(_SelfRaisingDialog):
             spikes, self.spn_neuron.value(), onset, window_ms
         )
         self._backend.record_probe_result(spike_count)
+
+    def _select_newest_if_stale(self, combo: QtWidgets.QComboBox) -> None:
+        """A freshly imported recording is not in the list until refresh(): pick it up
+        automatically when the selection is empty or still the previous probe's."""
+        count = combo.count()
+        if (
+            count
+            and combo.currentText() in ("", self._last_measured_dataset)
+            and combo.itemText(count - 1) != self._last_measured_dataset
+        ):
+            combo.setCurrentIndex(count - 1)
 
     def _reawait_acquisition(self) -> None:
         """Stay on the current probe: ask the user to fix the import and click again."""

@@ -827,3 +827,21 @@ def test_syscon2_rejects_amplitude_above_one_and_wrong_dt(qtbot) -> None:
     editor.current_stim_modifier.stim_array.dt = 0.001
     dialog.start()
     assert not host.sent and not dialog._running
+
+
+def test_syscon2_picks_up_newly_imported_trace_without_manual_selection(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    _import_calcium(project, dialog, "base", 1.0)
+    dialog.btn_data_imported.click()  # baseline measured
+    assert dialog._last_measured_dataset == "base"
+    dialog.btn_data_imported.click()  # pairing done, probe sent
+
+    # New recording is added to the project but never selected by hand.
+    _import_calcium(project, dialog, "after", 1.5)
+    dialog.cmb_trace.setCurrentText("base")  # selection still the previous probe's
+    dialog.btn_data_imported.click()
+
+    assert dialog._last_measured_dataset == "after"

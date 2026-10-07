@@ -867,3 +867,23 @@ def test_syscon2_requires_ttl_quantum_dt(qtbot) -> None:
     dialog.start()
     assert not host.sent
     assert not dialog._running
+
+
+def test_syscon2_picks_up_newly_imported_dataset_without_manual_selection(
+    qtbot,
+) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    _import_spikes(project, dialog, "rec0", spiking=True)
+    dialog.btn_data_imported.click()
+    sent = len(host.sent)
+
+    # Next probe: a new dataset appears in the project but is never selected by hand.
+    onset = dialog._pulse_onset_seconds - dialog._block_range[0] * (
+        _SYSCON2_TTL_PULSE_QUANTUM_S
+    )
+    project.spikes["rec1"] = SpikeData("rec1", np.array([0]), np.array([onset + 0.005]))
+    dialog.btn_data_imported.click()
+
+    assert len(host.sent) > sent or not dialog._running
+    assert dialog._last_measured_dataset == "rec1"

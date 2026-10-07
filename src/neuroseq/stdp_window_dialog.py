@@ -1291,6 +1291,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         """Calcium response from the imported trace; ``None`` to wait/finish."""
         assert self.project is not None
         self.refresh()
+        self._select_newest_if_stale(self.cmb_trace)
         name = self.cmb_trace.currentText()
         if not name or name == self._last_measured_dataset:
             self._append_log(
@@ -1321,6 +1322,17 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return None
         self._last_measured_dataset = name
         return (measurement,)
+
+    def _select_newest_if_stale(self, combo: QtWidgets.QComboBox) -> None:
+        """A freshly imported recording is not in the list until refresh(): pick it up
+        automatically when the selection is empty or still the previous probe's."""
+        count = combo.count()
+        if (
+            count
+            and combo.currentText() in ("", self._last_measured_dataset)
+            and combo.itemText(count - 1) != self._last_measured_dataset
+        ):
+            combo.setCurrentIndex(count - 1)
 
     def _reawait_acquisition(self) -> None:
         """Stay on the current probe: ask the user to fix the import and click again."""
