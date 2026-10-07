@@ -19,6 +19,20 @@ if TYPE_CHECKING:
     from neuroseq.stim_editor import StimEditor
 
 
+_DEFAULT_STATE: dict[str, float | int | str | bool] = {
+    "scope_specific": False,
+    "neuron_indices": "",
+    "pulse_ms": 100.0,
+    "ipi_ms": 18.0,
+    "magnitude": 1.0,
+    "value1": 1.0,
+    "value2": 2.0,
+    "repeats": 1,
+    "pulse_repetitions": 1,
+    "start_time_ms": 0.0,
+}
+
+
 @dataclass(slots=True)
 class StimPatternContext:
     stim_name: str
@@ -183,6 +197,41 @@ class StimPatternDialog(_SelfRaisingDialog):
             self.radio_sequential.setChecked(True)
         self._scope_changed()
 
+    def capture_state(self) -> dict[str, float | int | str | bool]:
+        """The user-entered values, for stashing on the active project (see
+        Project.static_input_state). The pattern radio isn't included:
+        set_context() re-picks it for the scope on every stim selection."""
+        return {
+            "scope_specific": self.radio_scope_specific.isChecked(),
+            "neuron_indices": self.edit_neuron_indices.text(),
+            "pulse_ms": float(self.spin_pulse_ms.value()),
+            "ipi_ms": float(self.spin_ipi_ms.value()),
+            "magnitude": float(self.spin_magnitude.value()),
+            "value1": float(self.spin_value1.value()),
+            "value2": float(self.spin_value2.value()),
+            "repeats": int(self.spin_repeats.value()),
+            "pulse_repetitions": int(self.spin_pulse_repetitions.value()),
+            "start_time_ms": float(self.spin_start_time_ms.value()),
+        }
+
+    def restore_state(self, state: dict[str, float | int | str | bool] | None) -> None:
+        """Load values saved by capture_state(); None restores the defaults
+        a freshly opened dialog has (a project that never used it)."""
+        values = {**_DEFAULT_STATE, **(state or {})}
+        if values["scope_specific"]:
+            self.radio_scope_specific.setChecked(True)
+        else:
+            self.radio_scope_all.setChecked(True)
+        self.edit_neuron_indices.setText(str(values["neuron_indices"]))
+        self.spin_pulse_ms.setValue(float(values["pulse_ms"]))
+        self.spin_ipi_ms.setValue(float(values["ipi_ms"]))
+        self.spin_magnitude.setValue(float(values["magnitude"]))
+        self.spin_value1.setValue(float(values["value1"]))
+        self.spin_value2.setValue(float(values["value2"]))
+        self.spin_repeats.setValue(int(values["repeats"]))
+        self.spin_pulse_repetitions.setValue(int(values["pulse_repetitions"]))
+        self.spin_start_time_ms.setValue(float(values["start_time_ms"]))
+
     def reset_start_time(self) -> None:
         self.spin_start_time_ms.setValue(0.0)
 
@@ -191,7 +240,6 @@ class StimPatternDialog(_SelfRaisingDialog):
         self.edit_neuron_indices.setVisible(not is_all)
         self.lbl_neuron_hint.setVisible(not is_all)
         for button in [
-            self.radio_sequential,
             self.radio_simultaneous,
             self.radio_fuer_elise,
         ]:
@@ -201,7 +249,8 @@ class StimPatternDialog(_SelfRaisingDialog):
             self.radio_linear,
         ]:
             button.setVisible(not is_all)
-        # Ramp lives in both scopes.
+        # Sequential and Ramp both live in both scopes (#582).
+        self.radio_sequential.setVisible(True)
         self.radio_ramp.setVisible(True)
         all_options = [
             self.radio_sequential,
@@ -210,6 +259,7 @@ class StimPatternDialog(_SelfRaisingDialog):
             self.radio_ramp,
         ]
         specific_options = [
+            self.radio_sequential,
             self.radio_constant,
             self.radio_linear,
             self.radio_ramp,
@@ -233,12 +283,11 @@ class StimPatternDialog(_SelfRaisingDialog):
         is_all = self.radio_scope_all.isChecked()
         is_specific = not is_all
         is_ramp = self.radio_ramp.isChecked()
-        is_constant = self.radio_constant.isChecked()
-        uses_single_magnitude = (is_all and not is_ramp) or (
-            is_specific and is_constant
-        )
+        # Every pattern uses either a single magnitude or a start/end value
+        # pair, never both/neither - so "single magnitude" is just "not a
+        # value pair" (Ramp, and Linear gradient in specific scope).
         uses_value_pair = is_ramp or (is_specific and self.radio_linear.isChecked())
-        uses_repeats = not (is_all and self.radio_sequential.isChecked())
+        uses_single_magnitude = not uses_value_pair
         uses_pulse_repetitions = is_all and self.radio_fuer_elise.isChecked()
 
         self._set_row_visible(
@@ -246,7 +295,6 @@ class StimPatternDialog(_SelfRaisingDialog):
         )
         self._set_row_visible(self.lbl_value1, self.spin_value1, uses_value_pair)
         self._set_row_visible(self.lbl_value2, self.spin_value2, uses_value_pair)
-        self._set_row_visible(self.lbl_repeats, self.spin_repeats, uses_repeats)
         self._set_row_visible(
             self.lbl_pulse_repetitions,
             self.spin_pulse_repetitions,
@@ -341,16 +389,18 @@ class StimPatternDialog(_SelfRaisingDialog):
                     dt_seconds=dt_seconds,
                     neuron_index=neuron_indices,
                 )
+            elif self.radio_sequential.isChecked():
+                pattern = generate_sequential(
+                    n_neurons=n_neurons,
+                    pulse_ms=pulse_ms,
+                    ipi_ms=ipi_ms,
+                    magnitude=float(self.spin_magnitude.value()),
+                    dt_seconds=dt_seconds,
+                    neuron_index=neuron_indices,
+                    repeats=repeats,
+                )
             elif self.radio_scope_all.isChecked():
-                if self.radio_sequential.isChecked():
-                    pattern = generate_sequential(
-                        n_neurons=n_neurons,
-                        pulse_ms=pulse_ms,
-                        ipi_ms=ipi_ms,
-                        magnitude=float(self.spin_magnitude.value()),
-                        dt_seconds=dt_seconds,
-                    )
-                elif self.radio_simultaneous.isChecked():
+                if self.radio_simultaneous.isChecked():
                     pattern = generate_simultaneous(
                         n_neurons=n_neurons,
                         pulse_ms=pulse_ms,

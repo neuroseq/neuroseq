@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import random
 
+import numpy as np
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
@@ -12,6 +13,42 @@ from neuroseq import console_art
 from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
+from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
+from neuroseq.stim_timing import seconds_to_samples_ceil
+
+BLANK_STIM_DURATION_SECONDS = 5.0
+# Matches the neuron count "Create input array" (StimEditor) starts from.
+BLANK_STIM_NEURONS = 10
+
+
+def new_blank_project() -> Project:
+    """An empty project holding a blank (all-zero) 5 s input array, so
+    there is something to draw on right away instead of an empty plot that
+    first needs "Design static/dynamic input" followed by "Clear" (#584)."""
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stimulus",
+            StimType.Excitation,
+            np.zeros(
+                (
+                    seconds_to_samples_ceil(
+                        BLANK_STIM_DURATION_SECONDS, DEFAULT_STIM_DT_SECONDS
+                    ),
+                    BLANK_STIM_NEURONS,
+                )
+            ),
+            "nS",
+            DEFAULT_STIM_DT_SECONDS,
+        )
+    )
+    # add_stim_array marks dirty as a side effect; a fresh project that
+    # hasn't been touched yet shouldn't prompt to save on close.
+    project.dirty = False
+    return project
+
 
 _BRAIN_ICON_HEIGHT = 48
 
@@ -112,7 +149,7 @@ class StartupDialog(QtWidgets.QDialog):
             self.accept()
 
     def _choose_new(self) -> None:
-        self.chosen_project = Project()
+        self.chosen_project = new_blank_project()
         self.accept()
 
     def _choose_recent(self, item: QtWidgets.QListWidgetItem) -> None:

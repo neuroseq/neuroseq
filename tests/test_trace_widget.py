@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import brian2.numpy_ as np
 import pygfx
 import pytest
@@ -7,6 +9,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+import neuroseq.timeseries_widget
 from neuroseq import theme
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
@@ -146,6 +149,157 @@ def test_trace_preview_uses_selected_region(
     assert ax.get_ylim() == pytest.approx(
         (cy - state["height"] / 2, cy + state["height"] / 2)
     )
+    dialog.close()
+
+
+def _make_fake_click_event(ax, line, index: int, button: int = 1):
+    """A minimal stand-in for matplotlib's MouseEvent - _on_click only reads
+    .button, .inaxes, .xdata, .x and .y, so a real button_press_event isn't
+    needed to exercise it directly. Pixel coordinates are the line's own
+    data point transformed through the real axes transform, so the
+    nearest-line hit-test in _on_click resolves to exactly that point."""
+    x_point = float(line.get_xdata()[index])
+    y_point = float(line.get_ydata()[index])
+    disp_x, disp_y = ax.transData.transform((x_point, y_point))
+    return SimpleNamespace(button=button, inaxes=ax, xdata=x_point, x=disp_x, y=disp_y)
+
+
+def test_trace_preview_amplitude_markers_require_two_points_on_same_trace(
+    qtbot, make_trace_data
+) -> None:
+    """Feature (#547): a single placed point isn't enough to report an
+    amplitude yet - only once a second point lands on the *same* trace."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+
+    expected_point = (float(line.get_xdata()[3]), float(line.get_ydata()[3]))
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+
+    assert dialog._amplitude_points[0] == [expected_point]
+    assert "one point placed" in dialog._amplitude_label.text()
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_measure_delta_between_last_two_points(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(
+        make_trace_data(
+            n_neurons=1,
+            n_timestamps=10,
+            indices=np.array([0], dtype=np.uint32),
+            dt=0.002,
+        )
+    )
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    (line,) = ax.get_lines()
+    dialog._place_points_checkbox.setChecked(True)
+
+    dialog._on_click(_make_fake_click_event(ax, line, index=2))
+    dialog._on_click(_make_fake_click_event(ax, line, index=7))
+
+    points = dialog._amplitude_points[0]
+    assert len(points) == 2
+    expected_dy = abs(points[1][1] - points[0][1])
+    expected_dt = abs(points[1][0] - points[0][0])  # x data is already in ms
+    label_text = dialog._amplitude_label.text()
+    assert f"{expected_dy:.4g}" in label_text
+    assert f"{expected_dt:.1f} ms" in label_text
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_only_hit_the_nearest_trace(
+    qtbot, make_trace_data
+) -> None:
+    """Regression (#547): traces are stacked only ~1 plot-unit apart, which
+    at typical preview zoom levels is well within a naive pixel pick radius
+    of each other. A click meant for one trace must not also register a
+    point on its neighbour."""
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line0 = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+
+    dialog._on_click(_make_fake_click_event(ax, line0, index=4))
+
+    assert set(dialog._amplitude_points.keys()) == {0}
+    assert len(dialog._amplitude_points[0]) == 1
+    dialog.close()
+
+
+def test_trace_preview_amplitude_markers_ignored_when_placement_disabled(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    assert not dialog._place_points_checkbox.isChecked()
+
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+
+    assert dialog._amplitude_points == {}
+    dialog.close()
+
+
+def test_trace_preview_clear_points_resets_markers_and_label(
+    qtbot, make_trace_data
+) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10, dt=0.002))
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    line = next(line for line in ax.get_lines() if line.get_gid() == "trace_0")
+    dialog._place_points_checkbox.setChecked(True)
+    dialog._on_click(_make_fake_click_event(ax, line, index=3))
+    dialog._on_click(_make_fake_click_event(ax, line, index=5))
+    assert dialog._amplitude_points
+    assert dialog._clear_points_button.isEnabled()
+
+    dialog._clear_points_button.click()
+
+    assert dialog._amplitude_points == {}
+    assert "Check" in dialog._amplitude_label.text()
+    assert not dialog._clear_points_button.isEnabled()
     dialog.close()
 
 
@@ -1573,3 +1727,140 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
     assert state.receivers(state.data_changed) == baseline_data
     assert state.receivers(state.greyed_changed) == baseline_greyed
     view_a.close()
+
+
+def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    class _AcceptedDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            self.neuron_ids = list(neuron_ids)
+            self.checked_ids = set(checked_ids)
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Accepted)
+
+        @property
+        def selected_neuron_ids(self) -> list[int]:
+            return [1, 3]
+
+    captured: dict = {}
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    def _capture(*args):
+        captured["args"] = args
+
+    trace_widget.custom_analysis_requested.connect(_capture)
+    with qtbot.waitSignal(trace_widget.custom_analysis_requested):
+        pearson_action.trigger()
+
+    assert captured["args"][3] == [1, 3]
+
+
+def test_trace_widget_pearson_correlation_prechecks_current_selection(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    seen_checked_ids: dict = {}
+
+    class _CapturingDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            seen_checked_ids["ids"] = set(checked_ids)
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget.select_neurons(slice(1, 3), None)
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    pearson_action.trigger()
+
+    assert seen_checked_ids["ids"] == {1, 2}
+
+
+def test_trace_widget_pearson_correlation_cancelled_dialog_emits_nothing(
+    qtbot: QtBot, monkeypatch, make_trace_data
+) -> None:
+    class _RejectedDialog:
+        def __init__(self, neuron_ids, checked_ids, parent=None) -> None:
+            pass
+
+        def exec(self) -> int:
+            return int(QtWidgets.QDialog.DialogCode.Rejected)
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=5))
+    trace_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    received = []
+    trace_widget.custom_analysis_requested.connect(lambda *args: received.append(args))
+    pearson_action.trigger()
+    qtbot.wait(20)
+
+    assert received == []
+
+
+def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
+    qtbot: QtBot, monkeypatch, make_spike_data
+) -> None:
+    """Pearson correlation only applies to TraceData (see
+    CustomAnalysisWidget.set_data) - the dialog must not open for a
+    SpikeWidget, since the chosen subset would be passed as a non-contiguous
+    list into SpikeData's slice-only neuron filtering and crash."""
+
+    def _unexpected_dialog(*args, **kwargs):
+        raise AssertionError("NeuronSubsetDialog should not open for SpikeData")
+
+    monkeypatch.setattr(
+        neuroseq.timeseries_widget, "NeuronSubsetDialog", _unexpected_dialog
+    )
+
+    controller = ConstrainedPanZoomController()
+    spike_widget = SpikeWidget(controller)
+    qtbot.addWidget(spike_widget)
+    spike_widget.set_data(make_spike_data())
+    spike_widget._rebuild_custom_analysis_menu()
+    pearson_action = next(
+        action
+        for action in spike_widget.context_menu.actions()
+        if action.text() == "Pearson correlation"
+    )
+
+    with qtbot.waitSignal(spike_widget.custom_analysis_requested):
+        pearson_action.trigger()

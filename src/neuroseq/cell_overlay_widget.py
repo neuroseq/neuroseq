@@ -105,8 +105,15 @@ def compute_segmentation_legend(
     if not neuron_ids:
         return []
 
-    zero_based = np.array(neuron_ids) - min(neuron_ids)
-    id_colors = neuron_indices_to_colors(zero_based)
+    # Keyed directly by the raw id (not shifted to start at 0), so a given
+    # id always gets the same colour regardless of which other ids happen
+    # to be visible - matching trace_widget's neuron_indices_to_colors(
+    # data.indices) convention exactly (#548). Shifting by the currently
+    # smallest visible id made colours diverge between the Spatial
+    # Footprints overlay and the trace viewer for any dataset whose lowest
+    # id isn't 0, and could even change the same cell's colour across
+    # re-renders as the visible id set changed.
+    id_colors = neuron_indices_to_colors(np.array(neuron_ids))
     return [
         (
             int(cell_id),
@@ -600,8 +607,9 @@ class OverlayView(FullScreenFPLWidget):
             int(cell_id): (rgb_val[0] / 255.0, rgb_val[1] / 255.0, rgb_val[2] / 255.0)
             for cell_id, rgb_val in (legend_data or [])
         }
-        zero_based = neuron_ids - neuron_ids.min()
-        id_colors = neuron_indices_to_colors(zero_based)
+        # Keyed by the raw id, not shifted to start at 0 - see
+        # compute_segmentation_legend's docstring/comment (#548).
+        id_colors = neuron_indices_to_colors(neuron_ids)
 
         for idx, neuron_id in enumerate(neuron_ids):
             mask = segmentation == neuron_id
@@ -1511,6 +1519,17 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         update, safe to call at pointer-move frequency."""
         self.overlay_image = overlay_image
         self.overlay_view.set_overlay_image(overlay_image)
+
+    def set_base_image(self, base_image: np.ndarray | None) -> None:
+        """Swap the raw (uncolored) FOV shown when "Show segmentation" is
+        off, without a full overlay rebuild."""
+        self.base_image = base_image
+        if (
+            not self.show_segmentation
+            and base_image is not None
+            and self.overlay_view.overlay_image is not None
+        ):
+            self.overlay_view.set_overlay_image(base_image)
 
     def set_aoi_overlay(
         self,

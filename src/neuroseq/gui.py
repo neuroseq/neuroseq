@@ -7,6 +7,7 @@ import logging
 import pathlib
 import threading
 from collections.abc import Callable
+from collections.abc import Sequence
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -57,6 +58,7 @@ from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
+from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
@@ -198,6 +200,7 @@ class BackgroundIOWorker(QtCore.QObject):
         self._task = task
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _report(percent: int) -> None:
             with contextlib.suppress(Exception):
@@ -237,6 +240,7 @@ class ExternalSimWorker(QtCore.QObject):
         self._cancel_event = cancel_event
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _progress_cb(fraction: float) -> None:
             if self._cancel_event.is_set():
@@ -287,6 +291,7 @@ class EliseProtocolWorker(QtCore.QObject):
         self._cancel_event = cancel_event
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _progress_cb(fraction: float) -> None:
             if self._cancel_event.is_set():
@@ -560,7 +565,7 @@ class Gui(QtWidgets.QMainWindow):
             tuple[
                 TraceData | SpikeData | SynapseData,
                 CustomAnalysisType | AnalysisPlugin | None,
-                slice | None,
+                slice | Sequence[int] | None,
                 slice | None,
             ]
             | None
@@ -680,7 +685,7 @@ class Gui(QtWidgets.QMainWindow):
         data: TraceData | SpikeData | SynapseData,
         analysis_type: CustomAnalysisType | AnalysisPlugin | None,
         new_window: bool,
-        neuron_slice: slice | None,
+        neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ):
         if new_window:
@@ -2539,7 +2544,12 @@ class Gui(QtWidgets.QMainWindow):
 
     def open_stimulation_generator_dialog(self) -> None:
         """Open the stimulation script generator dialog."""
-        dialog = StimulationGeneratorDialog(self.project, parent=self)
+        modifier = self.stim_editor.current_stim_modifier
+        dialog = StimulationGeneratorDialog(
+            self.project,
+            parent=self,
+            current_stim_name=(None if modifier is None else modifier.stim_array.name),
+        )
         dialog.exec()
 
     # Import stimulus wrappers

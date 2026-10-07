@@ -74,3 +74,15 @@ def test_multiframe_tiff_averages_every_second_of_first_300_frames(
     assert tiff_frame_count(image_path) == 302
     assert image.shape == (2, 3)
     np.testing.assert_array_equal(image, np.full((2, 3), 149.0))
+
+
+def test_load_annotation_image_accepts_a_png_snapshot(tmp_path: Path) -> None:
+    """Feature (#566): a PNG is a single still image, not a stack - it
+    should load directly without going through the TIFF frame-count path."""
+    image_path = tmp_path / "snapshot.png"
+    pixels = np.arange(12, dtype=np.uint8).reshape(3, 4)
+    Image.fromarray(pixels).save(image_path)
+
+    image = load_annotation_image(image_path)
+
+    np.testing.assert_array_equal(image, pixels)

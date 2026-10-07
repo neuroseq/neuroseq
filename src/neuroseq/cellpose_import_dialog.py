@@ -14,6 +14,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
 from neuroseq.importer_cellpose import AOIRole
 from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellPoseImporter
@@ -126,16 +127,26 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.open_fiji_button.clicked.connect(self._open_in_fiji)
 
         self.segmentation_run_group = QtWidgets.QGroupBox(
-            "Select file (single or multiframe TIFF)"
+            "Select file (single or multiframe TIFF, or PNG)"
         )
         cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
+        cellpose_button_layout.addWidget(QtWidgets.QLabel("Model:"))
+        self.cellpose_model_combo = QtWidgets.QComboBox()
+        self.cellpose_model_combo.addItems(CELLPOSE_MODEL_NAMES)
+        self.cellpose_model_combo.setToolTip(
+            "Cellpose segmentation model used for one-button segmentation. "
+            "cpsam_v2 offers higher sensitivity than cpsam on low "
+            "signal-to-noise fields of view, at a similar runtime cost."
+        )
+        cellpose_button_layout.addWidget(self.cellpose_model_combo)
         cellpose_button_layout.addStretch()
         self.annotate_tiff_button = QtWidgets.QPushButton(
             "Select file for segmentation…"
         )
         self.annotate_tiff_button.setToolTip(
-            "Select a mean-fluorescence TIFF and immediately segment it with "
-            "the Cellpose cpsam model. Results are saved beside the TIFF."
+            "Select a mean-fluorescence TIFF or a PNG snapshot and "
+            "immediately segment it with the Cellpose model chosen above. "
+            "Results are saved beside the selected file."
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
@@ -272,6 +283,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.manual_click_clear_button.setAutoDefault(False)
         self.manual_click_clear_button.clicked.connect(self._clear_manual_click_order)
         manual_click_layout.addWidget(self.manual_click_clear_button)
+        # Read-only reference while clicking cells in order: lets the user
+        # see where the Areas of Interest sit (as configured under the
+        # "Custom with areas of interest" strategy) without switching to it.
+        self.show_aoi_in_custom_checkbox = QtWidgets.QCheckBox("Show areas of interest")
+        self.show_aoi_in_custom_checkbox.setToolTip(
+            "Draw the areas of interest on the viewer as a reference while "
+            "choosing the cell order. They are not editable here and do not "
+            'affect the mapping - set them under "Custom with areas of '
+            'interest".'
+        )
+        self.show_aoi_in_custom_checkbox.toggled.connect(
+            self._update_aoi_overlay_visibility
+        )
+        manual_click_layout.addWidget(self.show_aoi_in_custom_checkbox)
         manual_click_layout.addStretch(1)
         self.manual_click_row_widget = QtWidgets.QWidget()
         self.manual_click_row_widget.setLayout(manual_click_layout)
@@ -776,7 +801,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if is_aoi:
             self._regenerate_aoi_mapping()
         else:
-            self.overlay_widget.set_aoi_overlay(None, show=False)
+            self._update_aoi_overlay_visibility()
 
         # Update preview if data is loaded
         if (
@@ -1171,10 +1196,20 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self._update_preview_mapping()
 
     def _update_aoi_overlay_visibility(self, *_args) -> None:
-        is_aoi = self._get_mapping_strategy() == CUSTOM_AOI_STRATEGY
+        strategy = self._get_mapping_strategy()
+        is_aoi = strategy == CUSTOM_AOI_STRATEGY
+        # Under plain Custom the shapes are only a reference for the click
+        # order: drawn on request, and never draggable (a drag there would
+        # change nothing, since the mapping doesn't use them).
+        is_reference = (
+            strategy == "Custom" and self.show_aoi_in_custom_checkbox.isChecked()
+        )
+        if is_reference:
+            self._ensure_aoi_defaults()
+        self.overlay_widget.set_aoi_editable(is_aoi)
         self.overlay_widget.set_aoi_overlay(
-            self._current_aoi_config() if is_aoi else None,
-            show=is_aoi and self.show_shapes_checkbox.isChecked(),
+            self._current_aoi_config() if (is_aoi or is_reference) else None,
+            show=(is_aoi and self.show_shapes_checkbox.isChecked()) or is_reference,
         )
 
     def _on_overlay_aoi_geometry_changed(self, config: AreasOfInterestConfig) -> None:
@@ -1256,12 +1291,15 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self._load_segmentation_file(filename)
 
     def _annotate_mean_tiff(self) -> None:
-        """Select and immediately annotate a mean-fluorescence TIFF with cpsam."""
+        """Select and immediately annotate a mean-fluorescence TIFF or a
+        single PNG snapshot with the Cellpose model chosen in the one-button
+        segmentation pane."""
         filename, _ = getopenfilename(
             self,
-            "Select mean fluorescence TIFF",
+            "Select image for segmentation",
             "",
-            "TIFF files (*.tif *.tiff);;All files (*)",
+            "Image files (*.tif *.tiff *.png);;TIFF files (*.tif *.tiff);;"
+            "PNG files (*.png);;All files (*)",
         )
         if not filename:
             return
@@ -1273,17 +1311,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             return
 
-        try:
-            from neuroseq.cellpose_annotation import tiff_frame_count
+        from neuroseq.cellpose_annotation import TIFF_SUFFIXES
 
-            frame_count = tiff_frame_count(filename)
-        except Exception as exc:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid TIFF file",
-                f"Could not inspect {filename}:\n{exc}",
-            )
-            return
+        frame_count = 1
+        if Path(filename).suffix.lower() in TIFF_SUFFIXES:
+            try:
+                from neuroseq.cellpose_annotation import tiff_frame_count
+
+                frame_count = tiff_frame_count(filename)
+            except Exception as exc:
+                QtWidgets.QMessageBox.critical(
+                    self,
+                    "Invalid TIFF file",
+                    f"Could not inspect {filename}:\n{exc}",
+                )
+                return
         if frame_count > 1:
             sampled_count = len(range(0, min(frame_count, 300), 2))
             QtWidgets.QMessageBox.information(
@@ -1301,7 +1343,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
 
             segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
-                filename, model_name="cpsam"
+                filename, model_name=self.cellpose_model_combo.currentText()
             )
             self._load_image_file(filename)
             self._load_segmentation_file(str(segmentation_path))

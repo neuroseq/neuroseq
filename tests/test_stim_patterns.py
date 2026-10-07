@@ -36,6 +36,54 @@ def test_sequential_includes_trailing_ipi() -> None:
     assert result.shape == (45, 3)
 
 
+def test_sequential_specific_neurons_fire_in_given_order() -> None:
+    """Feature (#582): a neuron subset fires in the order given, not just
+    the full 0..n_neurons-1 range."""
+    result = generate_sequential(
+        n_neurons=5,
+        pulse_ms=10,
+        ipi_ms=5,
+        magnitude=1.0,
+        dt_seconds=0.001,
+        neuron_index=[3, 1],
+    )
+    assert result.shape == (30, 5)
+    assert np.all(result[0:10, 3] == 1.0)
+    assert np.all(result[10:15, :] == 0.0)
+    assert np.all(result[15:25, 1] == 1.0)
+    for col in [0, 2, 4]:
+        assert np.all(result[:, col] == 0.0)
+    assert np.all(result[0:10, [0, 1, 2, 4]] == 0.0)
+    assert np.all(result[15:25, [0, 2, 3, 4]] == 0.0)
+
+
+def test_sequential_single_neuron_index() -> None:
+    result = generate_sequential(
+        n_neurons=4,
+        pulse_ms=10,
+        ipi_ms=5,
+        magnitude=1.0,
+        dt_seconds=0.001,
+        neuron_index=2,
+    )
+    assert result.shape == (15, 4)
+    assert np.all(result[0:10, 2] == 1.0)
+    for col in [0, 1, 3]:
+        assert np.all(result[:, col] == 0.0)
+
+
+def test_sequential_invalid_neuron_index_raises() -> None:
+    with pytest.raises(ValueError):
+        generate_sequential(
+            n_neurons=3,
+            pulse_ms=10,
+            ipi_ms=5,
+            magnitude=1.0,
+            dt_seconds=0.001,
+            neuron_index=[0, 5],
+        )
+
+
 def test_simultaneous_all_columns_fire_together() -> None:
     result = generate_simultaneous(4, 50, 10, 0.7, repeats=3, dt_seconds=0.001)
     assert result.shape == (180, 4)
@@ -348,3 +396,24 @@ def test_parse_neuron_indices_non_integer_raises() -> None:
 def test_parse_neuron_indices_out_of_range_raises() -> None:
     with pytest.raises(ValueError):
         parse_neuron_indices("0, 10", 10)
+
+
+def test_generate_sequential_repeats_tile_the_whole_sequence() -> None:
+    single = generate_sequential(3, 10, 5, 1.0, 0.001)
+    repeated = generate_sequential(3, 10, 5, 1.0, 0.001, repeats=2)
+
+    assert repeated.shape[0] == 2 * single.shape[0]
+    np.testing.assert_array_equal(repeated[: single.shape[0]], single)
+    np.testing.assert_array_equal(repeated[single.shape[0] :], single)
+
+
+def test_generate_sequential_repeats_with_specific_neurons() -> None:
+    single = generate_sequential(5, 10, 5, 1.0, 0.001, neuron_index=[4, 1])
+    repeated = generate_sequential(5, 10, 5, 1.0, 0.001, neuron_index=[4, 1], repeats=3)
+
+    np.testing.assert_array_equal(repeated, np.tile(single, (3, 1)))
+
+
+def test_generate_sequential_rejects_zero_repeats() -> None:
+    with pytest.raises(ValueError, match="repeats"):
+        generate_sequential(3, 10, 5, 1.0, 0.001, repeats=0)

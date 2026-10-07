@@ -452,6 +452,109 @@ def test_custom_analysis_widget_trace_pearson_correlation(
     assert np.isclose(corr[0, 2], -1.0)
 
 
+def test_custom_analysis_widget_trace_pearson_correlation_title_wraps_after_label(
+    qtbot: QtBot,
+) -> None:
+    """Regression (#546): a long neuron/time description used to run the
+    title past the window edge on one line - it should now wrap onto a
+    second line right after "Pearson correlation:"."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = TraceData(
+        name="corr_traces",
+        traces=np.random.random_sample((20, 50)).astype(np.float32),
+        indices=np.arange(20, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.PearsonCorrelation,
+        slice(5, 17),
+        slice(0, 50),
+    )
+    qtbot.wait(gui_delay_in_ms)
+
+    title = custom_analysis_widget.subplot.get_title()
+    assert "pearson correlation" in title.lower()
+    first_line, _, rest = title.partition("\n")
+    assert first_line.endswith(":")
+    assert "neurons 5-16" in rest.lower()
+
+
+@pytest.mark.parametrize(
+    "neuron_slice,expected_ids",
+    [
+        (None, [0, 1, 2, 3, 4]),
+        (slice(2, 5), [2, 3, 4]),
+        ([1, 4], [1, 4]),
+    ],
+)
+def test_custom_analysis_widget_trace_pearson_correlation_ticks_use_real_neuron_ids(
+    qtbot: QtBot, neuron_slice, expected_ids
+) -> None:
+    """Regression (#546): the correlation matrix's ticks used to always read
+    0, 1, 2, ... regardless of which neurons were actually selected."""
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    data = TraceData(
+        name="corr_traces",
+        traces=np.random.random_sample((5, 10)).astype(np.float32),
+        indices=np.arange(5, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.PearsonCorrelation,
+        neuron_slice,
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+
+    assert custom_analysis_widget.neuron_ids == expected_ids
+    formatter = custom_analysis_widget.subplot.xaxis.get_major_formatter()
+    labels = [formatter(i, None) for i in range(len(expected_ids))]
+    assert labels == [str(n) for n in expected_ids]
+
+
+def test_custom_analysis_widget_trace_pearson_correlation_ticks_are_integers(
+    qtbot: QtBot,
+) -> None:
+    """Regression (#560): with enough neurons, matplotlib's default tick
+    locator can pick fractional positions (e.g. 42.5) that don't correspond
+    to any real neuron id - the axes should only ever tick at whole numbers.
+    """
+    custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    n_neurons = 18  # with this axes size, matplotlib's default locator
+    # picks a fractional step (multiples of 2.5) without MaxNLocator(integer=True).
+    data = TraceData(
+        name="corr_traces",
+        traces=np.random.random_sample((n_neurons, 20)).astype(np.float32),
+        indices=np.arange(n_neurons, dtype=np.uint32),
+        units="mV",
+        dt=0.001,
+    )
+
+    custom_analysis_widget.set_data(
+        data,
+        CustomAnalysisType.PearsonCorrelation,
+        None,
+        None,
+    )
+    qtbot.wait(gui_delay_in_ms)
+
+    for axis in (
+        custom_analysis_widget.subplot.xaxis,
+        custom_analysis_widget.subplot.yaxis,
+    ):
+        ticks = axis.get_major_locator().tick_values(0, n_neurons - 1)
+        assert all(float(t).is_integer() for t in ticks)
+
+
 @pytest.mark.parametrize("new_window", [False, True])
 def test_custom_analysis_widget_trace_pearson_correlation_short_selection(
     qtbot: QtBot, new_window: bool

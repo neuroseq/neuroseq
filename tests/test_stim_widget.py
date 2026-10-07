@@ -955,6 +955,34 @@ def test_stim_widget_minimum_size_overlay_not_rebuilt_while_hidden(
     assert stim_widget.minimum_size_graphic is not hidden_graphic
 
 
+def test_background_short_input_indicators_obey_show_all_input_arrays(
+    qtbot: QtBot,
+) -> None:
+    """#585: with "Keep short inputs visible" on and "Show all input arrays"
+    off, other arrays' short-input indicators must stay hidden - including
+    ones added after the toggle (i.e. when switching input arrays)."""
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((1000, 2))
+    values[500, 1] = 1.0
+    current = StimArray("current", StimType.Excitation, values, "mV", dt=0.001)
+    other = StimArray("other", StimType.Excitation, values.copy(), "mV", dt=0.001)
+    stim_widget.set_data(current)
+    stim_widget.set_keep_short_stimuli_visible(True)
+    stim_widget.set_background_data_visible(False)
+
+    stim_widget.set_background_data(other)
+
+    assert len(stim_widget._background_minimum_size_graphics) == 1
+    assert not stim_widget._background_minimum_size_graphics[0].visible
+    assert stim_widget.minimum_size_graphic is not None
+    assert stim_widget.minimum_size_graphic.visible
+
+    stim_widget.set_background_data_visible(True)
+    assert stim_widget._background_minimum_size_graphics[0].visible
+
+
 def test_stim_widget_hover_preview_stays_snapped_within_cell(
     qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
 ) -> None:

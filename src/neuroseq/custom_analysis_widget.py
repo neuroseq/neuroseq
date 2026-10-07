@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from types import MethodType
 
 import brian2.numpy_ as np
 import numpy.typing as npt
+from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import MaxNLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtWidgets
 from qtpy.QtCore import Qt
@@ -66,6 +69,9 @@ class CustomAnalysisWidget(MatplotlibWidget):
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        # Lets the figure re-flow its margins for a wrapped (multi-line)
+        # title or a colorbar instead of letting them overlap the axes (#546).
+        self.getFigure().set_layout_engine("constrained")
         self.subplot = self.getFigure().add_subplot(111)
         original_draw_idle = self.canvas._draw_idle
 
@@ -84,6 +90,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.spike_times_ms: npt.NDArray | None = None
         self.spike_indices: npt.NDArray | None = None
         self.spike_neuron_indices: npt.NDArray | None = None
+        self.neuron_ids: list[int] | None = None
         self.dt_ms: float = 1.0
 
     def _redraw(self) -> None:
@@ -102,6 +109,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.spike_times_ms = None
         self.spike_indices = None
         self.spike_neuron_indices = None
+        self.neuron_ids = None
         self.subplot.clear()
         self._redraw()
 
@@ -123,13 +131,14 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self,
         data: TraceData | SpikeData | SynapseData,
         analysis_label: str,
-        neuron_slice: slice | None,
+        neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ) -> None:
         self.traces = None
         self.spike_times_ms = None
         self.spike_indices = None
         self.spike_neuron_indices = None
+        self.neuron_ids = None
         if isinstance(data, TraceData):
             self.dt_ms = data.dt * 1000.0
         else:
@@ -137,10 +146,18 @@ class CustomAnalysisWidget(MatplotlibWidget):
         if neuron_slice is None:
             neuron_slice = slice(None, None)
             neuron_str = "all neurons"
-        elif neuron_slice.stop == neuron_slice.start + 1:
-            neuron_str = f"neuron {neuron_slice.start}"
+        elif isinstance(neuron_slice, slice):
+            if neuron_slice.stop == neuron_slice.start + 1:
+                neuron_str = f"neuron {neuron_slice.start}"
+            else:
+                neuron_str = f"neurons {neuron_slice.start}-{neuron_slice.stop - 1}"
         else:
-            neuron_str = f"neurons {neuron_slice.start}-{neuron_slice.stop - 1}"
+            neuron_ids = list(neuron_slice)
+            neuron_str = (
+                f"neuron {neuron_ids[0]}"
+                if len(neuron_ids) == 1
+                else f"{len(neuron_ids)} selected neurons"
+            )
         self.neuron_slice = neuron_slice
         if time_slice is None:
             time_slice = slice(None, None)
@@ -152,8 +169,20 @@ class CustomAnalysisWidget(MatplotlibWidget):
             f"{data.name} {analysis_label}: {neuron_str}, {time_str}"
         )
         if isinstance(data, TraceData):
-            self.traces = np.asarray(data.traces)[neuron_slice, time_slice]
+            traces_array = np.asarray(data.traces)
+            self.traces = traces_array[neuron_slice, time_slice]
+            if isinstance(neuron_slice, slice):
+                start = neuron_slice.start if neuron_slice.start is not None else 0
+                stop = (
+                    neuron_slice.stop
+                    if neuron_slice.stop is not None
+                    else traces_array.shape[0]
+                )
+                self.neuron_ids = list(range(start, stop))
+            else:
+                self.neuron_ids = list(neuron_slice)
         elif isinstance(data, SpikeData):
+            assert isinstance(neuron_slice, slice)
             all_spike_indices = np.asarray(data.spike_indices)
             if neuron_slice.start is not None and neuron_slice.stop is not None:
                 self.spike_neuron_indices = np.arange(
@@ -186,7 +215,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self,
         data: TraceData | SpikeData | SynapseData | None,
         analysis_type: CustomAnalysisType | AnalysisPlugin | None,
-        neuron_slice: slice | None,
+        neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ) -> None:
         self.subplot.clear()
@@ -203,6 +232,10 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self._preprocess_data(data, analysis_label, neuron_slice, time_slice)
 
         if isinstance(analysis_type, AnalysisPlugin):
+            # Only CustomAnalysisType.PearsonCorrelation ever receives an
+            # arbitrary neuron subset (via the right-click "Pearson
+            # correlation" dialog) - plugins always get a contiguous slice.
+            assert isinstance(neuron_slice, slice) or neuron_slice is None
             try:
                 analysis_type.render(self, data, neuron_slice, time_slice)
             except Exception as exc:
@@ -280,6 +313,12 @@ class CustomAnalysisWidget(MatplotlibWidget):
             traces = np.asarray(self.traces)
             self.subplot.set_xlabel("Neuron index")
             self.subplot.set_ylabel("Neuron index")
+            # The title set by _preprocess_data is one long line that runs
+            # past the window edge once the neuron/time description gets
+            # non-trivial (#546) - break it onto a second line right after
+            # the analysis label, which is always present and never part of
+            # the neuron/time description itself.
+            self.subplot.set_title(self.subplot.get_title().replace(": ", ":\n", 1))
             if traces.shape[0] == 0 or traces.shape[1] < 2:
                 self.subplot.text(
                     0.5,
@@ -304,6 +343,20 @@ class CustomAnalysisWidget(MatplotlibWidget):
                     ax=self.subplot,
                     label="Pearson r",
                 )
+                # Ticks otherwise read as 0, 1, 2, ... regardless of which
+                # actual neurons were selected (#546) - relabel the matrix's
+                # default 0-based positions with the real neuron ids they
+                # correspond to, keeping matplotlib's own "nice" tick
+                # spacing rather than labelling every single row/column.
+                neuron_ids = self.neuron_ids or list(range(corr.shape[0]))
+
+                def _neuron_id_at(value: float, _pos, _ids=neuron_ids) -> str:
+                    index = round(value)
+                    return str(_ids[index]) if 0 <= index < len(_ids) else ""
+
+                for axis in (self.subplot.xaxis, self.subplot.yaxis):
+                    axis.set_major_locator(MaxNLocator(integer=True))
+                    axis.set_major_formatter(FuncFormatter(_neuron_id_at))
         else:
             return
         self._redraw()

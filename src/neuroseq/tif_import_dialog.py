@@ -33,6 +33,7 @@ from neuroseq.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
+from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.stim import StimArray
 
 
@@ -186,6 +187,7 @@ class _PipelineWorker(QtCore.QObject):
         self._stim_array = stim_array
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         handler = _QtLogHandler(self.log.emit)
         suite2p_logger = logging.getLogger("suite2p")
@@ -528,6 +530,11 @@ class TifImportDialog(QtWidgets.QDialog):
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
         if not has_stim_arrays:
+            # Disabled-but-still-checked reads as "suppression is on and you
+            # can't turn it off", which isn't true (there's no input array to
+            # suppress against) and left the user unable to even see the
+            # checkbox reflect that (#580).
+            self._suppress_stimulation_artefact_checkbox.setChecked(False)
             self._suppress_stimulation_artefact_checkbox.setToolTip(
                 "No input arrays are available in the current project."
             )

@@ -166,6 +166,12 @@ class Project:
         # slider value; not persisted to the saved archive.
         self.last_time_ms: int = 0
 
+        # "Design static input" dialog values (pulse/interval/magnitude/...)
+        # last used while this project was active, so the dialog's history
+        # stays within a project instead of leaking into the next one
+        # (#587). Transient GUI state like last_time_ms; not persisted.
+        self.static_input_state: dict[str, float | int | str | bool] | None = None
+
         # Cell(s) selected in the Spatial Footprints panel while this
         # project's tab was active. Transient GUI state, per-project like
         # last_time_ms - the panel's selection lives on one shared

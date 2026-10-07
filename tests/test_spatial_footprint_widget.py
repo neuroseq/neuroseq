@@ -19,6 +19,7 @@ from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import OverlayView
+from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.importer_cellpose import AOIRole
 from neuroseq.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -34,6 +35,7 @@ from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
+from neuroseq.utils import neuron_indices_to_colors
 
 
 def _right_click_event() -> SimpleNamespace:
@@ -1841,3 +1843,20 @@ def test_video_none_stim_source_disables_stimulation_crosses(qtbot) -> None:
     video.stim_combo.setCurrentText("None")
 
     assert video._stimulated_cellpose_ids_at(0) == set()
+
+
+def test_segmentation_legend_colors_match_trace_widget_for_non_zero_ids() -> None:
+    """Regression (#548): the overlay used to shift ids so the smallest one
+    present became "index 0" before colorizing, while trace_widget colors by
+    the raw id directly - the two only agreed by coincidence when the
+    smallest visible id happened to be 0. Use ids that don't start at 0 to
+    catch that divergence."""
+    neuron_ids = np.array([5, 8, 12], dtype=np.int32)
+    segmentation = np.array([[5, 8], [12, -1]], dtype=np.int32)
+
+    legend = dict(compute_segmentation_legend(segmentation))
+    expected = neuron_indices_to_colors(neuron_ids)
+
+    for neuron_id, expected_rgb in zip(neuron_ids, expected, strict=False):
+        actual_rgb = np.array(legend[int(neuron_id)]) / 255.0
+        assert np.allclose(actual_rgb, expected_rgb[:3], atol=1 / 255)

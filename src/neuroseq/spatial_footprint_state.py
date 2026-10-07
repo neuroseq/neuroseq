@@ -40,6 +40,7 @@ class SpatialFootprintState(QtCore.QObject):
     neurons_greyed_out_changed = QtCore.Signal(list, list)
     hovered_stim_id_changed = QtCore.Signal()
     active_stim_ids_changed = QtCore.Signal()
+    display_range_changed = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
@@ -134,6 +135,20 @@ class SpatialFootprintState(QtCore.QObject):
         self.hovered_stim_id = None
         self.active_stim_ids = frozenset()
         self.data_changed.emit()
+
+    @property
+    def display_range(self) -> tuple[int, int] | None:
+        """The FOV brightness/contrast window, persisted with the project
+        via `CellposeImportResult.display_range` (None = unadjusted)."""
+        if self.cellpose_data is None:
+            return None
+        return self.cellpose_data.display_range
+
+    def set_display_range(self, display_range: tuple[int, int] | None) -> None:
+        if self.cellpose_data is None or display_range == self.display_range:
+            return
+        self.cellpose_data.display_range = display_range
+        self.display_range_changed.emit()
 
     def _set_selected(self, new_selected: set[int]) -> None:
         old_greyed = self.greyed_cellpose_ids

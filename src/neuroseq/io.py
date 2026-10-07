@@ -196,6 +196,11 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                             else str(obj.segmentation_path)
                         ),
                         "background_image": background_image_path,
+                        "display_range": (
+                            None
+                            if obj.display_range is None
+                            else [int(v) for v in obj.display_range]
+                        ),
                     }
                 case b2.Quantity():
                     value, unit = quantity_to_value_unit_str(obj)
@@ -361,6 +366,14 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                         None if segmentation_path is None else Path(segmentation_path)
                     ),
                     background_image=loaded_background_image,
+                    display_range=(
+                        None
+                        if rest.get("display_range") is None
+                        else (
+                            int(rest["display_range"][0]),
+                            int(rest["display_range"][1]),
+                        )
+                    ),
                 )
             case {
                 "!CellposeImportResult": True,
