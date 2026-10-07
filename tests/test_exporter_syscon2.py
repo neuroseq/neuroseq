@@ -1249,6 +1249,25 @@ def test_resample_stim_values_to_dt_rejects_non_2d_input() -> None:
         resample_stim_values_to_dt(stim_array, new_dt=0.002)
 
 
+def test_resample_stim_values_to_dt_handles_zero_timepoints() -> None:
+    """Regression: n_old=0 used to force n_new=max(1, round(0/new_dt))=1, then
+    index the empty array with np.clip(idx, 0, -1) -> IndexError, before the
+    caller's own "invalid input" sanity check ever got a chance to run."""
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.zeros((10, 2), dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    stim_array.values = np.zeros((0, 2), dtype=np.float32)  # set after construction
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.002)
+
+    assert n_new == 0
+    assert new_values.shape == (0, 2)
+
+
 def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None:
     values = np.zeros((72, 2), dtype=np.float32)
     values[0:3, 0] = 1.0

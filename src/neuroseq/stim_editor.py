@@ -600,6 +600,23 @@ class StimEditor(QtWidgets.QWidget):
             and displayed_values is not None
             and displayed_values.shape != target_modifier.stim_array.values.shape
         )
+        # Distinct from shape_changed above: that's also true on an ordinary
+        # switch between two different (and differently-shaped) stims, where
+        # the target's own undo history is still perfectly valid. Only the
+        # in-place-resample case - same modifier already selected, shape
+        # changed under it - needs the history cleared: ReversibleAction
+        # records absolute sample-index slices against the OLD array shape
+        # (see its __init__), so undoing one after a resample would misapply
+        # old-shaped data into the new, differently-shaped array.
+        resampled_in_place = (
+            target_modifier is not None
+            and self.current_stim_modifier is target_modifier
+            and shape_changed
+        )
+        if resampled_in_place:
+            assert target_modifier is not None
+            target_modifier.action_stack = []
+            target_modifier.current_index = -1
         if target_modifier is not None and (
             self.current_stim_modifier != target_modifier or shape_changed
         ):

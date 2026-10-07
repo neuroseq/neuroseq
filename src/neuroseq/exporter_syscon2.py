@@ -2351,6 +2351,11 @@ def resample_stim_values_to_dt(
 
     old_dt = float(stim_array.dt)
     n_old = stim_array.values.shape[0]
+    if n_old == 0:
+        return (
+            np.zeros((0, stim_array.values.shape[1]), dtype=np.float32),
+            0,
+        )
     duration_s = n_old * old_dt
     n_new = max(1, int(round(duration_s / new_dt)))
     new_sample_times = np.arange(n_new) * new_dt

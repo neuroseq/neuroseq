@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import sys
 import threading
 
@@ -10,6 +11,13 @@ import neuroseq.syscon2_connection_manager as connection_manager_module
 from neuroseq.syscon2_client import SysCon2ConnectionError
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
 from neuroseq.syscon2_protocol import encode_string
+
+# A string response whose declared length (DWord header) is honored, but whose
+# payload byte isn't 7-bit ASCII - read_string() raises SysCon2ProtocolError
+# for this (manual framing is otherwise intact, unlike SysCon2ConnectionError's
+# transport-level failures), simulating a malformed/corrupted response rather
+# than a truncated or dropped pipe.
+_MALFORMED_RESPONSE = struct.pack("<I", 1) + b"\xff"
 
 
 class FakeTransport:
@@ -167,6 +175,51 @@ def test_submit_connection_error_disconnects(
 
     assert "pipe broke" in blocker.args[0]
     assert failed_seen == [("run", "pipe broke")]
+
+
+def test_submit_malformed_response_disconnects(
+    manager: SysCon2ConnectionManager, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: a malformed (non-ASCII) response raises SysCon2ProtocolError,
+    not SysCon2ConnectionError - but SysCon2Client._request() already closed the
+    transport before re-raising, so the manager must disconnect for this case
+    too, not just for SysCon2ConnectionError. Otherwise _client stays set and
+    every later command/poll silently fails against the already-closed pipe
+    with no reconnect prompt."""
+    monkeypatch.setattr(
+        connection_manager_module,
+        "NamedPipeTransport",
+        lambda: FakeTransport([_MALFORMED_RESPONSE]),
+    )
+    with qtbot.waitSignal(manager.connected, timeout=2000):
+        manager.connect_to_syscon2()
+
+    failed_seen: list[tuple[str, str]] = []
+    manager.command_failed.connect(lambda name, msg: failed_seen.append((name, msg)))
+
+    with qtbot.waitSignal(manager.disconnected, timeout=2000):
+        manager.submit("get_state", lambda client: client.holo4d.get_state())
+
+    assert len(failed_seen) == 1
+    assert failed_seen[0][0] == "get_state"
+
+
+def test_polling_malformed_response_disconnects(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        connection_manager_module,
+        "NamedPipeTransport",
+        lambda: FakeTransport([_MALFORMED_RESPONSE] * 10),
+    )
+    mgr = SysCon2ConnectionManager(poll_interval_ms=20)
+    try:
+        with qtbot.waitSignal(mgr.connected, timeout=2000):
+            mgr.connect_to_syscon2()
+        with qtbot.waitSignal(mgr.disconnected, timeout=2000):
+            pass
+    finally:
+        mgr.shutdown()
 
 
 def test_disconnect_closes_transport(

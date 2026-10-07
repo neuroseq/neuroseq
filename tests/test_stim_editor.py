@@ -1079,6 +1079,103 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
     assert set_data_calls[0].shape == (2266, 10)
 
 
+def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> None:
+    """Regression: ReversibleAction (stim_array_modifier.py) records absolute
+    sample-index slices against the array's shape at the time of the edit.
+    After an in-place resample, the modifier's pre-resample undo stack still
+    references the OLD shape - undoing one would misapply old-shaped data
+    into the new, differently-shaped array. select_stim() must drop that
+    history, not just refresh the widget, for the same "same modifier,
+    shape changed under it" case."""
+    modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((2266, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+        action_stack=["some_pre_resample_action"],
+        current_index=0,
+    )
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+        data_values=np.zeros((1180, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": modifier},
+        current_stim_modifier=modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
+
+    assert modifier.action_stack == []
+    assert modifier.current_index == -1
+
+
+def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
+    """The undo-history clear above must be specific to the in-place-resample
+    case - an ordinary switch to a genuinely different (and differently
+    shaped) stim must leave that stim's own undo history untouched."""
+    old_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((100, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+    )
+    new_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "b",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((50, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+        action_stack=["an_existing_action"],
+        current_index=0,
+    )
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+        data_values=np.zeros((100, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": old_modifier, "b": new_modifier},
+        current_stim_modifier=old_modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "b")  # type: ignore[arg-type]
+
+    assert new_modifier.action_stack == ["an_existing_action"]
+    assert new_modifier.current_index == 0
+
+
 def test_create_stim_array_defaults_to_selected_stim_dt(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:

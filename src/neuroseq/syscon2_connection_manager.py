@@ -17,6 +17,8 @@ from qtpy import QtCore
 from neuroseq.syscon2_client import NamedPipeTransport
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_client import SysCon2ConnectionError
+from neuroseq.syscon2_protocol import SysCon2Error
+from neuroseq.syscon2_protocol import SysCon2ProtocolError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +80,25 @@ class SysCon2ConnectionManager(QtCore.QObject):
         self._request_command.emit(name, fn)
 
     def shutdown(self) -> None:
-        """Disconnect and stop the worker thread. Call from the GUI's ``closeEvent``."""
+        """Disconnect and stop the worker thread. Call from the GUI's ``closeEvent``.
+
+        Known limitation: ``_request_disconnect`` is a queued signal, delivered only once
+        the worker thread's event loop regains control - but if SysCon2 has stopped
+        responding mid-command/poll, the worker is blocked inside
+        ``NamedPipeTransport.recv()``'s synchronous ``file.read()``, which has no timeout
+        and isn't interrupted by ``QThread.quit()``. The ``wait(2000)`` below bounds how
+        long *this* (GUI) thread can be blocked waiting for it, but if it times out, the
+        worker thread, its open pipe handle, and the stuck read are simply abandoned (not
+        forcibly torn down) - this method just stops waiting and returns, rather than
+        risking a real fix's failure mode: closing the file handle from this thread while
+        the worker has a pending synchronous read on it is documented Win32 behavior as
+        unsafe (can hang or corrupt the reading thread, not just fail cleanly), so it's
+        deliberately not attempted here. A real fix needs cancellable I/O the stdlib
+        ``open()`` on a named pipe doesn't provide - e.g. overlapped I/O with
+        ``CancelIoEx``, or polling via ``ctypes``/``PeekNamedPipe`` between bounded reads -
+        either way, new Win32-interop code that needs a real Windows + SysCon2 setup to
+        verify, not something to guess at from this codebase alone.
+        """
         self._request_disconnect.emit()
         self._thread.quit()
         if not self._thread.wait(2000):
@@ -133,6 +153,21 @@ class SysCon2ConnectionManager(QtCore.QObject):
             self.command_failed.emit(name, str(exc))
             self.disconnected.emit(str(exc))
             return
+        except SysCon2Error as exc:
+            # A well-formed "Error: ..." application response (manual §2.1) -
+            # the pipe itself is still fine, so the connection stays up.
+            self.command_failed.emit(name, str(exc))
+            return
+        except SysCon2ProtocolError as exc:
+            # Malformed framing: SysCon2Client._request() already closed the
+            # transport before re-raising, so the connection must follow suit
+            # here too, or every later command/poll would silently keep
+            # trying (and failing) against a dead pipe with no reconnect
+            # prompt.
+            self._client = None
+            self.command_failed.emit(name, str(exc))
+            self.disconnected.emit(str(exc))
+            return
         except Exception as exc:
             self.command_failed.emit(name, f"{type(exc).__name__}: {exc}")
             return
@@ -148,8 +183,17 @@ class SysCon2ConnectionManager(QtCore.QObject):
             self._client = None
             self.disconnected.emit(str(exc))
             return
+        except SysCon2Error:
+            # A transient application-level error on the polling call isn't
+            # worth surfacing as a disconnect; just skip this tick and try
+            # again on the next one.
+            return
+        except SysCon2ProtocolError as exc:
+            # See _handle_command's matching except clause - the transport is
+            # already closed, so the connection must be torn down too.
+            self._client = None
+            self.disconnected.emit(str(exc))
+            return
         except Exception:
-            # A transient error on the polling call isn't worth surfacing as a disconnect;
-            # just skip this tick and try again on the next one.
             return
         self.state_changed.emit({"Holo4D": state})
