@@ -57,6 +57,7 @@ def generate_sequential(
     magnitude: float,
     dt_seconds: float,
     neuron_index: int | Sequence[int] | None = None,
+    repeats: int = 1,
 ) -> np.ndarray:
     """Fire each neuron in turn, each for pulse_ms separated by ipi_ms.
 
@@ -64,12 +65,15 @@ def generate_sequential(
     (the original "all neurons" behavior). Otherwise only the given
     column(s) fire, each once, in the given order - e.g. [5, 2, 7] fires
     neuron 5, then 2, then 7.
+
+    The whole sequence is played `repeats` times back to back (#586); each
+    repeat ends with its trailing inter-pulse interval, like a single pass.
     """
     pulse_n, ipi_n = _validate_common(
         n_neurons=n_neurons,
         pulse_ms=pulse_ms,
         ipi_ms=ipi_ms,
-        repeats=1,
+        repeats=repeats,
         dt_seconds=dt_seconds,
     )
     indices = (
@@ -77,11 +81,12 @@ def generate_sequential(
         if neuron_index is None
         else _normalize_neuron_indices(neuron_index, n_neurons)
     )
-    total_n = len(indices) * (pulse_n + ipi_n)
-    values = np.zeros((total_n, n_neurons), dtype=float)
-    for order, idx in enumerate(indices):
-        t0 = order * (pulse_n + ipi_n)
-        values[t0 : t0 + pulse_n, idx] = magnitude
+    pass_n = len(indices) * (pulse_n + ipi_n)
+    values = np.zeros((repeats * pass_n, n_neurons), dtype=float)
+    for repeat_index in range(repeats):
+        for order, idx in enumerate(indices):
+            t0 = repeat_index * pass_n + order * (pulse_n + ipi_n)
+            values[t0 : t0 + pulse_n, idx] = magnitude
     return values
 
 

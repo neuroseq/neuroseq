@@ -443,18 +443,36 @@ def test_dialog_apply_sequential_specific_neurons_writes_only_those_columns(
         assert np.all(project.stim_arrays["a"].values[:, col] == 0.0)
 
 
-def test_dialog_sequential_hides_repeats_in_both_scopes(qtbot: QtBot) -> None:
+def test_dialog_sequential_shows_repeats_in_both_scopes(qtbot: QtBot) -> None:
     editor, project = _make_editor(qtbot)
     dialog = _open_dialog(editor)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_sequential.setChecked(True)
-    assert not dialog.lbl_repeats.isVisible()
+    assert dialog.lbl_repeats.isVisible()
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("0")
     dialog.radio_sequential.setChecked(True)
-    assert not dialog.lbl_repeats.isVisible()
+    assert dialog.lbl_repeats.isVisible()
+
+
+def test_dialog_sequential_repeats_replay_the_whole_sequence(qtbot: QtBot) -> None:
+    """#586: Repeats on a sequential pattern plays the sequence N times."""
+    editor, project = _make_editor(qtbot, length_samples=4000)
+    dialog = _open_dialog(editor)
+
+    dialog.radio_scope_all.setChecked(True)
+    dialog.radio_sequential.setChecked(True)
+    dialog.spin_repeats.setValue(3)
+    dialog.btn_apply.click()
+
+    expected = generate_sequential(10, 100, 18, 1.0, 0.001, repeats=3)
+    assert expected.shape[0] == 3 * 1180
+    np.testing.assert_allclose(
+        project.stim_arrays["a"].values[: expected.shape[0], :], expected
+    )
+    assert dialog.spin_start_time_ms.value() == 3540.0
 
 
 def _second_project() -> Project:

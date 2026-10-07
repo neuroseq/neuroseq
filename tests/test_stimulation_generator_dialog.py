@@ -1144,3 +1144,40 @@ def test_stimulation_generator_dialog_applies_pulse_overrun_fix_when_clicked(
     dialog.check_sanity_button.click()
 
     assert np.array_equal(project.stim_arrays["stim"].values, fix_values)
+
+
+def _two_array_project() -> Project:
+    project = _build_project(np.zeros((40, 1), dtype=np.float32), mapping={0: 0})
+    project.add_stim_array(
+        StimArray(
+            name="second",
+            stim_type=StimType.Excitation,
+            values=np.zeros((40, 1), dtype=np.float32),
+            units="1",
+            dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
+        )
+    )
+    return project
+
+
+def test_stimulation_generator_dialog_preselects_the_current_input_array(
+    qtbot: QtBot,
+) -> None:
+    """#588: don't default to the first array created."""
+    dialog = StimulationGeneratorDialog(
+        _two_array_project(), current_stim_name="second"
+    )
+    qtbot.addWidget(dialog)
+
+    assert dialog.stim_combo.currentText() == "second"
+
+
+def test_stimulation_generator_dialog_defaults_to_first_without_a_current_array(
+    qtbot: QtBot,
+) -> None:
+    for current in (None, "not-a-project-array"):
+        dialog = StimulationGeneratorDialog(
+            _two_array_project(), current_stim_name=current
+        )
+        qtbot.addWidget(dialog)
+        assert dialog.stim_combo.currentText() == "stim"

@@ -2540,7 +2540,12 @@ class Gui(QtWidgets.QMainWindow):
 
     def open_stimulation_generator_dialog(self) -> None:
         """Open the stimulation script generator dialog."""
-        dialog = StimulationGeneratorDialog(self.project, parent=self)
+        modifier = self.stim_editor.current_stim_modifier
+        dialog = StimulationGeneratorDialog(
+            self.project,
+            parent=self,
+            current_stim_name=(None if modifier is None else modifier.stim_array.name),
+        )
         dialog.exec()
 
     # Import stimulus wrappers

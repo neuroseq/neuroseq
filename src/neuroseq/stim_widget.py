@@ -487,6 +487,13 @@ class StimWidget(TimeseriesWidget):
             alpha=0.25,
         )
         if minimum_graphic is not None:
+            # _add_minimum_size_graphic only knows about "keep short inputs
+            # visible"; a background array's indicator must also respect
+            # "Show all input arrays", or switching input arrays brings every
+            # other array's short-input marks back while that is off (#585).
+            minimum_graphic.visible = (
+                self.keep_short_stimuli_visible and self.show_background_graphics
+            )
             self._background_minimum_size_graphics.append(minimum_graphic)
         units_str = "" if stim_array.units == "1" else str(stim_array.units)
         self._background_stim_arrays.append(

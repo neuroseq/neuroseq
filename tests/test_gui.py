@@ -4636,3 +4636,38 @@ def test_toolbar_progress_does_not_auto_hide_at_maximum(qtbot: QtBot) -> None:
     pd.reset()
     assert pd.isHidden()
     gui.close()
+
+
+def test_gui_export_dialog_opens_on_the_current_input_array(
+    monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
+) -> None:
+    """#588: the stimulation export dialog preselects the input array open
+    in the editor, not the first one created."""
+    import neuroseq.gui as gui_module
+
+    test_project.add_stim_array(
+        StimArray(
+            "second_stim",
+            StimType.Excitation,
+            np.zeros((100, 3), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.load_project(test_project)
+    gui.stim_editor.cmb_stim.setCurrentText("second_stim")
+    opened: list[str] = []
+
+    class RecordingDialog(gui_module.StimulationGeneratorDialog):
+        def exec(self) -> int:
+            opened.append(self.stim_combo.currentText())
+            return 0
+
+    monkeypatch.setattr(gui_module, "StimulationGeneratorDialog", RecordingDialog)
+
+    gui.open_stimulation_generator_dialog()
+
+    assert opened == ["second_stim"]
+    gui.close()

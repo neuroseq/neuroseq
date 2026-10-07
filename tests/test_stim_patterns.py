@@ -396,3 +396,24 @@ def test_parse_neuron_indices_non_integer_raises() -> None:
 def test_parse_neuron_indices_out_of_range_raises() -> None:
     with pytest.raises(ValueError):
         parse_neuron_indices("0, 10", 10)
+
+
+def test_generate_sequential_repeats_tile_the_whole_sequence() -> None:
+    single = generate_sequential(3, 10, 5, 1.0, 0.001)
+    repeated = generate_sequential(3, 10, 5, 1.0, 0.001, repeats=2)
+
+    assert repeated.shape[0] == 2 * single.shape[0]
+    np.testing.assert_array_equal(repeated[: single.shape[0]], single)
+    np.testing.assert_array_equal(repeated[single.shape[0] :], single)
+
+
+def test_generate_sequential_repeats_with_specific_neurons() -> None:
+    single = generate_sequential(5, 10, 5, 1.0, 0.001, neuron_index=[4, 1])
+    repeated = generate_sequential(5, 10, 5, 1.0, 0.001, neuron_index=[4, 1], repeats=3)
+
+    np.testing.assert_array_equal(repeated, np.tile(single, (3, 1)))
+
+
+def test_generate_sequential_rejects_zero_repeats() -> None:
+    with pytest.raises(ValueError, match="repeats"):
+        generate_sequential(3, 10, 5, 1.0, 0.001, repeats=0)

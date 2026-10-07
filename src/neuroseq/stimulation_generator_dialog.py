@@ -53,7 +53,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        current_stim_name: str | None = None,
     ) -> None:
+        """`current_stim_name` is the input array the user has open in the
+        editor; it is preselected so exporting doesn't default to the first
+        array created (#588). Ignored if it isn't one of the project's."""
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
@@ -87,6 +91,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         if stim_names:
             for name in stim_names:
                 self.stim_combo.addItem(name)
+            if current_stim_name in stim_names:
+                self.stim_combo.setCurrentText(current_stim_name)
         else:
             self.stim_combo.addItem("(No input arrays available)")
             self.stim_combo.setEnabled(False)

@@ -288,8 +288,6 @@ class StimPatternDialog(_SelfRaisingDialog):
         # value pair" (Ramp, and Linear gradient in specific scope).
         uses_value_pair = is_ramp or (is_specific and self.radio_linear.isChecked())
         uses_single_magnitude = not uses_value_pair
-        # generate_sequential() has no repeats concept in either scope.
-        uses_repeats = not self.radio_sequential.isChecked()
         uses_pulse_repetitions = is_all and self.radio_fuer_elise.isChecked()
 
         self._set_row_visible(
@@ -297,7 +295,6 @@ class StimPatternDialog(_SelfRaisingDialog):
         )
         self._set_row_visible(self.lbl_value1, self.spin_value1, uses_value_pair)
         self._set_row_visible(self.lbl_value2, self.spin_value2, uses_value_pair)
-        self._set_row_visible(self.lbl_repeats, self.spin_repeats, uses_repeats)
         self._set_row_visible(
             self.lbl_pulse_repetitions,
             self.spin_pulse_repetitions,
@@ -400,6 +397,7 @@ class StimPatternDialog(_SelfRaisingDialog):
                     magnitude=float(self.spin_magnitude.value()),
                     dt_seconds=dt_seconds,
                     neuron_index=neuron_indices,
+                    repeats=repeats,
                 )
             elif self.radio_scope_all.isChecked():
                 if self.radio_simultaneous.isChecked():
