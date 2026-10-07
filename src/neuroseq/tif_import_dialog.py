@@ -33,6 +33,7 @@ from neuroseq.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
+from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.stim import StimArray
 
 
@@ -186,6 +187,7 @@ class _PipelineWorker(QtCore.QObject):
         self._stim_array = stim_array
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         handler = _QtLogHandler(self.log.emit)
         suite2p_logger = logging.getLogger("suite2p")

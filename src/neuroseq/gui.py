@@ -58,6 +58,7 @@ from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
+from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
@@ -199,6 +200,7 @@ class BackgroundIOWorker(QtCore.QObject):
         self._task = task
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _report(percent: int) -> None:
             with contextlib.suppress(Exception):
@@ -238,6 +240,7 @@ class ExternalSimWorker(QtCore.QObject):
         self._cancel_event = cancel_event
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _progress_cb(fraction: float) -> None:
             if self._cancel_event.is_set():
@@ -288,6 +291,7 @@ class EliseProtocolWorker(QtCore.QObject):
         self._cancel_event = cancel_event
 
     @QtCore.Slot()
+    @returns_to_main_thread
     def run(self) -> None:
         def _progress_cb(fraction: float) -> None:
             if self._cancel_event.is_set():
