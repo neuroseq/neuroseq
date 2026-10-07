@@ -455,3 +455,70 @@ def test_dialog_sequential_hides_repeats_in_both_scopes(qtbot: QtBot) -> None:
     dialog.edit_neuron_indices.setText("0")
     dialog.radio_sequential.setChecked(True)
     assert not dialog.lbl_repeats.isVisible()
+
+
+def _second_project() -> Project:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "other",
+            StimType.Excitation,
+            np.zeros((500, 10), dtype=np.float32),
+            "nS",
+            0.001,
+        )
+    )
+    return project
+
+
+def test_dialog_values_are_confined_to_their_project(qtbot: QtBot) -> None:
+    """#587: values entered in one project must not show up in another, and
+    must come back when switching back."""
+    editor, first = _make_editor(qtbot)
+    second = _second_project()
+    dialog = _open_dialog(editor)
+    dialog.spin_pulse_ms.setValue(250.0)
+    dialog.spin_ipi_ms.setValue(75.0)
+    dialog.spin_magnitude.setValue(3.5)
+    dialog.spin_start_time_ms.setValue(400.0)
+
+    editor.set_project(second)
+    assert dialog.spin_pulse_ms.value() == 100.0
+    assert dialog.spin_ipi_ms.value() == 18.0
+    assert dialog.spin_magnitude.value() == 1.0
+    assert dialog.spin_start_time_ms.value() == 0.0
+    dialog.spin_pulse_ms.setValue(5.0)
+
+    editor.set_project(first)
+    assert dialog.spin_pulse_ms.value() == 250.0
+    assert dialog.spin_ipi_ms.value() == 75.0
+    assert dialog.spin_magnitude.value() == 3.5
+    assert dialog.spin_start_time_ms.value() == 400.0
+
+    editor.set_project(second)
+    assert dialog.spin_pulse_ms.value() == 5.0
+
+
+def test_dialog_values_survive_refreshing_the_same_project(qtbot: QtBot) -> None:
+    editor, project = _make_editor(qtbot)
+    dialog = _open_dialog(editor)
+    dialog.spin_pulse_ms.setValue(250.0)
+
+    editor.set_project(project)
+
+    assert dialog.spin_pulse_ms.value() == 250.0
+
+
+def test_dialog_opened_after_switching_starts_from_the_project_state(
+    qtbot: QtBot,
+) -> None:
+    editor, first = _make_editor(qtbot)
+    second = _second_project()
+    second.static_input_state = {"pulse_ms": 42.0, "scope_specific": True}
+
+    editor.set_project(second)
+    dialog = _open_dialog(editor)
+
+    assert dialog.spin_pulse_ms.value() == 42.0
+    assert dialog.radio_scope_specific.isChecked()
+    assert dialog.spin_ipi_ms.value() == 18.0

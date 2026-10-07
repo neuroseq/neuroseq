@@ -169,6 +169,16 @@ class StimEditor(QtWidgets.QWidget):
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
+        outgoing_project = self.project
+        project_changed = outgoing_project is not project
+        pattern_dialog = getattr(self, "_pattern_dialog", None)
+        if pattern_dialog is not None and project_changed:
+            # The Design static input dialog is one cached window shared by
+            # every open project; keep each project's own entered values
+            # with it instead of letting them leak across (#587).
+            if outgoing_project is not None:
+                outgoing_project.static_input_state = pattern_dialog.capture_state()
+            pattern_dialog.restore_state(project.static_input_state)
         self.project = project
         self.project.update_limits()
         if self.current_stim_modifier is not None and keep_undo_history:
@@ -1233,6 +1243,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         if self._pattern_dialog is None:
             self._pattern_dialog = StimPatternDialog(self)
+            self._pattern_dialog.restore_state(self.project.static_input_state)
         self._pattern_dialog.set_context(self._current_pattern_context())
         self._pattern_dialog.show()
         self._pattern_dialog.raise_()
