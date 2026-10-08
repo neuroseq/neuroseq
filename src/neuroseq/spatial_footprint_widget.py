@@ -167,15 +167,6 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_shapes_checkbox.setEnabled(False)
         self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_shapes_checkbox)
-        self.brightness_contrast_button = QtWidgets.QPushButton("Brightness/Contrast…")
-        self.brightness_contrast_button.setToolTip(
-            "Adjust the display brightness/contrast of the FOV image "
-            "(display only - the image data is not changed)"
-        )
-        self.brightness_contrast_button.clicked.connect(
-            self._show_brightness_contrast_dialog
-        )
-        checkbox_layout.addWidget(self.brightness_contrast_button)
         self.show_targets_checkbox = QtWidgets.QCheckBox("Show targets")
         self.show_targets_checkbox.setChecked(True)
         self.show_targets_checkbox.setToolTip(
@@ -186,6 +177,15 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._update_target_overlay_visibility
         )
         checkbox_layout.addWidget(self.show_targets_checkbox)
+        self.brightness_contrast_button = QtWidgets.QPushButton("Brightness/Contrast…")
+        self.brightness_contrast_button.setToolTip(
+            "Adjust the display brightness/contrast of the FOV image "
+            "(display only - the image data is not changed)"
+        )
+        self.brightness_contrast_button.clicked.connect(
+            self._show_brightness_contrast_dialog
+        )
+        checkbox_layout.addWidget(self.brightness_contrast_button)
         checkbox_layout.addStretch(1)
         self.checkbox_container = QtWidgets.QWidget()
         self.checkbox_container.setLayout(checkbox_layout)

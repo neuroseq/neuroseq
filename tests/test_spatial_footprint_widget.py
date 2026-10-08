@@ -1932,3 +1932,18 @@ def test_segmentation_legend_colors_match_trace_widget_for_non_zero_ids() -> Non
     for neuron_id, expected_rgb in zip(neuron_ids, expected, strict=False):
         actual_rgb = np.array(legend[int(neuron_id)]) / 255.0
         assert np.allclose(actual_rgb, expected_rgb[:3], atol=1 / 255)
+
+
+def test_show_targets_checkbox_sits_left_of_brightness_button(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    layout = widget.checkbox_container.layout()
+    assert layout is not None
+    order = [
+        layout.itemAt(i).widget()
+        for i in range(layout.count())
+        if layout.itemAt(i).widget() is not None
+    ]
+    assert order.index(widget.show_targets_checkbox) + 1 == order.index(
+        widget.brightness_contrast_button
+    )
