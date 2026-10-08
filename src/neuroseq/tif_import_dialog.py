@@ -10,6 +10,7 @@ import importlib.util
 import logging
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from collections.abc import Mapping
 from pathlib import Path
@@ -31,6 +32,7 @@ from neuroseq.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importer_tif import DEFAULT_FS
+from neuroseq.importer_tif import PipelineCancelled
 from neuroseq.importer_tif import TifPipelineParams
 from neuroseq.importer_tif import TifPipelineResult
 from neuroseq.qt_threading import returns_to_main_thread
@@ -170,6 +172,7 @@ class _PipelineWorker(QtCore.QObject):
     log = QtCore.Signal(str)
     finished = QtCore.Signal(object)  # TifPipelineResult
     failed = QtCore.Signal(str)
+    cancelled = QtCore.Signal()
 
     def __init__(
         self,
@@ -185,6 +188,11 @@ class _PipelineWorker(QtCore.QObject):
         self._params = params
         self._pipeline = pipeline
         self._stim_array = stim_array
+        self._cancel_requested = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the pipeline to stop at its next progress checkpoint."""
+        self._cancel_requested.set()
 
     @QtCore.Slot()
     @returns_to_main_thread
@@ -202,6 +210,8 @@ class _PipelineWorker(QtCore.QObject):
             # Imported here so test environments without suite2p can still import
             # this module.
             def callback(msg: str, frac: float) -> None:
+                if self._cancel_requested.is_set():
+                    raise PipelineCancelled
                 self.progress.emit(msg, float(frac))
 
             if self._pipeline == "roi_average":
@@ -223,6 +233,8 @@ class _PipelineWorker(QtCore.QObject):
                     self._tif_paths, self._masks, self._params, progress=callback
                 )
             self.finished.emit(result)
+        except PipelineCancelled:
+            self.cancelled.emit()
         except Exception as exc:
             logging.getLogger(__name__).exception("Calcium extraction pipeline failed")
             self.failed.emit(str(exc))
@@ -272,9 +284,9 @@ class _PipelineProgressDialog(QtWidgets.QDialog):
 
         buttons = QtWidgets.QHBoxLayout()
         buttons.addStretch(1)
-        cancel_button = QtWidgets.QPushButton(cancel_text)
-        cancel_button.clicked.connect(self.canceled.emit)
-        buttons.addWidget(cancel_button)
+        self._cancel_button = QtWidgets.QPushButton(cancel_text)
+        self._cancel_button.clicked.connect(self.canceled.emit)
+        buttons.addWidget(self._cancel_button)
         layout.addLayout(buttons)
 
     def _toggle_details(self, expanded: bool) -> None:
@@ -288,6 +300,9 @@ class _PipelineProgressDialog(QtWidgets.QDialog):
 
     def setLabelText(self, text: str) -> None:
         self._label.setText(text)
+
+    def setCancelEnabled(self, enabled: bool) -> None:
+        self._cancel_button.setEnabled(enabled)
 
     def setValue(self, value: int) -> None:
         self._bar.setValue(value)
@@ -327,6 +342,7 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._thread: QtCore.QThread | None = None
         self._worker: _PipelineWorker | None = None
+        self._reject_after_thread_exit = False
         self._progress_dialog: _PipelineProgressDialog | None = None
         self._wheel_passthrough_widgets: set[QtCore.QObject] = set()
 
@@ -835,8 +851,10 @@ class TifImportDialog(QtWidgets.QDialog):
         self._worker.log.connect(self._progress_dialog.appendLog)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.cancelled.connect(self._thread.quit)
         self._thread.finished.connect(self._cleanup_thread)
         self._thread.start()
 
@@ -869,20 +887,43 @@ class TifImportDialog(QtWidgets.QDialog):
         self._run_button.setEnabled(True)
 
     def _cancel_pipeline(self) -> None:
-        # Suite2p is not cooperatively cancellable from outside; we let it finish
-        # but mark the dialog as rejected so results are dropped.
-        if self._thread is not None and self._thread.isRunning():
-            self.logger.info("Pipeline cancel requested — results will be discarded")
-            self._worker = None  # results will be ignored on finished signal
+        # The worker stops at its next progress checkpoint. The dialog must stay
+        # alive until the thread has exited: destroying a running QThread aborts
+        # the whole process.
+        if self._worker is None or self._thread is None or not self._thread.isRunning():
+            if self._progress_dialog is not None:
+                self._progress_dialog.close()
+            self.reject()
+            return
+        self.logger.info("Pipeline cancel requested")
+        self._worker.cancel()
+        if self._progress_dialog is not None:
+            self._progress_dialog.setCancelEnabled(False)
+            self._progress_dialog.setLabelText("Cancelling… finishing current step")
+
+    @QtCore.Slot()
+    def _on_cancelled(self) -> None:
         if self._progress_dialog is not None:
             self._progress_dialog.close()
-        self.reject()
+        self._run_button.setEnabled(True)
+        # Reject once the thread has fully exited (see _cleanup_thread).
+        self._reject_after_thread_exit = True
+
+    def reject(self) -> None:
+        # Block closing the dialog while the worker thread is still running.
+        if self._thread is not None and self._thread.isRunning():
+            self._cancel_pipeline()
+            return
+        super().reject()
 
     def _cleanup_thread(self) -> None:
         if self._thread is not None:
             self._thread.deleteLater()
             self._thread = None
         self._worker = None
+        if self._reject_after_thread_exit:
+            self._reject_after_thread_exit = False
+            super().reject()
 
     # -- Finalisation -------------------------------------------------------
     def _finalize_import(self, result: TifPipelineResult) -> None:

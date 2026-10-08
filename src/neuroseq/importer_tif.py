@@ -71,6 +71,10 @@ class TifPipelineResult:
 ProgressCallback = Callable[[str, float], None]
 
 
+class PipelineCancelled(Exception):
+    """Raised from a progress callback to abort a running pipeline cleanly."""
+
+
 def _noop_progress(_message: str, _fraction: float) -> None:
     return None
 
@@ -146,11 +150,16 @@ def run_roi_average_pipeline(
             )
         if first_stack is None:
             first_stack = stack
-        trace_parts.append(
-            np.vstack(
-                [stack[:, masks == label].mean(axis=1) for label in labels]
-            ).astype(np.float32)
-        )
+        rows = []
+        for label_index, label in enumerate(labels):
+            # Reported per ROI so a cancel request is honoured promptly even
+            # for large stacks.
+            progress(
+                f"Averaging ROIs in {path.name}",
+                (index + label_index / len(labels)) / len(tif_paths),
+            )
+            rows.append(stack[:, masks == label].mean(axis=1))
+        trace_parts.append(np.vstack(rows).astype(np.float32))
 
     F = np.concatenate(trace_parts, axis=1)
     contaminated_frames = np.array([], dtype=np.int64)
