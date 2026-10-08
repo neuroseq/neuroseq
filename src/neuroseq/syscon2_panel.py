@@ -22,6 +22,7 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.stim import StimArray
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
+from neuroseq.stimulation_generator_dialog import next_default_export_name
 from neuroseq.syscon2_client import LightsourceStatus
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
@@ -634,7 +635,7 @@ class SysCon2Panel(QtWidgets.QWidget):
                 stim_array,
                 self._export_settings,
                 self.stimulation_host.output_dir,
-                f"{stim_array.name}_current",
+                next_default_export_name(self.stimulation_host.output_dir),
                 confirm_warnings=lambda warnings: self._confirm(
                     "Review export changes:\n" + "\n".join(warnings)
                 ),

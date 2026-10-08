@@ -72,7 +72,7 @@ following details matter when testing the current implementation.
    confirmation. Closing the shutter is immediate. Emission OFF currently also
    asks for confirmation.
 6. Edit the array and test **Export current array to SysCon2**. It reuses the last
-   dialog export's settings but writes `<array name>_current.seq` and its diagnostic
+   dialog export's settings but writes `export_seq_<date>_<n>.seq` and its diagnostic
    files to a temporary directory, not the dialog's chosen output folder. It
    opens the full export dialog if settings are unavailable. As above, verify
    the import, then select/upload again before running the changed sequence.

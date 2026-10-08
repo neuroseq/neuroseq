@@ -628,3 +628,21 @@ def test_panel_text_uses_stimulation_setup_wording(panel):
     assert "SysCon2" not in panel.btn_export_current.text()
     assert "SysCon2" not in panel.btn_export_current.toolTip()
     assert "SysCon2" not in panel.btn_connect.toolTip()
+
+
+def test_quick_export_uses_dated_numbered_name(panel, mocker, tmp_path):
+    panel.set_project(Project())
+    panel._export_settings = _settings()
+    panel.set_current_stim_provider(
+        lambda: StimArray("a", StimType.External, np.ones((4, 2)), "", 0.001)
+    )
+    result = SysconExportResult(
+        tmp_path / "a.seq", tmp_path / "a.png", frozenset(), mocker.Mock()
+    )
+    export = mocker.patch.object(
+        syscon2_panel_module, "export_stim_array", return_value=result
+    )
+    mocker.patch.object(panel, "_on_dialog_sequence_generated")
+    panel._on_export_current_clicked()
+    name = export.call_args.args[4]
+    assert name.startswith("export_seq_") and name.endswith("_1")
