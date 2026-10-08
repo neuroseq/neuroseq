@@ -845,3 +845,43 @@ def test_syscon2_picks_up_newly_imported_trace_without_manual_selection(qtbot) -
     dialog.btn_data_imported.click()
 
     assert dialog._last_measured_dataset == "after"
+
+
+def test_syscon2_first_probe_rejects_existing_trace_and_picks_new_import(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["old"] = project.trace
+    dialog.refresh()
+    dialog.cmb_trace.setCurrentText("old")
+    dialog.start()
+    dialog.btn_data_imported.click()
+    assert dialog._running
+    assert len(host.sent) == 1
+    assert dialog.btn_data_imported.isEnabled()
+    _import_calcium(project, dialog, "new", 1.0)
+    dialog.cmb_trace.setCurrentText("old")
+    dialog.btn_data_imported.click()
+    assert dialog._last_measured_dataset == "new"
+    assert len(host.sent) == 2
+
+
+def test_syscon2_accepts_replacement_trace_with_same_name(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["recording"] = project.trace
+    dialog.refresh()
+    dialog.cmb_trace.setCurrentText("recording")
+    dialog.start()
+    _import_calcium(project, dialog, "recording", 1.0)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 2
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 3
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 3
+    _import_calcium(project, dialog, "recording", 1.5)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) > 3
+
+
+def test_syscon2_does_not_accept_simulation_data_as_an_import(qtbot):
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert not dialog._is_fresh_dataset("Simulation :: P / v")

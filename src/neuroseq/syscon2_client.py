@@ -10,9 +10,12 @@ network-bridge transport).
 from __future__ import annotations
 
 import contextlib
+import importlib
 import sys
-import typing
+import threading
+import time
 from dataclasses import dataclass
+from typing import Any
 from typing import Protocol
 
 from neuroseq.syscon2_protocol import Reader
@@ -45,48 +48,113 @@ class Transport(Protocol):
 
 
 class NamedPipeTransport:
-    """Opens ``\\\\.\\pipe\\<pipe_name>`` directly -- Windows treats a named pipe as a regular
-    file path, so plain ``open()``/``read()``/``write()`` works without ``pywin32``/``ctypes``.
+    """Local Windows pipe with cancellable overlapped I/O and a command deadline.
+
+    Uses CPython's Windows API wrapper, as multiprocessing.connection does. Pending
+    operations are cancelled and reaped on the worker before releasing their buffers.
+    The 30-second default allows slow device commands (SCI manual section 2.1);
+    disconnect and shutdown can still cancel immediately.
     """
 
-    def __init__(self, pipe_name: str = PIPE_NAME) -> None:
+    _api: Any
+    _cancel_event: threading.Event
+    _timeout: float
+    _deadline: float
+    _handle: int | None
+
+    def __init__(self, pipe_name: str = PIPE_NAME, timeout: float = 30.0) -> None:
         if sys.platform != "win32":
             raise SysCon2UnavailableError("SysCon2 control requires Windows")
-        self._file: typing.BinaryIO
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        self._api = importlib.import_module("_winapi")
+        self._cancel_event = threading.Event()
+        self._timeout = timeout
+        self._deadline = time.monotonic() + timeout
+        self._handle: int | None = None
         try:
-            self._file = open(f"\\\\.\\pipe\\{pipe_name}", "r+b", buffering=0)  # noqa: SIM115
+            self._handle = self._api.CreateFile(
+                rf"\\.\pipe\{pipe_name}",
+                self._api.GENERIC_READ | self._api.GENERIC_WRITE,
+                0,
+                0,
+                self._api.OPEN_EXISTING,
+                self._api.FILE_FLAG_OVERLAPPED,
+                0,
+            )
         except OSError as exc:
             raise SysCon2ConnectionError(
                 f"Could not open the SysCon2 named pipe {pipe_name!r} -- is SysCon2 running?"
             ) from exc
 
-    def send(self, data: bytes) -> None:
-        try:
-            self._file.write(data)
-        except OSError as exc:
+    def set_cancel_event(self, event: threading.Event) -> None:
+        self._cancel_event = event
+
+    def _check_deadline(self) -> None:
+        if self._cancel_event.is_set():
+            raise SysCon2ConnectionError("SysCon2 operation cancelled")
+        if time.monotonic() >= self._deadline:
             raise SysCon2ConnectionError(
-                f"Failed writing to the SysCon2 pipe: {exc}"
-            ) from exc
+                "SysCon2 command timed out; reconnect explicitly"
+            )
+
+    def _complete(self, operation: Any) -> int:
+        try:
+            while True:
+                self._check_deadline()
+                size, error = operation.GetOverlappedResult(False)
+                if error == 0:
+                    return int(size)
+                # ERROR_IO_INCOMPLETE is not exported by CPython's _winapi.
+                if error != 996:
+                    raise SysCon2ConnectionError(f"SysCon2 pipe I/O failed ({error})")
+                self._api.WaitForSingleObject(operation.event, 50)
+        except BaseException:
+            # Cancellation alone does not release the kernel's buffer references.
+            operation.cancel()
+            with contextlib.suppress(OSError):
+                operation.GetOverlappedResult(True)
+            raise
+
+    def send(self, data: bytes) -> None:
+        self._deadline = time.monotonic() + self._timeout
+        try:
+            offset = 0
+            while offset < len(data):
+                self._check_deadline()
+                operation, _ = self._api.WriteFile(
+                    self._handle, data[offset:], overlapped=True
+                )
+                written = self._complete(operation)
+                if not written:
+                    raise SysCon2ConnectionError("SysCon2 pipe closed unexpectedly")
+                offset += written
+        except OSError as exc:
+            raise SysCon2ConnectionError(f"Failed writing to SysCon2: {exc}") from exc
 
     def recv(self, n: int) -> bytes:
         chunks: list[bytes] = []
         remaining = n
-        while remaining > 0:
-            try:
-                chunk = self._file.read(remaining)
-            except OSError as exc:
-                raise SysCon2ConnectionError(
-                    f"Failed reading from the SysCon2 pipe: {exc}"
-                ) from exc
-            if not chunk:
-                raise SysCon2ConnectionError("SysCon2 pipe closed unexpectedly")
-            chunks.append(chunk)
-            remaining -= len(chunk)
+        try:
+            while remaining > 0:
+                self._check_deadline()
+                operation, _ = self._api.ReadFile(
+                    self._handle, min(remaining, 65536), overlapped=True
+                )
+                size = self._complete(operation)
+                if not size:
+                    raise SysCon2ConnectionError("SysCon2 pipe closed unexpectedly")
+                chunks.append(operation.getbuffer())
+                remaining -= size
+        except OSError as exc:
+            raise SysCon2ConnectionError(f"Failed reading from SysCon2: {exc}") from exc
         return b"".join(chunks)
 
     def close(self) -> None:
-        with contextlib.suppress(OSError):
-            self._file.close()
+        if self._handle is not None:
+            with contextlib.suppress(OSError):
+                self._api.CloseHandle(self._handle)
+            self._handle = None
 
 
 def _split_lines(text: str) -> list[str]:
@@ -253,6 +321,7 @@ class SequenceManagerCommands:
 
     These operate on ``.seq`` files already on disk (e.g. from ``exporter_syscon2``) rather than
     raw sequence data -- ``ImportSequence`` takes a filepath, not a byte payload.
+    The default instance name is specified in the Holo4D profile table (manual section 4).
     """
 
     def __init__(
@@ -331,6 +400,8 @@ class Holo4DCommands:
         return _parse_state(self._client.call_string(self._instance, "GetState"))
 
     def upload_sequence(self, runs: int) -> None:
+        # Manual section 3.5 calls Runs an "integer" without specifying its width;
+        # use the same DWord representation as UGA-42 pending rig verification.
         self._client.call_standard(self._instance, "UploadSequence", encode_dword(runs))
 
     def run_sequence(self, start_condition: str, trigger_behavior: str) -> None:

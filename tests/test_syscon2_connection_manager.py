@@ -256,3 +256,54 @@ def test_polling_emits_state_changed(
         assert states[0] == {"Holo4D": "Busy"}
     finally:
         mgr.shutdown()
+
+
+@pytest.mark.parametrize("action", ["disconnect", "shutdown"])
+def test_pending_io_is_cancelled_and_closed_on_worker(
+    manager, qtbot, monkeypatch, action
+):
+    entered = threading.Event()
+    closed_on = []
+
+    class CancellableTransport(FakeTransport):
+        def set_cancel_event(self, event):
+            self.cancel_event = event
+
+        def recv(self, n):
+            entered.set()
+            if not self.cancel_event.wait(3):
+                raise AssertionError("Cancellation did not reach the transport")
+            raise SysCon2ConnectionError("cancelled")
+
+        def close(self):
+            closed_on.append(threading.get_ident())
+            super().close()
+
+    transport = CancellableTransport([])
+    monkeypatch.setattr(
+        connection_manager_module, "NamedPipeTransport", lambda: transport
+    )
+    with qtbot.waitSignal(manager.connected, timeout=2000):
+        manager.connect_to_syscon2()
+    manager.submit("state", lambda client: client.holo4d.get_state())
+    qtbot.waitUntil(entered.is_set, timeout=2000)
+    if action == "shutdown":
+        manager.shutdown()
+        assert not manager._thread.isRunning()
+    else:
+        with qtbot.waitSignal(manager.disconnected, timeout=2000):
+            manager.disconnect_from_syscon2()
+    assert transport.closed
+    assert closed_on and all(t != threading.get_ident() for t in closed_on)
+
+
+def test_shutdown_closes_idle_connection(manager, qtbot, monkeypatch):
+    transport = FakeTransport([])
+    monkeypatch.setattr(
+        connection_manager_module, "NamedPipeTransport", lambda: transport
+    )
+    with qtbot.waitSignal(manager.connected, timeout=2000):
+        manager.connect_to_syscon2()
+    manager.shutdown()
+    assert transport.closed
+    assert not manager._thread.isRunning()

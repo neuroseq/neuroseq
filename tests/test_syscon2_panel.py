@@ -465,3 +465,56 @@ def test_export_current_failure_warns_and_does_not_import(
 
     warning.assert_called_once()
     handler.assert_not_called()
+
+
+def test_upload_defaults_to_one_run(panel, mocker):
+    submit = mocker.patch.object(panel, "_submit")
+    panel.btn_holo4d_upload.click()
+    client = mocker.Mock()
+    submit.call_args.args[1](client)
+    client.holo4d.upload_sequence.assert_called_once_with(1)
+
+
+def test_endless_upload_requires_explicit_confirmation(panel, mocker):
+    submit = mocker.patch.object(panel, "_submit")
+    confirm = mocker.patch.object(panel, "_confirm", return_value=False)
+    panel.runs_spinbox.setValue(0)
+    panel.btn_holo4d_upload.click()
+    submit.assert_not_called()
+    assert "endless" in confirm.call_args.args[0]
+    confirm.return_value = True
+    panel.btn_holo4d_upload.click()
+    client = mocker.Mock()
+    submit.call_args.args[1](client)
+    client.holo4d.upload_sequence.assert_called_once_with(0)
+
+
+def test_shutter_open_requires_confirmation_but_close_is_immediate(panel, mocker):
+    submit = mocker.patch.object(panel, "_submit")
+    confirm = mocker.patch.object(panel, "_confirm", return_value=False)
+    panel._on_lightsources({"SN1": ["Laser"]})
+    panel.btn_shutter_open.click()
+    confirm.assert_called_once()
+    submit.assert_not_called()
+    confirm.return_value = True
+    panel.btn_shutter_open.click()
+    client = mocker.Mock()
+    submit.call_args.args[1](client)
+    client.laser.set_shutter.assert_called_once_with("SN1", True)
+    confirm.reset_mock()
+    confirm.return_value = False
+    panel.btn_shutter_close.click()
+    submit.call_args.args[1](client)
+    assert client.laser.set_shutter.call_args.args == ("SN1", False)
+    confirm.assert_not_called()
+
+
+def test_refreshing_same_project_preserves_export_settings(panel):
+    project = Project()
+    panel.set_project(project)
+    settings = SysconExportSettings(config_text="config")
+    panel._export_settings = settings
+    panel.set_project(project)
+    assert panel.export_settings is settings
+    panel.set_project(Project())
+    assert panel.export_settings is None

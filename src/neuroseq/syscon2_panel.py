@@ -113,6 +113,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
 
     def set_project(self, project: Project | None) -> None:
+        if project is self._project:
+            return
         self._project = project
         self._export_settings = None
 
@@ -253,6 +255,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.runs_spinbox = _NoScrollSpinBox()
         self.runs_spinbox.setRange(0, 1_000_000)
         self.runs_spinbox.setSpecialValueText("Endless (0)")
+        self.runs_spinbox.setValue(1)
         form.addRow("Runs:", self.runs_spinbox)
         self.start_condition_combo = _NoScrollComboBox()
         self.start_condition_combo.addItems(_START_CONDITIONS)
@@ -589,6 +592,10 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_holo4d_upload_clicked(self) -> None:
         runs = self.runs_spinbox.value()
+        if runs == 0 and not self._confirm(
+            "Upload for endless repetition? The sequence will repeat until stopped."
+        ):
+            return
 
         def task(client: SysCon2Client) -> object:
             client.holo4d.upload_sequence(runs)
@@ -669,7 +676,11 @@ class SysCon2Panel(QtWidgets.QWidget):
         selection = self._selected_device_and_description()
         if selection is None:
             return
-        device_sn, _description = selection
+        device_sn, description = selection
+        if open_ and not self._confirm(
+            f"Open the laser shutter for {description} ({device_sn})?"
+        ):
+            return
 
         def task(client: SysCon2Client) -> object:
             client.laser.set_shutter(device_sn, open_)

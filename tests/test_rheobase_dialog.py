@@ -887,3 +887,37 @@ def test_syscon2_picks_up_newly_imported_dataset_without_manual_selection(
 
     assert len(host.sent) > sent or not dialog._running
     assert dialog._last_measured_dataset == "rec1"
+
+
+def test_syscon2_first_probe_rejects_existing_recording_and_picks_new_import(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    _import_spikes(project, dialog, "old", spiking=False)
+    dialog.start()
+    dialog.btn_data_imported.click()
+    assert dialog._running
+    assert len(host.sent) == 1
+    assert dialog.btn_data_imported.isEnabled()
+    onset = dialog._pulse_onset_seconds
+    project.spikes["new"] = SpikeData("new", [0], [onset + 0.005])
+    dialog.btn_data_imported.click()
+    assert dialog._last_measured_dataset == "new"
+    assert len(host.sent) == 2
+
+
+def test_syscon2_accepts_replacement_recording_with_same_name(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    _import_spikes(project, dialog, "recording", spiking=False)
+    dialog.start()
+    _import_spikes(project, dialog, "recording", spiking=True)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 2
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 2
+    _import_spikes(project, dialog, "recording", spiking=True)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) > 2 or not dialog._running
+
+
+def test_syscon2_does_not_accept_simulation_data_as_an_import(qtbot):
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert not dialog._is_fresh_dataset("Simulation :: P / v")

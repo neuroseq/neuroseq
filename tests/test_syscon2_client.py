@@ -256,3 +256,130 @@ def test_transport_failure_closes_client_and_propagates() -> None:
 def test_named_pipe_transport_unavailable_off_windows() -> None:
     with pytest.raises(SysCon2UnavailableError):
         NamedPipeTransport()
+
+
+@pytest.fixture()
+def pipe_api(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import neuroseq.syscon2_client as module
+
+    api = SimpleNamespace(
+        GENERIC_READ=1,
+        GENERIC_WRITE=2,
+        OPEN_EXISTING=3,
+        FILE_FLAG_OVERLAPPED=4,
+        CreateFile=Mock(return_value=123),
+        CloseHandle=Mock(),
+        WriteFile=Mock(),
+        ReadFile=Mock(),
+        WaitForSingleObject=Mock(),
+    )
+    monkeypatch.setitem(sys.modules, "_winapi", api)
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32"))
+    return api
+
+
+def test_pipe_reads_fragments_and_writes_partial_data(pipe_api):
+    from unittest.mock import Mock
+
+    pipe = NamedPipeTransport()
+    writes = [Mock(), Mock()]
+    writes[0].GetOverlappedResult.return_value = (2, 0)
+    writes[1].GetOverlappedResult.return_value = (3, 0)
+    pipe_api.WriteFile.side_effect = [(op, 0) for op in writes]
+    reads = [Mock(), Mock()]
+    for op, data in zip(reads, [b"ab", b"cde"], strict=True):
+        op.GetOverlappedResult.return_value = (len(data), 0)
+        op.getbuffer.return_value = data
+    pipe_api.ReadFile.side_effect = [(op, 0) for op in reads]
+    pipe.send(b"12345")
+    assert pipe_api.WriteFile.call_args_list[1].args == (123, b"345")
+    assert pipe.recv(5) == b"abcde"
+    pipe.close()
+    pipe.close()
+    pipe_api.CloseHandle.assert_called_once_with(123)
+
+
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_pipe_timeout_cancels_and_reaps_io_before_close(
+    pipe_api, monkeypatch, direction
+):
+    from unittest.mock import Mock
+
+    import neuroseq.syscon2_client as module
+
+    now = [0.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
+    operation = Mock()
+    operation.GetOverlappedResult.side_effect = lambda wait: (
+        (0, 995) if wait else (0, 996)
+    )
+    pipe_api.ReadFile.return_value = (operation, 997)
+    pipe_api.WriteFile.return_value = (operation, 997)
+    pipe_api.WaitForSingleObject.side_effect = lambda *_: now.__setitem__(0, 2.0)
+    pipe = NamedPipeTransport(timeout=1.0)
+    with pytest.raises(SysCon2ConnectionError, match="timed out"):
+        if direction == "read":
+            pipe.recv(4)
+        else:
+            pipe.send(b"request")
+    operation.cancel.assert_called_once()
+    assert operation.GetOverlappedResult.call_args.args == (True,)
+    pipe_api.CloseHandle.assert_not_called()
+    pipe.close()
+
+
+def test_pipe_cancellation_during_receive(pipe_api):
+    import threading
+    from unittest.mock import Mock
+
+    cancel = threading.Event()
+    operation = Mock()
+    operation.GetOverlappedResult.return_value = (0, 996)
+    pipe_api.ReadFile.return_value = (operation, 997)
+    pipe_api.WaitForSingleObject.side_effect = lambda *_: cancel.set()
+    pipe = NamedPipeTransport()
+    pipe.set_cancel_event(cancel)
+    with pytest.raises(SysCon2ConnectionError, match="cancelled"):
+        pipe.recv(4)
+    operation.cancel.assert_called_once()
+    assert operation.GetOverlappedResult.call_args.args == (True,)
+    pipe.close()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="requires Windows named pipes")
+@pytest.mark.parametrize("direction", ["read", "write"])
+def test_real_named_pipe_timeout(direction):
+    import importlib
+    import uuid
+
+    api = importlib.import_module("_winapi")
+    name = f"neuroseq_test_{uuid.uuid4().hex}"
+    server = api.CreateNamedPipe(
+        rf"\\.\pipe\{name}",
+        api.PIPE_ACCESS_DUPLEX | api.FILE_FLAG_OVERLAPPED,
+        0,
+        1,
+        1024,
+        1024,
+        0,
+        0,
+    )
+    connection = api.ConnectNamedPipe(server, overlapped=True)
+    pipe = None
+    try:
+        pipe = NamedPipeTransport(name, timeout=0.1)
+        assert connection.GetOverlappedResult(True)[1] == 0
+        with pytest.raises(SysCon2ConnectionError, match="timed out"):
+            if direction == "read":
+                pipe.recv(4)
+            else:
+                pipe.send(b"x" * 1_000_000)
+    finally:
+        if pipe is not None:
+            pipe.close()
+        connection.cancel()
+        connection.GetOverlappedResult(True)
+        api.CloseHandle(server)

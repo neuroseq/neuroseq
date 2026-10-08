@@ -10,6 +10,7 @@ threads is queued), so nothing here blocks the GUI.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 
 from qtpy import QtCore
@@ -52,6 +53,7 @@ class SysCon2ConnectionManager(QtCore.QObject):
     def __init__(self, poll_interval_ms: int = DEFAULT_POLL_INTERVAL_MS) -> None:
         super().__init__()
         self._poll_interval_ms = poll_interval_ms
+        self._cancel_io = threading.Event()
         self._client: SysCon2Client | None = None
         self._timer: QtCore.QTimer | None = None
 
@@ -70,6 +72,7 @@ class SysCon2ConnectionManager(QtCore.QObject):
         self._request_connect.emit()
 
     def disconnect_from_syscon2(self) -> None:
+        self._cancel_io.set()
         self._request_disconnect.emit()
 
     def submit(self, name: str, fn: Callable[[SysCon2Client], object]) -> None:
@@ -80,25 +83,8 @@ class SysCon2ConnectionManager(QtCore.QObject):
         self._request_command.emit(name, fn)
 
     def shutdown(self) -> None:
-        """Disconnect and stop the worker thread. Call from the GUI's ``closeEvent``.
-
-        Known limitation: ``_request_disconnect`` is a queued signal, delivered only once
-        the worker thread's event loop regains control - but if SysCon2 has stopped
-        responding mid-command/poll, the worker is blocked inside
-        ``NamedPipeTransport.recv()``'s synchronous ``file.read()``, which has no timeout
-        and isn't interrupted by ``QThread.quit()``. The ``wait(2000)`` below bounds how
-        long *this* (GUI) thread can be blocked waiting for it, but if it times out, the
-        worker thread, its open pipe handle, and the stuck read are simply abandoned (not
-        forcibly torn down) - this method just stops waiting and returns, rather than
-        risking a real fix's failure mode: closing the file handle from this thread while
-        the worker has a pending synchronous read on it is documented Win32 behavior as
-        unsafe (can hang or corrupt the reading thread, not just fail cleanly), so it's
-        deliberately not attempted here. A real fix needs cancellable I/O the stdlib
-        ``open()`` on a named pipe doesn't provide - e.g. overlapped I/O with
-        ``CancelIoEx``, or polling via ``ctypes``/``PeekNamedPipe`` between bounded reads -
-        either way, new Win32-interop code that needs a real Windows + SysCon2 setup to
-        verify, not something to guess at from this codebase alone.
-        """
+        """Cancel pending I/O and stop the worker; close handles on the worker thread."""
+        self._cancel_io.set()
         self._request_disconnect.emit()
         self._thread.quit()
         if not self._thread.wait(2000):
@@ -118,6 +104,7 @@ class SysCon2ConnectionManager(QtCore.QObject):
         # before it stops, so this runs on the correct thread to stop the timer --
         # unlike relying on Python GC to destroy it later (typically from the GUI
         # thread), which trips Qt's "timers cannot be stopped from another thread".
+        self._handle_disconnect()
         if self._timer is not None:
             self._timer.stop()
             self._timer = None
@@ -126,8 +113,12 @@ class SysCon2ConnectionManager(QtCore.QObject):
     def _handle_connect(self) -> None:
         if self._client is not None:
             return
+        self._cancel_io.clear()
         try:
             transport = NamedPipeTransport()
+            set_cancel = getattr(transport, "set_cancel_event", None)
+            if set_cancel is not None:
+                set_cancel(self._cancel_io)
         except SysCon2ConnectionError as exc:
             self.disconnected.emit(str(exc))
             return

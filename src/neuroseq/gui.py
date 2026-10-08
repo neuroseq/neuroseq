@@ -1284,7 +1284,10 @@ class Gui(QtWidgets.QMainWindow):
         self,
         project: Project,
         reset_controller: bool = False,
+        *,
+        preserve_dynamic_input: bool = False,
     ) -> None:
+        preserve_dynamic_input = preserve_dynamic_input and project is self.project
         self.project = project
         self._update_window_title()
         if hasattr(self, "tab_bar"):
@@ -1315,11 +1318,17 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.project.cellpose_data = self.last_cellpose_import
 
-        self.stim_editor.set_project(self.project)
+        self.stim_editor.set_project(
+            self.project, keep_undo_history=preserve_dynamic_input
+        )
         # A replaced project must not inherit the previous run's Design dynamic
         # input state (plots, log, EPSP history); drop the cached dialog so it
         # is rebuilt fresh on next open.
-        self.stim_editor.discard_dynamic_input_dialogs()
+        if preserve_dynamic_input:
+            for dialog in self.stim_editor._dynamic_input_dialogs():
+                dialog.refresh()
+        else:
+            self.stim_editor.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
@@ -1682,7 +1691,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
             else:
                 self.project.add_experiment(experiment)
-            self.update_project(self.project)
+            self.update_project(self.project, preserve_dynamic_input=True)
             self._select_experiment_data(experiment.name)
         except Exception as e:
             QtWidgets.QMessageBox.critical(

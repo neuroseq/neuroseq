@@ -342,6 +342,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         # trace used for the previous probe, to catch a forgotten re-import.
         self._block_range = (0, 0)
         self._last_measured_dataset: str | None = None
+        self._data_before_block: dict[str, object] = {}
         self._host_connected = False
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
@@ -1144,6 +1145,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
         if host is None or self.project is None:
             self._finish("SysCon2 is not available.")
             return
+        self._data_before_block = {
+            name: self.project.get_data(name, TraceData)
+            for name in self.project.get_data_names(TraceData)
+        }
         start, stop = self._block_range
         self._append_log("Exporting block and sending it to SysCon2...")
         # A failure is reported through host.block_failed -> _on_block_failed.
@@ -1293,7 +1298,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.refresh()
         self._select_newest_if_stale(self.cmb_trace)
         name = self.cmb_trace.currentText()
-        if not name or name == self._last_measured_dataset:
+        if not name or not self._is_fresh_dataset(name):
             self._append_log(
                 "Import the new recording, select its trace, and click again."
                 if name
@@ -1323,16 +1328,20 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._last_measured_dataset = name
         return (measurement,)
 
+    def _is_fresh_dataset(self, name: str) -> bool:
+        if self.project is None or not name or name.startswith("Simulation :: "):
+            return False
+        data = self.project.get_data(name, TraceData)
+        return data is not None and data is not self._data_before_block.get(name)
+
     def _select_newest_if_stale(self, combo: QtWidgets.QComboBox) -> None:
-        """A freshly imported recording is not in the list until refresh(): pick it up
-        automatically when the selection is empty or still the previous probe's."""
-        count = combo.count()
-        if (
-            count
-            and combo.currentText() in ("", self._last_measured_dataset)
-            and combo.itemText(count - 1) != self._last_measured_dataset
-        ):
-            combo.setCurrentIndex(count - 1)
+        """Offer a recording imported after this block, including same-name replacements."""
+        if self._is_fresh_dataset(combo.currentText()):
+            return
+        for index in reversed(range(combo.count())):
+            if self._is_fresh_dataset(combo.itemText(index)):
+                combo.setCurrentIndex(index)
+                return
 
     def _reawait_acquisition(self) -> None:
         """Stay on the current probe: ask the user to fix the import and click again."""

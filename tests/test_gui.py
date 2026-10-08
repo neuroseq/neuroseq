@@ -4684,3 +4684,52 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
 
     assert opened == ["second_stim"]
     gui.close()
+
+
+def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypatch):
+    from neuroseq.rheobase_dialog import RheobaseDialog
+    from neuroseq.syscon2_export_service import SysconExportSettings
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = default_project()
+    gui.update_project(project)
+    # Use a second array to detect an accidental reset to the first one on import.
+    original = next(iter(project.stim_arrays.values()))
+    selected = StimArray(
+        "probe_array",
+        original.stim_type,
+        np.zeros_like(original.values),
+        original.units,
+        original.dt,
+    )
+    project.add_stim_array(selected)
+    gui.stim_editor.set_project(project, stim_to_select=selected.name)
+    dialog = RheobaseDialog(gui.stim_editor)
+    gui.stim_editor._rheobase_dialog = dialog
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    dialog._running = True
+    dialog._awaiting_simulation = True
+    host = gui.syscon2_panel.stimulation_host
+    host.phase = "awaiting_acquisition"
+    settings = SysconExportSettings(config_text="config")
+    gui.syscon2_panel._export_settings = settings
+    monkeypatch.setattr(
+        neuroseq.gui, "ImportExperimentDialog", MockImportExperimentDialog
+    )
+    recording = Experiment("new_recording", 1.0, [], [SpikeData("spikes", [0], [0.2])])
+
+    gui._append_experimental_data(recording)
+
+    assert "new_recording" in project.experiments
+    assert gui.stim_editor._rheobase_dialog is dialog
+    assert dialog._running and dialog._awaiting_simulation
+    assert host.phase == "awaiting_acquisition"
+    assert gui.syscon2_panel.export_settings is settings
+    assert gui.stim_editor.current_stim_modifier.stim_array is selected
+    assert dialog.cmb_spikes.findText("new_recording :: spikes") >= 0
+    gui.update_project(default_project())
+    assert gui.stim_editor._rheobase_dialog is None
+    assert gui.syscon2_panel.export_settings is None
+    gui._close_confirmed = True
+    gui.close()
