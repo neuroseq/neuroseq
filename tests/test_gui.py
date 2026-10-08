@@ -1832,7 +1832,7 @@ def test_timeseries_panels_and_slider_share_one_width(qtbot: QtBot) -> None:
     assert len(lefts) == 1, f"panels have differing left edges: {lefts}"
     # ...and they are genuinely narrower than the window, i.e. the right-hand
     # column is beside them rather than below.
-    assert next(iter(widths)) < gui.width()
+    assert next(iter(widths)) < gui._main_scroll.widget().width()
     gui.close()
 
 

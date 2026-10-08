@@ -55,6 +55,7 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
@@ -538,7 +539,10 @@ class Gui(QtWidgets.QMainWindow):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
         outer_layout.addWidget(self.tab_bar)
-        outer_layout.addWidget(central_widget)
+        # Scroll the whole workspace on small screens; nested widgets keep wheel
+        # priority until they hit their end (see main_scroll.py).
+        self._main_scroll = make_main_scroll_area(central_widget, 1500, 950)
+        outer_layout.addWidget(self._main_scroll)
         self.setCentralWidget(outer_widget)
         self._create_actions()
         self.showMaximized()
@@ -3298,7 +3302,7 @@ class Gui(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
-            ("&SysCon2", self.syscon2_panel, "mdi6.laser-pointer", False),
+            ("&Stimulation setup", self.syscon2_panel, "mdi6.laser-pointer", False),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(

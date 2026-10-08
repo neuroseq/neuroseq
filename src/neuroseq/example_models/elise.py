@@ -1149,7 +1149,9 @@ class Elise(NN):
         def _train(n_cycles: int) -> None:
             for k in range(n_cycles * T):
                 net(u_inp=_teacher_u(k % T), learn=True)
-                _record(one_exc_stim[(k % T) // upsample], one_inh_stim[(k % T) // upsample])
+                _record(
+                    one_exc_stim[(k % T) // upsample], one_inh_stim[(k % T) // upsample]
+                )
                 _tick()
 
         def _free_run(n_cycles: int, learn: bool) -> np.ndarray:

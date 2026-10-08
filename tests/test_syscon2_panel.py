@@ -622,3 +622,9 @@ def test_selection_status_requires_ack_and_ignores_disconnected_reply(panel, moc
     panel._on_disconnected("")
     panel._on_command_finished(name, "one.seq")
     assert "not confirmed" in panel.selection_label.text()
+
+
+def test_panel_text_uses_stimulation_setup_wording(panel):
+    assert "SysCon2" not in panel.btn_export_current.text()
+    assert "SysCon2" not in panel.btn_export_current.toolTip()
+    assert "SysCon2" not in panel.btn_connect.toolTip()

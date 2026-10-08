@@ -194,11 +194,11 @@ class SysCon2Panel(QtWidgets.QWidget):
         layout.addWidget(self.btn_send_to_syscon2)
 
         self.btn_export_current = QtWidgets.QPushButton(
-            "Export current array to SysCon2"
+            "Export current array to stimulation setup"
         )
         self.btn_export_current.setToolTip(
             "Export the input array currently shown in the editor with the settings of "
-            "the last 'Export with settings…' export, and import it into SysCon2. Opens the "
+            "the last 'Export with settings…' export, and import it into the stimulation setup. Opens the "
             "export dialog first if there are no settings yet."
         )
         self.btn_export_current.clicked.connect(self._on_export_current_clicked)
@@ -426,7 +426,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_disconnect.setEnabled(self._connected)
         if not can_connect_here:
             self.btn_connect.setToolTip(
-                "SysCon2 control requires neuroseq to run on the same Windows PC as SysCon2."
+                "Stimulation setup control requires neuroseq to run on the same Windows PC as the stimulation setup."
             )
         if self._connected:
             self.status_label.setText("Connected")
@@ -493,7 +493,7 @@ class SysCon2Panel(QtWidgets.QWidget):
                     f"Import failed: {message}. Generated preview only."
                 )
         QtWidgets.QMessageBox.warning(
-            self, "SysCon2 command failed", f"{name}: {message}"
+            self, "Stimulation setup command failed", f"{name}: {message}"
         )
 
     def _submit(self, name: str, fn: Callable[[SysCon2Client], object]) -> None:
@@ -560,7 +560,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         if not path:
             return
         if not self._confirm(
-            f"Delete sequence {path!r} from SysCon2's sequence manager?"
+            f"Delete sequence {path!r} from the stimulation setup's sequence manager?"
         ):
             return
 
@@ -575,7 +575,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             self,
             "Select .seq file to import",
             "",
-            "SysCon2 sequence files (*.seq);;All files (*)",
+            "Stimulation sequence files (*.seq);;All files (*)",
         )
         if filename:
             self.import_path_edit.setText(filename)
