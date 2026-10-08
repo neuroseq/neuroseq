@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime
 import logging
 import pathlib
+import re
 from enum import Enum
 from typing import TYPE_CHECKING
 from typing import cast
@@ -43,6 +45,23 @@ if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
     from neuroseq.project import Project
     from neuroseq.stim import StimArray
+
+
+def next_default_export_name(
+    folder: pathlib.Path | None, today: datetime.date | None = None
+) -> str:
+    """``export_seq_<YYYY-MM-DD>_<n>``, with ``n`` one past the highest number already
+    exported today (``.seq`` files) in ``folder``."""
+    day = (today or datetime.date.today()).isoformat()
+    prefix = f"export_seq_{day}_"
+    highest = 0
+    if folder is not None and folder.is_dir():
+        pattern = re.compile(rf"^{re.escape(prefix)}(\d+)\.seq$")
+        for path in folder.iterdir():
+            match = pattern.match(path.name)
+            if match:
+                highest = max(highest, int(match.group(1)))
+    return f"{prefix}{highest + 1}"
 
 
 class StimulationGeneratorDialog(QtWidgets.QDialog):
@@ -156,7 +175,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         name_layout = QtWidgets.QHBoxLayout()
         name_label = QtWidgets.QLabel("Script name:")
         self.name_edit = QtWidgets.QLineEdit()
-        self.name_edit.setText("syscon_sequence_example")
+        self._auto_name = next_default_export_name(None)
+        self.name_edit.setText(self._auto_name)
         self.name_edit.setToolTip("Base name for the generated script file")
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
@@ -358,6 +378,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         else:
             self.stim_info_label.setText("")
 
+    def _refresh_default_name(self) -> None:
+        """Advance the default script name, unless the user typed their own."""
+        if self.name_edit.text().strip() in ("", self._auto_name):
+            self._auto_name = next_default_export_name(self.output_folder)
+            self.name_edit.setText(self._auto_name)
+
     def _select_output_folder(self) -> None:
         """Open a dialog to select the output folder."""
         folder = getexistingdirectory(
@@ -370,6 +396,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             self.output_folder = pathlib.Path(folder)
             self.folder_edit.setText(str(self.output_folder))
             self.generate_button.setEnabled(True)
+            self._refresh_default_name()
             self._log_status(f"Output folder set to: {self.output_folder}")
 
     def _log_status(self, message: str, *args: object) -> None:
@@ -438,6 +465,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             self._log_status(f"✓ Generated: {script_filename}")
             self._log_status(f"✓ Generated: {debug_csv_filename}")
             self._log_status(f"✓ Generated: {overview_filename}")
+            self._refresh_default_name()
             self._log_status(
                 "Export summary: segments=%d mapped_active_neurons=%d "
                 "unmapped_active_neurons=%d entity_lanes=%d objects=%d",

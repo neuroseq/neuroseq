@@ -1341,3 +1341,39 @@ def test_standalone_sanity_fix_marks_project_dirty(qtbot):
     project.dirty = False
     assert dialog._replace_stim_values_preserving_undo("stim", np.ones_like(values))
     assert project.dirty
+
+
+def test_default_export_name_counts_todays_exports(tmp_path: Path) -> None:
+    import datetime
+
+    from neuroseq.stimulation_generator_dialog import next_default_export_name
+
+    day = datetime.date(2026, 10, 8)
+    assert next_default_export_name(None, day) == "export_seq_2026-10-08_1"
+    (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
+    (tmp_path / "export_seq_2026-10-08_2.seq").write_text("x")
+    (tmp_path / "export_seq_2026-10-07_9.seq").write_text("x")  # other day
+    (tmp_path / "export_seq_2026-10-08_7_export_debug.csv").write_text("x")
+    assert next_default_export_name(tmp_path, day) == "export_seq_2026-10-08_3"
+
+
+def test_dialog_default_name_advances_but_keeps_custom_names(
+    qtbot: QtBot, tmp_path: Path, qmessagebox_calls
+) -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    assert dialog.name_edit.text().startswith("export_seq_")
+    assert dialog.name_edit.text().endswith("_1")
+    dialog.output_folder = tmp_path
+
+    first = dialog.name_edit.text()
+    dialog._generate_scripts()
+    assert (tmp_path / f"{first}.seq").exists()
+    assert dialog.name_edit.text() == first[:-1] + "2"
+
+    dialog.name_edit.setText("my_name")
+    dialog._generate_scripts()
+    assert dialog.name_edit.text() == "my_name"
