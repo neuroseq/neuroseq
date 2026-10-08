@@ -180,7 +180,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_targets_checkbox.setChecked(True)
         self.show_targets_checkbox.setToolTip(
             "Mark, with a red cross, every neuron targeted by the sequence "
-            "most recently sent to SysCon2."
+            "whose import was confirmed by SysCon2. Not live illumination."
         )
         self.show_targets_checkbox.toggled.connect(
             self._update_target_overlay_visibility

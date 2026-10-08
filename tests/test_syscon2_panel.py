@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import brian2.numpy_ as np
 import pytest
@@ -251,7 +252,9 @@ def test_send_to_syscon2_opens_dialog_with_current_project(
 
     qtbot.mouseClick(panel.btn_send_to_syscon2, QtCore.Qt.MouseButton.LeftButton)
 
-    dialog_cls.assert_called_once_with(project, parent=panel.window())
+    dialog_cls.assert_called_once_with(
+        project, parent=panel.window(), current_stim_name=None
+    )
     dialog_cls.return_value.sequence_generated.connect.assert_called_once_with(
         panel._on_dialog_sequence_generated
     )
@@ -266,6 +269,7 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
 
     png_path = tmp_path / "preview_overview.png"
     QtGui.QPixmap(10, 10).save(str(png_path))
+    (tmp_path / "pushed.seq").write_text("sequence contents")
     seq_path = str(tmp_path / "pushed.seq")
 
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
@@ -275,7 +279,8 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
     assert pixmap is not None and not pixmap.isNull()
 
     assert b"ImportSequence" in fake.sent[0]
-    assert seq_path.encode() in fake.sent[0]
+    assert b"pushed.seq" in fake.sent[0]
+    assert "Import confirmed" in panel.preview_status_label.text()
 
     qtbot.waitUntil(lambda: panel.sequence_list.count() == 1, timeout=2000)
     assert panel.sequence_list.item(0).text() == "pushed.seq"
@@ -291,7 +296,8 @@ def test_dialog_sequence_generated_emits_targets_changed(
             "unused.seq", "unused.png", frozenset({3, 5})
         )
 
-    assert blocker.args == [frozenset({3, 5})]
+    assert blocker.args == [frozenset()]
+    assert "not imported" in panel.preview_status_label.text()
 
 
 def test_dialog_sequence_generated_shows_error_for_unloadable_image(
@@ -518,3 +524,101 @@ def test_refreshing_same_project_preserves_export_settings(panel):
     assert panel.export_settings is settings
     panel.set_project(Project())
     assert panel.export_settings is None
+
+
+def test_import_ack_tracks_latest_preview_and_snapshots_file(panel, mocker, tmp_path):
+    panel._on_connected()
+    submit = mocker.patch.object(panel, "_submit")
+    targets = mocker.Mock()
+    panel.targets_changed.connect(targets)
+    source = tmp_path / "same.seq"
+    source.write_text("first export")
+    panel._import_sequence(str(source), frozenset({1}))
+    first, first_task = submit.call_args.args
+    source.write_text("second export")
+    panel._import_sequence(str(source), frozenset({2}))
+    second = submit.call_args.args[0]
+    assert first != second
+    client = mocker.Mock()
+    first_task(client)
+    snapshot = client.sequence_manager.import_sequence.call_args.args[0]
+    assert Path(snapshot).read_text() == "first export"
+    panel._on_command_finished(first, None)
+    assert "pending" in panel.preview_status_label.text()
+    targets.assert_called_with(frozenset())
+    panel._on_command_finished(second, None)
+    targets.assert_called_with(frozenset({2}))
+    assert "Import confirmed" in panel.preview_status_label.text()
+
+
+def test_failed_and_stale_imports_do_not_confirm_targets(panel, mocker, tmp_path):
+    panel._on_connected()
+    submit = mocker.patch.object(panel, "_submit")
+    source = tmp_path / "export.seq"
+    source.write_text("seq")
+    panel._import_sequence(str(source), frozenset({1}))
+    name = submit.call_args.args[0]
+    panel._on_command_failed(name, "rejected")
+    assert "Import failed" in panel.preview_status_label.text()
+    panel._import_sequence(str(source), frozenset({1}))
+    name = submit.call_args.args[0]
+    panel._on_disconnected("lost connection")
+    panel._on_command_finished(name, None)
+    assert "No current confirmation" in panel.preview_status_label.text()
+    assert not panel.btn_import_sequence.isEnabled()
+
+
+@pytest.mark.parametrize(
+    "target", ["C:\\outside", "../outside", "/outside", "non-ascii-ä"]
+)
+def test_import_rejects_invalid_target_directory(panel, mocker, tmp_path, target):
+    panel._on_connected()
+    submit = mocker.patch.object(panel, "_submit")
+    source = tmp_path / "export.seq"
+    source.write_text("seq")
+    panel.target_directory_edit.setText(target)
+    panel._import_sequence(str(source), frozenset({1}))
+    submit.assert_not_called()
+    assert "Not imported" in panel.preview_status_label.text()
+
+
+def test_sequence_refresh_preserves_highlight_and_delete_refreshes(panel, mocker):
+    panel._on_connected()
+    panel._on_sequences(["one.seq", "two.seq"])
+    panel.sequence_list.setCurrentRow(1)
+    panel._on_sequences(["two.seq", "one.seq"])
+    assert panel._selected_sequence_path() == "two.seq"
+    submit = mocker.patch.object(panel, "_submit")
+    panel._on_command_finished("sequence_manager.delete", None)
+    assert submit.call_args.args[0] == "sequence_manager.get_sequences"
+
+
+def test_export_dialog_preselects_editor_array(panel, mocker):
+    panel.set_project(Project())
+    stim = StimArray("selected", StimType.External, np.zeros((64, 1)), "", 0.0005208125)
+    panel.set_current_stim_provider(lambda: stim)
+    dialog = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    panel._on_export_current_clicked()
+    assert dialog.call_args.kwargs["current_stim_name"] == "selected"
+
+
+def test_selection_status_requires_ack_and_ignores_disconnected_reply(panel, mocker):
+    panel._on_connected()
+    panel._on_sequences(["one.seq"])
+    panel.sequence_list.setCurrentRow(0)
+    submit = mocker.patch.object(panel, "_submit")
+    panel._on_select_sequence_clicked()
+    name, task = submit.call_args.args
+    assert "pending" in panel.selection_label.text()
+    result = task(mocker.Mock())
+    panel._on_command_finished(name, result)
+    assert "Selection confirmed: one.seq" in panel.selection_label.text()
+    panel._on_select_sequence_clicked()
+    name = submit.call_args.args[0]
+    panel._on_command_failed(name, "rejected")
+    assert "Selection failed" in panel.selection_label.text()
+    panel._on_select_sequence_clicked()
+    name = submit.call_args.args[0]
+    panel._on_disconnected("")
+    panel._on_command_finished(name, "one.seq")
+    assert "not confirmed" in panel.selection_label.text()

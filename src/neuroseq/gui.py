@@ -424,7 +424,7 @@ class Gui(QtWidgets.QMainWindow):
         self.syscon2_panel = SysCon2Panel(parent=self)
         self.syscon2_panel.setVisible(False)
         # Mark, with a cross in the Spatial Footprints panel, every neuron
-        # targeted by whichever sequence was most recently sent to SysCon2 -
+        # targeted by the preview whose import SysCon2 most recently confirmed -
         # see SysCon2Panel.targets_changed's docstring for why this can't be
         # a live hardware readout.
         self.syscon2_panel.targets_changed.connect(

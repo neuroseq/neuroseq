@@ -47,7 +47,7 @@ following details matter when testing the current implementation.
    the laser is connected or ready. Click **Refresh Lightsources**, choose the
    device/lightsource, and click **Get Status**. Check the mode and hardware state
    in SysCon2. The SCI manual specifies software mode for **SetEmission**.
-2. Prepare a short pattern and use **Send to SysCon2…**. Select the intended input
+2. Prepare a short pattern and use **Export with settings…**. Select the intended input
    array, wavelength, target power, LUT, and output directory. The export target
    power is in mW; the separate live **Intensity** control uses the unit selected
    in SysCon2, which the SCI status response does not identify. Do not assume the
@@ -59,9 +59,11 @@ following details matter when testing the current implementation.
    overview and debug CSV after the sanity fixes.
 4. Generate the script. Filenames use the dialog's **Script name**, whose initial
    value is `syscon_sequence_example`, rather than necessarily the array name.
-   The PNG and red target crosses describe the generated array and update before
-   SCI import succeeds. Confirm import through the refreshed sequence list and
-   SysCon2 itself; a preview is not an import or hardware-execution acknowledgement.
+   The PNG is a generated preview. The panel shows whether import is pending,
+   confirmed, failed, or not attempted (offline). Red target crosses appear only
+   after acknowledgement of that preview's import and exclude skipped neurons.
+   They do not show remote selection, upload, or live illumination. Confirm the
+   sequence also appears in SysCon2 itself before proceeding.
 5. Select the imported sequence, set **Runs = 1**, and upload it. One run is now
    the default; an endless upload requires explicit confirmation. Set the desired
    start condition/trigger edge before **Run**. Validate actual timing, pattern,
@@ -74,7 +76,8 @@ following details matter when testing the current implementation.
    files to a temporary directory, not the dialog's chosen output folder. It
    opens the full export dialog if settings are unavailable. As above, verify
    the import, then select/upload again before running the changed sequence.
-7. For rheobase, select the SysCon2 target, use amplitudes within 0–1, and choose
+7. For rheobase, select the SysCon2 target, disable binary intensity export, use
+   amplitudes within 0–1, and choose
    the response window from the actual acquisition frame rate. At 30 Hz,
    100–150 ms spans several frames; neither 30 Hz nor a particular useful response
    window is guaranteed by the SCI protocol. For raw TIFF import, use the Suite2p
@@ -126,3 +129,13 @@ location before using this workaround elsewhere.
 ## Pre-commit
 
 pre-commit run --all-files
+
+Export validation is shared by the dialog, quick export, and routine host. Timing
+fixes must first be reviewed and applied with **Check Input Sanity**. Other
+warnings (including skipped neurons, missing power calibration, and power clamping) require confirmation
+before a dialog or quick export can proceed; unattended routine exports reject
+these warnings. Existing dialog export files require overwrite confirmation.
+An import uses a private snapshot, so regenerating the same filename cannot
+change an already queued request. Disconnecting or changing projects clears
+preview import confirmation and target markers. Importing an arbitrary file
+clears the generated preview association because its targets are unknown.

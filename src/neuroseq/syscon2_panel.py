@@ -8,7 +8,10 @@ confirmation dialog first.
 from __future__ import annotations
 
 import logging
+import pathlib
+import shutil
 import sys
+import tempfile
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -65,12 +68,8 @@ class _NoScrollComboBox(QtWidgets.QComboBox):
 
 
 class SysCon2Panel(QtWidgets.QWidget):
-    #: Emitted with the frozenset[int] of stim ids targeted by whichever
-    #: sequence was most recently generated and sent to SysCon2 - lets a
-    #: caller (gui.py) reflect it elsewhere, e.g. as crosses in the Spatial
-    #: Footprints panel. Not a live hardware readout (SysCon2's SCI protocol
-    #: has no "which spots are illuminated right now" query) - just "who's in
-    #: the sequence currently loaded there."
+    #: Targets in the most recent preview whose import was acknowledged by SysCon.
+    #: This does not indicate remote selection, upload, or live illumination.
     targets_changed = QtCore.Signal(object)
 
     def __init__(
@@ -84,6 +83,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._manager = manager if manager is not None else SysCon2ConnectionManager()
         self._project: Project | None = None
         self._connected = False
+        self._import_serial = 0
+        self._preview_request: str | None = None
+        self._preview_source = ""
+        self._pending_selections: set[str] = set()
+        self._pending_imports: dict[str, frozenset[int] | None] = {}
+        self._import_files = tempfile.TemporaryDirectory(prefix="neuroseq-import-")
         self._lightsources: dict[str, list[str]] = {}
         self._current_stim_provider: Callable[[], StimArray | None] | None = None
         #: Export options of the last successful dialog export; reused by the one-click button.
@@ -92,6 +97,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._result_handlers: dict[str, Callable[[object], None]] = {
             "sequence_manager.get_sequences": self._on_sequences,
             "sequence_manager.import": self._on_sequence_imported,
+            "sequence_manager.delete": self._on_sequence_imported,
+            "sequence_manager.select": self._on_sequence_selected,
             "laser.get_lightsources": self._on_lightsources,
             "laser.get_status": self._on_lightsource_status,
         }
@@ -117,6 +124,8 @@ class SysCon2Panel(QtWidgets.QWidget):
             return
         self._project = project
         self._export_settings = None
+        self._reset_import_status()
+        self.preview_label.setText("No preview yet.")
 
     def set_current_stim_provider(
         self, provider: Callable[[], StimArray | None]
@@ -131,6 +140,7 @@ class SysCon2Panel(QtWidgets.QWidget):
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
         self._manager.shutdown()
+        self._import_files.cleanup()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         self.shutdown()
@@ -175,16 +185,36 @@ class SysCon2Panel(QtWidgets.QWidget):
         group = QtWidgets.QGroupBox("Sequence Manager")
         layout = QtWidgets.QVBoxLayout(group)
 
-        self.btn_send_to_syscon2 = QtWidgets.QPushButton("Send to SysCon2…")
+        self.btn_send_to_syscon2 = QtWidgets.QPushButton("Export with settings…")
         self.btn_send_to_syscon2.setToolTip(
             "Open the stimulation export dialog and, once it generates a script, "
-            "push it straight into SysCon2's sequence manager."
+            "import it if connected. Import does not select, upload, or run it."
         )
         self.btn_send_to_syscon2.clicked.connect(self._on_send_to_syscon2_clicked)
         layout.addWidget(self.btn_send_to_syscon2)
 
+        self.btn_export_current = QtWidgets.QPushButton(
+            "Export current array to SysCon2"
+        )
+        self.btn_export_current.setToolTip(
+            "Export the input array currently shown in the editor with the settings of "
+            "the last 'Export with settings…' export, and import it into SysCon2. Opens the "
+            "export dialog first if there are no settings yet."
+        )
+        self.btn_export_current.clicked.connect(self._on_export_current_clicked)
+        layout.addWidget(self.btn_export_current)
+
         self.sequence_list = QtWidgets.QListWidget()
+        self.sequence_list.setMaximumHeight(120)
+        self.sequence_list.currentRowChanged.connect(
+            lambda _: self._update_sequence_buttons()
+        )
         layout.addWidget(self.sequence_list)
+        self.selection_label = QtWidgets.QLabel(
+            "Remote selection not confirmed. Highlight a row, then Select."
+        )
+        self.selection_label.setWordWrap(True)
+        layout.addWidget(self.selection_label)
 
         refresh_row = QtWidgets.QHBoxLayout()
         self.btn_refresh_sequences = QtWidgets.QPushButton("Refresh")
@@ -221,6 +251,12 @@ class SysCon2Panel(QtWidgets.QWidget):
     def _build_preview_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Preview")
         layout = QtWidgets.QVBoxLayout(group)
+        self.preview_status_label = QtWidgets.QLabel("No generated export.")
+        self.preview_status_label.setWordWrap(True)
+        self.preview_status_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.preview_status_label)
         self.preview_label = QtWidgets.QLabel("No preview yet.")
         self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setWordWrap(True)
@@ -293,17 +329,6 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         refresh_row.addWidget(self.btn_refresh_lightsources)
         layout.addLayout(refresh_row)
-
-        self.btn_export_current = QtWidgets.QPushButton(
-            "Export current array to SysCon2"
-        )
-        self.btn_export_current.setToolTip(
-            "Export the input array currently shown in the editor with the settings of "
-            "the last 'Send to SysCon2...' export, and import it into SysCon2. Opens the "
-            "export dialog first if there are no settings yet."
-        )
-        self.btn_export_current.clicked.connect(self._on_export_current_clicked)
-        layout.addWidget(self.btn_export_current)
 
         form = QtWidgets.QFormLayout()
         self.device_combo = _NoScrollComboBox()
@@ -386,12 +411,16 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_disconnected(self, message: str) -> None:
         self._connected = False
+        self._reset_import_status()
+        self.sequence_list.clear()
+        self.selection_label.setText("Remote selection not confirmed.")
         self._update_connection_ui()
         if message:
             self.status_label.setText(f"Disconnected: {message}")
             self.status_label.setStyleSheet("QLabel { color: red; }")
 
     def _update_connection_ui(self) -> None:
+        self._update_sequence_buttons()
         can_connect_here = sys.platform == "win32"
         self.btn_connect.setEnabled(can_connect_here and not self._connected)
         self.btn_disconnect.setEnabled(self._connected)
@@ -406,17 +435,63 @@ class SysCon2Panel(QtWidgets.QWidget):
             self.status_label.setText("Disconnected")
             self.status_label.setStyleSheet("QLabel { color: gray; }")
 
+    def _update_sequence_buttons(self) -> None:
+        self.btn_refresh_sequences.setEnabled(self._connected)
+        self.btn_import_sequence.setEnabled(self._connected)
+        has_selection = self._selected_sequence_path() is not None
+        self.btn_select_sequence.setEnabled(self._connected and has_selection)
+        self.btn_delete_sequence.setEnabled(self._connected and has_selection)
+
+    def _reset_import_status(self) -> None:
+        self._pending_imports.clear()
+        self._pending_selections.clear()
+        self._preview_request = None
+        self.preview_status_label.setText(
+            "Import status unknown. No current confirmation."
+        )
+        self.targets_changed.emit(frozenset())
+
     def _on_state_changed(self, state: dict) -> None:
         holo4d_state = state.get("Holo4D")
         if holo4d_state is not None:
             self.holo4d_state_label.setText(f"State: {holo4d_state}")
 
     def _on_command_finished(self, name: str, result: object) -> None:
+        if name.startswith("sequence_manager.import."):
+            if name not in self._pending_imports:
+                return
+            targets = self._pending_imports.pop(name)
+            if name == self._preview_request:
+                self.preview_status_label.setText(
+                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload before running. "
+                    "The image is a generated preview, not hardware readback."
+                )
+                self.targets_changed.emit(targets or frozenset())
+            self._on_refresh_sequences_clicked()
+            return
+        if name.startswith("sequence_manager.select."):
+            if name in self._pending_selections:
+                self._pending_selections.remove(name)
+                self._on_sequence_selected(result)
+            return
         handler = self._result_handlers.get(name)
         if handler is not None:
             handler(result)
 
     def _on_command_failed(self, name: str, message: str) -> None:
+        if name.startswith("sequence_manager.select."):
+            if name not in self._pending_selections:
+                return
+            self._pending_selections.remove(name)
+            self.selection_label.setText(f"Selection failed: {message}")
+        if name.startswith("sequence_manager.import."):
+            if name not in self._pending_imports:
+                return
+            self._pending_imports.pop(name)
+            if name == self._preview_request:
+                self.preview_status_label.setText(
+                    f"Import failed: {message}. Generated preview only."
+                )
         QtWidgets.QMessageBox.warning(
             self, "SysCon2 command failed", f"{name}: {message}"
         )
@@ -444,12 +519,22 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
 
     def _on_sequences(self, result: object) -> None:
+        selected = self._selected_sequence_path()
         sequences = result if isinstance(result, list) else []
         self.sequence_list.clear()
         self.sequence_list.addItems(sequences)
+        if selected in sequences:
+            self.sequence_list.setCurrentRow(sequences.index(selected))
+        self._update_sequence_buttons()
 
     def _on_sequence_imported(self, _result: object) -> None:
+        self.selection_label.setText("Remote selection not confirmed.")
         self._on_refresh_sequences_clicked()
+
+    def _on_sequence_selected(self, result: object) -> None:
+        self.selection_label.setText(
+            f"Selection confirmed: {result}. Upload to apply it to Holo4D."
+        )
 
     def _selected_sequence_path(self) -> str | None:
         item = self.sequence_list.currentItem()
@@ -462,9 +547,13 @@ class SysCon2Panel(QtWidgets.QWidget):
 
         def task(client: SysCon2Client) -> object:
             client.sequence_manager.select_sequence(path)
-            return None
+            return path
 
-        self._submit("sequence_manager.select", task)
+        self._import_serial += 1
+        name = f"sequence_manager.select.{self._import_serial}"
+        self._pending_selections.add(name)
+        self.selection_label.setText(f"Selection pending: {path}")
+        self._submit(name, task)
 
     def _on_delete_sequence_clicked(self) -> None:
         path = self._selected_sequence_path()
@@ -493,15 +582,11 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_import_sequence_clicked(self) -> None:
         path = self.import_path_edit.text().strip()
-        target = self.target_directory_edit.text().strip()
-        if not path:
-            return
-
-        def task(client: SysCon2Client) -> object:
-            client.sequence_manager.import_sequence(path, target)
-            return None
-
-        self._submit("sequence_manager.import", task)
+        if path:
+            self.preview_label.setText(
+                "No generated preview associated with this file."
+            )
+            self._import_sequence(path, None)
 
     def _on_send_to_syscon2_clicked(self) -> None:
         if self._project is None:
@@ -509,7 +594,12 @@ class SysCon2Panel(QtWidgets.QWidget):
                 self, "No project", "No active project to export a stimulus from."
             )
             return
-        dialog = StimulationGeneratorDialog(self._project, parent=self.window())
+        current = self._current_stim_provider() if self._current_stim_provider else None
+        dialog = StimulationGeneratorDialog(
+            self._project,
+            parent=self.window(),
+            current_stim_name=current.name if current else None,
+        )
         if self._export_settings is not None:
             dialog.apply_settings(self._export_settings)
         dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
@@ -545,6 +635,9 @@ class SysCon2Panel(QtWidgets.QWidget):
                 self._export_settings,
                 self.stimulation_host.output_dir,
                 f"{stim_array.name}_current",
+                confirm_warnings=lambda warnings: self._confirm(
+                    "Review export changes:\n" + "\n".join(warnings)
+                ),
             )
         except (SysconExportError, ValueError, OSError) as exc:
             QtWidgets.QMessageBox.warning(self, "Export failed", str(exc))
@@ -564,14 +657,52 @@ class SysCon2Panel(QtWidgets.QWidget):
         if self._active_dialog is not None:
             self._export_settings = self._active_dialog.export_settings()
         self._show_preview(overview_png_path)
-        self.targets_changed.emit(targeted_stim_ids)
+        self.import_path_edit.setText(seq_path)
+        self._import_sequence(seq_path, targeted_stim_ids)
+
+    def _import_sequence(self, seq_path: str, targets: frozenset[int] | None) -> None:
+        self._preview_request = None
+        self.targets_changed.emit(frozenset())
+        self.preview_status_label.setText(
+            f"Generated/local file only; not imported: {seq_path}"
+        )
+        if not self._connected:
+            return
         target = self.target_directory_edit.text().strip()
+        try:
+            source = pathlib.Path(seq_path).resolve(strict=True)
+            remote = pathlib.PureWindowsPath(target)
+            if source.suffix.lower() != ".seq" or not source.is_file():
+                raise ValueError("Select an existing .seq file.")
+            if remote.drive or remote.root or ".." in remote.parts:
+                raise ValueError(
+                    "Target directory must be relative to the SysCon experiment directory."
+                )
+            target.encode("ascii")
+            source.name.encode("ascii")
+            self._import_serial += 1
+            name = f"sequence_manager.import.{self._import_serial}"
+            folder = pathlib.Path(self._import_files.name) / str(self._import_serial)
+            folder.mkdir()
+            snapshot = folder / source.name
+            shutil.copyfile(source, snapshot)
+            str(snapshot).encode("ascii")
+        except (ValueError, OSError) as exc:
+            self.preview_status_label.setText(f"Not imported: {exc}")
+            QtWidgets.QMessageBox.warning(self, "Import failed", str(exc))
+            return
+        self._pending_imports[name] = targets
+        self._preview_request = name
+        self._preview_source = source.name
+        self.preview_status_label.setText(
+            f"Import pending: {source.name}. Generated preview only."
+        )
 
         def task(client: SysCon2Client) -> object:
-            client.sequence_manager.import_sequence(seq_path, target)
+            client.sequence_manager.import_sequence(str(snapshot), target)
             return None
 
-        self._submit("sequence_manager.import", task)
+        self._submit(name, task)
 
     def _show_preview(self, png_path: str) -> None:
         pixmap = QtGui.QPixmap(png_path)

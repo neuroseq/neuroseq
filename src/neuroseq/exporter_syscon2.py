@@ -176,6 +176,7 @@ class SysconExportReport:
     power_lut_description: str = ""
     debug_csv_text: str = ""
     sanity_fix_messages: list[str] = field(default_factory=list)
+    exported_neuron_ids: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -776,6 +777,7 @@ def generate_syscon2_sequence_text(
         total_neurons=stim_array.values.shape[1],
         active_neurons=len(active_neurons),
         mapped_active_neurons=len(mapped_active_neurons),
+        exported_neuron_ids=frozenset(mapped_active_neurons),
         unmapped_active_neurons=sorted(unmapped_active_neurons),
         total_segments=len(sanitized.raw_segments),
         exported_segments=len(mapped_segments),

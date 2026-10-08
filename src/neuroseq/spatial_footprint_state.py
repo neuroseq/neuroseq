@@ -57,11 +57,10 @@ class SpatialFootprintState(QtCore.QObject):
         # stim array, not by any interaction with this panel itself.
         self.active_stim_ids: frozenset[int] = frozenset()
         # Stim/neuron rows targeted by whichever sequence was most recently
-        # sent to SysCon2 - driven by gui.py from SysCon2Panel.targets_changed.
+        # confirmed imported into SysCon2 - driven by gui.py from SysCon2Panel.targets_changed.
         # Unlike active_stim_ids, this isn't time-windowed: SysCon2's SCI
         # protocol has no live "which spots are on right now" readback, so
-        # this is simply every id with any nonzero value anywhere in the
-        # exported array, not a moment-by-moment playback position.
+        # these are the exported mapped targets, not a playback position.
         self.targeted_stim_ids: frozenset[int] = frozenset()
 
     def _all_cellpose_ids(self) -> set[int]:

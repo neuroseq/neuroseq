@@ -644,18 +644,15 @@ def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
     assert "scripts generated" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_stimulation_generator_dialog_sequence_generated_targets_every_active_neuron(
+def test_stimulation_generator_dialog_sequence_generated_excludes_unmapped_neurons(
     qtbot: QtBot,
     tmp_path: Path,
 ) -> None:
-    """The targeted-neuron set in sequence_generated is every stim id with
-    any nonzero value anywhere in the exported array, not just the first
-    one - see #582's "whole sequence" semantics (SysCon2 gives no live
-    playback position to narrow it down further)."""
+    """Only neurons included in the generated sequence get target markers."""
     _DT_S = 0.0005208125
     values = np.zeros((64, 3), dtype=np.float32)
-    values[10:13, 0] = 1.0
-    values[40:43, 2] = 1.0
+    values[33:36, 0] = 1.0
+    values[33:36, 2] = 1.0
     project = Project()
     stim = StimArray(
         name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
@@ -671,7 +668,7 @@ def test_stimulation_generator_dialog_sequence_generated_targets_every_active_ne
     with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
         dialog._generate_scripts()
 
-    assert blocker.args[2] == frozenset({0, 2})
+    assert blocker.args[2] == frozenset({0})
 
 
 # ---------------------------------------------------------------------------
@@ -1297,3 +1294,50 @@ def test_stimulation_generator_dialog_defaults_to_first_without_a_current_array(
         )
         qtbot.addWidget(dialog)
         assert dialog.stim_combo.currentText() == "stim"
+
+
+def test_generate_rejects_invalid_name_without_emitting(
+    qtbot, tmp_path, qmessagebox_calls
+):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.name_edit.setText("../escaped")
+    emitted = []
+    dialog.sequence_generated.connect(lambda *args: emitted.append(args))
+    dialog._generate_scripts()
+    assert not emitted
+    assert not list(tmp_path.iterdir())
+    assert qmessagebox_calls[-1]["name"] == "critical"
+
+
+def test_generate_cancelled_overwrite_preserves_files(
+    qtbot, tmp_path, qmessagebox_calls, mocker
+):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.name_edit.setText("existing")
+    (tmp_path / "existing.seq").write_text("original")
+    mocker.patch.object(dialog, "_confirm_export", return_value=False)
+    emitted = []
+    dialog.sequence_generated.connect(lambda *args: emitted.append(args))
+    dialog._generate_scripts()
+    assert not emitted
+    assert (tmp_path / "existing.seq").read_text() == "original"
+
+
+def test_standalone_sanity_fix_marks_project_dirty(qtbot):
+    values = np.zeros((64, 1), dtype=np.float32)
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    project.dirty = False
+    assert dialog._replace_stim_values_preserving_undo("stim", np.ones_like(values))
+    assert project.dirty

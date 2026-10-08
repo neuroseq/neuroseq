@@ -17,6 +17,7 @@ from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
 from neuroseq.exporter_syscon2 import SlmGapViolation
 from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
 from neuroseq.exporter_syscon2 import SysconExportReport
+from neuroseq.exporter_syscon2 import SysconInputSanityReport
 from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
 from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
@@ -25,7 +26,6 @@ from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
 from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
 from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
-from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
@@ -35,7 +35,9 @@ from neuroseq.power_lut import PowerLut
 from neuroseq.power_lut import parse_power_lut_text
 from neuroseq.power_lut import resolve_power_lut
 from neuroseq.syscon2_export_service import SysconExportSettings
+from neuroseq.syscon2_export_service import export_stim_array
 from neuroseq.syscon2_export_service import generate_sequence_text
+from neuroseq.syscon2_export_service import validate_export_name
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult
@@ -55,8 +57,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
     #: Emitted after a script is successfully written to disk, with the generated
     #: ``.seq`` file path, its timeline overview PNG path, and the frozenset[int] of
-    #: stim ids with any nonzero value anywhere in the exported array (the sequence's
-    #: full targeted-neuron set) -- lets a caller (e.g. the SysCon2 panel) act on the
+    #: stim ids actually included in the exported sequence (excluding skipped neurons) -- lets a caller (e.g. the SysCon2 panel) act on the
     #: freshly generated files, and know who they target, without polling the
     #: filesystem or re-deriving it from the array itself.
     sequence_generated = QtCore.Signal(str, str, object)
@@ -405,32 +406,34 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             hardware_type = self.hardware_combo.currentText()
             script_name = self.name_edit.text() or "stimulation_script"
 
-            # Generate script based on hardware type
-            script_content, export_report = self._generate_script_content(
-                stim_array=stim_array,
-                stim_name=stim_name,
-                hardware_type=hardware_type,
-                cellpose_data=self.project.cellpose_data,
+            if hardware_type != "HOLO4D":
+                raise ValueError(f"Unsupported hardware: {hardware_type}")
+            validate_export_name(script_name)
+            filenames = [
+                f"{script_name}.seq",
+                f"{script_name}_export_debug.csv",
+                f"{script_name}_overview.png",
+            ]
+            if any(
+                (self.output_folder / name).exists() for name in filenames
+            ) and not self._confirm_export(
+                "Replace existing export files?\n" + "\n".join(filenames)
+            ):
+                return
+            result = export_stim_array(
+                self.project,
+                stim_array,
+                self.export_settings(),
+                self.output_folder,
+                script_name,
+                confirm_warnings=lambda warnings: self._confirm_export(
+                    "Review export changes before generating or importing:\n\n"
+                    + "\n".join(warnings)
+                ),
             )
-
-            # Determine file extension based on hardware type
-            extension = self._get_file_extension(hardware_type)
-            script_filename = f"{script_name}{extension}"
-            script_path = self.output_folder / script_filename
-            debug_csv_filename = f"{script_name}_export_debug.csv"
-            debug_csv_path = self.output_folder / debug_csv_filename
-            overview_filename = f"{script_name}_overview.png"
-            overview_path = self.output_folder / overview_filename
-
-            # Write script file
-            with open(script_path, "w", encoding="utf-8") as f:
-                f.write(script_content)
-            with open(debug_csv_path, "w", encoding="utf-8", newline="") as f:
-                f.write(export_report.debug_csv_text)
-            generate_syscon2_timeline_overview_png(
-                script_content,
-                overview_path,
-            )
+            export_report = result.report
+            script_path, overview_path = result.seq_path, result.overview_png_path
+            script_filename, debug_csv_filename, overview_filename = filenames
 
             self._log_status(f"✓ Generated: {script_filename}")
             self._log_status(f"✓ Generated: {debug_csv_filename}")
@@ -444,12 +447,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 export_report.entity_lanes,
                 export_report.generated_objects,
             )
-            targeted_stim_ids = frozenset(
-                int(stim_id)
-                for stim_id in np.flatnonzero(np.any(stim_array.values != 0, axis=0))
-            )
             self.sequence_generated.emit(
-                str(script_path), str(overview_path), targeted_stim_ids
+                str(script_path), str(overview_path), result.targeted_stim_ids
             )
 
             report_lines = [
@@ -478,19 +477,6 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Scripts Generated",
                 "\n".join(report_lines),
             )
-            if export_report.power_saturation_warnings:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Power saturation",
-                    "Some pulses requested more power than the LUT can deliver "
-                    "and were clamped:\n\n"
-                    + "\n".join(export_report.power_saturation_warnings[:20])
-                    + (
-                        "\n…"
-                        if len(export_report.power_saturation_warnings) > 20
-                        else ""
-                    ),
-                )
 
         except Exception as e:
             self.logger.error(f"Error generating scripts: {e}", exc_info=True)
@@ -500,6 +486,39 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Generation Failed",
                 f"Failed to generate a script:\n{str(e)}",
             )
+
+    def _confirm_export(self, message: str) -> bool:
+        return (
+            QtWidgets.QMessageBox.question(
+                self,
+                "Review export",
+                message,
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            == QtWidgets.QMessageBox.StandardButton.Yes
+        )
+
+    def _input_sanity_report(self, stim_array: StimArray) -> SysconInputSanityReport:
+        force_binary_intensity = self.binary_mode_checkbox.isChecked()
+        return check_syscon2_input_sanity(
+            stim_array,
+            self.project.cellpose_data,
+            template_text=self.config_data_edit.toPlainText(),
+            tick_resolution_us=500,
+            active_threshold=0.0,
+            binary_intensity=1.0,
+            force_binary_intensity=force_binary_intensity,
+            active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
+            spiralling=self.spiralling_checkbox.isChecked(),
+            target_power_mw=self.target_power_spin.value(),
+            power_lut=self._selected_power_lut(),
+            stimulation_spots_per_roi=(
+                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
+            ),
+            stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
+        )
 
     def _check_input_sanity(self) -> None:
         """Run sanity check using the fixed 17ms->16.666ms export model."""
@@ -655,11 +674,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Equalized simultaneous durations in stim '%s'.", stim_name
             )
 
-        # 4b. Overlap alignment — applied automatically before the full sanity check so
-        #     that check_syscon2_input_sanity's internal overlap fix never diverges from
-        #     what the previous pre-sanity steps already produced.
+        # 4b. Review overlap alignment before changing the project timeline.
         overlap_violations = find_overlapping_pulse_group_violations(stim_array)
         if overlap_violations:
+            if not self._confirm_export(
+                "Align overlapping pulses to the shortest pulse? This changes the selected input array."
+            ):
+                return
             fixed_values, _ = align_overlapping_pulses_to_shortest(stim_array)
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
@@ -668,24 +689,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 "Aligned overlapping pulse groups in stim '%s'.", stim_name
             )
 
-        force_binary_intensity = self.binary_mode_checkbox.isChecked()
-        sanity_report = check_syscon2_input_sanity(
-            stim_array,
-            self.project.cellpose_data,
-            template_text=self.config_data_edit.toPlainText(),
-            tick_resolution_us=500,
-            active_threshold=0.0,
-            binary_intensity=1.0,
-            force_binary_intensity=force_binary_intensity,
-            active_laser_wavelength_nm=self._selected_laser_wavelength_nm(),
-            spiralling=self.spiralling_checkbox.isChecked(),
-            target_power_mw=self.target_power_spin.value(),
-            power_lut=self._selected_power_lut(),
-            stimulation_spots_per_roi=(
-                10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
-            ),
-            stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
-        )
+        sanity_report = self._input_sanity_report(stim_array)
 
         sanitized_values = sanity_report.sanitized_values
         has_sanitized_update = (
@@ -697,8 +701,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             apply_choice = QtWidgets.QMessageBox.question(
                 self,
                 "Apply Sanity Fixes",
-                "Sanity check inserted blank load window(s) by shifting the timeline.\n"
-                "Apply the shift to the selected input array now?",
+                "Sanity checking proposes changes to pulse timing or amplitudes.\n"
+                "Apply these changes to the selected input array now?\n\n"
+                + "\n".join(sanity_report.fix_messages + sanity_report.warnings),
                 QtWidgets.QMessageBox.StandardButton.Yes
                 | QtWidgets.QMessageBox.StandardButton.No,
                 QtWidgets.QMessageBox.StandardButton.Yes,
@@ -715,6 +720,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                         stim_name,
                     )
                     stim_array = self.project.stim_arrays[stim_name]
+                    sanity_report = self._input_sanity_report(stim_array)
                 else:
                     return
 
@@ -1070,6 +1076,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                         "Automatic sanity fixes require matching input-array shape."
                     )
                 target.values[:, :] = new_values
+                self.project.update_limits()
+                self.project.mark_dirty()
             return True
         except Exception as exc:
             self.logger.error("Failed to apply sanity fix: %s", exc, exc_info=True)

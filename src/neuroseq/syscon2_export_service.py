@@ -8,6 +8,9 @@ export settings and the same sanity gate.
 from __future__ import annotations
 
 import pathlib
+import re
+import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -107,6 +110,28 @@ def slice_stim_array(
     )
 
 
+def validate_export_name(name: str) -> None:
+    """Require a single filename stem usable on the SysCon Windows machine."""
+    if (
+        not name
+        or name in {".", ".."}
+        or name[-1:] in {".", " "}
+        or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
+        or name.split(".")[0].upper()
+        in {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            *(f"COM{i}" for i in range(1, 10)),
+            *(f"LPT{i}" for i in range(1, 10)),
+        }
+    ):
+        raise SysconExportError(
+            "Script name must be a valid Windows filename, without a folder or extension."
+        )
+
+
 def export_stim_array(
     project: Project,
     stim_array: StimArray,
@@ -116,12 +141,22 @@ def export_stim_array(
     *,
     start_sample: int | None = None,
     stop_sample: int | None = None,
+    confirm_warnings: Callable[[list[str]], bool] | None = None,
 ) -> SysconExportResult:
     """Sanity-check and export ``stim_array`` (optionally a sample range) to ``output_dir``.
 
     Raises :class:`SysconExportError` if the sanity check fails; fixes that need user
     judgement (resampling dt, spacing out pulses, ...) stay in the generator dialog.
     """
+    validate_export_name(name)
+    if (
+        not np.isfinite(float(stim_array.dt))
+        or not np.isfinite(settings.target_power_mw)
+        or settings.target_power_mw < 0
+    ):
+        raise SysconExportError(
+            "Sample interval and target power must be finite; power cannot be negative."
+        )
     if start_sample is not None or stop_sample is not None:
         stim_array = slice_stim_array(
             stim_array,
@@ -142,15 +177,58 @@ def export_stim_array(
             + "\n- ".join(sanity.errors)
         )
 
+    if sanity.fix_messages:
+        raise SysconExportError(
+            "Timing fixes require review. Open the export dialog and run Check Input Sanity:\n- "
+            + "\n- ".join(sanity.fix_messages)
+        )
+    warnings = list(sanity.warnings)
+    lut = _power_lut(project, settings.laser_wavelength_nm)
+    if settings.target_power_mw > 0 and lut is None:
+        warnings.append(
+            f"No power LUT is available for {settings.laser_wavelength_nm} nm. "
+            f"The requested {settings.target_power_mw:g} mW will NOT be applied; "
+            "the sequence will omit calibrated power fields. Load a suitable LUT "
+            "or explicitly accept export without calibrated power."
+        )
+    if (
+        lut is not None
+        and settings.target_power_mw > 0
+        and (
+            not lut.tuples
+            or any(
+                not np.isfinite(percent)
+                or not np.isfinite(mw)
+                or not 0 <= percent <= 100
+                or mw < 0
+                for percent, mw in lut.tuples
+            )
+        )
+    ):
+        raise SysconExportError(
+            "Power LUT must contain finite percentages in 0–100 and nonnegative mW values."
+        )
+    if warnings and (confirm_warnings is None or not confirm_warnings(warnings)):
+        raise SysconExportError(
+            "Export warnings require review:\n- " + "\n- ".join(warnings)
+        )
+
     script, report = generate_sequence_text(project, stim_array, settings)
     output_dir.mkdir(parents=True, exist_ok=True)
     seq_path = output_dir / f"{name}.seq"
     overview_path = output_dir / f"{name}_overview.png"
     debug_csv_path = output_dir / f"{name}_export_debug.csv"
-    seq_path.write_text(script, encoding="utf-8")
-    debug_csv_path.write_text(report.debug_csv_text, encoding="utf-8")
-    generate_syscon2_timeline_overview_png(script, overview_path)
-    targeted = frozenset(
-        int(i) for i in np.flatnonzero(np.any(stim_array.values != 0, axis=0))
-    )
+    # Render everything before replacing any existing output. Publish the sequence last.
+    with tempfile.TemporaryDirectory(
+        prefix=".syscon-export-", dir=output_dir
+    ) as staging:
+        staged = pathlib.Path(staging)
+        (staged / seq_path.name).write_text(script, encoding="utf-8")
+        (staged / debug_csv_path.name).write_text(
+            report.debug_csv_text, encoding="utf-8"
+        )
+        generate_syscon2_timeline_overview_png(script, staged / overview_path.name)
+        for destination in (overview_path, debug_csv_path, seq_path):
+            (staged / destination.name).replace(destination)
+    targeted = report.exported_neuron_ids
     return SysconExportResult(seq_path, overview_path, targeted, report)
