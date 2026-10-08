@@ -77,6 +77,85 @@ class MainScrollFilter(QtCore.QObject):
         return True
 
 
+ZOOM_MIN, ZOOM_MAX, ZOOM_STEP, ZOOM_DEFAULT = 50, 300, 10, 100
+
+
+class ZoomControl(QtWidgets.QWidget):
+    """``-`` / percent field / ``+`` controls; emits ``zoom_changed(percent)``."""
+
+    zoom_changed = QtCore.Signal(int)
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(2)
+        self.btn_minus = QtWidgets.QToolButton()
+        self.btn_minus.setText("\u2212")
+        self.btn_minus.setToolTip("Zoom out")
+        self.btn_plus = QtWidgets.QToolButton()
+        self.btn_plus.setText("+")
+        self.btn_plus.setToolTip("Zoom in")
+        self.field = QtWidgets.QLineEdit(f"{ZOOM_DEFAULT}%")
+        self.field.setFixedWidth(52)
+        self.field.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.field.setToolTip(f"Zoom ({ZOOM_MIN}-{ZOOM_MAX}%); press Enter to apply")
+        for widget in (self.btn_minus, self.field, self.btn_plus):
+            layout.addWidget(widget)
+        self._zoom = ZOOM_DEFAULT
+        self.btn_minus.clicked.connect(lambda: self.set_zoom(self._zoom - ZOOM_STEP))
+        self.btn_plus.clicked.connect(lambda: self.set_zoom(self._zoom + ZOOM_STEP))
+        self.field.editingFinished.connect(self._on_field_edited)
+
+    @property
+    def zoom(self) -> int:
+        return self._zoom
+
+    def set_zoom(self, percent: int) -> None:
+        percent = max(ZOOM_MIN, min(ZOOM_MAX, int(percent)))
+        self.field.setText(f"{percent}%")
+        self.btn_minus.setEnabled(percent > ZOOM_MIN)
+        self.btn_plus.setEnabled(percent < ZOOM_MAX)
+        if percent != self._zoom:
+            self._zoom = percent
+            self.zoom_changed.emit(percent)
+
+    def _on_field_edited(self) -> None:
+        text = self.field.text().strip().rstrip("%").strip()
+        try:
+            self.set_zoom(round(float(text)))
+        except ValueError:
+            self.set_zoom(self._zoom)  # restore the display
+
+
+class WorkspaceZoom(QtCore.QObject):
+    """Scales a workspace's minimum size and fonts; the scroll area handles overflow."""
+
+    def __init__(
+        self, content: QtWidgets.QWidget, base_width: int, base_height: int
+    ) -> None:
+        super().__init__(content)
+        self._content = content
+        self._base_size = (base_width, base_height)
+        font = content.font()
+        self._base_font = QtGui.QFont(font)
+        self._base_points = font.pointSizeF()
+        self._base_pixels = font.pixelSize()
+        self.apply(ZOOM_DEFAULT)
+
+    def apply(self, percent: int) -> None:
+        factor = percent / 100.0
+        self._content.setMinimumSize(
+            round(self._base_size[0] * factor), round(self._base_size[1] * factor)
+        )
+        font = QtGui.QFont(self._base_font)
+        if self._base_points > 0:
+            font.setPointSizeF(self._base_points * factor)
+        elif self._base_pixels > 0:
+            font.setPixelSize(max(1, round(self._base_pixels * factor)))
+        self._content.setFont(font)
+
+
 def make_main_scroll_area(
     content: QtWidgets.QWidget, min_width: int, min_height: int
 ) -> QtWidgets.QScrollArea:

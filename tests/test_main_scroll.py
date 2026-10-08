@@ -56,3 +56,60 @@ def test_scrolling_up_returns_priority_at_nested_top(qtbot: QtBot) -> None:
     area.verticalScrollBar().setValue(200)
     _wheel(inner.viewport(), 120)  # inner already at top -> main window scrolls up
     assert area.verticalScrollBar().value() < 200
+
+
+def test_zoom_control_buttons_field_and_limits(qtbot: QtBot) -> None:
+    from neuroseq.main_scroll import ZoomControl
+
+    control = ZoomControl()
+    qtbot.addWidget(control)
+    seen: list[int] = []
+    control.zoom_changed.connect(seen.append)
+    assert control.field.text() == "100%"
+
+    control.btn_plus.click()
+    assert control.zoom == 110 and control.field.text() == "110%"
+    control.btn_minus.click()
+    control.btn_minus.click()
+    assert control.zoom == 90
+
+    control.field.setText("150")
+    control.field.editingFinished.emit()
+    assert control.zoom == 150
+    control.field.setText("9999")
+    control.field.editingFinished.emit()
+    assert control.zoom == 300 and not control.btn_plus.isEnabled()
+    control.field.setText("abc")
+    control.field.editingFinished.emit()
+    assert control.zoom == 300 and control.field.text() == "300%"
+    assert seen == [110, 100, 90, 150, 300]
+
+
+def test_workspace_zoom_scales_size_and_font(qtbot: QtBot) -> None:
+    from neuroseq.main_scroll import WorkspaceZoom
+
+    content = QtWidgets.QWidget()
+    qtbot.addWidget(content)
+    zoom = WorkspaceZoom(content, 1000, 800)
+    base_points = content.font().pointSizeF()
+    zoom.apply(150)
+    assert content.minimumSize() == QtCore.QSize(1500, 1200)
+    assert content.font().pointSizeF() > base_points
+    zoom.apply(100)
+    assert content.minimumSize() == QtCore.QSize(1000, 800)
+    assert content.font().pointSizeF() == base_points
+
+
+def test_gui_zoom_control_resizes_workspace(qtbot: QtBot) -> None:
+    from neuroseq.gui import Gui
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    assert gui.zoom_control.field.text() == "100%"
+    content = gui._main_scroll.widget()
+    gui.zoom_control.btn_plus.click()
+    assert content.minimumSize() == QtCore.QSize(1650, 1045)
+    gui.zoom_control.set_zoom(100)
+    assert content.minimumSize() == QtCore.QSize(1500, 950)
+    gui._close_confirmed = True
+    gui.close()

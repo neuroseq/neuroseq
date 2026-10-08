@@ -55,6 +55,8 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.main_scroll import WorkspaceZoom
+from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
@@ -538,11 +540,19 @@ class Gui(QtWidgets.QMainWindow):
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
-        outer_layout.addWidget(self.tab_bar)
+        # Zoom controls sit at the top right, beside the project tabs.
+        self.zoom_control = ZoomControl()
+        tab_row = QtWidgets.QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 4, 0)
+        tab_row.addWidget(self.tab_bar, stretch=1)
+        tab_row.addWidget(self.zoom_control)
+        outer_layout.addLayout(tab_row)
         # Scroll the whole workspace on small screens; nested widgets keep wheel
         # priority until they hit their end (see main_scroll.py).
         self._main_scroll = make_main_scroll_area(central_widget, 1500, 950)
         outer_layout.addWidget(self._main_scroll)
+        self._workspace_zoom = WorkspaceZoom(central_widget, 1500, 950)
+        self.zoom_control.zoom_changed.connect(self._workspace_zoom.apply)
         self.setCentralWidget(outer_widget)
         self._create_actions()
         self.showMaximized()
