@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
@@ -14,19 +15,21 @@ from neuroseq.importer_syscon2 import get_timed_objects
 from neuroseq.importer_syscon2 import group_timed_objects_by_neuron_target
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
+from neuroseq.importer_syscon2 import sequence_to_stim_values
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
 
 
 _BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
 
 
 class Syscon2ImportDialog(QtWidgets.QDialog):
-    """Dialog for importing SysCon2 .seq files into an existing StimArray."""
+    """Dialog for importing SysCon2 .seq files into a new or existing StimArray."""
 
     def __init__(
         self,
@@ -78,14 +81,34 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         options_group = QtWidgets.QGroupBox("Import Options")
         options_layout = QtWidgets.QFormLayout(options_group)
 
+        self.create_new_radio = QtWidgets.QRadioButton("Create new input array")
+        self.import_existing_radio = QtWidgets.QRadioButton(
+            "Import into existing input array"
+        )
+        self.create_new_radio.toggled.connect(self._update_mode_state)
+        options_layout.addRow(self.create_new_radio)
+
+        self.new_name_edit = QtWidgets.QLineEdit(self._default_new_name())
+        self.new_name_edit.textChanged.connect(self._update_import_button_state)
+        options_layout.addRow("    Input name:", self.new_name_edit)
+        self.new_type_combo = QtWidgets.QComboBox()
+        self.new_type_combo.addItem("Excitatory", StimType.Excitation)
+        self.new_type_combo.addItem("Inhibitory", StimType.Inhibition)
+        self.new_type_combo.addItem("External", StimType.External)
+        self.new_type_combo.setCurrentIndex(2)
+        options_layout.addRow("    Input type:", self.new_type_combo)
+        self.new_units_edit = QtWidgets.QLineEdit(self._default_new_units())
+        options_layout.addRow("    Units:", self.new_units_edit)
+
+        options_layout.addRow(self.import_existing_radio)
         self.target_combo = QtWidgets.QComboBox()
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
-        options_layout.addRow("Target input data entity:", self.target_combo)
+        options_layout.addRow("    Target input data entity:", self.target_combo)
 
         self.neuron_offset_spin = QtWidgets.QSpinBox()
         self.neuron_offset_spin.setRange(0, 0)
         self.neuron_offset_spin.setValue(0)
-        options_layout.addRow("Target neuron offset:", self.neuron_offset_spin)
+        options_layout.addRow("    Target neuron offset:", self.neuron_offset_spin)
 
         self.tick_resolution_spin = QtWidgets.QSpinBox()
         self.tick_resolution_spin.setRange(1, 1_000_000)
@@ -128,6 +151,41 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         layout.addLayout(button_layout)
 
         self._populate_target_stims()
+        # Default to the existing-array workflow when there is something to
+        # import into; otherwise creating a new array is the only option.
+        has_arrays = bool(self.project.stim_arrays)
+        self.import_existing_radio.setEnabled(has_arrays)
+        self.import_existing_radio.setChecked(has_arrays)
+        self.create_new_radio.setChecked(not has_arrays)
+        self._update_mode_state()
+
+    def _default_new_name(self) -> str:
+        base = "syscon_input"
+        name, index = base, 2
+        while name in self.project.stim_arrays:
+            name = f"{base}_{index}"
+            index += 1
+        return name
+
+    def _default_new_units(self) -> str:
+        for stim_array in self.project.stim_arrays.values():
+            return stim_array.units
+        return "nS"
+
+    def _update_mode_state(self) -> None:
+        create_new = self.create_new_radio.isChecked()
+        self.new_name_edit.setEnabled(create_new)
+        self.new_type_combo.setEnabled(create_new)
+        self.new_units_edit.setEnabled(create_new)
+        self.target_combo.setEnabled(not create_new and bool(self.project.stim_arrays))
+        self.neuron_offset_spin.setEnabled(not create_new)
+        self.replace_checkbox.setEnabled(not create_new)
+        self.extend_checkbox.setEnabled(not create_new)
+        if create_new:
+            self.selected_stim_name = ""
+        else:
+            self._on_target_changed(self.target_combo.currentText())
+        self._update_import_button_state()
 
     def _populate_target_stims(self) -> None:
         self.target_combo.clear()
@@ -135,16 +193,14 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         if not stim_names:
             self.target_combo.addItem("(No input arrays available)")
             self.target_combo.setEnabled(False)
-            self.info_label.setText(
-                "No input data entities available. Create one before importing."
-            )
             return
 
         self.target_combo.addItems(stim_names)
-        self.target_combo.setEnabled(True)
         self._on_target_changed(self.target_combo.currentText())
 
     def _selected_stim_array(self) -> StimArray | None:
+        if self.create_new_radio.isChecked():
+            return None
         name = self.target_combo.currentText()
         if not name:
             return None
@@ -251,16 +307,48 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         return "\n".join(lines)
 
     def _update_import_button_state(self) -> None:
-        self.import_button.setEnabled(
-            self.sequence is not None and self._selected_stim_array() is not None
+        if self.create_new_radio.isChecked():
+            target_ready = self.new_name_edit.text().strip() != ""
+        else:
+            target_ready = self._selected_stim_array() is not None
+        self.import_button.setEnabled(self.sequence is not None and target_ready)
+
+    def _build_new_stim_array(self, name: str, dt: float) -> StimArray:
+        """Create an empty array with one neuron column per imported channel."""
+        assert self.sequence is not None
+        tick_us = self.tick_resolution_spin.value()
+        # Probing with a single neuron reports how many channels the file has.
+        _, probe = sequence_to_stim_values(
+            self.sequence, dt_seconds=dt, n_neurons=1, tick_resolution_us=tick_us
+        )
+        n_neurons = max(1, probe.grouped_objects)
+        stim_type = self.new_type_combo.currentData()
+        return StimArray(
+            name,
+            stim_type if isinstance(stim_type, StimType) else StimType.External,
+            np.zeros((0, n_neurons)),
+            self.new_units_edit.text().strip(),
+            dt,
         )
 
     def _import_file(self) -> None:
         if self.sequence is None:
             return
+        create_new = self.create_new_radio.isChecked()
         stim_array = self._selected_stim_array()
-        if stim_array is None:
+        if not create_new and stim_array is None:
             return
+        new_name = self.new_name_edit.text().strip()
+        if create_new:
+            if not new_name:
+                return
+            if new_name in self.project.stim_arrays:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Name already in use",
+                    f"An input data entity named '{new_name}' already exists.",
+                )
+                return
 
         target_dt = _SYSCON2_TTL_PULSE_QUANTUM_S
         if not stim_dt_matches(target_dt, self.project.dt):
@@ -282,16 +370,31 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             self.project.remap_all_data_to_dt(target_dt)
 
         try:
-            result = import_sequence_into_stim_array(
-                stim_array,
-                self.sequence,
-                tick_resolution_us=self.tick_resolution_spin.value(),
-                replace_existing=self.replace_checkbox.isChecked(),
-                extend_to_fit=self.extend_checkbox.isChecked(),
-                neuron_offset=self.neuron_offset_spin.value(),
-            )
+            if create_new:
+                stim_array = self._build_new_stim_array(new_name, target_dt)
+                result = import_sequence_into_stim_array(
+                    stim_array,
+                    self.sequence,
+                    tick_resolution_us=self.tick_resolution_spin.value(),
+                )
+                self.project.add_stim_array(stim_array)
+                self.selected_stim_name = new_name
+            else:
+                assert stim_array is not None
+                result = import_sequence_into_stim_array(
+                    stim_array,
+                    self.sequence,
+                    tick_resolution_us=self.tick_resolution_spin.value(),
+                    replace_existing=self.replace_checkbox.isChecked(),
+                    extend_to_fit=self.extend_checkbox.isChecked(),
+                    neuron_offset=self.neuron_offset_spin.value(),
+                )
             info_lines = [
-                f"Imported into '{stim_array.name}'.",
+                (
+                    f"Imported into new input array '{stim_array.name}'."
+                    if create_new
+                    else f"Imported into '{stim_array.name}'."
+                ),
                 f"Eligible timed objects: {result.eligible_objects}",
                 "Neuron channels after center-distance grouping: "
                 f"{result.grouped_objects}",
