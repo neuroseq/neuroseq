@@ -12,6 +12,7 @@ from neuroseq.data import TraceData
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
+from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importer_syscon2 import sequence_to_stim_values
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
@@ -1549,9 +1550,10 @@ def test_syscon2_import_dialog_aborts_when_user_declines_remap(
     assert dialog.result() != QtWidgets.QDialog.DialogCode.Accepted
 
 
-def test_syscon2_import_dialog_updates_generator_template_from_loaded_file(
+def test_syscon2_import_dialog_updates_generator_template_only_after_import(
     tmp_path: Path,
     qtbot,
+    monkeypatch,
 ) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_text = _sample_seq_text().replace(
@@ -1575,6 +1577,13 @@ def test_syscon2_import_dialog_updates_generator_template_from_loaded_file(
     qtbot.addWidget(import_dialog)
     import_dialog._load_file(str(seq_path))
 
+    assert project.syscon2_export_template_text is None
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    import_dialog._import_file()
     assert project.syscon2_export_template_text is not None
     assert (
         "SourceConnectorPort0=dummy_2_0 RMI In" in project.syscon2_export_template_text
@@ -1659,3 +1668,273 @@ def test_syscon2_import_dialog_new_array_rejects_duplicate_name(
     assert len(warned) == 1
     assert list(project.stim_arrays) == ["stimulus"]
     assert not project.stim_arrays["stimulus"].values.any()
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("TimelineInfo0_starttime", "nan"),
+        ("TimelineInfo0_starttime", "-1"),
+        ("TimelineInfo0_repeats", "inf"),
+        ("TimelineInfo0_repeats", "2.5"),
+        ("TimelineInfo0_Intensity_0", "not-a-number"),
+        ("TimelineInfo0_Intensity_0", "-1"),
+        ("TimelineInfo0_Stepsize", "0"),
+        ("Shape0_CenterX", "nan"),
+        ("TotalTimings", "2"),
+        ("TimelineInfo0_LightsourceCount", "2"),
+    ],
+)
+def test_reject_malformed_or_unsupported_object_fields(key, value):
+    import re
+
+    text = re.sub(
+        rf"^{key}=.*$",
+        f"{key}={value}",
+        _sample_seq_text(),
+        count=1,
+        flags=re.MULTILINE,
+    )
+    with pytest.raises(ValueError):
+        parse_syscon2_seq_text(text)
+
+
+def test_reject_duplicate_block_indices():
+    text = _sample_seq_text().replace("[1]", "[0]").replace("[/1]", "[/0]")
+    with pytest.raises(ValueError, match="Duplicate"):
+        parse_syscon2_seq_text(text)
+
+
+@pytest.mark.parametrize("dt", [float("nan"), float("inf"), 0, -1])
+def test_reject_invalid_import_dt(dt):
+    with pytest.raises(ValueError, match="dt_seconds"):
+        sequence_to_stim_values(
+            parse_syscon2_seq_text(_sample_seq_text()), dt_seconds=dt, n_neurons=1
+        )
+
+
+def test_reject_unbounded_allocation():
+    sequence = parse_syscon2_seq_text(
+        _sample_seq_text().replace(
+            "TimelineInfo0_starttime=0", "TimelineInfo0_starttime=1000000000000", 1
+        )
+    )
+    with pytest.raises(ValueError, match="512 MiB"):
+        sequence_to_stim_values(sequence, dt_seconds=0.001, n_neurons=4)
+
+
+def test_replace_preserves_unmapped_channels_and_fractional_values():
+    stim = StimArray(
+        "target", StimType.Excitation, np.full((100, 5), 7, dtype=np.int32), "1", 0.001
+    )
+    import_sequence_into_stim_array(
+        stim, parse_syscon2_seq_text(_sample_seq_text()), neuron_offset=1
+    )
+    np.testing.assert_array_equal(stim.values[:, [0, 3, 4]], 7)
+    assert stim.values[0, 1] == pytest.approx(0.3)
+    assert stim.values[-1, 1] == 0
+
+
+def test_empty_reconstruction_cannot_erase_target():
+    sequence = parse_syscon2_seq_text(_sample_seq_text())
+    sequence.objects = [
+        obj for obj in sequence.objects if obj.object_type == "TTLPulse"
+    ]
+    stim = StimArray("target", StimType.Excitation, np.ones((100, 2)), "1", 0.001)
+    with pytest.raises(ValueError, match="No stimulation events"):
+        import_sequence_into_stim_array(stim, sequence)
+    assert np.all(stim.values == 1)
+
+
+def _import_dialog_with_project(tmp_path, qtbot):
+    path = tmp_path / "test.seq"
+    path.write_text(_sample_seq_text())
+    project = Project()
+    project.add_stim_array(
+        StimArray("target", StimType.Excitation, np.ones((100, 3)), "1", 0.001)
+    )
+    project.syscon2_export_template_text = "previous template"
+    project.dirty = False
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    return dialog, project
+
+
+def test_cancel_after_preview_does_not_mutate_project(tmp_path, qtbot):
+    dialog, project = _import_dialog_with_project(tmp_path, qtbot)
+    dialog.reject()
+    assert project.syscon2_export_template_text == "previous template"
+    assert not project.dirty
+    assert project.dt == 0.001
+    assert np.all(project.stim_arrays["target"].values == 1)
+
+
+def test_conversion_failure_does_not_remap_project(tmp_path, qtbot, mocker):
+    dialog, project = _import_dialog_with_project(tmp_path, qtbot)
+    original = project.stim_arrays["target"].values
+    mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    mocker.patch(
+        "neuroseq.syscon2_import_dialog.import_sequence_into_stim_array",
+        side_effect=ValueError("bad sequence"),
+    )
+    dialog._import_file()
+    assert project.stim_arrays["target"].values is original
+    assert project.dt == 0.001
+    assert project.stim_arrays["target"].dt == 0.001
+    assert project.syscon2_export_template_text == "previous template"
+    assert not project.dirty
+
+
+def test_declining_dropped_channels_leaves_project_unchanged(tmp_path, qtbot, mocker):
+    dialog, project = _import_dialog_with_project(tmp_path, qtbot)
+    original = project.stim_arrays["target"].values
+    dialog.neuron_offset_spin.setValue(2)
+    question = mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        side_effect=[
+            QtWidgets.QMessageBox.StandardButton.Yes,
+            QtWidgets.QMessageBox.StandardButton.No,
+        ],
+    )
+    dialog._import_file()
+    assert question.call_count == 2
+    assert "dropped" in question.call_args.args[2]
+    assert project.stim_arrays["target"].values is original
+    assert not project.dirty
+    assert project.dt == 0.001
+
+
+def _point_sequence(specs):
+    header = _sample_seq_text().split("[0]")[0]
+    blocks = []
+    for index, (kind, start_tick, lane, source, center) in enumerate(specs):
+        blocks.append(
+            f"[{index}]\ntype={kind}\nTotalTimings=1\nTimelineInfo0_starttime={start_tick * 520.8125}\nTimelineInfo0_TimelineIndex={lane}\nTimelineInfo0_repeats={1 if kind == 'TTLPulse' else 0}\nTimelineInfo0_LightsourceID_0={source}\nShape{index}_Type=0\nShape{index}_CenterX={center}\nShape{index}_CenterY=0\nShape{index}_CenterZ=0\n[/{index}]"
+        )
+    return parse_syscon2_seq_text(header + "\n".join(blocks))
+
+
+def test_repeated_point_shapes_map_to_same_channel_and_preview(qtbot):
+    sequence = _point_sequence(
+        [
+            ("Shape", 0, 0, "laser-a", 1),
+            ("Shape", 128, 0, "laser-a", 1),
+            ("TTLPulse", 33, 2, "laser-a", 0),
+            ("TTLPulse", 161, 2, "laser-a", 0),
+        ]
+    )
+    values, report = sequence_to_stim_values(
+        sequence, dt_seconds=_SYSCON2_TTL_PULSE_QUANTUM_S, n_neurons=1
+    )
+    assert report.grouped_objects == 1
+    assert report.dropped_objects == 0
+    np.testing.assert_array_equal(np.flatnonzero(values[:, 0]), [33, 34, 161, 162])
+    dialog = Syscon2ImportDialog(Project())
+    qtbot.addWidget(dialog)
+    assert "Estimated neuron channels (shape/entity)=1" in dialog._build_preview_text(
+        sequence
+    )
+
+
+def test_laser_timelines_are_associated_with_their_own_targets():
+    sequence = _point_sequence(
+        [
+            ("Shape", 0, 0, "laser-a", 1),
+            ("Shape", 0, 6, "laser-b", 5),
+            ("TTLPulse", 33, 2, "laser-a", 0),
+            ("TTLPulse", 43, 3, "laser-b", 0),
+        ]
+    )
+    values, report = sequence_to_stim_values(
+        sequence, dt_seconds=_SYSCON2_TTL_PULSE_QUANTUM_S, n_neurons=2
+    )
+    assert report.mapped_objects == 2
+    np.testing.assert_array_equal(np.flatnonzero(values[:, 0]), [33, 34])
+    np.testing.assert_array_equal(np.flatnonzero(values[:, 1]), [43, 44])
+
+
+def test_ambiguous_laser_association_fails_instead_of_guessing():
+    sequence = _point_sequence(
+        [
+            ("Shape", 0, 0, "", 1),
+            ("TTLPulse", 33, 2, "laser-a", 0),
+            ("TTLPulse", 43, 3, "laser-b", 0),
+        ]
+    )
+    with pytest.raises(ValueError, match="Cannot associate"):
+        sequence_to_stim_values(
+            sequence, dt_seconds=_SYSCON2_TTL_PULSE_QUANTUM_S, n_neurons=1
+        )
+
+
+def test_untimed_shape_does_not_create_import_channel():
+    sequence = _point_sequence(
+        [
+            ("Shape", 0, 0, "laser-a", 1),
+            ("TTLPulse", 33, 2, "laser-a", 0),
+        ]
+    )
+    sequence.objects[0].properties.pop("TimelineInfo0_starttime")
+    _, report = sequence_to_stim_values(
+        sequence, dt_seconds=_SYSCON2_TTL_PULSE_QUANTUM_S, n_neurons=1
+    )
+    assert report.mapped_objects == 0
+
+
+def test_shape_repeats_define_duration_not_extra_shifted_events():
+    sequence = parse_syscon2_seq_text(_sample_seq_text())
+    sequence.objects = sequence.objects[:1]
+    values, _ = sequence_to_stim_values(
+        sequence, dt_seconds=_SYSCON2_TTL_PULSE_QUANTUM_S, n_neurons=1
+    )
+    # Shape repeats=2 means four 32-tick windows, not 3 copies spaced by Stepsize.
+    assert values.shape == (128, 1)
+    assert np.all(values[:, 0] == np.float32(0.3))
+
+
+def test_reject_invalid_event_cap():
+    with pytest.raises(ValueError, match="max_events_per_object"):
+        sequence_to_stim_values(
+            parse_syscon2_seq_text(_sample_seq_text()),
+            dt_seconds=0.001,
+            n_neurons=1,
+            max_events_per_object=0,
+        )
+
+
+def test_remap_failure_does_not_mutate_any_live_arrays(tmp_path, qtbot, mocker):
+    dialog, project = _import_dialog_with_project(tmp_path, qtbot)
+    original = project.stim_arrays["target"].values
+    project.add_stim_array(
+        StimArray("second", StimType.Excitation, np.ones((5, 1)), "1", 0.002)
+    )
+    project.dirty = False
+    mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    from neuroseq.stim_timing import remap_stim_values_to_dt
+
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ValueError("failed second remap")
+        return remap_stim_values_to_dt(*args, **kwargs)
+
+    mocker.patch("neuroseq.project.remap_stim_values_to_dt", side_effect=fail_second)
+    dialog._import_file()
+    assert project.stim_arrays["target"].values is original
+    assert project.stim_arrays["target"].dt == 0.001
+    assert project.stim_arrays["second"].dt == 0.002
+    assert project.dt == 0.001
+    assert not project.dirty

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,7 @@ _SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_NEURON_OBJECT_QUANTUM_US = 32 * _SYSCON2_TTL_PULSE_QUANTUM_US
 _SYSCON2_WINDOW_TICKS = 32
 _NEUROSEQ_DT_TOLERANCE_SECONDS = 1e-9
+_MAX_IMPORT_BYTES = 512 * 1024 * 1024
 
 
 @dataclass
@@ -128,6 +130,58 @@ def _safe_float(value: str | None, default: float = 0.0) -> float:
         return default
 
 
+def _validate_object_properties(props: dict[str, str], block_index: int) -> None:
+    integer_keys = {
+        "ID",
+        "TotalTimings",
+        "TimelineInfo0_repeats",
+        "TimelineInfo0_Stepsize",
+        "TimelineInfo0_TimelineIndex",
+        "TimelineInfo0_LightsourceCount",
+    }
+    for key, raw in props.items():
+        numeric = (
+            key in integer_keys
+            or key == "TimelineInfo0_starttime"
+            or "_Intensity_" in key
+            or key.lower().endswith(("_centerx", "_centery", "_centerz"))
+        )
+        if not numeric:
+            continue
+        try:
+            value = float(raw)
+        except ValueError as exc:
+            raise ValueError(f"Block [{block_index}]: invalid {key}={raw!r}") from exc
+        if not math.isfinite(value) or (key in integer_keys and not value.is_integer()):
+            raise ValueError(
+                f"Block [{block_index}]: {key} must be a finite {'integer' if key in integer_keys else 'number'}"
+            )
+        if (
+            key in {"TimelineInfo0_starttime", "TimelineInfo0_repeats"}
+            or "_Intensity_" in key
+        ) and value < 0:
+            raise ValueError(f"Block [{block_index}]: {key} cannot be negative")
+        if key == "TimelineInfo0_Stepsize" and value <= 0:
+            raise ValueError(f"Block [{block_index}]: step size must be positive")
+    if _safe_int(props.get("TotalTimings"), 1) > 1 or any(
+        re.match(r"TimelineInfo[1-9]", key) for key in props
+    ):
+        raise ValueError(
+            f"Block [{block_index}]: multiple timings per object are not supported"
+        )
+    if _safe_int(props.get("TimelineInfo0_LightsourceCount"), 1) > 1:
+        raise ValueError(
+            f"Block [{block_index}]: multiple lightsources per object are not supported"
+        )
+
+
+def _check_allocation(n_timepoints: int, n_neurons: int, itemsize: int = 4) -> None:
+    if n_timepoints * n_neurons * itemsize > _MAX_IMPORT_BYTES:
+        raise ValueError(
+            "Sequence would require more than 512 MiB for its stimulus array. Reduce duration or target channel count before importing."
+        )
+
+
 def parse_syscon2_seq_text(text: str) -> SysconSequence:
     lines = text.splitlines()
     cleaned = [_strip_comment(line).strip() for line in lines]
@@ -170,11 +224,15 @@ def parse_syscon2_seq_text(text: str) -> SysconSequence:
             f"Invalid SysCon2 header, missing keys: {', '.join(missing_header_keys)}"
         )
 
+    seen_blocks: set[int] = set()
     while i < len(cleaned):
         start_match = _BLOCK_START_RE.match(cleaned[i])
         if not start_match:
             raise ValueError(f"Expected block start marker at line '{cleaned[i]}'")
         block_index = int(start_match.group(1))
+        if block_index in seen_blocks:
+            raise ValueError(f"Duplicate block index [{block_index}]")
+        seen_blocks.add(block_index)
         i += 1
 
         props: dict[str, str] = {}
@@ -200,6 +258,7 @@ def parse_syscon2_seq_text(text: str) -> SysconSequence:
             )
         i += 1
 
+        _validate_object_properties(props, block_index)
         object_type = props.get("type", "")
         default_intensity = 1.0 if _is_shape_like_object_type(object_type) else 0.0
         obj = SysconSequenceObject(
@@ -514,7 +573,10 @@ def _group_entities_by_center_distance(
 
     centers_by_index: dict[int, tuple[float, float]] = {}
     for idx, obj in enumerate(entities):
-        if obj.object_type.strip().lower() != "entity":
+        if obj.object_type.strip().lower() != "entity" and not (
+            obj.object_type.strip().lower() == "shape"
+            and _parse_shape_entity_geometry_type(obj) == 0
+        ):
             continue
         center = _extract_entity_center_any_shape(obj)
         if center is not None:
@@ -526,7 +588,22 @@ def _group_entities_by_center_distance(
         for idx_b in centered_indices[i + 1 :]:
             center_b_x, center_b_y = centers_by_index[idx_b]
             distance = float(np.hypot(center_a_x - center_b_x, center_a_y - center_b_y))
-            if distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM:
+            a, b = entities[idx_a], entities[idx_b]
+            both_entities = a.object_type.lower() == b.object_type.lower() == "entity"
+            same_point = (
+                a.object_type.lower() == b.object_type.lower() == "shape"
+                and distance == 0
+                and _safe_float(
+                    _find_property_value_by_suffix(a.properties, ("_centerz",))
+                )
+                == _safe_float(
+                    _find_property_value_by_suffix(b.properties, ("_centerz",))
+                )
+            )
+            if (
+                (both_entities and distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM)
+                or same_point
+            ) and _extract_lightsource_ids(a) == _extract_lightsource_ids(b):
                 union(idx_a, idx_b)
 
     grouped: list[list[SysconSequenceObject]] = []
@@ -611,9 +688,7 @@ def _sequence_to_stim_values_holo4d_layout(
     n_neurons: int,
     tick_resolution_us: int,
 ) -> tuple[np.ndarray, SysconImportResult]:
-    shape_like_objects = [
-        obj for obj in sequence.objects if _is_shape_like_object_type(obj.object_type)
-    ]
+    shape_like_objects = get_timed_objects(sequence)
     grouped_entities = _group_entities_by_center_distance(
         sorted(shape_like_objects, key=lambda obj: (obj.start_time_us, obj.block_index))
     )
@@ -627,30 +702,28 @@ def _sequence_to_stim_values_holo4d_layout(
         if _ttl_pulse_duration_us(obj, tick_resolution_us=tick_resolution_us)
         is not None
     ]
-    pulses_by_timeline: dict[int, list[SysconSequenceObject]] = {}
-    for pulse in laser_pulses:
-        timeline_idx = _timeline_index_for_object(pulse)
-        pulses_by_timeline.setdefault(timeline_idx, []).append(pulse)
-    active_timeline_idx, active_timeline_pulses = sorted(
-        pulses_by_timeline.items(),
-        key=lambda item: (-len(item[1]), item[0]),
-    )[0]
-    _ = active_timeline_idx
-    # In Holo4D layout, laser TTLPulse objects are the true stimulation events.
-    # Entity objects define availability windows (SLM lead-in + placement duration).
-    pulse_intervals = _merge_time_intervals_us(
-        [
-            (
-                pulse.start_time_us,
-                pulse.start_time_us
-                + float(
-                    _ttl_pulse_duration_us(pulse, tick_resolution_us=tick_resolution_us)
-                    or 0
-                ),
-            )
-            for pulse in active_timeline_pulses
-        ]
+    all_lightsources = set().union(
+        *(_extract_lightsource_ids(pulse) for pulse in laser_pulses)
     )
+    intervals_by_lightsource = {
+        source: _merge_time_intervals_us(
+            [
+                (
+                    pulse.start_time_us,
+                    pulse.start_time_us
+                    + float(
+                        _ttl_pulse_duration_us(
+                            pulse, tick_resolution_us=tick_resolution_us
+                        )
+                        or 0
+                    ),
+                )
+                for pulse in laser_pulses
+                if source in _extract_lightsource_ids(pulse)
+            ]
+        )
+        for source in all_lightsources
+    }
 
     # One SLM window (32 ticks × 520.8125 µs = 16 666 µs) is the hologram load-up
     # time during which no laser pulse may fire.
@@ -679,6 +752,20 @@ def _sequence_to_stim_values_holo4d_layout(
     max_timepoints = 1
     for neuron_idx, entity_group in enumerate(grouped_entities[:mapped_objects]):
         for entity in entity_group:
+            sources = _extract_lightsource_ids(entity)
+            if not sources:
+                if len(all_lightsources) != 1:
+                    raise ValueError(
+                        "Cannot associate a shape without a lightsource ID with multiple laser timelines"
+                    )
+                sources = all_lightsources
+            pulse_intervals = _merge_time_intervals_us(
+                [
+                    interval
+                    for source in sources
+                    for interval in intervals_by_lightsource.get(source, [])
+                ]
+            )
             entity_start_us = entity.start_time_us
             entity_end_us = entity_start_us + _shape_object_duration_us(
                 entity,
@@ -717,6 +804,7 @@ def _sequence_to_stim_values_holo4d_layout(
                 )
                 max_timepoints = max(max_timepoints, end_idx)
 
+    _check_allocation(max_timepoints, n_neurons)
     values = np.zeros((max_timepoints, n_neurons), dtype=np.float32)
     for neuron_idx, intervals in enumerate(intervals_by_neuron):
         for start_idx, end_idx, intensity in intervals:
@@ -803,6 +891,12 @@ def group_timed_objects_by_neuron_target(
     and mapped to the same neuron channel.
     """
     eligible_objects = get_timed_objects(sequence, include_non_shape=include_non_shape)
+    if _has_laser_ttl_pulses(sequence):
+        return _group_entities_by_center_distance(
+            sorted(
+                eligible_objects, key=lambda obj: (obj.start_time_us, obj.block_index)
+            )
+        )
     return _group_eligible_objects_by_target_neuron(eligible_objects)
 
 
@@ -828,12 +922,15 @@ def sequence_to_stim_values(
     ``tick_resolution_us`` is used only for legacy ``Entity`` duration calculation
     and has no effect when the Holo4D path is active.
     """
-    if dt_seconds <= 0:
+    if not math.isfinite(dt_seconds) or dt_seconds <= 0:
         raise ValueError("dt_seconds must be positive")
     if n_neurons <= 0:
         raise ValueError("n_neurons must be positive")
-    if tick_resolution_us <= 0:
+    if not math.isfinite(tick_resolution_us) or tick_resolution_us <= 0:
         raise ValueError("tick_resolution_us must be positive")
+
+    if max_events_per_object <= 0:
+        raise ValueError("max_events_per_object must be positive")
 
     # Prefer pulse-based reconstruction whenever laser TTLPulse events exist.
     # This avoids mode-flips caused by startup-TTL duration thresholds.
@@ -862,7 +959,9 @@ def sequence_to_stim_values(
     max_timepoints = 1
     for object_group in grouped_objects[:mapped_objects]:
         for obj in object_group:
-            event_count = obj.repeats + 1
+            event_count = (
+                1 if obj.object_type.strip().lower() == "shape" else obj.repeats + 1
+            )
             if event_count > max_events_per_object:
                 truncated_repeats += event_count - max_events_per_object
                 event_count = max_events_per_object
@@ -884,11 +983,14 @@ def sequence_to_stim_values(
             max_timepoints = max(max_timepoints, last_time_index + duration_timepoints)
 
     n_timepoints = max_timepoints
+    _check_allocation(n_timepoints, n_neurons)
     values = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
 
     for neuron_idx, object_group in enumerate(grouped_objects[:mapped_objects]):
         for obj in object_group:
-            event_count = obj.repeats + 1
+            event_count = (
+                1 if obj.object_type.strip().lower() == "shape" else obj.repeats + 1
+            )
             if event_count > max_events_per_object:
                 event_count = max_events_per_object
             if event_count <= 0:
@@ -948,7 +1050,8 @@ def import_sequence_into_stim_array(
     ``dt_seconds`` is taken from ``stim_array.dt``; neurons are written starting
     at column ``neuron_offset``.  If ``extend_to_fit`` is ``True`` and the
     imported data is longer than the existing array, the array is extended.
-    Excess timepoints are silently truncated when ``extend_to_fit`` is ``False``.
+    Excess timepoints are reported as truncated when ``extend_to_fit`` is ``False``.
+    Replacement clears only mapped destination channels; other channels are preserved.
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Target StimArray must be 2-dimensional")
@@ -972,11 +1075,25 @@ def import_sequence_into_stim_array(
     if extend_to_fit:
         target_timepoints = max(n_existing_timepoints, imported_values.shape[0])
 
-    target_values = np.zeros(
-        (target_timepoints, n_existing_neurons), dtype=stim_array.values.dtype
+    if result.mapped_objects == 0 or not np.any(imported_values):
+        raise ValueError(
+            "No stimulation events could be reconstructed; the target has not been changed."
+        )
+    _check_allocation(
+        target_timepoints,
+        n_existing_neurons,
+        np.dtype(np.result_type(stim_array.values.dtype, np.float32)).itemsize,
     )
-    if not replace_existing:
-        target_values[:n_existing_timepoints, :] = stim_array.values
+    target_values = np.zeros(
+        (target_timepoints, n_existing_neurons),
+        dtype=np.result_type(stim_array.values.dtype, np.float32),
+    )
+    target_values[:n_existing_timepoints, :] = stim_array.values
+    # Replace only the mapped destination channels, preserving all other neurons.
+    stop_neuron = neuron_offset + result.mapped_objects
+    if replace_existing:
+        target_values[:, neuron_offset:stop_neuron] = 0
+    imported_values = imported_values[:, : result.mapped_objects]
 
     if imported_values.shape[0] > target_timepoints:
         result.truncated_timepoints = imported_values.shape[0] - target_timepoints

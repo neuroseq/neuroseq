@@ -1953,3 +1953,25 @@ def test_compute_cell_centroids_x_axis_is_unchanged() -> None:
 
     x, _ = centroids[0]
     assert x == pytest.approx(4.5)
+
+
+def test_roundtrip_revisiting_point_target_preserves_neuron_channel():
+    values = np.zeros((256, 2), dtype=np.float32)
+    values[33:36, 0] = 1
+    values[129:132, 1] = 1
+    values[225:228, 0] = 1
+    stim = StimArray("repeat", StimType.Excitation, values, "1", _DT_S)
+    text, _ = generate_syscon2_sequence_text(
+        stim,
+        _cellpose_result_many(n_neurons=2, mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+        spiralling=False,
+    )
+    imported, report = sequence_to_stim_values(
+        parse_syscon2_seq_text(text),
+        dt_seconds=_DT_S,
+        n_neurons=2,
+    )
+    assert report.dropped_objects == 0
+    assert report.merged_objects >= 1
+    np.testing.assert_array_equal(imported, values[: imported.shape[0]])

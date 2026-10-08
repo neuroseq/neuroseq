@@ -168,3 +168,34 @@ neuroseq --generate-cellpose-test-data ./cellpose_1300.tif \
  --cellpose-grid-cols 10 \
  --cellpose-square-size 1300
 ```
+
+## Importing a `.seq` file
+
+Use **File → Import stimulus → Import light stimulus → SysCon2** to reconstruct a
+sequence in an existing input array. Browsing and cancelling do not change the
+project. Import applies the file's header as the session's export template only
+after conversion succeeds. If the project sample interval changes to 520.8125 µs,
+existing stimulus and trace data are remapped after confirmation.
+
+Targets map to consecutive channels starting at **Target neuron offset**, in their
+first-occurrence order for Holo4D sequences. They are not matched to project neuron
+IDs or Cellpose identities. Repeated point Shapes at identical coordinates and
+with the same lightsource share a channel; nearby legacy Entities retain the
+1 µm grouping rule. Multiple spots in one ROI may therefore import as separate
+channels. The preview shows the same grouping used for conversion.
+
+**Replace mapped target channels** clears only channels receiving imported data;
+other channels are preserved. Disable it to merge using the maximum value at
+each sample. Dropped channels, clipped duration, and capped legacy repeats require
+confirmation before the project changes. Files that reconstruct no stimulation
+are rejected, as are arrays exceeding the 512 MiB import allocation limit.
+
+Holo4D timing is reconstructed from each target's laser TTL pulses and SLM
+availability windows. The **Legacy repeat tick** setting does not change Holo4D's
+520.8125 µs TTL quantum. One sequence pass is imported; the header's `runs` count
+is not expanded. Imported amplitudes are raw file intensity values, with a nominal
+1 used for zero-intensity shapes, rather than recovered optical power or the
+original drawing amplitudes. Spiralling latency and hardware behavior cannot be
+inferred from the file, so this is not a measurement of delivered stimulation.
+Objects with multiple timing entries or multiple lightsources are rejected rather
+than partially imported.

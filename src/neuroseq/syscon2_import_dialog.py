@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from pathlib import Path
@@ -9,6 +10,7 @@ import numpy as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.data import TraceData
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importer_syscon2 import SysconSequence
 from neuroseq.importer_syscon2 import get_timed_objects
@@ -42,6 +44,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         self.sequence: SysconSequence | None = None
         self.file_path: str = ""
         self.selected_stim_name: str = ""
+        self._header_template: str | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -53,7 +56,9 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             "Select a SysCon2 .seq file, preview parsed content, and import timing/intensity "
-            "information into a selected input data entity."
+            "information into a selected input data entity. Channels are assigned by target order, "
+            "not matched to your project neuron IDs. Intensities are file values (zero uses a "
+            "nominal 1), not measured optical power. Hardware latency is not reconstructed."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -115,10 +120,9 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         self.tick_resolution_spin.setValue(500)
         self.tick_resolution_spin.setSuffix(" us")
         self.tick_resolution_spin.setToolTip(
-            "System tick resolution used to expand repeats. "
-            "Typical values: 500us (Holo4D) or 50us (UGA-42)."
+            "Legacy repeat spacing only. Holo4D laser TTL pulses always use 520.8125 us ticks."
         )
-        options_layout.addRow("System tick resolution:", self.tick_resolution_spin)
+        options_layout.addRow("Legacy repeat tick:", self.tick_resolution_spin)
 
         self.extend_checkbox = QtWidgets.QCheckBox(
             "Extend target input array to fit imported duration"
@@ -127,7 +131,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         options_layout.addRow(self.extend_checkbox)
 
         self.replace_checkbox = QtWidgets.QCheckBox(
-            "Replace existing target input values (instead of merging)"
+            "Replace mapped target channels (preserve other channels)"
         )
         self.replace_checkbox.setChecked(True)
         options_layout.addRow(self.replace_checkbox)
@@ -238,15 +242,14 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             self.file_label.setText(filename)
             self.file_label.setStyleSheet("QLabel { color: black; }")
             self.preview_text.setPlainText(self._build_preview_text(self.sequence))
-            template_text = self._extract_header_template_text(filename)
-            if template_text is not None:
-                self.project.syscon2_export_template_text = template_text
+            self._header_template = self._extract_header_template_text(filename)
             self.info_label.setText(
                 "Review options and click Import to apply the sequence."
             )
         except Exception as exc:
             self.logger.exception("Failed to parse SysCon2 file %s", filename)
             self.sequence = None
+            self._header_template = None
             self.file_path = ""
             self.file_label.setText("No .seq file selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
@@ -290,8 +293,12 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             f"Objects total={len(sequence.objects)}",
             f"Timed shape/entity objects={len(timed_shape_objects)}",
             f"Estimated neuron channels (shape/entity)={len(grouped_shape_objects)}",
-            "Center-merged circular entities (<=1um)="
+            "Merged repeated targets="
             f"{max(0, len(timed_shape_objects) - len(grouped_shape_objects))}",
+            "",
+            "Mapping uses target order plus neuron offset, not project neuron identities.",
+            "Repeated point Shapes at identical coordinates share a channel.",
+            "Runs is not expanded; one sequence pass is imported.",
             "",
             "First objects:",
         ]
@@ -311,7 +318,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             target_ready = self.new_name_edit.text().strip() != ""
         else:
             target_ready = self._selected_stim_array() is not None
-        self.import_button.setEnabled(self.sequence is not None and target_ready)
+        self.import_button.setEnabled(
+            self.sequence is not None
+            and bool(get_timed_objects(self.sequence))
+            and target_ready
+        )
 
     def _build_new_stim_array(self, name: str, dt: float) -> StimArray:
         """Create an empty array with one neuron column per imported channel."""
@@ -367,33 +378,90 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 )
                 if answer != QtWidgets.QMessageBox.StandardButton.Yes:
                     return
-            self.project.remap_all_data_to_dt(target_dt)
 
         try:
+            # Remapping and conversion must succeed without mutating the live project.
+            prepared = copy.copy(self.project)
+            prepared.stim_arrays = {
+                name: copy.copy(stim) for name, stim in self.project.stim_arrays.items()
+            }
+            prepared.experiments = {}
+            for name, experiment in self.project.experiments.items():
+                staged_experiment = copy.copy(experiment)
+                staged_experiment.data = [copy.copy(datum) for datum in experiment.data]
+                prepared.experiments[name] = staged_experiment
+            prepared.remap_all_data_to_dt(target_dt)
             if create_new:
-                stim_array = self._build_new_stim_array(new_name, target_dt)
+                staged_stim = self._build_new_stim_array(new_name, target_dt)
                 result = import_sequence_into_stim_array(
-                    stim_array,
+                    staged_stim,
                     self.sequence,
                     tick_resolution_us=self.tick_resolution_spin.value(),
                 )
-                self.project.add_stim_array(stim_array)
-                self.selected_stim_name = new_name
             else:
-                assert stim_array is not None
+                staged_stim = prepared.stim_arrays[self.target_combo.currentText()]
                 result = import_sequence_into_stim_array(
-                    stim_array,
+                    staged_stim,
                     self.sequence,
                     tick_resolution_us=self.tick_resolution_spin.value(),
                     replace_existing=self.replace_checkbox.isChecked(),
                     extend_to_fit=self.extend_checkbox.isChecked(),
                     neuron_offset=self.neuron_offset_spin.value(),
                 )
+            losses = []
+            if result.dropped_objects:
+                losses.append(
+                    f"{result.dropped_objects} target channels will be dropped."
+                )
+            if result.truncated_timepoints:
+                losses.append(
+                    f"{result.truncated_timepoints} timepoints will be truncated."
+                )
+            if result.truncated_repeats:
+                losses.append(
+                    f"{result.truncated_repeats} repetitions exceed the import limit."
+                )
+            if (
+                losses
+                and QtWidgets.QMessageBox.question(
+                    self,
+                    "Incomplete import",
+                    "\n".join(losses) + "\nImport the remaining data?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                != QtWidgets.QMessageBox.StandardButton.Yes
+            ):
+                return
+            for name, staged in prepared.stim_arrays.items():
+                original = self.project.stim_arrays[name]
+                original.values, original.dt = staged.values, staged.dt
+            for name, staged_experiment in prepared.experiments.items():
+                for original_data, staged_data in zip(
+                    self.project.experiments[name].data,
+                    staged_experiment.data,
+                    strict=True,
+                ):
+                    if isinstance(original_data, TraceData) and isinstance(
+                        staged_data, TraceData
+                    ):
+                        original_data.traces, original_data.dt = (
+                            staged_data.traces,
+                            staged_data.dt,
+                        )
+            self.project.dt = target_dt
+            if create_new:
+                self.project.add_stim_array(staged_stim)
+                self.selected_stim_name = new_name
+            self.project.syscon2_export_template_text = self._header_template
+            self.project.update_limits()
+            self.project.mark_dirty()
             info_lines = [
                 (
-                    f"Imported into new input array '{stim_array.name}'."
+                    f"Imported into new input array '{staged_stim.name}'."
                     if create_new
-                    else f"Imported into '{stim_array.name}'."
+                    else f"Imported into '{staged_stim.name}'."
                 ),
                 f"Eligible timed objects: {result.eligible_objects}",
                 "Neuron channels after center-distance grouping: "
@@ -403,10 +471,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 f"Generated timepoints: {result.generated_timepoints}",
             ]
             if result.merged_objects > 0:
-                info_lines.append(
-                    "Merged circular entities by center distance (<=1um): "
-                    f"{result.merged_objects}"
-                )
+                info_lines.append(f"Merged repeated targets: {result.merged_objects}")
             if result.truncated_timepoints > 0:
                 info_lines.append(
                     f"Truncated timepoints: {result.truncated_timepoints}"
