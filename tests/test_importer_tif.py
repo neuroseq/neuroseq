@@ -1015,3 +1015,28 @@ def test_run_with_cpu_fallback_reraises_on_cpu_failure(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="boom"):
         _run_with_cpu_fallback(fn, cpu, "CPU")
+
+
+def test_roi_average_pipeline_stops_when_progress_raises_cancelled(tmp_path):
+    import tifffile
+
+    from neuroseq.importer_tif import PipelineCancelled
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.importer_tif import run_roi_average_pipeline
+
+    path = tmp_path / "a.tif"
+    tifffile.imwrite(path, np.ones((4, 4, 4), dtype=np.uint16))
+    masks = np.zeros((4, 4), dtype=np.int32)
+    masks[0, 0], masks[1, 1] = 1, 2
+    calls = []
+
+    def progress(message, fraction):
+        calls.append(message)
+        if len(calls) > 1:
+            raise PipelineCancelled
+
+    with pytest.raises(PipelineCancelled):
+        run_roi_average_pipeline(
+            [path], masks, TifPipelineParams(nchannels=1), progress=progress
+        )
+    assert len(calls) == 2

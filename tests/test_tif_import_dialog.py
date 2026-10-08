@@ -920,3 +920,90 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
     dialog._start_pipeline()
     qtbot.waitUntil(lambda: dialog._run_button.isEnabled(), timeout=5000)
     assert dialog._pipeline_result is None
+
+
+def test_pipeline_worker_cancel_emits_cancelled_not_failed(mocker):
+    from neuroseq.importer_tif import TifPipelineParams
+    from neuroseq.tif_import_dialog import _PipelineWorker
+
+    worker = _PipelineWorker(
+        [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), "roi_average"
+    )
+
+    def fake_pipeline(*_args, progress, **_kwargs):
+        progress("step 1", 0.1)
+        worker.cancel()
+        progress("step 2", 0.2)
+        raise AssertionError("pipeline kept running after cancel")
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_roi_average_pipeline", side_effect=fake_pipeline
+    )
+    events = {"cancelled": 0, "failed": [], "finished": []}
+    worker.cancelled.connect(lambda: events.__setitem__("cancelled", 1))
+    worker.failed.connect(events["failed"].append)
+    worker.finished.connect(events["finished"].append)
+
+    worker.run()
+
+    assert events == {"cancelled": 1, "failed": [], "finished": []}
+
+
+def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
+    qtbot, mocker, tmp_path
+):
+    """Regression test for #592: cancelling must not destroy a running QThread."""
+    import threading
+
+    from neuroseq.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(0)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._tif_list.addItem(str(tif))
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_pipeline(*_args, progress, **_kwargs):
+        progress("start", 0.0)
+        started.set()
+        release.wait(timeout=5)
+        progress("next", 0.5)  # raises PipelineCancelled once cancelled
+        raise AssertionError("pipeline kept running after cancel")
+
+    mocker.patch(
+        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=slow_pipeline
+    )
+    rejected = MagicMock()
+    mocker.patch.object(
+        QtWidgets.QDialog,
+        "reject",
+        lambda self_: rejected(self_) if self_ is dialog else None,
+    )
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(started.is_set, timeout=5000)
+    progress_dialog = dialog._progress_dialog
+
+    dialog._cancel_pipeline()
+
+    # Still running: dialog must not be rejected and the thread must survive.
+    assert dialog._thread is not None and dialog._thread.isRunning()
+    rejected.assert_not_called()
+    assert not progress_dialog._cancel_button.isEnabled()
+
+    # Closing via Esc/X while the worker runs is also deferred.
+    dialog.reject()
+    rejected.assert_not_called()
+
+    release.set()
+    qtbot.waitUntil(lambda: dialog._thread is None, timeout=5000)
+    rejected.assert_called_once_with(dialog)
+    assert dialog._run_button.isEnabled()
+    assert dialog._pipeline_result is None

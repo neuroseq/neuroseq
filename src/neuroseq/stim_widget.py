@@ -151,6 +151,20 @@ def apply_cmap_alpha(image_graphic: fpl.ImageGraphic, cmap: object) -> None:
     image_graphic._material.map.texture.update_range((0, 0, 0), size=(256, 1, 1))
 
 
+def _active_span(column: np.ndarray, index: int) -> tuple[int, int] | None:
+    """Return the first and last sample of the non-zero run containing ``index``.
+
+    ``None`` when the sample at ``index`` is zero (the pointer is over empty space).
+    """
+    if column[index] == 0:
+        return None
+    zeros_before = np.flatnonzero(column[:index] == 0)
+    first = int(zeros_before[-1]) + 1 if zeros_before.size else 0
+    zeros_after = np.flatnonzero(column[index + 1 :] == 0)
+    last = index + int(zeros_after[0]) if zeros_after.size else len(column) - 1
+    return first, last
+
+
 class StimWidget(TimeseriesWidget):
     """A widget that displays a StimArray stimuli timeseries for neurons.
 
@@ -598,10 +612,6 @@ class StimWidget(TimeseriesWidget):
             self.mouse_pos is None
             or self.data_values is None
             or not self._visible_neuron_ids
-            or (
-                not self._background_stim_arrays
-                and self.stim_type != StimType.Inhibition
-            )
         ):
             return
         t_idx_fg = np.clip(
@@ -616,6 +626,8 @@ class StimWidget(TimeseriesWidget):
         raw_fg = float(self.data_values[t_idx_fg, neuron_id])
         best_val = -raw_fg if self.stim_type == StimType.Inhibition else raw_fg
         best_units = self.units
+        best_span = _active_span(self.data_values[:, neuron_id], t_idx_fg)
+        best_dt_ms = self.dt_ms
         for arr, units, dt_ms, stim_type in self._background_stim_arrays:
             t_idx = np.clip(
                 math.floor(self.mouse_pos[0] / dt_ms),
@@ -628,6 +640,12 @@ class StimWidget(TimeseriesWidget):
             if abs(val) > abs(best_val):
                 best_val = val
                 best_units = units
-        self.text.set_pos(
-            self.mouse_pos, f"Neuron {neuron_id}\n{best_val:.3g} {best_units}"
-        )
+                best_span = _active_span(arr[:, n_idx_bg], int(t_idx))
+                best_dt_ms = dt_ms
+        text = f"Neuron {neuron_id}\n{best_val:.3g} {best_units}"
+        if best_span is not None:
+            first, last = best_span
+            start_ms = first * best_dt_ms
+            end_ms = (last + 1) * best_dt_ms
+            text += f"\nStart: {start_ms:.6g} ms\nEnd: {end_ms:.6g} ms"
+        self.text.set_pos(self.mouse_pos, text)

@@ -2364,14 +2364,6 @@ class Gui(QtWidgets.QMainWindow):
             self._warn_if_cellpose_model_mismatch()
 
     def btn_import_syscon2_seq_clicked(self) -> None:
-        if not self.project.stim_arrays:
-            QtWidgets.QMessageBox.information(
-                self,
-                "No input entities",
-                "No input data entities available. Create one before importing a SysCon2 sequence.",
-            )
-            return
-
         dialog = Syscon2ImportDialog(self.project, parent=self)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()

@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 
 import brian2.numpy_ as np
+import pytest
 from qtpy import QtWidgets
 
 from neuroseq.data import Experiment
@@ -1585,3 +1586,76 @@ def test_syscon2_import_dialog_updates_generator_template_from_loaded_file(
         "SourceConnectorPort0=dummy_2_0 RMI In"
         in generator_dialog.config_data_edit.toPlainText()
     )
+
+
+def test_syscon2_import_dialog_creates_new_input_array_in_empty_project(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    """Issue #591: importing must not require a pre-existing input array."""
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+    project = Project()
+    assert not project.stim_arrays
+
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    assert dialog.create_new_radio.isChecked()
+    assert not dialog.import_existing_radio.isEnabled()
+    dialog._load_file(str(seq_path))
+    assert dialog.import_button.isEnabled()
+
+    dialog.new_name_edit.setText("holo_stim")
+    dialog.new_units_edit.setText("mW")
+    dialog.new_type_combo.setCurrentIndex(dialog.new_type_combo.findText("Excitatory"))
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    dialog._import_file()
+
+    stim = project.stim_arrays["holo_stim"]
+    assert dialog.selected_stim_name == "holo_stim"
+    assert stim.stim_type == StimType.Excitation
+    assert stim.units == "mW"
+    assert math.isclose(stim.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+    assert stim.values.shape[1] == 2
+    assert stim.values[0, 0] == pytest.approx(0.3)
+    assert stim.values[12, 1] == pytest.approx(0.8)
+
+
+def test_syscon2_import_dialog_new_array_rejects_duplicate_name(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+    project = Project()
+    project.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+    project.add_stim_array(
+        StimArray(
+            "stimulus",
+            StimType.Excitation,
+            np.zeros((5, 3), dtype=np.float32),
+            "1",
+            _SYSCON2_TTL_PULSE_QUANTUM_S,
+        )
+    )
+
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    # Existing arrays: default stays on the existing-array workflow.
+    assert dialog.import_existing_radio.isChecked()
+    dialog._load_file(str(seq_path))
+    dialog.create_new_radio.setChecked(True)
+    assert dialog.new_name_edit.text() not in project.stim_arrays
+    dialog.new_name_edit.setText("stimulus")
+    warned = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox, "warning", lambda *args, **kwargs: warned.append(args)
+    )
+
+    dialog._import_file()
+
+    assert len(warned) == 1
+    assert list(project.stim_arrays) == ["stimulus"]
+    assert not project.stim_arrays["stimulus"].values.any()
