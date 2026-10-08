@@ -35,6 +35,80 @@ Pipe commands have a 30-second deadline, configurable through
 A timeout closes the connection and requires an explicit reconnect; it does not
 confirm that a queued Stop command reached the device.
 
+### Real-rig checklist
+
+This updates the [export/control test](https://github.com/ssciwr/neuroseq/pull/573#issuecomment-6046355724)
+and [rheobase test](https://github.com/ssciwr/neuroseq/pull/573#issuecomment-6046356049)
+in the PR. Those comments describe the overall workflow correctly, but the
+following details matter when testing the current implementation.
+
+1. Run NeuroSeq and SysCon2 on the same Windows PC, with the Holo4D profile and a
+   verified Cellpose-to-stim-ID mapping. Connect opens the pipe; it does not prove
+   the laser is connected or ready. Click **Refresh Lightsources**, choose the
+   device/lightsource, and click **Get Status**. Check the mode and hardware state
+   in SysCon2. The SCI manual specifies software mode for **SetEmission**.
+2. Prepare a short pattern and use **Send to SysCon2…**. Select the intended input
+   array, wavelength, target power, LUT, and output directory. The export target
+   power is in mW; the separate live **Intensity** control uses the unit selected
+   in SysCon2, which the SCI status response does not identify. Do not assume the
+   two controls use the same unit or scale.
+3. Run **Check Input Sanity** and resolve every reported violation. The exact
+   required timestep is **520.8125 µs** (`0.0005208125` seconds), not exactly
+   520.8 µs. Let the dialog resample it. Around 20 ms is a starting pulse duration,
+   but it does not by itself guarantee valid SLM timing; inspect the generated
+   overview and debug CSV after the sanity fixes.
+4. Generate the script. Filenames use the dialog's **Script name**, whose initial
+   value is `syscon_sequence_example`, rather than necessarily the array name.
+   The PNG and red target crosses describe the generated array and update before
+   SCI import succeeds. Confirm import through the refreshed sequence list and
+   SysCon2 itself; a preview is not an import or hardware-execution acknowledgement.
+5. Select the imported sequence, set **Runs = 1**, and upload it. One run is now
+   the default; an endless upload requires explicit confirmation. Set the desired
+   start condition/trigger edge before **Run**. Validate actual timing, pattern,
+   and delivered power using the rig's normal controlled bench-test procedure.
+   Opening the shutter, enabling emission, and changing intensity ask for
+   confirmation. Closing the shutter is immediate. Emission OFF currently also
+   asks for confirmation.
+6. Edit the array and test **Export current array to SysCon2**. It reuses the last
+   dialog export's settings but writes `<array name>_current.seq` and its diagnostic
+   files to a temporary directory, not the dialog's chosen output folder. It
+   opens the full export dialog if settings are unavailable. As above, verify
+   the import, then select/upload again before running the changed sequence.
+7. For rheobase, select the SysCon2 target, use amplitudes within 0–1, and choose
+   the response window from the actual acquisition frame rate. At 30 Hz,
+   100–150 ms spans several frames; neither 30 Hz nor a particular useful response
+   window is guaranteed by the SCI protocol. For raw TIFF import, use the Suite2p
+   processing option to obtain deconvolved spike data. Verify the sample rate,
+   spike threshold, and neuron mapping in the import dialog.
+8. Start the routine. For **every** block, refresh the sequence list, select the
+   newly imported block, upload with **Runs = 1**, then run/acquire. The host only
+   imports; it does not select, upload, or run. Arm a triggered run before firing
+   the acquisition trigger, and verify its alignment with the recording. Manual
+   clicks alone do not establish a shared time origin.
+9. Import each probe into a **new experiment with a unique name**, starting at
+   time zero for that block. Avoid appending it after a prior recording: the
+   routine measures times relative to the current block, without subtracting an
+   import offset. A repeated experiment name can make the import dialog select
+   **Apply to existing experiment** automatically; check this choice explicitly.
+10. Return to the routine and click **Calcium data imported**. Fresh-data selection
+    is resolved when that button is clicked, so a new recording need not already
+    be selected immediately after import. Existing recordings are rejected,
+    including on the first probe. Importing data must preserve the open routine,
+    selected stimulus, and export settings; this now has a GUI regression test.
+11. Check pause, stale-data rejection, and stopping. **Routine Stop** ends the
+    software search and discards its pending result; it does not send a hardware
+    Stop command or retract an already queued/imported block. Use **Holo4D Stop**
+    to request a hardware stop, and verify it on the rig. If communication stalls,
+    a queued Stop cannot be assumed delivered; Disconnect cancels communication,
+    not stimulation.
+
+Record the script/debug CSV, selected sequence, Runs, trigger settings, wavelength,
+power settings, actual frame rate, import threshold, and per-probe response.
+Confirm the Runs wire representation on the real system; the Sequence Manager
+instance name is documented in the manual and is no longer an unresolved naming
+assumption. The same per-block import/time-origin rules apply to the STDP target;
+pairing blocks require acknowledgement after execution, but no new recording.
+
 ## Linux teardown crash with Conda
 
 If tests report success and then segfault during process exit, inspect the native
