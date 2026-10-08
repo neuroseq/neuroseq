@@ -305,7 +305,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
     stim_widget.pointer_move(None)
 
     assert len(stim_widget._background_stim_arrays) == 1
-    assert captured["additional_text"] == "Neuron 1\n-4.5 pA"
+    assert captured["additional_text"] == "Neuron 1\n-4.5 pA\nStart: 2 ms\nEnd: 3 ms"
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
 
@@ -1020,3 +1020,43 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
     )
     stim_widget.close()
     qtbot.waitUntil(lambda: not stim_widget.isVisible())
+
+
+def test_active_span_finds_bounds_of_contiguous_nonzero_run() -> None:
+    from neuroseq.stim_widget import _active_span
+
+    column = np.array([0, 1, 2, 2, 0, 0, 3, 0], dtype=float)
+    assert _active_span(column, 0) is None
+    assert _active_span(column, 1) == (1, 3)
+    assert _active_span(column, 3) == (1, 3)
+    assert _active_span(column, 6) == (6, 6)
+    assert _active_span(np.ones(4), 2) == (0, 3)
+
+
+def test_stim_widget_hover_shows_start_and_end_of_stimulus(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Issue #590: hovering a stimulus reports its start and end time."""
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((10, 2), dtype=float)
+    values[3:7, 1] = 5.0
+    stim_widget.set_data(StimArray("s", StimType.Excitation, values, "pA", dt=0.002))
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        stim_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    world = {"pos": np.array([8.0, 1.0, 0.0])}  # 2 ms samples -> time index 4
+    monkeypatch.setattr(
+        stim_widget.subplot, "map_screen_to_world", lambda ev: world["pos"]
+    )
+
+    stim_widget.pointer_move(None)
+    assert captured["t"] == "Neuron 1\n5 pA\nStart: 6 ms\nEnd: 14 ms"
+
+    # Empty space: no start/end lines.
+    world["pos"] = np.array([1.0, 1.0, 0.0])
+    stim_widget.pointer_move(None)
+    assert captured["t"] == "Neuron 1\n0 pA"
+    stim_widget.close()
