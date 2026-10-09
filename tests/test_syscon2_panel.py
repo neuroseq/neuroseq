@@ -180,7 +180,7 @@ def test_holo4d_run_requires_confirmation(
         "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.No,
     )
-    qtbot.mouseClick(panel.btn_holo4d_upload_run, QtCore.Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
     assert fake.sent == []
 
     mocker.patch(
@@ -188,7 +188,7 @@ def test_holo4d_run_requires_confirmation(
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
-        qtbot.mouseClick(panel.btn_holo4d_upload_run, QtCore.Qt.MouseButton.LeftButton)
+        qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
     qtbot.waitUntil(
         lambda: any(b"RunSequence" in frame for frame in fake.sent), timeout=2000
     )
@@ -481,7 +481,7 @@ def test_upload_defaults_to_one_run(panel, mocker):
     panel._on_connected()
     mocker.patch.object(panel, "_confirm", return_value=True)
     submit = mocker.patch.object(panel, "_submit")
-    panel.btn_holo4d_upload_run.click()
+    panel.btn_holo4d_upload.click()
     client = mocker.Mock()
     submit.call_args.args[1](client)
     client.holo4d.upload_sequence.assert_called_once_with(1)
@@ -492,11 +492,11 @@ def test_endless_upload_requires_explicit_confirmation(panel, mocker):
     submit = mocker.patch.object(panel, "_submit")
     confirm = mocker.patch.object(panel, "_confirm", return_value=False)
     panel.runs_spinbox.setValue(0)
-    panel.btn_holo4d_upload_run.click()
+    panel.btn_holo4d_upload.click()
     submit.assert_not_called()
     assert "endless" in confirm.call_args.args[0]
     confirm.return_value = True
-    panel.btn_holo4d_upload_run.click()
+    panel.btn_holo4d_upload.click()
     client = mocker.Mock()
     submit.call_args.args[1](client)
     client.holo4d.upload_sequence.assert_called_once_with(0)
@@ -659,19 +659,34 @@ def _begin_upload_run(panel, mocker):
     panel._on_connected()
     mocker.patch.object(panel, "_confirm", return_value=True)
     submit = mocker.patch.object(panel, "_submit")
-    panel._on_upload_run_clicked()
+    panel._on_upload_clicked()
     return submit, submit.call_args.args[0]
 
 
-def test_upload_run_waits_for_ready_and_tracks_actual_states(panel, mocker):
+def _finish_upload(panel, submit, mocker):
+    """Complete an upload (ack + Idle) and press Run; returns (run_name, run_task)."""
+    panel._on_command_finished(submit.call_args.args[0], None)
+    panel._on_command_finished(submit.call_args.args[0], "Idle")
+    assert panel.btn_holo4d_run.isEnabled()
+    panel._on_run_clicked()
+    return submit.call_args.args
+
+
+def test_upload_waits_for_ready_then_run_tracks_actual_states(panel, mocker):
     submit, upload = _begin_upload_run(panel, mocker)
     assert "Uploading" in panel.execution_label.text()
-    assert not panel.btn_holo4d_upload_run.isEnabled()
+    assert not panel.btn_holo4d_upload.isEnabled()
+    assert not panel.btn_holo4d_run.isEnabled()
     panel._on_command_finished(upload, None)
     state_request = submit.call_args.args[0]
     panel._on_command_finished(state_request, "Uploading")
     assert submit.call_count == 2
     panel._on_state_changed({"Holo4D": "Idle"})
+    assert "Press Run" in panel.execution_label.text()
+    assert panel.btn_holo4d_upload.isEnabled()
+    assert panel.btn_holo4d_run.isEnabled()
+    assert submit.call_count == 2  # upload alone never starts the run
+    panel._on_run_clicked()
     run, task = submit.call_args.args
     client = mocker.Mock()
     task(client)
@@ -681,7 +696,15 @@ def test_upload_run_waits_for_ready_and_tracks_actual_states(panel, mocker):
     assert "running" in panel.execution_label.text()
     panel._on_state_changed({"Holo4D": "Idle"})
     assert "finished" in panel.execution_label.text()
-    assert panel.btn_holo4d_upload_run.isEnabled()
+    assert panel.btn_holo4d_run.isEnabled()
+
+
+def test_run_requires_confirmation(panel, mocker):
+    panel._on_connected()
+    submit = mocker.patch.object(panel, "_submit")
+    mocker.patch.object(panel, "_confirm", return_value=False)
+    panel.btn_holo4d_run.click()
+    submit.assert_not_called()
 
 
 def test_stop_during_upload_never_starts_run(panel, mocker):
@@ -694,11 +717,9 @@ def test_stop_during_upload_never_starts_run(panel, mocker):
     assert "Stop acknowledged" in panel.execution_label.text()
 
 
-def test_stop_cancels_run_already_queued_after_upload(panel, mocker):
+def test_stop_cancels_run_already_queued(panel, mocker):
     submit, upload = _begin_upload_run(panel, mocker)
-    panel._on_command_finished(upload, None)
-    panel._on_command_finished(submit.call_args.args[0], "Idle")
-    run_task = submit.call_args.args[1]
+    _, run_task = _finish_upload(panel, submit, mocker)
     panel._on_holo4d_stop_clicked()
     client = mocker.Mock()
     run_task(client)
@@ -710,18 +731,17 @@ def test_upload_failure_does_not_run(panel, mocker):
     panel._on_command_failed(upload, "device rejected upload")
     assert submit.call_count == 1
     assert "failed" in panel.execution_label.text()
-    assert panel.btn_holo4d_upload_run.isEnabled()
+    assert panel.btn_holo4d_upload.isEnabled()
 
 
 def test_trigger_wait_is_not_reported_as_completed(panel, mocker):
     panel.start_condition_combo.setCurrentText("trigger1")
     submit, upload = _begin_upload_run(panel, mocker)
-    panel._on_command_finished(upload, None)
-    panel._on_command_finished(submit.call_args.args[0], "Idle")
-    panel._on_command_finished(submit.call_args.args[0], None)
+    run, _ = _finish_upload(panel, submit, mocker)
+    panel._on_command_finished(run, None)
     panel._on_state_changed({"Holo4D": "Idle"})
     assert "waiting for trigger1" in panel.execution_label.text()
-    assert not panel.btn_holo4d_upload_run.isEnabled()
+    assert not panel.btn_holo4d_run.isEnabled()
 
 
 def test_laser_controls_hidden_and_single_selector_defaults_940(panel, qtbot):
@@ -757,6 +777,7 @@ def test_generated_and_routine_exports_display_resizable_preview(
     panel.show_generated_preview("example.seq", str(path), frozenset({1}))
     panel.show()
     qtbot.waitExposed(panel)
+    panel.btn_toggle_preview.click()
     panel.resize(460, 850)
     qtbot.waitUntil(lambda: panel.preview_label.pixmap() is not None)
     assert not panel.preview_label.pixmap().isNull()
@@ -799,24 +820,33 @@ def test_get_status_discovers_and_uses_raw_identifiers(panel, mocker):
 
 def test_short_run_reports_idle_without_claiming_observed_completion(panel, mocker):
     submit, upload = _begin_upload_run(panel, mocker)
-    panel._on_command_finished(upload, None)
-    panel._on_command_finished(submit.call_args.args[0], "Idle")
-    panel._on_command_finished(submit.call_args.args[0], None)
+    run, _ = _finish_upload(panel, submit, mocker)
+    panel._on_command_finished(run, None)
     panel._on_state_changed({"Holo4D": "Idle"})
     assert "may have finished between polls" in panel.execution_label.text()
-    assert panel.btn_holo4d_upload_run.isEnabled()
+    assert panel.btn_holo4d_run.isEnabled()
 
 
 def test_disconnect_cancels_pending_run_and_ignores_old_ack(panel, mocker):
     submit, upload = _begin_upload_run(panel, mocker)
-    panel._on_command_finished(upload, None)
-    panel._on_command_finished(submit.call_args.args[0], "Idle")
-    name, task = submit.call_args.args
+    name, task = _finish_upload(panel, submit, mocker)
     panel._on_disconnected("lost pipe")
     task(mocker.Mock())
     panel._on_command_finished(name, None)
     assert "unknown" in panel.execution_label.text()
-    assert not panel.btn_holo4d_upload_run.isEnabled()
+    assert not panel.btn_holo4d_run.isEnabled()
+
+
+def test_preview_hidden_by_default_and_toggle_expands_it(panel, qtbot):
+    panel.show()
+    qtbot.waitExposed(panel)
+    assert not panel.preview_container.isVisible()
+    assert panel.btn_toggle_preview.text() == "Show preview"
+    panel.btn_toggle_preview.click()
+    assert panel.preview_container.isVisible()
+    assert panel.btn_toggle_preview.text() == "Hide preview"
+    panel.btn_toggle_preview.click()
+    assert not panel.preview_container.isVisible()
 
 
 def test_selecting_sequence_shows_its_generated_preview(

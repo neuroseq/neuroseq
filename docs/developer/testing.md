@@ -65,8 +65,8 @@ following details matter when testing the current implementation.
    They do not show remote selection, upload, or live illumination. Confirm the
    sequence also appears in SysCon2 itself before proceeding.
 5. Select the imported sequence, set **Runs = 1**, choose the start condition and
-   trigger edge, then click **Upload & Run** and confirm. Verify the progress label
-   moves through uploading, hardware readiness, starting, and running. A triggered
+   trigger edge, then click **Upload**, wait for "Press Run", then click **Run** and confirm. Verify the
+   progress label moves through uploading, hardware readiness, starting, and running. A triggered
    run must wait for its trigger. Stop during upload must not send Run afterward.
    SCI reports phases rather than percentage completion. Validate actual timing,
    pattern, and delivered power using the rig's controlled bench-test procedure.
@@ -75,7 +75,7 @@ following details matter when testing the current implementation.
    dialog export's settings but writes `export_seq_<date>_<n>.seq` and its diagnostic
    files to a temporary directory, not the dialog's chosen output folder. It
    opens the full export dialog if settings are unavailable. As above, verify
-   the import, then select and use Upload & Run for the changed sequence.
+   the import, then select and use Upload then Run for the changed sequence.
 7. For rheobase, select the SysCon2 target, disable binary intensity export, use
    amplitudes within 0–1, and choose
    the response window from the actual acquisition frame rate. At 30 Hz,
@@ -84,7 +84,7 @@ following details matter when testing the current implementation.
    processing option to obtain deconvolved spike data. Verify the sample rate,
    spike threshold, and neuron mapping in the import dialog.
 8. Start the routine. For **every** block, refresh the sequence list, select the
-   newly imported block, set **Runs = 1**, then **Upload & Run** and acquire. The host only
+   newly imported block, set **Runs = 1**, then **Upload**, **Run** and acquire. The host only
    imports; it does not select, upload, or run. Arm a triggered run before firing
    the acquisition trigger, and verify its alignment with the recording. Manual
    clicks alone do not establish a shared time origin.

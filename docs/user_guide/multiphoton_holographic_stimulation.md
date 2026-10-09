@@ -222,12 +222,14 @@ friendly names while retaining the original SCI identifiers internally. Set powe
 shutter, and emission in SysCon2 itself.
 
 Select the imported sequence, choose Runs and trigger settings, and click
-**Upload & Run**. After confirmation, NeuroSeq uploads, waits for hardware Idle,
-and then sends Run. The panel shows phases, elapsed time, and hardware Busy/Idle
-state; SCI provides no percentage-complete measurement. A triggered run remains
-waiting until Busy is observed. A short automatic run can finish between polls;
-that case is reported without claiming measured completion. **Stop** also cancels
-any queued automatic Run following the upload.
+**Upload**. After confirmation of an endless upload, NeuroSeq uploads and waits for
+hardware Idle. Then click **Run** and confirm to start the sequence. The panel shows
+phases, elapsed time, and hardware Busy/Idle state; SCI provides no
+percentage-complete measurement. A triggered run remains waiting until Busy is
+observed. A short automatic run can finish between polls; that case is reported
+without claiming measured completion. **Stop** also cancels any queued Run.
+
+The preview is collapsed by default; click **Show preview** to expand it.
 
 The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
 starting with the wrong timestep. **Edit Input Array** also provides exact presets

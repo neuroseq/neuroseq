@@ -365,6 +365,18 @@ class SysCon2Panel(QtWidgets.QWidget):
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.preview_status_label)
+        self.btn_toggle_preview = QtWidgets.QToolButton()
+        self.btn_toggle_preview.setText("Show preview")
+        self.btn_toggle_preview.setCheckable(True)
+        self.btn_toggle_preview.setToolButtonStyle(
+            QtCore.Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.btn_toggle_preview.setArrowType(QtCore.Qt.ArrowType.RightArrow)
+        self.btn_toggle_preview.toggled.connect(self._on_preview_toggled)
+        layout.addWidget(self.btn_toggle_preview)
+        self.preview_container = QtWidgets.QWidget()
+        container_layout = QtWidgets.QVBoxLayout(self.preview_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_label = _SequencePreview()
         zoom_row = QtWidgets.QHBoxLayout()
         zoom_row.addStretch(1)
@@ -390,12 +402,23 @@ class SysCon2Panel(QtWidgets.QWidget):
         zoom_row.addWidget(self.preview_zoom_label)
         zoom_row.addWidget(self.btn_preview_zoom_in)
         zoom_row.addWidget(self.btn_preview_fit)
-        layout.addLayout(zoom_row)
+        container_layout.addLayout(zoom_row)
         self.preview_label.zoom_changed.connect(
             lambda zoom: self.preview_zoom_label.setText(f"{zoom:.0%}")
         )
-        layout.addWidget(self.preview_label)
+        container_layout.addWidget(self.preview_label)
+        self.preview_container.setVisible(False)
+        layout.addWidget(self.preview_container)
         return group
+
+    def _on_preview_toggled(self, checked: bool) -> None:
+        self.preview_container.setVisible(checked)
+        self.btn_toggle_preview.setText("Hide preview" if checked else "Show preview")
+        self.btn_toggle_preview.setArrowType(
+            QtCore.Qt.ArrowType.DownArrow if checked else QtCore.Qt.ArrowType.RightArrow
+        )
+        if checked:
+            self.preview_label.fit_to_view()
 
     def _build_holo4d_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Holo4D")
@@ -439,11 +462,14 @@ class SysCon2Panel(QtWidgets.QWidget):
         layout.addWidget(self.holo4d_advanced_panel)
 
         button_row = QtWidgets.QHBoxLayout()
-        self.btn_holo4d_upload_run = QtWidgets.QPushButton("Upload && Run")
-        self.btn_holo4d_upload_run.clicked.connect(self._on_upload_run_clicked)
+        self.btn_holo4d_upload = QtWidgets.QPushButton("Upload")
+        self.btn_holo4d_upload.clicked.connect(self._on_upload_clicked)
+        self.btn_holo4d_run = QtWidgets.QPushButton("Run")
+        self.btn_holo4d_run.clicked.connect(self._on_run_clicked)
         self.btn_holo4d_stop = QtWidgets.QPushButton("Stop")
         self.btn_holo4d_stop.clicked.connect(self._on_holo4d_stop_clicked)
-        button_row.addWidget(self.btn_holo4d_upload_run)
+        button_row.addWidget(self.btn_holo4d_upload)
+        button_row.addWidget(self.btn_holo4d_run)
         button_row.addWidget(self.btn_holo4d_stop)
         button_row.addStretch()
         layout.addLayout(button_row)
@@ -575,9 +601,9 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _update_connection_ui(self) -> None:
         self._update_sequence_buttons()
-        self.btn_holo4d_upload_run.setEnabled(
-            self._connected and self._execution_phase == "idle"
-        )
+        idle = self._connected and self._execution_phase == "idle"
+        self.btn_holo4d_upload.setEnabled(idle)
+        self.btn_holo4d_run.setEnabled(idle)
         self.btn_holo4d_stop.setEnabled(self._connected)
         self.btn_refresh_status.setEnabled(self._connected)
         can_connect_here = sys.platform == "win32"
@@ -629,7 +655,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             targets = self._pending_imports.pop(name)
             if name == self._preview_request:
                 self.preview_status_label.setText(
-                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload & Run. "
+                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload and Run. "
                     "The image is a generated preview, not hardware readback."
                 )
                 self.targets_changed.emit(targets or frozenset())
@@ -712,7 +738,7 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_sequence_selected(self, result: object) -> None:
         self.selection_label.setText(
-            f"Selection confirmed: {result}. Use Upload & Run to apply it to Holo4D."
+            f"Selection confirmed: {result}. Use Upload, then Run, to apply it to Holo4D."
         )
 
     def _selected_sequence_path(self) -> str | None:
@@ -959,7 +985,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._remember_preview(str(result.seq_path), str(result.overview_png_path))
         self.import_path_edit.setText(str(result.seq_path))
         self.preview_status_label.setText(
-            f"Import confirmed: {result.seq_path.name}. Select it, then Upload & Run."
+            f"Import confirmed: {result.seq_path.name}. Select it, then Upload and Run."
         )
         self.targets_changed.emit(result.targeted_stim_ids)
         if self._connected:
@@ -988,7 +1014,8 @@ class SysCon2Panel(QtWidgets.QWidget):
             self._progress_timer.stop()
         else:
             self._progress_timer.start()
-        self.btn_holo4d_upload_run.setEnabled(self._connected and not busy)
+        self.btn_holo4d_upload.setEnabled(self._connected and not busy)
+        self.btn_holo4d_run.setEnabled(self._connected and not busy)
         self._update_sequence_buttons()
         self._update_progress_text()
 
@@ -1000,26 +1027,40 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         self.execution_label.setText(self._progress_message + elapsed)
 
-    def _on_upload_run_clicked(self) -> None:
+    def _on_upload_clicked(self) -> None:
         if not self._connected or self._execution_phase != "idle":
             return
         runs = self.runs_spinbox.value()
-        mode = "endless repetition" if runs == 0 else f"{runs} run(s)"
-        if not self._confirm(
-            f"Upload the remotely selected sequence and run it with {mode}?"
+        if runs == 0 and not self._confirm(
+            "Upload for endless repetition? The sequence will repeat until stopped."
         ):
             return
         self._execution_serial += 1
         self._execution_cancel = threading.Event()
-        self._execution_options = (
-            self.start_condition_combo.currentText(),
-            self.trigger_behavior_combo.currentText(),
-        )
         self._execution_elapsed.start()
         self._set_execution_progress("uploading", "Uploading sequence…")
         self._submit(
             f"holo4d.execute.{self._execution_serial}.upload",
             lambda client: client.holo4d.upload_sequence(runs),
+        )
+
+    def _on_run_clicked(self) -> None:
+        if not self._connected or self._execution_phase != "idle":
+            return
+        if not self._confirm("Run the currently uploaded sequence on Holo4D now?"):
+            return
+        self._execution_serial += 1
+        cancelled = self._execution_cancel = threading.Event()
+        start = self.start_condition_combo.currentText()
+        edge = self.trigger_behavior_combo.currentText()
+        self._execution_options = (start, edge)
+        self._execution_elapsed.start()
+        self._set_execution_progress("starting", "Starting sequence…")
+        self._submit(
+            f"holo4d.execute.{self._execution_serial}.run",
+            lambda client: (
+                None if cancelled.is_set() else client.holo4d.run_sequence(start, edge)
+            ),
         )
 
     def _on_execution_finished(self, name: str, result: object) -> None:
@@ -1053,17 +1094,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         state = state.lower().removeprefix("state:").strip()
         if self._execution_phase == "ready_check" and state == "idle":
             self._set_execution_progress(
-                "starting", "Upload complete; starting sequence…"
-            )
-            start, edge = self._execution_options
-            cancelled = self._execution_cancel
-            self._submit(
-                f"holo4d.execute.{self._execution_serial}.run",
-                lambda client: (
-                    None
-                    if cancelled.is_set()
-                    else client.holo4d.run_sequence(start, edge)
-                ),
+                "idle", "Upload complete; hardware is Idle. Press Run to start."
             )
         elif self._execution_phase in {"awaiting_busy", "running"} and state == "busy":
             self._set_execution_progress("running", "Sequence running (hardware Busy).")
