@@ -761,6 +761,16 @@ def test_generated_and_routine_exports_display_resizable_preview(
     qtbot.waitUntil(lambda: panel.preview_label.pixmap() is not None)
     assert not panel.preview_label.pixmap().isNull()
     assert panel.preview_label.pixmap().width() <= panel.preview_label.width()
+    assert isinstance(panel.preview_label, QtWidgets.QScrollArea)
+    assert panel.preview_label.maximumHeight() == 280
+    fitted_size = panel.preview_label.pixmap().size()
+    panel.preview_label.zoom_by(2.0)
+    assert panel.preview_label.pixmap().width() > fitted_size.width()
+    assert panel.preview_label.horizontalScrollBar().maximum() > 0
+    panel.preview_label.fit_to_view()
+    assert (
+        panel.preview_label.pixmap().width() <= panel.preview_label.viewport().width()
+    )
     submit.assert_not_called()
     assert "not imported" in panel.preview_status_label.text()
     result = SysconExportResult(

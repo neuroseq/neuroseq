@@ -71,44 +71,88 @@ class _NoScrollComboBox(QtWidgets.QComboBox):
             event.ignore()
 
 
-class _SequencePreview(QtWidgets.QLabel):
-    """Retain the source image and fit it inside the available panel area."""
+class _SequencePreview(QtWidgets.QScrollArea):
+    """A bounded image viewport with scrolling and explicit zoom controls."""
+
+    zoom_changed = QtCore.Signal(float)
 
     def __init__(self) -> None:
-        super().__init__("No preview yet.")
+        super().__init__()
         self._source = QtGui.QPixmap()
+        self._zoom = 0.0
+        self._fit_mode = True
+        self._message = "No preview yet."
         self.setMinimumSize(200, 140)
-        self.setMaximumHeight(300)
+        self.setMaximumHeight(280)
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+            QtWidgets.QSizePolicy.Policy.Expanding, QtWidgets.QSizePolicy.Policy.Fixed
         )
+        self.setWidgetResizable(False)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.setWordWrap(True)
+        self.image_label = QtWidgets.QLabel(self._message)
+        self.image_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setWordWrap(True)
+        self.setWidget(self.image_label)
 
     def setText(self, text: str) -> None:
         self._source = QtGui.QPixmap()
-        super().setText(text)
+        self._message = text
+        self.image_label.setPixmap(QtGui.QPixmap())
+        self.image_label.setText(text)
+
+    def text(self) -> str:
+        return self._message
+
+    def pixmap(self) -> QtGui.QPixmap:
+        return self.image_label.pixmap()
 
     def set_image(self, path: str) -> None:
         self._source = QtGui.QPixmap(path)
         if self._source.isNull():
             self.setText(f"Could not load preview image:\n{path}")
             return
+        self._zoom = 0.0
+        self._fit_mode = True
+        self.fit_to_view()
+
+    def zoom_by(self, factor: float) -> None:
+        if self._source.isNull():
+            return
+        self._fit_mode = False
+        self._zoom = min(8.0, max(0.1, self._zoom * factor))
         self._fit_image()
+        self.zoom_changed.emit(self._zoom)
+
+    def fit_to_view(self) -> None:
+        if self._source.isNull():
+            return
+        self._fit_mode = True
+        available = self.viewport().size()
+        self._zoom = min(
+            available.width() / self._source.width(),
+            available.height() / self._source.height(),
+            1.0,
+        )
+        self._fit_image()
+        self.zoom_changed.emit(self._zoom)
 
     def _fit_image(self) -> None:
         if not self._source.isNull():
-            self.setPixmap(
+            self.image_label.setText("")
+            self.image_label.setPixmap(
                 self._source.scaled(
-                    self.contentsRect().size(),
+                    max(1, round(self._source.width() * self._zoom)),
+                    max(1, round(self._source.height() * self._zoom)),
                     QtCore.Qt.AspectRatioMode.KeepAspectRatio,
                     QtCore.Qt.TransformationMode.SmoothTransformation,
                 )
             )
+            self.image_label.resize(self.image_label.pixmap().size())
 
     def resizeEvent(self, event: QtGui.QResizeEvent | None) -> None:
         super().resizeEvent(event)
-        self._fit_image()
+        if self._fit_mode:
+            self.fit_to_view()
 
 
 class SysCon2Panel(QtWidgets.QWidget):
@@ -318,8 +362,34 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         layout.addWidget(self.preview_status_label)
         self.preview_label = _SequencePreview()
-        self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.preview_label.setWordWrap(True)
+        zoom_row = QtWidgets.QHBoxLayout()
+        zoom_row.addStretch(1)
+        self.btn_preview_zoom_out = QtWidgets.QToolButton()
+        self.btn_preview_zoom_out.setText("−")
+        self.btn_preview_zoom_out.setToolTip("Zoom out")
+        self.btn_preview_zoom_out.clicked.connect(
+            lambda: self.preview_label.zoom_by(1 / 1.25)
+        )
+        self.preview_zoom_label = QtWidgets.QLabel("Fit")
+        self.preview_zoom_label.setMinimumWidth(44)
+        self.preview_zoom_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.btn_preview_zoom_in = QtWidgets.QToolButton()
+        self.btn_preview_zoom_in.setText("+")
+        self.btn_preview_zoom_in.setToolTip("Zoom in")
+        self.btn_preview_zoom_in.clicked.connect(
+            lambda: self.preview_label.zoom_by(1.25)
+        )
+        self.btn_preview_fit = QtWidgets.QToolButton()
+        self.btn_preview_fit.setText("Fit")
+        self.btn_preview_fit.clicked.connect(self.preview_label.fit_to_view)
+        zoom_row.addWidget(self.btn_preview_zoom_out)
+        zoom_row.addWidget(self.preview_zoom_label)
+        zoom_row.addWidget(self.btn_preview_zoom_in)
+        zoom_row.addWidget(self.btn_preview_fit)
+        layout.addLayout(zoom_row)
+        self.preview_label.zoom_changed.connect(
+            lambda zoom: self.preview_zoom_label.setText(f"{zoom:.0%}")
+        )
         layout.addWidget(self.preview_label)
         return group
 
