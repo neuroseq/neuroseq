@@ -699,6 +699,27 @@ def test_upload_waits_for_ready_then_run_tracks_actual_states(panel, mocker):
     assert panel.btn_holo4d_run.isEnabled()
 
 
+def test_upload_ack_with_unexpected_state_name_does_not_stick(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_state_changed({"Holo4D": "Uploading"})
+    assert not panel.btn_holo4d_run.isEnabled()
+    assert "state: uploading" in panel.execution_label.text()
+    panel._on_state_changed({"Holo4D": "Ready"})
+    assert panel.btn_holo4d_run.isEnabled()
+    assert "Press Run" in panel.execution_label.text()
+
+
+def test_upload_ready_check_times_out_with_state_message(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_state_changed({"Holo4D": "Busy"})
+    mocker.patch.object(panel._ready_elapsed, "elapsed", return_value=11_000)
+    panel._update_progress_text()
+    assert panel.btn_holo4d_run.isEnabled()
+    assert "still 'busy'" in panel.execution_label.text()
+
+
 def test_run_requires_confirmation(panel, mocker):
     panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")

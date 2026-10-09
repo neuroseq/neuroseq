@@ -156,6 +156,9 @@ class _SequencePreview(QtWidgets.QScrollArea):
             self.fit_to_view()
 
 
+_READY_CHECK_TIMEOUT_MS = 10_000
+
+
 class SysCon2Panel(QtWidgets.QWidget):
     #: Targets in the most recent preview whose import was acknowledged by SysCon.
     #: This does not indicate remote selection, upload, or live illumination.
@@ -189,6 +192,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._execution_options = ("auto", "rising")
         self._execution_elapsed = QtCore.QElapsedTimer()
         self._progress_message = "No run requested."
+        self._hardware_state = ""
+        self._ready_elapsed = QtCore.QElapsedTimer()
         self._progress_timer = QtCore.QTimer(self)
         self._progress_timer.setInterval(250)
         self._progress_timer.timeout.connect(self._update_progress_text)
@@ -1020,6 +1025,18 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._update_progress_text()
 
     def _update_progress_text(self) -> None:
+        if (
+            self._execution_phase == "ready_check"
+            and self._ready_elapsed.isValid()
+            and self._ready_elapsed.elapsed() > _READY_CHECK_TIMEOUT_MS
+        ):
+            state = self._hardware_state or "unknown"
+            self._set_execution_progress(
+                "idle",
+                f"Upload acknowledged but the hardware state is still '{state}'. "
+                "Check the stimulation setup; Run is available.",
+            )
+            return
         elapsed = (
             f" ({self._execution_elapsed.elapsed() / 1000:.1f} s)"
             if self._execution_phase != "idle" and self._execution_elapsed.isValid()
@@ -1067,6 +1084,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         if not name.startswith(f"holo4d.execute.{self._execution_serial}."):
             return
         if name.endswith(".upload") and self._execution_phase == "uploading":
+            self._ready_elapsed.start()
             self._set_execution_progress(
                 "ready_check", "Upload acknowledged; waiting for hardware readiness…"
             )
@@ -1092,10 +1110,19 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _advance_execution(self, state: str) -> None:
         state = state.lower().removeprefix("state:").strip()
-        if self._execution_phase == "ready_check" and state == "idle":
-            self._set_execution_progress(
-                "idle", "Upload complete; hardware is Idle. Press Run to start."
-            )
+        self._hardware_state = state
+        if self._execution_phase == "ready_check":
+            if state in {"busy", "disconnected"} or state.startswith("upload"):
+                self._progress_message = f"Upload acknowledged; waiting for hardware (state: {state or '?'})…"
+                self._update_progress_text()
+            else:
+                # SysCon acknowledged the upload, and the hardware is not uploading or busy,
+                # so the sequence is ready ("idle" is the usual state; others are accepted
+                # rather than leaving the panel stuck on a state name we do not know).
+                self._set_execution_progress(
+                    "idle",
+                    f"Upload complete (hardware state: {state or 'unknown'}). Press Run to start.",
+                )
         elif self._execution_phase in {"awaiting_busy", "running"} and state == "busy":
             self._set_execution_progress("running", "Sequence running (hardware Busy).")
         elif self._execution_phase == "running" and state == "idle":
