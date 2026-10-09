@@ -25,7 +25,6 @@ from neuroseq.dynamic_input_measurement import measure_epsp
 from neuroseq.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input_routine import backend_property
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
 from neuroseq.stdp_synaptic_tuning_dialog import _set_native_minimized_position
 from neuroseq.stdp_synaptic_tuning_dialog import _WheelToScrollFilter
@@ -35,6 +34,7 @@ from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
 from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
+from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt
@@ -367,6 +367,9 @@ class StdpWindowDialog(_SelfRaisingDialog):
             info_row.addWidget(QtWidgets.QLabel(title, self))
             info_row.addWidget(value)
             info_row.addSpacing(8)
+        self.btn_syscon_dt = QtWidgets.QPushButton("Use SysCon2 dt", self)
+        self.btn_syscon_dt.clicked.connect(self._fix_syscon_dt)
+        info_row.addWidget(self.btn_syscon_dt)
         info_row.addStretch()
         layout.addLayout(info_row)
 
@@ -707,7 +710,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self.lbl_stim_name.setText(stim.name)
             self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
-            self.lbl_stim_dt.setText(f"{stim.dt * 1000.0:g} ms")
+            self.lbl_stim_dt.setText(f"{format_milliseconds(stim.dt * 1000.0)} ms")
             self.lbl_stim_neurons.setText(str(n_neurons))
         else:
             self.lbl_units.setText("")
@@ -770,6 +773,8 @@ class StdpWindowDialog(_SelfRaisingDialog):
 
     def _update_target_controls(self, _text: str = "") -> None:
         syscon2 = self._target_is_syscon2()
+        self.btn_syscon_dt.setVisible(syscon2)
+        self.btn_syscon_dt.setEnabled(not self._running)
         self.cmb_readout.setEnabled(not syscon2)
         self.cmb_sweep_mode.setEnabled(not syscon2)
         self.btn_data_imported.setVisible(syscon2)
@@ -920,14 +925,18 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return
         self._begin_sweep(clear_log=True)
 
+    def _fix_syscon_dt(self) -> bool:
+        if self._running:
+            return False
+        if not self.editor.prepare_syscon_timestep(self):
+            return False
+        self.refresh()
+        return True
+
     def _start_syscon2(self, choice: str, stim: StimArray) -> None:
         """Begin a sweep whose blocks are delivered through SysCon2."""
         host = self.editor.stimulation_host
-        if abs(float(stim.dt) - _SYSCON2_TTL_PULSE_QUANTUM_S) > 1e-9:
-            self._append_log(
-                f"SysCon2 export needs dt = {_SYSCON2_TTL_PULSE_QUANTUM_S:.6g} s but "
-                f"'{stim.name}' has dt = {stim.dt:.6g} s; fix it in the export dialog."
-            )
+        if not self._fix_syscon_dt():
             return
         if host is None or host.phase != "idle":
             self._append_log("SysCon2 is not ready (a block is still in flight).")

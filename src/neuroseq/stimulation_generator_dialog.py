@@ -185,7 +185,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.binary_mode_checkbox = QtWidgets.QCheckBox(
             "Force binary export intensity (all ON samples -> 1.0)"
         )
-        self.binary_mode_checkbox.setChecked(True)
+        self.binary_mode_checkbox.setChecked(False)
         self.binary_mode_checkbox.setToolTip(
             "When unchecked, export preprocessing preserves the array's original "
             "amplitudes (clipped to [0, 1]) instead of normalizing ON samples to 1.0."
@@ -195,7 +195,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.spiralling_checkbox = QtWidgets.QCheckBox(
             "Spiralling (TTL fires 1 tick before SLM load completes)"
         )
-        self.spiralling_checkbox.setChecked(True)
+        self.spiralling_checkbox.setChecked(False)
         self.spiralling_checkbox.setToolTip(
             "When checked, every laser TTL pulse is shifted 1 tick earlier so the "
             "laser edge aligns with the SLM-ready edge in spiralling mode. Uncheck "
@@ -207,7 +207,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.ten_spots_per_roi_checkbox = QtWidgets.QCheckBox(
             "Use 10 input spots per ROI"
         )
-        self.ten_spots_per_roi_checkbox.setChecked(False)
+        self.ten_spots_per_roi_checkbox.setChecked(True)
         self.ten_spots_per_roi_checkbox.setToolTip(
             "Place 10 evenly distributed input spots inside each Cellpose mask."
         )
@@ -222,7 +222,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.spot_algorithm_combo.addItem(
             "Equal spacing from ROI border", "edge_balanced"
         )
-        self.spot_algorithm_combo.setEnabled(False)
+        self.spot_algorithm_combo.setEnabled(
+            self.ten_spots_per_roi_checkbox.isChecked()
+        )
         self.spot_algorithm_combo.setToolTip(
             "Choose whether spacing is maximized only between spots or also "
             "balanced against the ROI border."
@@ -1215,6 +1217,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             return
         self.project.power_luts[wavelength_nm] = lut
+        self.project.mark_dirty()
         self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:

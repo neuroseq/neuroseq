@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 import shutil
 import sys
 import tempfile
+import threading
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -27,6 +29,7 @@ from neuroseq.syscon2_client import LightsourceStatus
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
 from neuroseq.syscon2_export_service import SysconExportError
+from neuroseq.syscon2_export_service import SysconExportResult
 from neuroseq.syscon2_export_service import SysconExportSettings
 from neuroseq.syscon2_export_service import export_stim_array
 from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
@@ -68,6 +71,46 @@ class _NoScrollComboBox(QtWidgets.QComboBox):
             event.ignore()
 
 
+class _SequencePreview(QtWidgets.QLabel):
+    """Retain the source image and fit it inside the available panel area."""
+
+    def __init__(self) -> None:
+        super().__init__("No preview yet.")
+        self._source = QtGui.QPixmap()
+        self.setMinimumSize(200, 140)
+        self.setMaximumHeight(300)
+        self.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Ignored, QtWidgets.QSizePolicy.Policy.Preferred
+        )
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setWordWrap(True)
+
+    def setText(self, text: str) -> None:
+        self._source = QtGui.QPixmap()
+        super().setText(text)
+
+    def set_image(self, path: str) -> None:
+        self._source = QtGui.QPixmap(path)
+        if self._source.isNull():
+            self.setText(f"Could not load preview image:\n{path}")
+            return
+        self._fit_image()
+
+    def _fit_image(self) -> None:
+        if not self._source.isNull():
+            self.setPixmap(
+                self._source.scaled(
+                    self.contentsRect().size(),
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                    QtCore.Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+
+    def resizeEvent(self, event: QtGui.QResizeEvent | None) -> None:
+        super().resizeEvent(event)
+        self._fit_image()
+
+
 class SysCon2Panel(QtWidgets.QWidget):
     #: Targets in the most recent preview whose import was acknowledged by SysCon.
     #: This does not indicate remote selection, upload, or live illumination.
@@ -91,6 +134,16 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._pending_imports: dict[str, frozenset[int] | None] = {}
         self._import_files = tempfile.TemporaryDirectory(prefix="neuroseq-import-")
         self._lightsources: dict[str, list[str]] = {}
+        self._execution_cancel = threading.Event()
+        self._discover_for_status = False
+        self._execution_serial = 0
+        self._execution_phase = "idle"
+        self._execution_options = ("auto", "rising")
+        self._execution_elapsed = QtCore.QElapsedTimer()
+        self._progress_message = "No run requested."
+        self._progress_timer = QtCore.QTimer(self)
+        self._progress_timer.setInterval(250)
+        self._progress_timer.timeout.connect(self._update_progress_text)
         self._current_stim_provider: Callable[[], StimArray | None] | None = None
         #: Export options of the last successful dialog export; reused by the one-click button.
         self._export_settings: SysconExportSettings | None = None
@@ -119,6 +172,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             self.stimulation_host.on_command_finished
         )
         self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
+        self.stimulation_host.block_sent.connect(self._on_host_block_sent)
 
     def set_project(self, project: Project | None) -> None:
         if project is self._project:
@@ -140,6 +194,7 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
+        self._execution_cancel.set()
         self._manager.shutdown()
         self._import_files.cleanup()
 
@@ -168,6 +223,10 @@ class SysCon2Panel(QtWidgets.QWidget):
 
         scroll_area.setWidget(content)
         outer_layout.addWidget(scroll_area)
+        for button in self.findChildren(QtWidgets.QPushButton):
+            button.setSizePolicy(
+                QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed
+            )
 
     def _build_connection_group(self) -> QtWidgets.QGroupBox:
         group = QtWidgets.QGroupBox("Connection")
@@ -258,7 +317,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.preview_status_label)
-        self.preview_label = QtWidgets.QLabel("No preview yet.")
+        self.preview_label = _SequencePreview()
         self.preview_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
@@ -286,7 +345,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         advanced_layout.setContentsMargins(0, 0, 0, 0)
 
         self.holo4d_state_label = QtWidgets.QLabel("State: unknown")
-        advanced_layout.addWidget(self.holo4d_state_label)
+        layout.addWidget(self.holo4d_state_label)
 
         form = QtWidgets.QFormLayout()
         self.runs_spinbox = _NoScrollSpinBox()
@@ -306,16 +365,22 @@ class SysCon2Panel(QtWidgets.QWidget):
         layout.addWidget(self.holo4d_advanced_panel)
 
         button_row = QtWidgets.QHBoxLayout()
-        self.btn_holo4d_upload = QtWidgets.QPushButton("Upload")
-        self.btn_holo4d_upload.clicked.connect(self._on_holo4d_upload_clicked)
-        self.btn_holo4d_run = QtWidgets.QPushButton("Run")
-        self.btn_holo4d_run.clicked.connect(self._on_holo4d_run_clicked)
+        self.btn_holo4d_upload_run = QtWidgets.QPushButton("Upload && Run")
+        self.btn_holo4d_upload_run.clicked.connect(self._on_upload_run_clicked)
         self.btn_holo4d_stop = QtWidgets.QPushButton("Stop")
         self.btn_holo4d_stop.clicked.connect(self._on_holo4d_stop_clicked)
-        button_row.addWidget(self.btn_holo4d_upload)
-        button_row.addWidget(self.btn_holo4d_run)
+        button_row.addWidget(self.btn_holo4d_upload_run)
         button_row.addWidget(self.btn_holo4d_stop)
+        button_row.addStretch()
         layout.addLayout(button_row)
+        self.execution_label = QtWidgets.QLabel(self._progress_message)
+        self.execution_label.setWordWrap(True)
+        layout.addWidget(self.execution_label)
+        self.execution_progress = QtWidgets.QProgressBar()
+        self.execution_progress.setRange(0, 1)
+        self.execution_progress.setValue(0)
+        self.execution_progress.setTextVisible(False)
+        layout.addWidget(self.execution_progress)
 
         return group
 
@@ -328,19 +393,23 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_refresh_lightsources.clicked.connect(
             self._on_refresh_lightsources_clicked
         )
-        refresh_row.addWidget(self.btn_refresh_lightsources)
+        self.btn_refresh_lightsources.setParent(group)
+        self.btn_refresh_lightsources.hide()
         layout.addLayout(refresh_row)
 
         form = QtWidgets.QFormLayout()
         self.device_combo = _NoScrollComboBox()
         self.device_combo.currentTextChanged.connect(self._on_device_changed)
-        form.addRow("Device:", self.device_combo)
+        self.device_combo.setParent(group)
+        self.device_combo.hide()
         self.description_combo = _NoScrollComboBox()
+        self.description_combo.setPlaceholderText("940 nm — Get Status to discover")
         form.addRow("Lightsource:", self.description_combo)
         self.intensity_spinbox = _NoScrollDoubleSpinBox()
         self.intensity_spinbox.setRange(0.0, 1_000_000.0)
         self.intensity_spinbox.setDecimals(3)
-        form.addRow("Intensity:", self.intensity_spinbox)
+        self.intensity_spinbox.setParent(group)
+        self.intensity_spinbox.hide()
         layout.addLayout(form)
 
         self.btn_toggle_laser_advanced = QtWidgets.QToolButton()
@@ -352,7 +421,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         self.btn_toggle_laser_advanced.setArrowType(QtCore.Qt.ArrowType.RightArrow)
         self.btn_toggle_laser_advanced.toggled.connect(self._on_laser_advanced_toggled)
-        layout.addWidget(self.btn_toggle_laser_advanced)
+        self.btn_toggle_laser_advanced.setParent(group)
+        self.btn_toggle_laser_advanced.hide()
 
         self.laser_advanced_panel = QtWidgets.QWidget()
         advanced_row = QtWidgets.QHBoxLayout(self.laser_advanced_panel)
@@ -388,7 +458,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_set_intensity.clicked.connect(self._on_set_intensity_clicked)
         self.btn_refresh_status = QtWidgets.QPushButton("Get Status")
         self.btn_refresh_status.clicked.connect(self._on_refresh_status_clicked)
-        button_row.addWidget(self.btn_set_intensity)
+        self.btn_set_intensity.setParent(group)
+        self.btn_set_intensity.hide()
         button_row.addWidget(self.btn_refresh_status)
         layout.addLayout(button_row)
 
@@ -412,6 +483,14 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_disconnected(self, message: str) -> None:
         self._connected = False
+        self._discover_for_status = False
+        self.description_combo.clear()
+        self.lightsource_status_label.setText("Status unknown (disconnected).")
+        self._execution_cancel.set()
+        self._execution_serial += 1
+        self._set_execution_progress(
+            "idle", "Disconnected; hardware execution status unknown."
+        )
         self._reset_import_status()
         self.sequence_list.clear()
         self.selection_label.setText("Remote selection not confirmed.")
@@ -422,6 +501,11 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _update_connection_ui(self) -> None:
         self._update_sequence_buttons()
+        self.btn_holo4d_upload_run.setEnabled(
+            self._connected and self._execution_phase == "idle"
+        )
+        self.btn_holo4d_stop.setEnabled(self._connected)
+        self.btn_refresh_status.setEnabled(self._connected)
         can_connect_here = sys.platform == "win32"
         self.btn_connect.setEnabled(can_connect_here and not self._connected)
         self.btn_disconnect.setEnabled(self._connected)
@@ -440,8 +524,11 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_refresh_sequences.setEnabled(self._connected)
         self.btn_import_sequence.setEnabled(self._connected)
         has_selection = self._selected_sequence_path() is not None
-        self.btn_select_sequence.setEnabled(self._connected and has_selection)
-        self.btn_delete_sequence.setEnabled(self._connected and has_selection)
+        can_change_selection = (
+            self._connected and has_selection and self._execution_phase == "idle"
+        )
+        self.btn_select_sequence.setEnabled(can_change_selection)
+        self.btn_delete_sequence.setEnabled(can_change_selection)
 
     def _reset_import_status(self) -> None:
         self._pending_imports.clear()
@@ -456,15 +543,19 @@ class SysCon2Panel(QtWidgets.QWidget):
         holo4d_state = state.get("Holo4D")
         if holo4d_state is not None:
             self.holo4d_state_label.setText(f"State: {holo4d_state}")
+            self._advance_execution(str(holo4d_state))
 
     def _on_command_finished(self, name: str, result: object) -> None:
+        if name.startswith("holo4d.execute."):
+            self._on_execution_finished(name, result)
+            return
         if name.startswith("sequence_manager.import."):
             if name not in self._pending_imports:
                 return
             targets = self._pending_imports.pop(name)
             if name == self._preview_request:
                 self.preview_status_label.setText(
-                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload before running. "
+                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload & Run. "
                     "The image is a generated preview, not hardware readback."
                 )
                 self.targets_changed.emit(targets or frozenset())
@@ -480,6 +571,14 @@ class SysCon2Panel(QtWidgets.QWidget):
             handler(result)
 
     def _on_command_failed(self, name: str, message: str) -> None:
+        if name == "laser.get_lightsources":
+            self._discover_for_status = False
+        if name.startswith("holo4d.execute."):
+            if not name.startswith(f"holo4d.execute.{self._execution_serial}."):
+                return
+            self._set_execution_progress(
+                "idle", f"Command failed: {message}. Check hardware state."
+            )
         if name.startswith("sequence_manager.select."):
             if name not in self._pending_selections:
                 return
@@ -534,7 +633,7 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_sequence_selected(self, result: object) -> None:
         self.selection_label.setText(
-            f"Selection confirmed: {result}. Upload to apply it to Holo4D."
+            f"Selection confirmed: {result}. Use Upload & Run to apply it to Holo4D."
         )
 
     def _selected_sequence_path(self) -> str | None:
@@ -705,14 +804,38 @@ class SysCon2Panel(QtWidgets.QWidget):
 
         self._submit(name, task)
 
-    def _show_preview(self, png_path: str) -> None:
-        pixmap = QtGui.QPixmap(png_path)
-        if pixmap.isNull():
-            self.preview_label.setText(f"Could not load preview image:\n{png_path}")
-            return
-        self.preview_label.setPixmap(
-            pixmap.scaledToWidth(400, QtCore.Qt.TransformationMode.SmoothTransformation)
+    def show_generated_preview(
+        self,
+        seq_path: str,
+        png_path: str,
+        _targets: object,
+        settings: SysconExportSettings | None = None,
+    ) -> None:
+        if settings is not None:
+            self._export_settings = settings
+        self._show_preview(png_path)
+        self.import_path_edit.setText(seq_path)
+        self._preview_request = None
+        self.targets_changed.emit(frozenset())
+        self.preview_status_label.setText(
+            f"Generated preview only; not imported: {seq_path}"
         )
+
+    def _on_host_block_sent(self, result: object) -> None:
+        if not isinstance(result, SysconExportResult):
+            return
+        self._preview_request = None
+        self._show_preview(str(result.overview_png_path))
+        self.import_path_edit.setText(str(result.seq_path))
+        self.preview_status_label.setText(
+            f"Import confirmed: {result.seq_path.name}. Select it, then Upload & Run."
+        )
+        self.targets_changed.emit(result.targeted_stim_ids)
+        if self._connected:
+            self._on_refresh_sequences_clicked()
+
+    def _show_preview(self, png_path: str) -> None:
+        self.preview_label.set_image(png_path)
 
     # ---- Holo4D ----
 
@@ -722,37 +845,124 @@ class SysCon2Panel(QtWidgets.QWidget):
             QtCore.Qt.ArrowType.DownArrow if checked else QtCore.Qt.ArrowType.RightArrow
         )
 
-    def _on_holo4d_upload_clicked(self) -> None:
+    def _set_execution_progress(self, phase: str, message: str) -> None:
+        self._execution_phase = phase
+        self._progress_message = message
+        busy = phase != "idle"
+        self.execution_progress.setRange(0, 0 if busy else 1)
+        if not busy:
+            self.execution_progress.setValue(
+                1 if message.startswith("Sequence finished") else 0
+            )
+            self._progress_timer.stop()
+        else:
+            self._progress_timer.start()
+        self.btn_holo4d_upload_run.setEnabled(self._connected and not busy)
+        self._update_sequence_buttons()
+        self._update_progress_text()
+
+    def _update_progress_text(self) -> None:
+        elapsed = (
+            f" ({self._execution_elapsed.elapsed() / 1000:.1f} s)"
+            if self._execution_phase != "idle" and self._execution_elapsed.isValid()
+            else ""
+        )
+        self.execution_label.setText(self._progress_message + elapsed)
+
+    def _on_upload_run_clicked(self) -> None:
+        if not self._connected or self._execution_phase != "idle":
+            return
         runs = self.runs_spinbox.value()
-        if runs == 0 and not self._confirm(
-            "Upload for endless repetition? The sequence will repeat until stopped."
+        mode = "endless repetition" if runs == 0 else f"{runs} run(s)"
+        if not self._confirm(
+            f"Upload the remotely selected sequence and run it with {mode}?"
         ):
             return
+        self._execution_serial += 1
+        self._execution_cancel = threading.Event()
+        self._execution_options = (
+            self.start_condition_combo.currentText(),
+            self.trigger_behavior_combo.currentText(),
+        )
+        self._execution_elapsed.start()
+        self._set_execution_progress("uploading", "Uploading sequence…")
+        self._submit(
+            f"holo4d.execute.{self._execution_serial}.upload",
+            lambda client: client.holo4d.upload_sequence(runs),
+        )
 
-        def task(client: SysCon2Client) -> object:
-            client.holo4d.upload_sequence(runs)
-            return None
-
-        self._submit("holo4d.upload", task)
-
-    def _on_holo4d_run_clicked(self) -> None:
-        start_condition = self.start_condition_combo.currentText()
-        trigger_behavior = self.trigger_behavior_combo.currentText()
-        if not self._confirm("Run the currently uploaded sequence on Holo4D now?"):
+    def _on_execution_finished(self, name: str, result: object) -> None:
+        if not name.startswith(f"holo4d.execute.{self._execution_serial}."):
             return
+        if name.endswith(".upload") and self._execution_phase == "uploading":
+            self._set_execution_progress(
+                "ready_check", "Upload acknowledged; waiting for hardware readiness…"
+            )
+            self._submit(
+                f"holo4d.execute.{self._execution_serial}.state",
+                lambda client: client.holo4d.get_state(),
+            )
+        elif name.endswith(".state"):
+            self._advance_execution(str(result))
+        elif name.endswith(".run") and self._execution_phase == "starting":
+            trigger = self._execution_options[0]
+            self._set_execution_progress(
+                "awaiting_busy",
+                "Run accepted; "
+                + (
+                    "waiting for hardware Busy state…"
+                    if trigger == "auto"
+                    else f"waiting for {trigger} / hardware Busy state…"
+                ),
+            )
+        elif name.endswith(".stop"):
+            self._set_execution_progress("idle", "Stop acknowledged.")
 
-        def task(client: SysCon2Client) -> object:
-            client.holo4d.run_sequence(start_condition, trigger_behavior)
-            return None
-
-        self._submit("holo4d.run", task)
+    def _advance_execution(self, state: str) -> None:
+        state = state.lower().removeprefix("state:").strip()
+        if self._execution_phase == "ready_check" and state == "idle":
+            self._set_execution_progress(
+                "starting", "Upload complete; starting sequence…"
+            )
+            start, edge = self._execution_options
+            cancelled = self._execution_cancel
+            self._submit(
+                f"holo4d.execute.{self._execution_serial}.run",
+                lambda client: (
+                    None
+                    if cancelled.is_set()
+                    else client.holo4d.run_sequence(start, edge)
+                ),
+            )
+        elif self._execution_phase in {"awaiting_busy", "running"} and state == "busy":
+            self._set_execution_progress("running", "Sequence running (hardware Busy).")
+        elif self._execution_phase == "running" and state == "idle":
+            self._set_execution_progress(
+                "idle", "Sequence finished (hardware returned to Idle)."
+            )
+        elif self._execution_phase == "awaiting_busy" and state == "idle":
+            # A short auto-start run may finish between polls; do not claim measured completion.
+            if self._execution_options[0] == "auto":
+                self._set_execution_progress(
+                    "idle",
+                    "Run accepted; hardware is Idle. A short run may have finished between polls.",
+                )
+        elif self._execution_phase != "idle" and state == "disconnected":
+            self._execution_cancel.set()
+            self._execution_serial += 1
+            self._set_execution_progress(
+                "idle", "Hardware disconnected; execution status unknown."
+            )
 
     def _on_holo4d_stop_clicked(self) -> None:
-        def task(client: SysCon2Client) -> object:
-            client.holo4d.stop_sequence()
-            return None
-
-        self._submit("holo4d.stop", task)
+        # Invalidate any pending upload completion so Stop can never be followed by Run.
+        self._execution_cancel.set()
+        self._execution_serial += 1
+        self._set_execution_progress("stopping", "Stop requested…")
+        self._submit(
+            f"holo4d.execute.{self._execution_serial}.stop",
+            lambda client: client.holo4d.stop_sequence(),
+        )
 
     # ---- Laser ----
 
@@ -770,22 +980,46 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _on_lightsources(self, result: object) -> None:
         self._lightsources = result if isinstance(result, dict) else {}
-        self.device_combo.blockSignals(True)
-        self.device_combo.clear()
-        self.device_combo.addItems(sorted(self._lightsources))
-        self.device_combo.blockSignals(False)
-        self._on_device_changed(self.device_combo.currentText())
-
-    def _on_device_changed(self, device_sn: str) -> None:
+        previous = self.description_combo.currentData()
         self.description_combo.clear()
-        self.description_combo.addItems(self._lightsources.get(device_sn, []))
+        for device, descriptions in sorted(self._lightsources.items()):
+            for description in descriptions:
+                label = (
+                    re.sub(
+                        r"\bdummy(?:_\d+)*\s*", "", description, flags=re.IGNORECASE
+                    ).strip()
+                    or "Laser"
+                )
+                self.description_combo.addItem(label, (device, description))
+        preferred = self.description_combo.findData(previous) if previous else -1
+        if preferred < 0:
+            preferred = next(
+                (
+                    i
+                    for i in range(self.description_combo.count())
+                    if "940" in self.description_combo.itemText(i)
+                ),
+                0,
+            )
+        self.description_combo.setCurrentIndex(preferred)
+        if self._discover_for_status:
+            self._discover_for_status = False
+            if self.description_combo.count():
+                self._on_refresh_status_clicked()
+            else:
+                self.lightsource_status_label.setText(
+                    "No lightsources reported by SysCon2."
+                )
+
+    def _on_device_changed(self, _device_sn: str) -> None:
+        # Device identity is kept as item data in the single lightsource selector.
+        pass
 
     def _selected_device_and_description(self) -> tuple[str, str] | None:
-        device_sn = self.device_combo.currentText()
-        description = self.description_combo.currentText()
-        if not device_sn or not description:
-            return None
-        return device_sn, description
+        selection = self.description_combo.currentData()
+        return (
+            selection if isinstance(selection, tuple) and len(selection) == 2 else None
+        )
 
     def _on_set_emission_clicked(self, on: bool) -> None:
         selection = self._selected_device_and_description()
@@ -838,6 +1072,10 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._submit("laser.set_intensity", task)
 
     def _on_refresh_status_clicked(self) -> None:
+        if not self.description_combo.count():
+            self._discover_for_status = True
+            self._on_refresh_lightsources_clicked()
+            return
         selection = self._selected_device_and_description()
         if selection is None:
             return

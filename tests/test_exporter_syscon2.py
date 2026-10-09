@@ -848,8 +848,8 @@ def test_export_seq_writes_lut_inverted_intensity_when_power_requested() -> None
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "50"
-    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "50"
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "0.5"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "0.5"
     assert report.power_saturation_warnings == []
     assert report.target_power_mw == 25.0
     assert report.power_lut_description == ""
@@ -887,8 +887,8 @@ def test_export_seq_clamps_and_warns_when_target_power_exceeds_lut_max() -> None
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "100"
-    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "100"
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "1"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "1"
     assert len(report.power_saturation_warnings) >= 1
     assert any("LUT max" in warning for warning in report.power_saturation_warnings)
 
@@ -922,10 +922,10 @@ def test_export_seq_uses_window_intensity_as_multiplier_when_non_binary() -> Non
     laser_pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
 
     assert float(shapes[0].properties["TimelineInfo0_Intensity_0"]) == pytest.approx(
-        40.0
+        0.4
     )
     assert any(
-        float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(40.0)
+        float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(0.4)
         for pulse in laser_pulses
         if "TimelineInfo0_Intensity_0" in pulse.properties
     )
@@ -1975,3 +1975,28 @@ def test_roundtrip_revisiting_point_target_preserves_neuron_channel():
     assert report.dropped_objects == 0
     assert report.merged_objects >= 1
     np.testing.assert_array_equal(imported, values[: imported.shape[0]])
+
+
+@pytest.mark.parametrize("wavelength", [940, 1030, 1100])
+def test_lut_export_writes_normalized_power_fraction(wavelength):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    stim = StimArray("power", StimType.Excitation, values, "1", _DT_S)
+    text, _ = generate_syscon2_sequence_text(
+        stim,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        target_power_mw=5,
+        power_lut=_linear_power_lut(85),
+        active_laser_wavelength_nm=wavelength,
+        spiralling=False,
+    )
+    objects = parse_syscon2_seq_text(text).objects
+    intensities = [
+        float(obj.properties["TimelineInfo0_Intensity_0"])
+        for obj in objects
+        if "TimelineInfo0_Intensity_0" in obj.properties
+    ]
+    nonzero = [value for value in intensities if value > 0]
+    assert len(nonzero) >= 2  # both Shape and laser TTL
+    assert all(value * 85 == pytest.approx(5, abs=0.0001) for value in nonzero)

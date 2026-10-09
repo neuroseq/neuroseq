@@ -171,14 +171,16 @@ def test_delete_sequence_requires_confirmation(
 def test_holo4d_run_requires_confirmation(
     panel: SysCon2Panel, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, mocker
 ) -> None:
-    fake = FakeTransport([encode_string("OK")])
+    fake = FakeTransport(
+        [encode_string("OK"), encode_string("State:Idle"), encode_string("OK")]
+    )
     _connect(panel, qtbot, monkeypatch, fake)
 
     mocker.patch(
         "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.No,
     )
-    qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(panel.btn_holo4d_upload_run, QtCore.Qt.MouseButton.LeftButton)
     assert fake.sent == []
 
     mocker.patch(
@@ -186,8 +188,10 @@ def test_holo4d_run_requires_confirmation(
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
-        qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
-    assert b"RunSequence" in fake.sent[-1]
+        qtbot.mouseClick(panel.btn_holo4d_upload_run, QtCore.Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(
+        lambda: any(b"RunSequence" in frame for frame in fake.sent), timeout=2000
+    )
 
 
 def test_laser_emission_uses_selected_device_after_confirmation(
@@ -201,7 +205,7 @@ def test_laser_emission_uses_selected_device_after_confirmation(
         qtbot.mouseClick(
             panel.btn_refresh_lightsources, QtCore.Qt.MouseButton.LeftButton
         )
-    assert panel.device_combo.currentText() == "SN1"
+    assert panel._selected_device_and_description() == ("SN1", "Chameleon")
     assert panel.description_combo.currentText() == "Chameleon"
 
     mocker.patch(
@@ -474,22 +478,25 @@ def test_export_current_failure_warns_and_does_not_import(
 
 
 def test_upload_defaults_to_one_run(panel, mocker):
+    panel._on_connected()
+    mocker.patch.object(panel, "_confirm", return_value=True)
     submit = mocker.patch.object(panel, "_submit")
-    panel.btn_holo4d_upload.click()
+    panel.btn_holo4d_upload_run.click()
     client = mocker.Mock()
     submit.call_args.args[1](client)
     client.holo4d.upload_sequence.assert_called_once_with(1)
 
 
 def test_endless_upload_requires_explicit_confirmation(panel, mocker):
+    panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")
     confirm = mocker.patch.object(panel, "_confirm", return_value=False)
     panel.runs_spinbox.setValue(0)
-    panel.btn_holo4d_upload.click()
+    panel.btn_holo4d_upload_run.click()
     submit.assert_not_called()
     assert "endless" in confirm.call_args.args[0]
     confirm.return_value = True
-    panel.btn_holo4d_upload.click()
+    panel.btn_holo4d_upload_run.click()
     client = mocker.Mock()
     submit.call_args.args[1](client)
     client.holo4d.upload_sequence.assert_called_once_with(0)
@@ -646,3 +653,157 @@ def test_quick_export_uses_dated_numbered_name(panel, mocker, tmp_path):
     panel._on_export_current_clicked()
     name = export.call_args.args[4]
     assert name.startswith("export_seq_") and name.endswith("_1")
+
+
+def _begin_upload_run(panel, mocker):
+    panel._on_connected()
+    mocker.patch.object(panel, "_confirm", return_value=True)
+    submit = mocker.patch.object(panel, "_submit")
+    panel._on_upload_run_clicked()
+    return submit, submit.call_args.args[0]
+
+
+def test_upload_run_waits_for_ready_and_tracks_actual_states(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    assert "Uploading" in panel.execution_label.text()
+    assert not panel.btn_holo4d_upload_run.isEnabled()
+    panel._on_command_finished(upload, None)
+    state_request = submit.call_args.args[0]
+    panel._on_command_finished(state_request, "Uploading")
+    assert submit.call_count == 2
+    panel._on_state_changed({"Holo4D": "Idle"})
+    run, task = submit.call_args.args
+    client = mocker.Mock()
+    task(client)
+    client.holo4d.run_sequence.assert_called_once_with("auto", "rising")
+    panel._on_command_finished(run, None)
+    panel._on_state_changed({"Holo4D": "Busy"})
+    assert "running" in panel.execution_label.text()
+    panel._on_state_changed({"Holo4D": "Idle"})
+    assert "finished" in panel.execution_label.text()
+    assert panel.btn_holo4d_upload_run.isEnabled()
+
+
+def test_stop_during_upload_never_starts_run(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_holo4d_stop_clicked()
+    stop = submit.call_args.args[0]
+    panel._on_command_finished(upload, None)
+    assert submit.call_count == 2
+    panel._on_command_finished(stop, None)
+    assert "Stop acknowledged" in panel.execution_label.text()
+
+
+def test_stop_cancels_run_already_queued_after_upload(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_command_finished(submit.call_args.args[0], "Idle")
+    run_task = submit.call_args.args[1]
+    panel._on_holo4d_stop_clicked()
+    client = mocker.Mock()
+    run_task(client)
+    client.holo4d.run_sequence.assert_not_called()
+
+
+def test_upload_failure_does_not_run(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_failed(upload, "device rejected upload")
+    assert submit.call_count == 1
+    assert "failed" in panel.execution_label.text()
+    assert panel.btn_holo4d_upload_run.isEnabled()
+
+
+def test_trigger_wait_is_not_reported_as_completed(panel, mocker):
+    panel.start_condition_combo.setCurrentText("trigger1")
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_command_finished(submit.call_args.args[0], "Idle")
+    panel._on_command_finished(submit.call_args.args[0], None)
+    panel._on_state_changed({"Holo4D": "Idle"})
+    assert "waiting for trigger1" in panel.execution_label.text()
+    assert not panel.btn_holo4d_upload_run.isEnabled()
+
+
+def test_laser_controls_hidden_and_single_selector_defaults_940(panel, qtbot):
+    panel._on_lightsources({"dummy_SN": ["dummy 1100 nm", "dummy 940 nm"]})
+    panel.show()
+    qtbot.waitExposed(panel)
+    assert panel.description_combo.currentText() == "940 nm"
+    assert panel._selected_device_and_description() == ("dummy_SN", "dummy 940 nm")
+    for widget in (
+        panel.device_combo,
+        panel.intensity_spinbox,
+        panel.btn_set_intensity,
+        panel.btn_toggle_laser_advanced,
+        panel.laser_advanced_panel,
+        panel.btn_refresh_lightsources,
+    ):
+        assert not widget.isVisible()
+    assert panel.btn_refresh_status.isVisible()
+    for button in panel.findChildren(QtWidgets.QPushButton):
+        assert (
+            button.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Policy.Fixed
+        )
+
+
+def test_generated_and_routine_exports_display_resizable_preview(
+    panel, tmp_path, mocker, qtbot
+):
+    path = tmp_path / "preview.png"
+    source = QtGui.QPixmap(1000, 400)
+    source.fill(QtCore.Qt.GlobalColor.red)
+    source.save(str(path))
+    submit = mocker.patch.object(panel, "_submit")
+    panel.show_generated_preview("example.seq", str(path), frozenset({1}))
+    panel.show()
+    qtbot.waitExposed(panel)
+    panel.resize(460, 850)
+    qtbot.waitUntil(lambda: panel.preview_label.pixmap() is not None)
+    assert not panel.preview_label.pixmap().isNull()
+    assert panel.preview_label.pixmap().width() <= panel.preview_label.width()
+    submit.assert_not_called()
+    assert "not imported" in panel.preview_status_label.text()
+    result = SysconExportResult(
+        tmp_path / "block.seq", path, frozenset({2}), mocker.Mock()
+    )
+    targets = mocker.Mock()
+    panel.targets_changed.connect(targets)
+    panel.stimulation_host.block_sent.emit(result)
+    assert "Import confirmed: block.seq" in panel.preview_status_label.text()
+    targets.assert_called_with(frozenset({2}))
+
+
+def test_get_status_discovers_and_uses_raw_identifiers(panel, mocker):
+    submit = mocker.patch.object(panel, "_submit")
+    panel._on_refresh_status_clicked()
+    assert submit.call_args.args[0] == "laser.get_lightsources"
+    panel._on_command_finished("laser.get_lightsources", {"dummy_SN": ["dummy 940 nm"]})
+    name, task = submit.call_args.args
+    assert name == "laser.get_status"
+    client = mocker.Mock()
+    task(client)
+    client.laser.get_lightsource_status.assert_called_once_with(
+        "dummy_SN", "dummy 940 nm"
+    )
+
+
+def test_short_run_reports_idle_without_claiming_observed_completion(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_command_finished(submit.call_args.args[0], "Idle")
+    panel._on_command_finished(submit.call_args.args[0], None)
+    panel._on_state_changed({"Holo4D": "Idle"})
+    assert "may have finished between polls" in panel.execution_label.text()
+    assert panel.btn_holo4d_upload_run.isEnabled()
+
+
+def test_disconnect_cancels_pending_run_and_ignores_old_ack(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    panel._on_command_finished(upload, None)
+    panel._on_command_finished(submit.call_args.args[0], "Idle")
+    name, task = submit.call_args.args
+    panel._on_disconnected("lost pipe")
+    task(mocker.Mock())
+    panel._on_command_finished(name, None)
+    assert "unknown" in panel.execution_label.text()
+    assert not panel.btn_holo4d_upload_run.isEnabled()

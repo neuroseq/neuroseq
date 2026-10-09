@@ -44,38 +44,38 @@ following details matter when testing the current implementation.
 
 1. Run NeuroSeq and SysCon2 on the same Windows PC, with the Holo4D profile and a
    verified Cellpose-to-stim-ID mapping. Connect opens the pipe; it does not prove
-   the laser is connected or ready. Click **Refresh Lightsources**, choose the
-   device/lightsource, and click **Get Status**. Check the mode and hardware state
-   in SysCon2. The SCI manual specifies software mode for **SetEmission**.
+   the laser is connected or ready. Click **Get Status** to discover lightsources and retrieve status; the selector
+   prefers 940 nm. Check the mode and hardware state in SysCon2. Direct laser
+   mutation controls are hidden.
 2. Prepare a short pattern and use **Export with settings…**. Select the intended input
    array, wavelength, target power, LUT, and output directory. The export target
-   power is in mW; the separate live **Intensity** control uses the unit selected
-   in SysCon2, which the SCI status response does not identify. Do not assume the
-   two controls use the same unit or scale.
+   power is in mW. LUT percentages are divided by 100 in `.seq` files; verify
+   this scaling on the rig. Live status uses the unit configured in SysCon2,
+   which SCI does not identify.
 3. Run **Check Input Sanity** and resolve every reported violation. The exact
    required timestep is **520.8125 µs** (`0.0005208125` seconds), not exactly
    520.8 µs. Let the dialog resample it. Around 20 ms is a starting pulse duration,
    but it does not by itself guarantee valid SLM timing; inspect the generated
    overview and debug CSV after the sanity fixes.
 4. Generate the script. Filenames use the dialog's **Script name**, whose initial
-   value is `syscon_sequence_example`, rather than necessarily the array name.
+   value follows `export_seq_<date>_<n>`, rather than the array name.
    The PNG is a generated preview. The panel shows whether import is pending,
    confirmed, failed, or not attempted (offline). Red target crosses appear only
    after acknowledgement of that preview's import and exclude skipped neurons.
    They do not show remote selection, upload, or live illumination. Confirm the
    sequence also appears in SysCon2 itself before proceeding.
-5. Select the imported sequence, set **Runs = 1**, and upload it. One run is now
-   the default; an endless upload requires explicit confirmation. Set the desired
-   start condition/trigger edge before **Run**. Validate actual timing, pattern,
-   and delivered power using the rig's normal controlled bench-test procedure.
-   Opening the shutter, enabling emission, and changing intensity ask for
-   confirmation. Closing the shutter is immediate. Emission OFF currently also
-   asks for confirmation.
-6. Edit the array and test **Export current array to SysCon2**. It reuses the last
+5. Select the imported sequence, set **Runs = 1**, choose the start condition and
+   trigger edge, then click **Upload & Run** and confirm. Verify the progress label
+   moves through uploading, hardware readiness, starting, and running. A triggered
+   run must wait for its trigger. Stop during upload must not send Run afterward.
+   SCI reports phases rather than percentage completion. Validate actual timing,
+   pattern, and delivered power using the rig's controlled bench-test procedure.
+   Configure emission, shutter, and laser intensity in SysCon2 itself.
+6. Edit the array and test **Export current array to stimulation setup**. It reuses the last
    dialog export's settings but writes `export_seq_<date>_<n>.seq` and its diagnostic
    files to a temporary directory, not the dialog's chosen output folder. It
    opens the full export dialog if settings are unavailable. As above, verify
-   the import, then select/upload again before running the changed sequence.
+   the import, then select and use Upload & Run for the changed sequence.
 7. For rheobase, select the SysCon2 target, disable binary intensity export, use
    amplitudes within 0–1, and choose
    the response window from the actual acquisition frame rate. At 30 Hz,
@@ -84,7 +84,7 @@ following details matter when testing the current implementation.
    processing option to obtain deconvolved spike data. Verify the sample rate,
    spike threshold, and neuron mapping in the import dialog.
 8. Start the routine. For **every** block, refresh the sequence list, select the
-   newly imported block, upload with **Runs = 1**, then run/acquire. The host only
+   newly imported block, set **Runs = 1**, then **Upload & Run** and acquire. The host only
    imports; it does not select, upload, or run. Arm a triggered run before firing
    the acquisition trigger, and verify its alignment with the recording. Manual
    clicks alone do not establish a shared time origin.

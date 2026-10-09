@@ -4733,3 +4733,30 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     assert gui.syscon2_panel.export_settings is None
     gui._close_confirmed = True
     gui.close()
+
+
+def test_main_menu_export_updates_setup_preview_without_import(
+    qtbot, monkeypatch, tmp_path
+):
+    from qtpy import QtGui
+
+    import neuroseq.gui as gui_module
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    path = tmp_path / "overview.png"
+    image = QtGui.QPixmap(100, 50)
+    image.fill()
+    image.save(str(path))
+
+    class ExportDialog(gui_module.StimulationGeneratorDialog):
+        def exec(self):
+            self.sequence_generated.emit("offline.seq", str(path), frozenset({1}))
+            return 0
+
+    monkeypatch.setattr(gui_module, "StimulationGeneratorDialog", ExportDialog)
+    gui.open_stimulation_generator_dialog()
+    assert not gui.syscon2_panel.preview_label.pixmap().isNull()
+    assert "not imported" in gui.syscon2_panel.preview_status_label.text()
+    assert gui.syscon2_panel.export_settings is not None
+    gui.close()

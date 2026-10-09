@@ -41,9 +41,9 @@ class SysconExportSettings:
     """The user-facing knobs of a HOLO4D ``.seq`` export."""
 
     config_text: str
-    force_binary_intensity: bool = True
-    spiralling: bool = True
-    ten_spots_per_roi: bool = False
+    force_binary_intensity: bool = False
+    spiralling: bool = False
+    ten_spots_per_roi: bool = True
     spot_algorithm: str = "farthest_point"
     laser_wavelength_nm: int = 940
     target_power_mw: float = 92.0

@@ -119,7 +119,7 @@ the corrected values back to the stim array via _Apply fixes_.
 
 1. Open **File → Export data → Export light stimulus** (or the toolbar button) and choose `SysCon2` in the pre-dialog.
 2. Select the stim array and Cellpose segmentation.
-3. Choose laser wavelength (`940 nm`, `1030 nm`, or `1100 nm` digital; default `1100 nm`).
+3. Choose laser wavelength (`940 nm`, `1030 nm`, or `1100 nm` digital; default `940 nm`).
 4. Optionally set a **Target power** and load a power LUT (see below).
 5. Click **Check Input Sanity** and resolve any errors.
 6. Enter an output script name and click **Export**.
@@ -133,10 +133,12 @@ button:
   `Intensity_0` fields are written as zero, which matches the historical
   default behaviour.
 - Loading a SysCon `.lut` file maps the requested mW to the laser's
-  intensity percentage at the currently selected wavelength. Each
+  intensity percentage at the currently selected wavelength. The exporter divides
+  that percentage by 100 for the `.seq` intensity fields (0–1). Each
   wavelength has its own LUT slot.
 - LUTs are bundled into the `.nseq` archive when you save the project, so
-  the export stays reproducible across machines.
+  the export stays reproducible across machines. Loading a LUT marks the project
+  as modified; save it to retain the calibration.
 
 The **status label** next to the button shows which LUT (if any) is
 currently loaded for the active wavelength. Switching the wavelength
@@ -199,3 +201,34 @@ original drawing amplitudes. Spiralling latency and hardware behavior cannot be
 inferred from the file, so this is not a measurement of delivered stimulation.
 Objects with multiple timing entries or multiple lightsources are rejected rather
 than partially imported.
+
+## Setup panel and hardware execution
+
+Export defaults are **940 nm**, **Force binary export intensity off**,
+**Spiralling off**, and **Use 10 input spots per ROI on**. Previously remembered
+settings still apply to quick exports. With a linear 85 mW maximum calibration,
+5 mW is exported as approximately `0.058824`, not `5.8824`, in both Shape and
+laser TTL intensity fields. Use the rig's measured wavelength-specific LUT;
+the linear example is not a replacement calibration.
+
+Main-menu exports populate the setup panel's generated preview without importing
+into hardware. Exports from the setup panel import when connected. Routine blocks
+also update the preview after import acknowledgement. Preview images resize with
+the panel and remain distinct from hardware status.
+
+Laser controls are currently read-only: **Get Status** discovers lightsources on
+its first use, preferring 940 nm, and retrieves status. The single selector displays
+friendly names while retaining the original SCI identifiers internally. Set power,
+shutter, and emission in SysCon2 itself.
+
+Select the imported sequence, choose Runs and trigger settings, and click
+**Upload & Run**. After confirmation, NeuroSeq uploads, waits for hardware Idle,
+and then sends Run. The panel shows phases, elapsed time, and hardware Busy/Idle
+state; SCI provides no percentage-complete measurement. A triggered run remains
+waiting until Busy is observed. A short automatic run can finish between polls;
+that case is reported without claiming measured completion. **Stop** also cancels
+any queued automatic Run following the upload.
+
+The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
+starting with the wrong timestep. **Edit Input Array** also provides exact presets
+for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

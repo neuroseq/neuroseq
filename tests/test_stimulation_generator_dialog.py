@@ -203,7 +203,7 @@ def test_stimulation_generator_dialog_sanity_check_passes(
     assert "exported segments" in qmessagebox_calls[0]["text"].lower()
 
 
-def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
+def test_stimulation_generator_dialog_export_defaults(
     qtbot: QtBot,
 ) -> None:
     values = np.zeros((40, 1), dtype=np.float32)
@@ -212,10 +212,10 @@ def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
         _build_project(values, mapping={0: 0}),
     )
     qtbot.addWidget(dialog)
-    assert dialog.binary_mode_checkbox.isChecked()
-    assert dialog.spiralling_checkbox.isChecked()
-    assert not dialog.ten_spots_per_roi_checkbox.isChecked()
-    assert not dialog.spot_algorithm_combo.isEnabled()
+    assert not dialog.binary_mode_checkbox.isChecked()
+    assert not dialog.spiralling_checkbox.isChecked()
+    assert dialog.ten_spots_per_roi_checkbox.isChecked()
+    assert dialog.spot_algorithm_combo.isEnabled()
     assert dialog.spot_algorithm_combo.currentData() == "farthest_point"
     assert dialog._selected_laser_wavelength_nm() == 940
     assert dialog.target_power_spin.value() == 92.0
@@ -256,7 +256,7 @@ def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelengt
     dialog.check_sanity_button.click()
 
     assert captured["active_laser_wavelength_nm"] == 1030
-    assert captured["spiralling"] is True
+    assert captured["spiralling"] is False
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
 
@@ -1377,3 +1377,20 @@ def test_dialog_default_name_advances_but_keeps_custom_names(
     dialog.name_edit.setText("my_name")
     dialog._generate_scripts()
     assert dialog.name_edit.text() == "my_name"
+
+
+def test_loaded_940_lut_marks_dirty_and_survives_project_save(qtbot, tmp_path):
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    project = Project()
+    project.dirty = False
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    path = tmp_path / "940.lut"
+    path.write_text(_REFERENCE_LUT_TEXT)
+    dialog._apply_lut_from_path(str(path), 940)
+    assert project.dirty
+    saved = tmp_path / "calibrated.nseq"
+    project.save(saved, SaveLoadOptions(True, True, True, True))
+    loaded = Project(saved)
+    assert loaded.power_luts[940] == project.power_luts[940]

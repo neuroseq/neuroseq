@@ -1167,6 +1167,32 @@ class StimEditor(QtWidgets.QWidget):
             )
             self.set_project(self.project, stim_to_select=dialog.name)
 
+    def prepare_syscon_timestep(self, parent: QtWidgets.QWidget | None = None) -> bool:
+        """Offer to resample project data before a hardware routine starts."""
+        from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+
+        if self.project is None or self.current_stim_modifier is None:
+            return False
+        stim = self.current_stim_modifier.stim_array
+        dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+        if stim_dt_matches(stim.dt, dt):
+            return True
+        answer = QtWidgets.QMessageBox.question(
+            parent or self,
+            "Use SysCon2 timestep",
+            "SysCon2 requires 0.5208125 ms samples. Resample the project's input arrays "
+            "and traces using zero-order hold? Existing timing may shift by one sample. "
+            "Input undo history will be cleared.",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return False
+        self.project.remap_all_data_to_dt(dt)
+        self.set_project(self.project, stim_to_select=stim.name)
+        return True
+
     def edit_stim_array(self):
         if self.current_stim_modifier is None:
             return

@@ -515,7 +515,7 @@ def generate_syscon2_sequence_text(
     by ``_SPIRALLING_TTL_LEAD_TICKS`` so the active edge aligns with the
     SLM-ready edge in spiralling mode.
     When ``target_power_mw > 0`` and ``power_lut is not None``, Shape and laser
-    TTLPulse intensity fields are written as LUT-inverted percent values for the
+    TTLPulse intensity fields are written as LUT-inverted fractions (percent / 100) for the
     requested delivered power; otherwise they remain `0`.
 
     Returns the sequence text and a :class:`SysconExportReport` with per-neuron
@@ -714,9 +714,9 @@ def generate_syscon2_sequence_text(
                     f"Laser TTL@tick={start_tick}: requested {effective_mw:.3f} mW "
                     f"exceeded LUT max {power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
                 )
-            intensity_percent = _format_float(percent)
+            intensity_fraction = _format_float(percent / 100.0)
         else:
-            intensity_percent = "0"
+            intensity_fraction = "0"
         block_object_id = next_object_id
         object_blocks.append(
             _format_ttl_pulse_block(
@@ -728,7 +728,7 @@ def generate_syscon2_sequence_text(
                 port=lightsource_port,
                 lightsource_id=lightsource_id,
                 include_lightsource=True,
-                intensity_percent=intensity_percent,
+                intensity_fraction=intensity_fraction,
             )
         )
         laser_block_rows.append((block_object_id, (start_tick, end_tick)))
@@ -3570,7 +3570,7 @@ def _format_ttl_pulse_block(
     port: str,
     lightsource_id: str,
     include_lightsource: bool,
-    intensity_percent: str = "0",
+    intensity_fraction: str = "0",
 ) -> list[str]:
     properties: list[tuple[str, str]] = [
         ("TotalTimings", "1"),
@@ -3588,7 +3588,7 @@ def _format_ttl_pulse_block(
     ]
     if include_lightsource:
         properties.append(("TimelineInfo0_LightsourceID_0", lightsource_id))
-        properties.append(("TimelineInfo0_Intensity_0", intensity_percent))
+        properties.append(("TimelineInfo0_Intensity_0", intensity_fraction))
     properties.extend(
         [
             ("TimelineInfo0_timelinegroupid", "-1"),
@@ -3639,7 +3639,7 @@ def _shape_intensity_for_window(
             f"{label}: requested {effective_mw:.3f} mW exceeded LUT max "
             f"{power_lut.max_mw:.3f} mW; clamped to {percent:.2f}%."
         )
-    return _format_float(percent)
+    return _format_float(percent / 100.0)
 
 
 def _format_time_us(value_us: float) -> str:

@@ -1740,3 +1740,35 @@ def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> Non
     assert stim_editor._stdp_window_dialog is None
     stim_editor.close()
     stim_editor.close()
+
+
+def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker):
+    project = Project()
+    values = np.zeros((100, 2), dtype=np.float32)
+    values[10:15, 0] = 1
+    project.add_stim_array(
+        StimArray("target", neuroseq.stim.StimType.Excitation, values, "1", 0.001)
+    )
+    combo = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    editor = StimEditor(ConstrainedPanZoomController(), combo, toolbar)
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    question = mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        return_value=QtWidgets.QMessageBox.StandardButton.No,
+    )
+    assert not editor.prepare_syscon_timestep()
+    assert project.stim_arrays["target"].values is values
+    question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
+    assert editor.prepare_syscon_timestep()
+    stim = project.stim_arrays["target"]
+    assert stim.dt == 0.0005208125
+    assert project.dt == stim.dt
+    assert editor.stim_widget.data_values.shape == stim.values.shape
+    assert editor.current_stim_modifier.stim_array is stim
+    assert project.dirty
+    question.reset_mock()
+    assert editor.prepare_syscon_timestep()
+    question.assert_not_called()

@@ -2580,6 +2580,11 @@ class Gui(QtWidgets.QMainWindow):
             parent=self,
             current_stim_name=(None if modifier is None else modifier.stim_array.name),
         )
+        dialog.sequence_generated.connect(
+            lambda seq, png, targets: self.syscon2_panel.show_generated_preview(
+                seq, png, targets, dialog.export_settings()
+            )
+        )
         dialog.exec()
 
     # Import stimulus wrappers

@@ -78,6 +78,12 @@ class _FakeEditor:
             )
         )
 
+    def prepare_syscon_timestep(self, parent=None):
+        return (
+            abs(self.current_stim_modifier.stim_array.dt - _SYSCON2_TTL_PULSE_QUANTUM_S)
+            < 1e-12
+        )
+
     def focus_time_range(self, start: float, stop: float) -> None:
         self.controller.focus_time_range(start, stop)
 
@@ -885,3 +891,18 @@ def test_syscon2_accepts_replacement_trace_with_same_name(qtbot):
 def test_syscon2_does_not_accept_simulation_data_as_an_import(qtbot):
     _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
     assert not dialog._is_fresh_dataset("Simulation :: P / v")
+
+
+def test_dynamic_syscon_dt_button_resamples_before_start(qtbot, mocker):
+    _project, editor, dialog, _host = _syscon2_dialog(qtbot)
+    stim = editor.current_stim_modifier.stim_array
+    stim.dt = 0.001
+
+    def fix(parent):
+        stim.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+        return True
+
+    prepare = mocker.patch.object(editor, "prepare_syscon_timestep", side_effect=fix)
+    dialog.btn_syscon_dt.click()
+    prepare.assert_called_once_with(dialog)
+    assert "0.5208125" in dialog.lbl_stim_dt.text()
