@@ -22,6 +22,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.stim import StimArray
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.stimulation_generator_dialog import next_default_export_name
@@ -177,6 +178,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._pending_selections: set[str] = set()
         #: Generated overview images by .seq file name, for previewing selections.
         self._known_previews: dict[str, str] = {}
+        self._known_sources: dict[str, str] = {}
         self._pending_imports: dict[str, frozenset[int] | None] = {}
         self._import_files = tempfile.TemporaryDirectory(prefix="neuroseq-import-")
         self._lightsources: dict[str, list[str]] = {}
@@ -704,7 +706,9 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._on_refresh_sequences_clicked()
 
     def _remember_preview(self, seq_path: str, png_path: str) -> None:
-        self._known_previews[pathlib.Path(seq_path).name.lower()] = png_path
+        key = pathlib.Path(seq_path).name.lower()
+        self._known_previews[key] = png_path
+        self._known_sources[key] = seq_path
 
     def _on_sequence_selected(self, result: object) -> None:
         self.selection_label.setText(
@@ -732,22 +736,51 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._submit(name, task)
 
     def _show_preview_for_sequence(self, remote_path: str) -> None:
-        """Show the generated overview for a sequence chosen in the manager."""
-        stem_name = pathlib.PureWindowsPath(remote_path.replace("/", "\\")).name
-        key = stem_name.lower()
+        """Show a preview for a sequence chosen in the manager.
+
+        Uses the overview generated at export time when available; otherwise renders
+        one from a local copy of the ``.seq`` file (the remote name is the imported file's
+        name, so a local file with that name is looked up in known sources and the output folder).
+        """
+        name = pathlib.PureWindowsPath(remote_path.replace("/", "\\")).name
+        key = name.lower()
         png = self._known_previews.get(key)
-        if png is None or not pathlib.Path(png).is_file():
-            candidate = (
-                pathlib.Path(self.stimulation_host.output_dir)
-                / f"{pathlib.PureWindowsPath(stem_name).stem}_overview.png"
-            )
-            png = str(candidate) if candidate.is_file() else None
-        if png is None:
-            self.preview_label.setText(
-                f"No generated preview available for {stem_name}."
-            )
+        if png is not None and pathlib.Path(png).is_file():
+            self._show_preview(png)
             return
-        self._show_preview(png)
+        output_dir = pathlib.Path(self.stimulation_host.output_dir)
+        candidates = []
+        known = self._known_sources.get(key)
+        if known:
+            candidates.append(pathlib.Path(known))
+        candidates.append(output_dir / name)
+        typed = self.import_path_edit.text().strip()
+        if typed and pathlib.Path(typed).name.lower() == key:
+            candidates.append(pathlib.Path(typed))
+        for seq in candidates:
+            if not seq.is_file():
+                continue
+            existing = seq.with_name(f"{seq.stem}_overview.png")
+            if existing.is_file():
+                self._known_previews[key] = str(existing)
+                self._show_preview(str(existing))
+                return
+            try:
+                folder = pathlib.Path(self._import_files.name) / "previews"
+                folder.mkdir(exist_ok=True)
+                out = generate_syscon2_timeline_overview_png(
+                    seq.read_text(encoding="utf-8", errors="replace"),
+                    folder / f"{seq.stem}_{len(self._known_previews)}_overview.png",
+                )
+            except (ValueError, OSError):
+                continue
+            self._known_previews[key] = str(out)
+            self._show_preview(str(out))
+            return
+        self.preview_label.setText(
+            f"No local copy of {name} found to preview. Put it in the export folder "
+            f"({output_dir}) or enter its path in the import field."
+        )
 
     def _on_delete_sequence_clicked(self) -> None:
         path = self._selected_sequence_path()
@@ -866,6 +899,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         target = self.target_directory_edit.text().strip()
         try:
             source = pathlib.Path(seq_path).resolve(strict=True)
+            self._known_sources[source.name.lower()] = str(source)
             remote = pathlib.PureWindowsPath(target)
             if source.suffix.lower() != ".seq" or not source.is_file():
                 raise ValueError("Select an existing .seq file.")

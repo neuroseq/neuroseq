@@ -834,4 +834,17 @@ def test_selecting_sequence_shows_its_generated_preview(
     assert not panel.preview_label._source.isNull()
 
     panel._show_preview_for_sequence("unknown.seq")
-    assert "No generated preview" in panel.preview_label.text()
+    assert "No local copy" in panel.preview_label.text()
+
+
+def test_selecting_sequence_renders_preview_from_local_seq_file(
+    panel: SysCon2Panel, tmp_path
+) -> None:
+    from tests.test_importer_syscon2 import _sample_holo4d_layout_seq_text
+
+    (tmp_path / "Sequence2.seq").write_text(_sample_holo4d_layout_seq_text())
+    panel.import_path_edit.setText(str(tmp_path / "Sequence2.seq"))
+
+    panel._show_preview_for_sequence("Experiment\\Sequence2.seq")
+
+    assert not panel.preview_label._source.isNull()
