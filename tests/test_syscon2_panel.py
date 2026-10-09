@@ -817,3 +817,21 @@ def test_disconnect_cancels_pending_run_and_ignores_old_ack(panel, mocker):
     panel._on_command_finished(name, None)
     assert "unknown" in panel.execution_label.text()
     assert not panel.btn_holo4d_upload_run.isEnabled()
+
+
+def test_selecting_sequence_shows_its_generated_preview(
+    panel: SysCon2Panel, qtbot: QtBot, tmp_path
+) -> None:
+    from qtpy import QtGui
+
+    png = tmp_path / "a_overview.png"
+    image = QtGui.QImage(40, 20, QtGui.QImage.Format.Format_RGB32)
+    image.fill(QtGui.QColor("red"))
+    assert image.save(str(png))
+    panel._remember_preview(str(tmp_path / "a.seq"), str(png))
+
+    panel._show_preview_for_sequence("Experiment\\A.seq")
+    assert not panel.preview_label._source.isNull()
+
+    panel._show_preview_for_sequence("unknown.seq")
+    assert "No generated preview" in panel.preview_label.text()

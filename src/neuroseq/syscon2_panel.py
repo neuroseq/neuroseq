@@ -175,6 +175,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._preview_request: str | None = None
         self._preview_source = ""
         self._pending_selections: set[str] = set()
+        #: Generated overview images by .seq file name, for previewing selections.
+        self._known_previews: dict[str, str] = {}
         self._pending_imports: dict[str, frozenset[int] | None] = {}
         self._import_files = tempfile.TemporaryDirectory(prefix="neuroseq-import-")
         self._lightsources: dict[str, list[str]] = {}
@@ -701,6 +703,9 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.selection_label.setText("Remote selection not confirmed.")
         self._on_refresh_sequences_clicked()
 
+    def _remember_preview(self, seq_path: str, png_path: str) -> None:
+        self._known_previews[pathlib.Path(seq_path).name.lower()] = png_path
+
     def _on_sequence_selected(self, result: object) -> None:
         self.selection_label.setText(
             f"Selection confirmed: {result}. Use Upload & Run to apply it to Holo4D."
@@ -719,11 +724,30 @@ class SysCon2Panel(QtWidgets.QWidget):
             client.sequence_manager.select_sequence(path)
             return path
 
+        self._show_preview_for_sequence(path)
         self._import_serial += 1
         name = f"sequence_manager.select.{self._import_serial}"
         self._pending_selections.add(name)
         self.selection_label.setText(f"Selection pending: {path}")
         self._submit(name, task)
+
+    def _show_preview_for_sequence(self, remote_path: str) -> None:
+        """Show the generated overview for a sequence chosen in the manager."""
+        stem_name = pathlib.PureWindowsPath(remote_path.replace("/", "\\")).name
+        key = stem_name.lower()
+        png = self._known_previews.get(key)
+        if png is None or not pathlib.Path(png).is_file():
+            candidate = (
+                pathlib.Path(self.stimulation_host.output_dir)
+                / f"{pathlib.PureWindowsPath(stem_name).stem}_overview.png"
+            )
+            png = str(candidate) if candidate.is_file() else None
+        if png is None:
+            self.preview_label.setText(
+                f"No generated preview available for {stem_name}."
+            )
+            return
+        self._show_preview(png)
 
     def _on_delete_sequence_clicked(self) -> None:
         path = self._selected_sequence_path()
@@ -827,6 +851,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         if self._active_dialog is not None:
             self._export_settings = self._active_dialog.export_settings()
         self._show_preview(overview_png_path)
+        self._remember_preview(seq_path, overview_png_path)
         self.import_path_edit.setText(seq_path)
         self._import_sequence(seq_path, targeted_stim_ids)
 
@@ -884,6 +909,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         if settings is not None:
             self._export_settings = settings
         self._show_preview(png_path)
+        self._remember_preview(seq_path, png_path)
         self.import_path_edit.setText(seq_path)
         self._preview_request = None
         self.targets_changed.emit(frozenset())
@@ -896,6 +922,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             return
         self._preview_request = None
         self._show_preview(str(result.overview_png_path))
+        self._remember_preview(str(result.seq_path), str(result.overview_png_path))
         self.import_path_edit.setText(str(result.seq_path))
         self.preview_status_label.setText(
             f"Import confirmed: {result.seq_path.name}. Select it, then Upload & Run."
