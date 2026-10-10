@@ -2490,11 +2490,16 @@ class B2Model:
             values = np.ascontiguousarray(values[:, ::downsample_factor])
             timestamps = timestamps[::downsample_factor]
         dt = timestamps[1] - timestamps[0]
+        units = display_units(b2.Quantity(1, dim=quantity.dim))
+        # Voltage traces are stored in SI volts but conventionally displayed
+        # in millivolts throughout the trace widget.
+        if quantity.dim == b2.volt.dim:
+            units = "mV"
         return TraceData(
             trace_name,
             values,
             monitor.record,
-            display_units(quantity),
+            units,
             dt,
         )
 
