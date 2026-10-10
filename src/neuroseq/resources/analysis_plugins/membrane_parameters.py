@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
@@ -253,7 +254,7 @@ def _format_resistance(value_ohm: float) -> str:
 
 
 def open_analysis_dialog(parent, project, data, neuron_slice, time_slice) -> None:
-    """Open one dialog containing both input selection and fit results."""
+    """Open a modeless dialog containing input selection and fit results."""
     if not isinstance(data, TraceData):
         QtWidgets.QMessageBox.warning(
             parent, PLUGIN_NAME, "Membrane parameter fitting supports trace data only."
@@ -270,7 +271,26 @@ def open_analysis_dialog(parent, project, data, neuron_slice, time_slice) -> Non
             "include A, mA, µA, nA, and pA.",
         )
         return
-    MembraneParametersDialog(data, arrays, neuron_slice, time_slice, parent).exec()
+    dialog = MembraneParametersDialog(data, arrays, neuron_slice, time_slice, parent)
+    dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+
+    # A modeless dialog needs a live Python reference. Keep it on the main
+    # window until Qt destroys it so users can continue interacting with the
+    # rest of NeuroSeq while comparing or changing the selected input array.
+    dialogs = getattr(parent, "_analysis_plugin_dialogs", None)
+    if dialogs is None:
+        dialogs = []
+        parent._analysis_plugin_dialogs = dialogs
+    dialogs.append(dialog)
+
+    def forget_dialog(*_args) -> None:
+        if dialog in dialogs:
+            dialogs.remove(dialog)
+
+    dialog.destroyed.connect(forget_dialog)
+    dialog.show()
+    dialog.raise_()
+    dialog.activateWindow()
 
 
 def render_analysis(widget, data, neuron_slice, time_slice) -> None:
