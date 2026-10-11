@@ -67,6 +67,16 @@ def test_estimate_parameters_uses_selected_time_and_neuron() -> None:
     assert (result[0].r_m, result[0].v_rest, result[0].tau_m) == pytest.approx(
         (r_m, v_rest, tau_m), rel=1e-5
     )
+    assert result[0].c_m == pytest.approx(tau_m / r_m, rel=1e-5)
+
+
+def test_format_capacitance_uses_cell_scale_units() -> None:
+    from neuroseq.resources.analysis_plugins.membrane_parameters import (
+        _format_capacitance,
+    )
+
+    assert _format_capacitance(80e-12) == "80 pF"
+    assert _format_capacitance(1.5e-9) == "1.5 nF"
 
 
 @pytest.mark.parametrize("units", ["A", "mA", "µA", "uA", "nA", "pA", "ampere"])

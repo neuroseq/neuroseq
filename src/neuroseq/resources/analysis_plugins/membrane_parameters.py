@@ -23,6 +23,7 @@ class MembraneParameterEstimate:
     r_m: float
     v_rest: float
     tau_m: float
+    c_m: float
 
 
 def _normalized_unit(units: str) -> str:
@@ -168,7 +169,13 @@ def estimate_parameters(
         r_m, v_rest, tau_m = fit_a_b_c(
             dv_dt, trace[:-1], stimulus_values[stim_indices, neuron]
         )
-        estimates.append(MembraneParameterEstimate(neuron, r_m, v_rest, tau_m))
+        if np.isclose(r_m, 0.0, atol=1e-15):
+            raise ValueError(
+                f"Could not estimate C_m for neuron {neuron} because the fitted "
+                "membrane resistance is near zero."
+            )
+        c_m = tau_m / r_m
+        estimates.append(MembraneParameterEstimate(neuron, r_m, v_rest, tau_m, c_m))
     return estimates
 
 
@@ -237,6 +244,7 @@ class MembraneParametersDialog(QtWidgets.QDialog):
                     f"v_rest: {result.v_rest / voltage_factor(self._data.units):.6g} "
                     f"{self._data.units}",
                     f"tau_m:  {result.tau_m * 1000.0:.6g} ms",
+                    f"C_m:    {_format_capacitance(result.c_m)}",
                 )
             )
         self.results.setPlainText("\n".join(lines))
@@ -251,6 +259,19 @@ def _format_resistance(value_ohm: float) -> str:
     if absolute >= 1e3:
         return f"{value_ohm / 1e3:.6g} kΩ"
     return f"{value_ohm:.6g} Ω"
+
+
+def _format_capacitance(value_farad: float) -> str:
+    absolute = abs(value_farad)
+    if absolute >= 1e-6:
+        return f"{value_farad / 1e-6:.6g} µF"
+    if absolute >= 1e-9:
+        return f"{value_farad / 1e-9:.6g} nF"
+    if absolute >= 1e-12:
+        return f"{value_farad / 1e-12:.6g} pF"
+    if absolute >= 1e-15:
+        return f"{value_farad / 1e-15:.6g} fF"
+    return f"{value_farad:.6g} F"
 
 
 def open_analysis_dialog(parent, project, data, neuron_slice, time_slice) -> None:
