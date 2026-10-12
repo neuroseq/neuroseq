@@ -1992,4 +1992,4 @@ def test_group_uses_exported_neuron_tags() -> None:
         for i, tag in enumerate([4, 2, 4, 2, 4])
     ]
     groups = _group_entities_by_center_distance(objs)
-    assert [len(g) for g in groups] == [2, 3]
+    assert [len(g) for g in groups] == [0, 0, 2, 0, 3]

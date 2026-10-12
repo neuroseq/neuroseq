@@ -2046,3 +2046,58 @@ def test_lut_export_writes_normalized_power_fraction(wavelength):
     nonzero = [value for value in intensities if value > 0]
     assert len(nonzero) >= 2  # both Shape and laser TTL
     assert all(value * 85 == pytest.approx(5, abs=0.0001) for value in nonzero)
+
+
+def test_multi_spot_roundtrip_keeps_rows_and_timings() -> None:
+    n_neurons = 6
+    values = np.zeros((300, n_neurons), dtype=np.float32)
+    starts = {1: [100, 107, 114], 4: [100, 107, 114], 5: [200, 207]}
+    for neuron, burst_starts in starts.items():
+        for start_idx in burst_starts:
+            values[start_idx : start_idx + 2, neuron] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    # Each ROI is a 3x3 block so that several spots per ROI can be placed.
+    segmentation = np.full((3, n_neurons * 10), -1, dtype=np.int32)
+    for neuron in range(n_neurons):
+        segmentation[:, neuron * 10 : neuron * 10 + 3] = neuron
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy_spots.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((3, n_neurons * 10, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(n_neurons, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        cellpose,
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        stimulation_spots_per_roi=3,
+    )
+    sequence = parse_syscon2_seq_text(seq_text)
+    assert len([o for o in sequence.objects if o.object_type == "Shape"]) > 3
+    imported, _ = sequence_to_stim_values(
+        sequence,
+        dt_seconds=_DT_S,
+        n_neurons=n_neurons,
+        tick_resolution_us=500,
+    )
+    assert imported.shape[1] == n_neurons
+    assert np.flatnonzero(imported.any(axis=0)).tolist() == [1, 4, 5]
+    for neuron in (1, 4, 5):
+        got = imported[:, neuron] > 0
+        assert (
+            np.flatnonzero(got).tolist() == np.flatnonzero(values[:, neuron]).tolist()
+        )

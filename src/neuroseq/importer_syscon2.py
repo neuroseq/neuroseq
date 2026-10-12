@@ -572,7 +572,8 @@ def _group_entities_by_center_distance(
         by_tag: dict[int, list[SysconSequenceObject]] = {}
         for obj, tag in zip(entities, tags, strict=True):
             by_tag.setdefault(int(tag), []).append(obj)  # type: ignore[arg-type]
-        return [by_tag[tag] for tag in sorted(by_tag)]
+        # Keep original rows: untouched neurons stay as empty placeholder groups.
+        return [by_tag.get(row, []) for row in range(max(by_tag) + 1)]
 
     parent = list(range(len(entities)))
 
@@ -846,7 +847,9 @@ def _sequence_to_stim_values_holo4d_layout(
         total_objects=len(sequence.objects),
         eligible_objects=len(shape_like_objects),
         grouped_objects=grouped_objects_count,
-        merged_objects=max(0, len(shape_like_objects) - grouped_objects_count),
+        merged_objects=max(
+            0, len(shape_like_objects) - sum(1 for g in grouped_entities if g)
+        ),
         mapped_objects=mapped_objects,
         dropped_objects=dropped_objects,
         generated_timepoints=values.shape[0],
