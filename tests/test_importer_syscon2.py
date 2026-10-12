@@ -1938,3 +1938,33 @@ def test_remap_failure_does_not_mutate_any_live_arrays(tmp_path, qtbot, mocker):
     assert project.stim_arrays["second"].dt == 0.002
     assert project.dt == 0.001
     assert not project.dirty
+
+
+def test_group_merges_simultaneous_multi_spot_shapes() -> None:
+    from neuroseq.importer_syscon2 import SysconSequenceObject
+    from neuroseq.importer_syscon2 import _group_entities_by_center_distance
+
+    def shape(idx: int, start_us: float, x: float, y: float) -> SysconSequenceObject:
+        return SysconSequenceObject(
+            block_index=idx,
+            object_id=idx,
+            object_type="Shape",
+            properties={
+                "Shape0_Type": "0",
+                "Shape0_CenterX": str(x),
+                "Shape0_CenterY": str(y),
+                "Shape0_CenterZ": "0",
+            },
+            start_time_us=start_us,
+            repeats=6,
+            step_size=100,
+            intensity=1.0,
+        )
+
+    # Neuron A: three spots at t=0 and the same spots again later; neuron B far away.
+    spots_a = [(10.0, 10.0), (14.0, 12.0), (8.0, 15.0)]
+    objs = [shape(i, 0.0, x, y) for i, (x, y) in enumerate(spots_a)]
+    objs.append(shape(3, 0.0, 100.0, 100.0))
+    objs += [shape(4 + i, 500_000.0, x, y) for i, (x, y) in enumerate(spots_a)]
+    groups = _group_entities_by_center_distance(objs)
+    assert sorted(len(g) for g in groups) == [1, 6]

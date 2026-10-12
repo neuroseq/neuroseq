@@ -38,6 +38,7 @@ _MAPPABLE_SHAPE_TYPES = {"shape", "entity"}
 # Equals one SLM window (32 ticks × 520.8125 µs = 16 666 µs); rounded to 16.666 ms.
 _ENTITY_DEFAULT_DURATION_SECONDS = 16.666e-3
 _SAME_NEURON_MAX_CENTER_DISTANCE_UM = 1.0
+_SAME_ROI_SPOT_MAX_DISTANCE_UM = 9.0
 _HOLO4D_TTL_OUT_START_PULSE_MIN_US = 9_000
 _SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_NEURON_OBJECT_QUANTUM_US = 32 * _SYSCON2_TTL_PULSE_QUANTUM_US
@@ -600,9 +601,18 @@ def _group_entities_by_center_distance(
                     _find_property_value_by_suffix(b.properties, ("_centerz",))
                 )
             )
+            # Multi-spot ROIs: spots of one neuron are written as simultaneous
+            # shapes (same start and duration) a few micrometres apart.
+            same_event_spots = (
+                a.object_type.lower() == b.object_type.lower() == "shape"
+                and distance <= _SAME_ROI_SPOT_MAX_DISTANCE_UM
+                and a.start_time_us == b.start_time_us
+                and a.repeats == b.repeats
+            )
             if (
                 (both_entities and distance <= _SAME_NEURON_MAX_CENTER_DISTANCE_UM)
                 or same_point
+                or same_event_spots
             ) and _extract_lightsource_ids(a) == _extract_lightsource_ids(b):
                 union(idx_a, idx_b)
 
