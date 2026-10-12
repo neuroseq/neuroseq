@@ -3,10 +3,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.rheobase_dialog import RheobaseDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -24,13 +27,18 @@ class _FakeProject:
             0.001,
         )
         self.stim_arrays: dict[str, StimArray] = {}
+        self.spikes: dict[str, SpikeData] = {}
         self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
-    def get_data_names(self, data_type: type[TraceData]) -> list[str]:
+    def get_data_names(self, data_type: type) -> list[str]:
+        if data_type is SpikeData:
+            return list(self.spikes)
         assert data_type is TraceData
         return [self.trace.name] if self.trace_available else []
 
-    def get_data(self, name: str, data_type: type[TraceData]) -> TraceData:
+    def get_data(self, name: str, data_type: type):
+        if data_type is SpikeData:
+            return self.spikes[name]
         assert name == self.trace.name
         assert data_type is TraceData
         return self.trace
@@ -39,6 +47,7 @@ class _FakeProject:
 class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
+        self.stimulation_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -56,6 +65,12 @@ class _FakeEditor:
             focus_time_range=lambda start, stop: self.focused_ranges.append(
                 (start, stop)
             )
+        )
+
+    def prepare_syscon_timestep(self, parent=None):
+        return (
+            abs(self.current_stim_modifier.stim_array.dt - _SYSCON2_TTL_PULSE_QUANTUM_S)
+            < 1e-12
         )
 
     def focus_time_range(self, start: float, stop: float) -> None:
@@ -728,3 +743,202 @@ def test_rheobase_plot_window_is_scrollable(qtbot) -> None:
     assert len(scroll_areas) == 1
     assert scroll_areas[0].widget() is dialog.rheobase_plot
     assert scroll_areas[0].widgetResizable()
+
+
+class _FakeHost(QtCore.QObject):
+    block_sent = QtCore.Signal(object)
+    block_failed = QtCore.Signal(str)
+    block_completed = QtCore.Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.phase = "idle"
+        self.sent: list[tuple[int, int, bool]] = []
+        self.cancelled = 0
+
+    def send_block(
+        self, project, stim, start, stop, label="block", *, preserve_amplitude=False
+    ):
+        self.sent.append((start, stop, preserve_amplitude))
+        self.phase = "awaiting_acquisition"
+        self.block_sent.emit(None)
+        return True
+
+    def acquisition_imported(self) -> None:
+        self.phase = "idle"
+        self.block_completed.emit()
+
+    def cancel(self) -> None:
+        self.cancelled += 1
+        self.phase = "idle"
+
+
+def _syscon2_dialog(qtbot):
+    project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+    host = _FakeHost()
+    editor.stimulation_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    _use_fixed_duration_strategy(dialog)
+    dialog.spn_min_amplitude.setValue(0.1)
+    dialog.spn_max_amplitude.setValue(1.0)
+    dialog.spn_tolerance.setValue(0.3)
+    dialog.spn_recovery_ms.setValue(100.0)
+    return project, editor, dialog, host
+
+
+def _import_spikes(project, dialog, name: str, *, spiking: bool) -> None:
+    onset = (
+        dialog._pulse_onset_seconds
+        - dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+    )
+    times = [onset + 0.005] if spiking else [onset + 5.0]
+    project.spikes[name] = SpikeData(name, np.array([0]), np.array(times))
+    dialog.refresh()
+    dialog.cmb_spikes.setCurrentText(name)
+
+
+def test_syscon2_target_unavailable_without_host(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    item = dialog.cmb_target.model().item(1)
+    assert not item.isEnabled()
+
+
+def test_syscon2_probe_is_sent_and_waits_for_import(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+
+    dialog.start()
+
+    assert len(host.sent) == 1
+    start, stop, preserve = host.sent[0]
+    assert (start, stop) == dialog._block_range
+    assert preserve
+    assert dialog.btn_data_imported.isEnabled()
+    assert dialog._awaiting_simulation
+
+
+def test_syscon2_search_converges_from_imported_calcium_spikes(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+
+    for i in range(20):
+        if not dialog._running:
+            break
+        spiking = dialog._pending_amplitude >= 0.5
+        _import_spikes(project, dialog, f"rec{i}", spiking=spiking)
+        dialog.btn_data_imported.click()
+
+    assert not dialog._running
+    assert dialog._rheobase is not None
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert all(preserve for _, _, preserve in host.sent)
+    assert not dialog.btn_data_imported.isEnabled()
+
+
+def test_syscon2_reused_dataset_does_not_advance_search(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    _import_spikes(project, dialog, "rec0", spiking=True)
+    dialog.btn_data_imported.click()
+    sent_before = len(host.sent)
+
+    # The same dataset again for the next probe: must be rejected, not re-measured.
+    dialog.btn_data_imported.click()
+
+    assert len(host.sent) == sent_before
+    assert dialog._running
+    assert dialog.btn_data_imported.isEnabled()
+
+
+def test_syscon2_failure_finishes_routine(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    host.block_failed.emit("pipe closed")
+    assert not dialog._running
+    assert not dialog.btn_data_imported.isEnabled()
+
+
+def test_syscon2_rejects_amplitudes_above_one(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.spn_max_amplitude.setValue(5.0)
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+
+
+def test_syscon2_requires_ttl_quantum_dt(qtbot) -> None:
+    _project, editor, dialog, host = _syscon2_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.dt = 0.001
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+
+
+def test_syscon2_picks_up_newly_imported_dataset_without_manual_selection(
+    qtbot,
+) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    _import_spikes(project, dialog, "rec0", spiking=True)
+    dialog.btn_data_imported.click()
+    sent = len(host.sent)
+
+    # Next probe: a new dataset appears in the project but is never selected by hand.
+    onset = dialog._pulse_onset_seconds - dialog._block_range[0] * (
+        _SYSCON2_TTL_PULSE_QUANTUM_S
+    )
+    project.spikes["rec1"] = SpikeData("rec1", np.array([0]), np.array([onset + 0.005]))
+    dialog.btn_data_imported.click()
+
+    assert len(host.sent) > sent or not dialog._running
+    assert dialog._last_measured_dataset == "rec1"
+
+
+def test_syscon2_first_probe_rejects_existing_recording_and_picks_new_import(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    _import_spikes(project, dialog, "old", spiking=False)
+    dialog.start()
+    dialog.btn_data_imported.click()
+    assert dialog._running
+    assert len(host.sent) == 1
+    assert dialog.btn_data_imported.isEnabled()
+    onset = dialog._pulse_onset_seconds
+    project.spikes["new"] = SpikeData("new", [0], [onset + 0.005])
+    dialog.btn_data_imported.click()
+    assert dialog._last_measured_dataset == "new"
+    assert len(host.sent) == 2
+
+
+def test_syscon2_accepts_replacement_recording_with_same_name(qtbot):
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    _import_spikes(project, dialog, "recording", spiking=False)
+    dialog.start()
+    _import_spikes(project, dialog, "recording", spiking=True)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 2
+    dialog.btn_data_imported.click()
+    assert len(host.sent) == 2
+    _import_spikes(project, dialog, "recording", spiking=True)
+    dialog.btn_data_imported.click()
+    assert len(host.sent) > 2 or not dialog._running
+
+
+def test_syscon2_does_not_accept_simulation_data_as_an_import(qtbot):
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert not dialog._is_fresh_dataset("Simulation :: P / v")
+
+
+def test_dynamic_syscon_dt_button_resamples_before_start(qtbot, mocker):
+    _project, editor, dialog, _host = _syscon2_dialog(qtbot)
+    stim = editor.current_stim_modifier.stim_array
+    stim.dt = 0.001
+
+    def fix(parent):
+        stim.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+        return True
+
+    prepare = mocker.patch.object(editor, "prepare_syscon_timestep", side_effect=fix)
+    dialog.btn_syscon_dt.click()
+    prepare.assert_called_once_with(dialog)
+    assert "0.5208125" in dialog.lbl_stim_dt.text()

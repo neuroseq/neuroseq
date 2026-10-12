@@ -52,3 +52,20 @@ def test_edit_stim_dialog(qtbot: QtBot):
     assert dialog.stim_type == StimType.Inhibition
     dialog.cmb_type.setCurrentIndex(2)
     assert dialog.stim_type == StimType.External
+
+
+def test_syscon_timestep_preset_preserves_exact_quantum(qtbot):
+    import numpy as np
+
+    from neuroseq.stim import StimArray
+    from neuroseq.stim import StimType
+    from neuroseq.stim_dialog import EditStimDialog
+
+    dialog = EditStimDialog(
+        StimArray("stim", StimType.Excitation, np.zeros((10, 2)), "1", 0.001), []
+    )
+    qtbot.addWidget(dialog)
+    index = dialog.cmb_dt_presets.findData(0.0005208125)
+    dialog._apply_dt_preset(index)
+    assert dialog.dt == 0.0005208125
+    assert dialog.txt_dt.text() == "0.0005208125"

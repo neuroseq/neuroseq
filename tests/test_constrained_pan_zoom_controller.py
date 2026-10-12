@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import brian2 as b2
 import pygfx
 
@@ -137,3 +139,45 @@ def test_current_time_range_reports_camera_interval(monkeypatch) -> None:
     )
 
     assert controller.current_time_range() == (0.1, 0.4)
+
+
+def test_small_pan_steps_are_not_snapped_back_by_the_scroll_bar(
+    qtbot, monkeypatch
+) -> None:
+    from qtpy import QtCore
+    from qtpy import QtWidgets
+
+    controller = ConstrainedPanZoomController()
+    controller.min_height = 1.0
+    controller.max_height = 1000.0
+    controller.min_width = 1.0
+    controller.max_width = 1000.0
+    scroll_bar = QtWidgets.QScrollBar(QtCore.Qt.Orientation.Vertical)
+    qtbot.addWidget(scroll_bar)
+    controller.connect_y_scroll_bar(scroll_bar)
+
+    # Stand-in camera: the state the controller reads back is the one it last set.
+    camera: dict[str, Any] = {
+        "width": 1000.0,
+        "height": 10.0,
+        "position": (500.0, 500.0, 1.0),
+    }
+    monkeypatch.setattr(controller, "_get_camera_state", lambda: dict(camera))
+    monkeypatch.setattr(
+        pygfx.PanZoomController,
+        "_set_camera_state",
+        lambda self, state: camera.update(state),
+    )
+    monkeypatch.setattr(controller, "_update_cameras", lambda: None)
+
+    controller._set_camera_state(dict(camera))
+    previous_y = camera["position"][1]
+    # Scrolling down moves the view by 0.2 rows per step; the scroll bar only has
+    # ~1 step per row at this zoom, so rounding must not pull the view back.
+    for _ in range(40):
+        state = dict(camera)
+        state["position"] = (500.0, camera["position"][1] - 0.2, 1.0)
+        controller._set_camera_state(state)
+        y = camera["position"][1]
+        assert y < previous_y
+        previous_y = y

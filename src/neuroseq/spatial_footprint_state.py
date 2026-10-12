@@ -41,6 +41,7 @@ class SpatialFootprintState(QtCore.QObject):
     hovered_stim_id_changed = QtCore.Signal()
     active_stim_ids_changed = QtCore.Signal()
     display_range_changed = QtCore.Signal()
+    targeted_stim_ids_changed = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
@@ -55,6 +56,12 @@ class SpatialFootprintState(QtCore.QObject):
         # time slider's current position - driven by gui.py from the active
         # stim array, not by any interaction with this panel itself.
         self.active_stim_ids: frozenset[int] = frozenset()
+        # Stim/neuron rows targeted by whichever sequence was most recently
+        # confirmed imported into SysCon2 - driven by gui.py from SysCon2Panel.targets_changed.
+        # Unlike active_stim_ids, this isn't time-windowed: SysCon2's SCI
+        # protocol has no live "which spots are on right now" readback, so
+        # these are the exported mapped targets, not a playback position.
+        self.targeted_stim_ids: frozenset[int] = frozenset()
 
     def _all_cellpose_ids(self) -> set[int]:
         if self.cellpose_data is None:
@@ -119,6 +126,20 @@ class SpatialFootprintState(QtCore.QObject):
         self.active_stim_ids = new_ids
         self.active_stim_ids_changed.emit()
 
+    @property
+    def targeted_cellpose_ids(self) -> set[int]:
+        cellpose_ids = (
+            self._stim_id_to_cellpose_id(stim_id) for stim_id in self.targeted_stim_ids
+        )
+        return {cellpose_id for cellpose_id in cellpose_ids if cellpose_id is not None}
+
+    def set_targeted_stim_ids(self, stim_ids: Iterable[int]) -> None:
+        new_ids = frozenset(stim_ids)
+        if new_ids == self.targeted_stim_ids:
+            return
+        self.targeted_stim_ids = new_ids
+        self.targeted_stim_ids_changed.emit()
+
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         if cellpose_data is not None and cellpose_data.background_image is None:
             # Projects saved before `background_image` existed have none
@@ -134,6 +155,7 @@ class SpatialFootprintState(QtCore.QObject):
         self.selected_cellpose_ids = set()
         self.hovered_stim_id = None
         self.active_stim_ids = frozenset()
+        self.targeted_stim_ids = frozenset()
         self.data_changed.emit()
 
     @property

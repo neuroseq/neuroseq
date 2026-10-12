@@ -40,6 +40,7 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         # then. See test_focus_time_range_can_include_empty_future_space.
         self._minimum_time_extent = 0.0
         self.initialized = False
+        self._updating_scroll_bars = False
         self.x_scroll_bar: QtWidgets.QScrollBar | None = None
         self.y_scroll_bar: QtWidgets.QScrollBar | None = None
         self.grid_lines: list[GridLines] = []
@@ -231,12 +232,25 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         # the zoom/pan that was just applied (issue #564).
         super()._set_camera_state(new_state)
         self._update_cameras()
-        self._set_scroll_bar_size(self.x_scroll_bar, new_state["width"] / max_width)
-        self._set_scroll_bar_size(self.y_scroll_bar, new_state["height"] / max_height)
-        self._set_scroll_bar_position(self.x_scroll_bar, (x - half_width) / max_width)
-        self._set_scroll_bar_position(
-            self.y_scroll_bar, 1 - (y + 0.5 + half_height) / max_height
-        )
+        # The scrollbars are integer-valued (``scroll_bar_steps`` steps over the whole
+        # extent). Writing the camera position into them emits valueChanged, which
+        # must not feed the rounded value back into the camera: when zoomed in a
+        # wheel step is far below one scrollbar step, so that round trip snapped the
+        # view back against the scroll direction.
+        self._updating_scroll_bars = True
+        try:
+            self._set_scroll_bar_size(self.x_scroll_bar, new_state["width"] / max_width)
+            self._set_scroll_bar_size(
+                self.y_scroll_bar, new_state["height"] / max_height
+            )
+            self._set_scroll_bar_position(
+                self.x_scroll_bar, (x - half_width) / max_width
+            )
+            self._set_scroll_bar_position(
+                self.y_scroll_bar, 1 - (y + 0.5 + half_height) / max_height
+            )
+        finally:
+            self._updating_scroll_bars = False
         self._notify_state_change()
 
     def _set_scroll_bar_position(
@@ -292,6 +306,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         scroll_bar.valueChanged.connect(self.y_scroll_event)
 
     def x_scroll_event(self, value: int):
+        if self._updating_scroll_bars:
+            return
         state = self._get_camera_state()
         width = float(state["width"])
         max_width = float(self.max_width)
@@ -313,6 +329,8 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
 
     def y_scroll_event(self, value: int):
         assert self.y_scroll_bar is not None
+        if self._updating_scroll_bars:
+            return
         state = self._get_camera_state()
         height = float(state["height"])
         max_height = float(self.max_height)

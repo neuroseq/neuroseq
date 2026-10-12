@@ -78,6 +78,13 @@ def test_default_power_luts_includes_1100nm() -> None:
     assert lut.tuples[-1] == (100.0, 49.0)
 
 
+def test_default_power_luts_includes_940nm() -> None:
+    lut = DEFAULT_POWER_LUTS[940]
+
+    assert lut.tuples == ((0.0, 0.0), (100.0, 85.0))
+    assert lut.max_mw == 85.0
+
+
 def test_resolve_power_lut_prefers_project_override_over_default() -> None:
     override = PowerLut(description="override", tuples=((0.0, 0.0), (100.0, 10.0)))
 
@@ -95,7 +102,7 @@ def test_resolve_power_lut_falls_back_to_default_when_project_has_none() -> None
 
 
 def test_resolve_power_lut_returns_none_for_unknown_wavelength() -> None:
-    lut, is_override = resolve_power_lut({}, 940)
+    lut, is_override = resolve_power_lut({}, 1234)
 
     assert lut is None
     assert is_override is False

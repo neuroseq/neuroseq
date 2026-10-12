@@ -6,7 +6,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq import theme
+import neuroseq.theme as theme
 
 
 def _relative_luminance(color: str) -> float:

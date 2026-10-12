@@ -40,6 +40,7 @@ from neuroseq.stim_timing import seconds_to_samples_ceil
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_widget import StimWidget
+from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
@@ -103,6 +104,8 @@ class StimEditor(QtWidgets.QWidget):
         self._pattern_dialog: StimPatternDialog | None = None
         self._stdp_synaptic_tuning_dialog: StdpSynapticTuningDialog | None = None
         self._rheobase_dialog: RheobaseDialog | None = None
+        #: Set by the main window; routine dialogs offer a SysCon2 target when present.
+        self.stimulation_host: SysCon2StimulationHost | None = None
         self._stdp_window_dialog: StdpWindowDialog | None = None
         self._routine_selector_dialog: RoutineSelectorDialog | None = None
         self._dynamic_input_theme = "light"
@@ -586,9 +589,39 @@ class StimEditor(QtWidgets.QWidget):
 
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
-        if (
-            stim_name in self.stims_dict
-            and self.current_stim_modifier != self.stims_dict[stim_name]
+        target_modifier = self.stims_dict.get(stim_name)
+        # A fix that resamples a stim array to a new dt (see the SysCon2
+        # "Check Input Sanity" dialog) replaces stim_array.values with a
+        # differently-shaped array while leaving the same modifier selected
+        # - refresh the widget in that case too, not just on an actual
+        # selection change. Without this, stim_widget's graphic texture
+        # stays the old shape, and the next write into it (e.g. a later
+        # sanity fix in the same check) raises a numpy broadcast error.
+        displayed_values = getattr(self.stim_widget, "data_values", None)
+        shape_changed = (
+            target_modifier is not None
+            and displayed_values is not None
+            and displayed_values.shape != target_modifier.stim_array.values.shape
+        )
+        # Distinct from shape_changed above: that's also true on an ordinary
+        # switch between two different (and differently-shaped) stims, where
+        # the target's own undo history is still perfectly valid. Only the
+        # in-place-resample case - same modifier already selected, shape
+        # changed under it - needs the history cleared: ReversibleAction
+        # records absolute sample-index slices against the OLD array shape
+        # (see its __init__), so undoing one after a resample would misapply
+        # old-shaped data into the new, differently-shaped array.
+        resampled_in_place = (
+            target_modifier is not None
+            and self.current_stim_modifier is target_modifier
+            and shape_changed
+        )
+        if resampled_in_place:
+            assert target_modifier is not None
+            target_modifier.action_stack = []
+            target_modifier.current_index = -1
+        if target_modifier is not None and (
+            self.current_stim_modifier != target_modifier or shape_changed
         ):
             old_dt_seconds = self._current_stim_dt_seconds()
             new_dt_seconds = float(self.stims_dict[stim_name].stim_array.dt)
@@ -1133,6 +1166,32 @@ class StimEditor(QtWidgets.QWidget):
                 )
             )
             self.set_project(self.project, stim_to_select=dialog.name)
+
+    def prepare_syscon_timestep(self, parent: QtWidgets.QWidget | None = None) -> bool:
+        """Offer to resample project data before a hardware routine starts."""
+        from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+
+        if self.project is None or self.current_stim_modifier is None:
+            return False
+        stim = self.current_stim_modifier.stim_array
+        dt = _SYSCON2_TTL_PULSE_QUANTUM_S
+        if stim_dt_matches(stim.dt, dt):
+            return True
+        answer = QtWidgets.QMessageBox.question(
+            parent or self,
+            "Use SysCon2 timestep",
+            "SysCon2 requires 0.5208125 ms samples. Resample the project's input arrays "
+            "and traces using zero-order hold? Existing timing may shift by one sample. "
+            "Input undo history will be cleared.",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return False
+        self.project.remap_all_data_to_dt(dt)
+        self.set_project(self.project, stim_to_select=stim.name)
+        return True
 
     def edit_stim_array(self):
         if self.current_stim_modifier is None:

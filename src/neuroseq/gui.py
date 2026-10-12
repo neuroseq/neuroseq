@@ -55,6 +55,9 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.main_scroll import WorkspaceZoom
+from neuroseq.main_scroll import ZoomControl
+from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
@@ -70,6 +73,7 @@ from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
+from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -420,7 +424,18 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000])
+        self.syscon2_panel = SysCon2Panel(parent=self)
+        self.syscon2_panel.setVisible(False)
+        # Mark, with a cross in the Spatial Footprints panel, every neuron
+        # targeted by the preview whose import SysCon2 most recently confirmed -
+        # see SysCon2Panel.targets_changed's docstring for why this can't be
+        # a live hardware readout.
+        self.syscon2_panel.targets_changed.connect(
+            self._spatial_footprint_state.set_targeted_stim_ids
+        )
+        self.syscon2_panel.set_current_stim_provider(self._current_stim_array)
+        split_left_right.addWidget(self.syscon2_panel)
+        split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
         self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -453,6 +468,7 @@ class Gui(QtWidgets.QMainWindow):
             self.trace_controller.focus_time_range
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.stimulation_host = self.syscon2_panel.stimulation_host
         self.stim_editor.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )
@@ -524,8 +540,19 @@ class Gui(QtWidgets.QMainWindow):
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
-        outer_layout.addWidget(self.tab_bar)
-        outer_layout.addWidget(central_widget)
+        # Zoom controls sit at the top right, beside the project tabs.
+        self.zoom_control = ZoomControl()
+        tab_row = QtWidgets.QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 4, 0)
+        tab_row.addWidget(self.tab_bar, stretch=1)
+        tab_row.addWidget(self.zoom_control)
+        outer_layout.addLayout(tab_row)
+        # Scroll the whole workspace on small screens; nested widgets keep wheel
+        # priority until they hit their end (see main_scroll.py).
+        self._main_scroll = make_main_scroll_area(central_widget, 1500, 950)
+        outer_layout.addWidget(self._main_scroll)
+        self._workspace_zoom = WorkspaceZoom(central_widget, 1500, 950)
+        self.zoom_control.zoom_changed.connect(self._workspace_zoom.apply)
         self.setCentralWidget(outer_widget)
         self._create_actions()
         self.showMaximized()
@@ -1271,7 +1298,10 @@ class Gui(QtWidgets.QMainWindow):
         self,
         project: Project,
         reset_controller: bool = False,
+        *,
+        preserve_dynamic_input: bool = False,
     ) -> None:
+        preserve_dynamic_input = preserve_dynamic_input and project is self.project
         self.project = project
         self._update_window_title()
         if hasattr(self, "tab_bar"):
@@ -1290,6 +1320,7 @@ class Gui(QtWidgets.QMainWindow):
             self.spike_controller.reset()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1301,13 +1332,20 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.project.cellpose_data = self.last_cellpose_import
 
-        self.stim_editor.set_project(self.project)
+        self.stim_editor.set_project(
+            self.project, keep_undo_history=preserve_dynamic_input
+        )
         # A replaced project must not inherit the previous run's Design dynamic
         # input state (plots, log, EPSP history); drop the cached dialog so it
         # is rebuilt fresh on next open.
-        self.stim_editor.discard_dynamic_input_dialogs()
+        if preserve_dynamic_input:
+            for dialog in self.stim_editor._dynamic_input_dialogs():
+                dialog.refresh()
+        else:
+            self.stim_editor.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
@@ -1667,7 +1705,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
             else:
                 self.project.add_experiment(experiment)
-            self.update_project(self.project)
+            self.update_project(self.project, preserve_dynamic_input=True)
             self._select_experiment_data(experiment.name)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -2542,6 +2580,12 @@ class Gui(QtWidgets.QMainWindow):
             parent=self,
             current_stim_name=(None if modifier is None else modifier.stim_array.name),
         )
+        dialog.reserved_names = self.syscon2_panel._remote_sequence_names
+        dialog.sequence_generated.connect(
+            lambda seq, png, targets: self.syscon2_panel.show_generated_preview(
+                seq, png, targets, dialog.export_settings()
+            )
+        )
         dialog.exec()
 
     # Import stimulus wrappers
@@ -3274,6 +3318,7 @@ class Gui(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
+            ("&Stimulation setup", self.syscon2_panel, "mdi6.laser-pointer", False),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(
@@ -4219,6 +4264,7 @@ class Gui(QtWidgets.QMainWindow):
             self._external_sim_thread, 2000, "External simulation worker"
         )
         self._stop_worker_thread(self._io_thread, 10000, "IO worker")
+        self.syscon2_panel.shutdown()
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

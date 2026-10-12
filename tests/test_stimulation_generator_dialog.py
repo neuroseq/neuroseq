@@ -8,6 +8,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
+import neuroseq.syscon2_export_service as syscon2_export_service_module
 from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.exporter_syscon2 import OverlappingPulseGroupViolation
@@ -202,7 +203,7 @@ def test_stimulation_generator_dialog_sanity_check_passes(
     assert "exported segments" in qmessagebox_calls[0]["text"].lower()
 
 
-def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
+def test_stimulation_generator_dialog_export_defaults(
     qtbot: QtBot,
 ) -> None:
     values = np.zeros((40, 1), dtype=np.float32)
@@ -211,13 +212,13 @@ def test_stimulation_generator_dialog_binary_mode_checkbox_defaults_to_enabled(
         _build_project(values, mapping={0: 0}),
     )
     qtbot.addWidget(dialog)
-    assert dialog.binary_mode_checkbox.isChecked()
-    assert dialog.spiralling_checkbox.isChecked()
-    assert not dialog.ten_spots_per_roi_checkbox.isChecked()
-    assert not dialog.spot_algorithm_combo.isEnabled()
+    assert not dialog.binary_mode_checkbox.isChecked()
+    assert not dialog.spiralling_checkbox.isChecked()
+    assert dialog.ten_spots_per_roi_checkbox.isChecked()
+    assert dialog.spot_algorithm_combo.isEnabled()
     assert dialog.spot_algorithm_combo.currentData() == "farthest_point"
     assert dialog._selected_laser_wavelength_nm() == 940
-    assert dialog.target_power_spin.value() == 92.0
+    assert dialog.target_power_spin.value() == 1.0
 
 
 def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelength(
@@ -255,7 +256,7 @@ def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelengt
     dialog.check_sanity_button.click()
 
     assert captured["active_laser_wavelength_nm"] == 1030
-    assert captured["spiralling"] is True
+    assert captured["spiralling"] is False
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
 
@@ -279,7 +280,7 @@ def test_stimulation_generator_dialog_generate_passes_spiralling_checkbox(
         return "nohash\n", _build_export_report()
 
     monkeypatch.setattr(
-        stimulation_generator_dialog_module,
+        syscon2_export_service_module,
         "generate_syscon2_sequence_text",
         _fake_generate_syscon2_sequence_text,
     )
@@ -350,7 +351,7 @@ def test_stimulation_generator_dialog_passes_target_power_and_lut_to_exporter(
         return "nohash\n", _build_export_report()
 
     monkeypatch.setattr(
-        stimulation_generator_dialog_module,
+        syscon2_export_service_module,
         "generate_syscon2_sequence_text",
         _fake_generate_syscon2_sequence_text,
     )
@@ -604,9 +605,70 @@ def test_stimulation_generator_dialog_generate_writes_seq_and_overview_png(
     assert seq_path.exists()
     assert png_path.exists()
     assert png_path.stat().st_size > 0
+
+
+def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
+    qtbot: QtBot,
+    tmp_path: Path,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    _DT_S = 0.0005208125  # SysCon2 tick quantum required for export
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0  # active pulse inside a valid SLM window
+    project = Project()
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.folder_edit.setText(str(tmp_path))
+    dialog.name_edit.setText("live_export")
+
+    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+        dialog._generate_scripts()
+
+    assert blocker.args == [
+        str(tmp_path / "live_export.seq"),
+        str(tmp_path / "live_export_overview.png"),
+        frozenset({0}),
+    ]
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
     assert "scripts generated" in qmessagebox_calls[0]["title"].lower()
+
+
+def test_stimulation_generator_dialog_sequence_generated_excludes_unmapped_neurons(
+    qtbot: QtBot,
+    tmp_path: Path,
+) -> None:
+    """Only neurons included in the generated sequence get target markers."""
+    _DT_S = 0.0005208125
+    values = np.zeros((64, 3), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    values[33:36, 2] = 1.0
+    project = Project()
+    stim = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result(mapping={0: 0, 1: 1, 2: 2})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.folder_edit.setText(str(tmp_path))
+    dialog.name_edit.setText("multi_target_export")
+
+    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+        dialog._generate_scripts()
+
+    assert blocker.args[2] == frozenset({0})
 
 
 # ---------------------------------------------------------------------------
@@ -614,33 +676,7 @@ def test_stimulation_generator_dialog_generate_writes_seq_and_overview_png(
 # ---------------------------------------------------------------------------
 
 
-def test_stimulation_generator_dialog_shows_error_for_wrong_dt(
-    qtbot: QtBot,
-    qmessagebox_calls: list[dict[str, str]],
-) -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
-    project = Project()
-    stim = StimArray(
-        name="stim",
-        stim_type=StimType.Excitation,
-        values=values,
-        units="1",
-        dt=0.001,  # wrong dt
-    )
-    project.add_stim_array(stim)
-    project.cellpose_data = _cellpose_result()
-    dialog = StimulationGeneratorDialog(project)
-    qtbot.addWidget(dialog)
-
-    dialog.check_sanity_button.click()
-
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "critical"
-    assert "sanity check failed" in qmessagebox_calls[0]["title"].lower()
-
-
-def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
+def test_stimulation_generator_dialog_cancels_on_wrong_dt(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
@@ -660,11 +696,43 @@ def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
 
-    # Override _show_scrollable_message to simulate clicking "Fix dt"
     monkeypatch.setattr(
         StimulationGeneratorDialog,
-        "_show_scrollable_message",
-        lambda *a, **kw: True,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.CANCEL,
+    )
+
+    dialog.check_sanity_button.click()
+
+    # Cancelling leaves the array untouched and shows no further message boxes.
+    assert project.stim_arrays["stim"].dt == pytest.approx(0.001)
+    assert not qmessagebox_calls
+
+
+def test_stimulation_generator_dialog_clears_array_when_dt_fix_choice_is_clear(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    project = Project()
+    stim = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=0.001,  # wrong dt
+    )
+    project.add_stim_array(stim)
+    project.cellpose_data = _cellpose_result()
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.CLEAR,
     )
 
     dialog.check_sanity_button.click()
@@ -672,6 +740,51 @@ def test_stimulation_generator_dialog_fixes_dt_when_fix_clicked(
     assert project.stim_arrays["stim"].dt == pytest.approx(_SYSCON2_TTL_PULSE_QUANTUM_S)
     assert np.all(project.stim_arrays["stim"].values == 0.0)
     # Confirmation info message shown after fixing
+    assert any(c["name"] == "information" for c in qmessagebox_calls)
+
+
+def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    # old_dt is exactly half the SysCon2 tick, so the resample mapping is unambiguous
+    # (see test_resample_stim_values_to_dt_downsamples_via_nearest_neighbor).
+    old_dt = _SYSCON2_TTL_PULSE_QUANTUM_S / 2
+    values = np.zeros((10, 1), dtype=np.float32)
+    values[2:6, 0] = 1.0
+    project = _build_project(values.copy(), mapping={0: 0})
+    project.stim_arrays["stim"].dt = old_dt  # force the mismatch _build_project avoids
+    _patch_no_slm_violations(monkeypatch)
+
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_dt_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._DtFixChoice.RESAMPLE,
+    )
+    sanity_calls: list[object] = []
+
+    def _fake_check_sanity(*args, **kwargs):
+        sanity_calls.append(args)
+        return _build_sanity_report(is_valid=True, export_report=_build_export_report())
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        _fake_check_sanity,
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.check_sanity_button.click()
+
+    stim = project.stim_arrays["stim"]
+    assert stim.dt == pytest.approx(_SYSCON2_TTL_PULSE_QUANTUM_S)
+    assert stim.values.shape == (5, 1)
+    assert list(stim.values[:, 0]) == [0.0, 1.0, 1.0, 0.0, 0.0]
+    # The pipeline must not stop after resampling -- it should reach the full sanity
+    # check below, proving the other conditions are still evaluated on the new array.
+    assert sanity_calls
     assert any(c["name"] == "information" for c in qmessagebox_calls)
 
 
@@ -1181,3 +1294,142 @@ def test_stimulation_generator_dialog_defaults_to_first_without_a_current_array(
         )
         qtbot.addWidget(dialog)
         assert dialog.stim_combo.currentText() == "stim"
+
+
+def test_generate_rejects_invalid_name_without_emitting(
+    qtbot, tmp_path, qmessagebox_calls
+):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.name_edit.setText("../escaped")
+    emitted = []
+    dialog.sequence_generated.connect(lambda *args: emitted.append(args))
+    dialog._generate_scripts()
+    assert not emitted
+    assert not list(tmp_path.iterdir())
+    assert qmessagebox_calls[-1]["name"] == "critical"
+
+
+def test_generate_cancelled_overwrite_preserves_files(
+    qtbot, tmp_path, qmessagebox_calls, mocker
+):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog.name_edit.setText("existing")
+    (tmp_path / "existing.seq").write_text("original")
+    mocker.patch.object(dialog, "_confirm_export", return_value=False)
+    emitted = []
+    dialog.sequence_generated.connect(lambda *args: emitted.append(args))
+    dialog._generate_scripts()
+    assert not emitted
+    assert (tmp_path / "existing.seq").read_text() == "original"
+
+
+def test_standalone_sanity_fix_marks_project_dirty(qtbot):
+    values = np.zeros((64, 1), dtype=np.float32)
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    project.dirty = False
+    assert dialog._replace_stim_values_preserving_undo("stim", np.ones_like(values))
+    assert project.dirty
+
+
+def test_default_export_name_counts_todays_exports(tmp_path: Path) -> None:
+    import datetime
+
+    from neuroseq.stimulation_generator_dialog import next_default_export_name
+
+    day = datetime.date(2026, 10, 8)
+    assert next_default_export_name(None, day) == "export_seq_2026-10-08_1"
+    (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
+    (tmp_path / "export_seq_2026-10-08_2.seq").write_text("x")
+    (tmp_path / "export_seq_2026-10-07_9.seq").write_text("x")  # other day
+    assert next_default_export_name(tmp_path, day) == "export_seq_2026-10-08_3"
+
+
+def test_default_export_name_avoids_every_collision_source(tmp_path: Path) -> None:
+    import datetime
+
+    from neuroseq.stimulation_generator_dialog import next_default_export_name
+
+    day = datetime.date(2026, 10, 8)
+    (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
+    # Stray sibling files of an export count, even without the .seq.
+    (tmp_path / "export_seq_2026-10-08_4_export_debug.csv").write_text("x")
+    (tmp_path / "EXPORT_SEQ_2026-10-08_5_overview.PNG").write_text("x")
+    assert next_default_export_name(tmp_path, day) == "export_seq_2026-10-08_6"
+    # Names already in the stimulation setup count, with or without a folder part.
+    reserved = ["Exp\\export_seq_2026-10-08_9.seq", "other/export_seq_2026-10-08_7.SEQ"]
+    assert (
+        next_default_export_name(tmp_path, day, reserved) == "export_seq_2026-10-08_10"
+    )
+    # A missing folder is not an error.
+    assert (
+        next_default_export_name(tmp_path / "missing", day) == "export_seq_2026-10-08_1"
+    )
+
+
+def test_dialog_rechecks_default_name_at_export_time(
+    qtbot: QtBot, tmp_path: Path, qmessagebox_calls
+) -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog._refresh_default_name()
+    stale = dialog.name_edit.text()
+    # Someone else (e.g. the stimulation setup) takes that name after the dialog resolved it.
+    dialog.reserved_names = lambda: [f"{stale}.seq"]
+    dialog._generate_scripts()
+    assert not (tmp_path / f"{stale}.seq").exists()
+    assert any(tmp_path.glob("export_seq_*.seq"))
+
+
+def test_dialog_default_name_advances_but_keeps_custom_names(
+    qtbot: QtBot, tmp_path: Path, qmessagebox_calls
+) -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    assert dialog.name_edit.text().startswith("export_seq_")
+    assert dialog.name_edit.text().endswith("_1")
+    dialog.output_folder = tmp_path
+
+    first = dialog.name_edit.text()
+    dialog._generate_scripts()
+    assert (tmp_path / f"{first}.seq").exists()
+    assert dialog.name_edit.text() == first[:-1] + "2"
+
+    dialog.name_edit.setText("my_name")
+    dialog._generate_scripts()
+    assert dialog.name_edit.text() == "my_name"
+
+
+def test_loaded_940_lut_marks_dirty_and_survives_project_save(qtbot, tmp_path):
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    project = Project()
+    project.dirty = False
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    path = tmp_path / "940.lut"
+    path.write_text(_REFERENCE_LUT_TEXT)
+    dialog._apply_lut_from_path(str(path), 940)
+    assert project.dirty
+    saved = tmp_path / "calibrated.nseq"
+    project.save(saved, SaveLoadOptions(True, True, True, True))
+    loaded = Project(saved)
+    assert loaded.power_luts[940] == project.power_luts[940]
