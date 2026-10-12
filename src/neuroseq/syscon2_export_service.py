@@ -21,6 +21,8 @@ from neuroseq.exporter_syscon2 import SysconExportReport
 from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.importer_syscon2 import original_stim_sidecar_path
+from neuroseq.importer_syscon2 import write_original_stim_sidecar
 from neuroseq.power_lut import resolve_power_lut
 from neuroseq.stim import StimArray
 
@@ -220,6 +222,7 @@ def export_stim_array(
     seq_path = output_dir / f"{name}.seq"
     overview_path = output_dir / f"{name}_overview.png"
     debug_csv_path = output_dir / f"{name}_export_debug.csv"
+    original_path = original_stim_sidecar_path(seq_path)
     # Render everything before replacing any existing output. Publish the sequence last.
     with tempfile.TemporaryDirectory(
         prefix=".syscon-export-", dir=output_dir
@@ -229,8 +232,11 @@ def export_stim_array(
         (staged / debug_csv_path.name).write_text(
             report.debug_csv_text, encoding="utf-8"
         )
+        write_original_stim_sidecar(
+            staged / original_path.name, stim_array.values, stim_array.dt, script
+        )
         generate_syscon2_timeline_overview_png(script, staged / overview_path.name)
-        for destination in (overview_path, debug_csv_path, seq_path):
+        for destination in (overview_path, debug_csv_path, original_path, seq_path):
             (staged / destination.name).replace(destination)
     targeted = report.exported_neuron_ids
     return SysconExportResult(seq_path, overview_path, targeted, report)

@@ -299,6 +299,14 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             "Mapping uses target order plus neuron offset, not project neuron identities.",
             "Repeated point Shapes at identical coordinates share a channel.",
             "Runs is not expanded; one sequence pass is imported.",
+            *(
+                [
+                    "Original stim array found next to the file: its exact timings "
+                    "and neuron rows are restored on import."
+                ]
+                if sequence.original_values is not None
+                else []
+            ),
             "",
             "First objects:",
         ]

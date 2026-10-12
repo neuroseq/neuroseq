@@ -147,3 +147,14 @@ def test_invalid_calibration_cannot_export(export_input, tmp_path, mocker, tuple
             project, stim, service.SysconExportSettings("template"), tmp_path, "valid"
         )
     generate.assert_not_called()
+
+
+def test_export_writes_sidecar_with_the_original_stim_array(export_input, tmp_path):
+    project, stim, settings, _, _ = export_input
+    result = service.export_stim_array(project, stim, settings, tmp_path, "valid")
+    sidecar = tmp_path / "valid_original_stim.npz"
+    assert sidecar.is_file()
+    with np.load(sidecar) as data:
+        assert np.array_equal(data["values"], stim.values.astype(np.float32))
+        assert float(data["dt"]) == stim.dt
+    assert result.seq_path.read_text() == "sequence"

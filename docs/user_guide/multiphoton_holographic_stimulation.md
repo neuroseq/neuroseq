@@ -202,6 +202,12 @@ inferred from the file, so this is not a measurement of delivered stimulation.
 Objects with multiple timing entries or multiple lightsources are rejected rather
 than partially imported.
 
+Every export also writes `<name>_original_stim.npz` next to the `.seq`: the exact
+input array, including silent neurons. The `.seq` holds hardware-adjusted timings
+(SLM load delays), so importing it alone reproduces those adjusted timings. When
+the sidecar sits next to the file and still matches it, the import restores the
+original array with its exact timings and neuron rows. Keep the two files together.
+
 ## Setup panel and hardware execution
 
 Export defaults are **940 nm**, **Force binary export intensity off**,

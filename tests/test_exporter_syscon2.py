@@ -2166,3 +2166,56 @@ def test_export_keeps_trailing_stimuli_when_blank_windows_push_the_tail() -> Non
     for exact in (False, True):
         imported = _export_and_reimport(values, exact=exact)
         assert np.flatnonzero(imported.any(axis=0)).tolist() == [0, 1, 2, 3]
+
+
+def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
+    from neuroseq.importer_syscon2 import original_stim_sidecar_path
+    from neuroseq.importer_syscon2 import parse_syscon2_seq_file
+    from neuroseq.importer_syscon2 import write_original_stim_sidecar
+
+    n_neurons = 5
+    values = np.zeros((900, n_neurons), dtype=np.float32)
+    values[0:193, 0] = 1.0  # needs delays on export
+    values[227:419, 1] = 0.5
+    values[454:646, 3] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result_many(n_neurons=n_neurons),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        exact_slm_timing=True,
+    )
+    seq_path = tmp_path / "script.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+
+    plain = parse_syscon2_seq_file(seq_path)
+    assert plain.original_values is None
+    drifted, _ = sequence_to_stim_values(
+        plain, dt_seconds=_DT_S, n_neurons=n_neurons, tick_resolution_us=500
+    )
+    assert _starts(drifted[:, 1]) != [227]
+
+    write_original_stim_sidecar(
+        original_stim_sidecar_path(seq_path), values, _DT_S, seq_text
+    )
+    restored_seq = parse_syscon2_seq_file(seq_path)
+    restored, result = sequence_to_stim_values(
+        restored_seq, dt_seconds=_DT_S, n_neurons=n_neurons, tick_resolution_us=500
+    )
+    assert np.array_equal(restored, values)
+    assert result.grouped_objects == n_neurons
+
+    # A sidecar that does not belong to the file is ignored.
+    seq_path.write_text(seq_text + "\n", encoding="utf-8")
+    assert parse_syscon2_seq_file(seq_path).original_values is None

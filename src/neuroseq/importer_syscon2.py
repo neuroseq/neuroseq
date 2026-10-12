@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import re
@@ -63,6 +64,10 @@ class SysconSequenceObject:
 class SysconSequence:
     header: dict[str, str]
     objects: list[SysconSequenceObject]
+    # The stim array this file was exported from, restored from the sidecar
+    # written next to the .seq (the file itself holds hardware-adjusted timings).
+    original_values: np.ndarray | None = None
+    original_dt: float | None = None
 
 
 @dataclass
@@ -286,10 +291,57 @@ def parse_syscon2_seq_text(text: str) -> SysconSequence:
     return SysconSequence(header=header, objects=objects)
 
 
+ORIGINAL_STIM_SUFFIX = "_original_stim.npz"
+
+
+def original_stim_sidecar_path(seq_path: str | Path) -> Path:
+    seq_path = Path(seq_path)
+    return seq_path.with_name(seq_path.stem + ORIGINAL_STIM_SUFFIX)
+
+
+def write_original_stim_sidecar(
+    path: str | Path, values: np.ndarray, dt: float, seq_text: str
+) -> None:
+    """Save the exported stim array so a re-import can restore its exact timings."""
+    digest = hashlib.sha256(seq_text.encode("utf-8")).hexdigest()
+    with open(path, "wb") as handle:
+        np.savez_compressed(
+            handle,
+            values=np.asarray(values, dtype=np.float32),
+            dt=np.float64(dt),
+            seq_sha256=np.str_(digest),
+        )
+
+
+def _load_original_stim_sidecar(
+    seq_path: Path, seq_bytes: bytes
+) -> tuple[np.ndarray, float] | None:
+    sidecar = original_stim_sidecar_path(seq_path)
+    if not sidecar.is_file():
+        return None
+    try:
+        with np.load(sidecar, allow_pickle=False) as data:
+            if str(data["seq_sha256"]) != hashlib.sha256(seq_bytes).hexdigest():
+                logger.info("Ignoring %s: it does not match %s", sidecar, seq_path)
+                return None
+            values = np.asarray(data["values"], dtype=np.float32)
+            dt = float(data["dt"])
+    except (OSError, ValueError, KeyError):
+        logger.warning("Could not read %s", sidecar, exc_info=True)
+        return None
+    if values.ndim != 2 or values.shape[0] == 0 or values.shape[1] == 0:
+        return None
+    return values, dt
+
+
 def parse_syscon2_seq_file(path: str | Path) -> SysconSequence:
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
-    return parse_syscon2_seq_text(text)
+    raw = path.read_bytes()
+    sequence = parse_syscon2_seq_text(raw.decode("utf-8"))
+    original = _load_original_stim_sidecar(path, raw)
+    if original is not None:
+        sequence.original_values, sequence.original_dt = original
+    return sequence
 
 
 def get_timed_objects(
@@ -929,6 +981,28 @@ def group_timed_objects_by_neuron_target(
     return _group_eligible_objects_by_target_neuron(eligible_objects)
 
 
+def _original_stim_values(
+    original: np.ndarray, n_neurons: int
+) -> tuple[np.ndarray, SysconImportResult]:
+    n_timepoints, n_original = original.shape
+    mapped = min(n_neurons, n_original)
+    _check_allocation(n_timepoints, n_neurons)
+    values = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
+    values[:, :mapped] = original[:, :mapped]
+    active = int(np.count_nonzero(original.any(axis=0)))
+    return values, SysconImportResult(
+        total_objects=0,
+        eligible_objects=active,
+        grouped_objects=n_original,
+        merged_objects=0,
+        mapped_objects=mapped,
+        dropped_objects=n_original - mapped,
+        generated_timepoints=n_timepoints,
+        truncated_timepoints=0,
+        truncated_repeats=0,
+    )
+
+
 def sequence_to_stim_values(
     sequence: SysconSequence,
     *,
@@ -960,6 +1034,13 @@ def sequence_to_stim_values(
 
     if max_events_per_object <= 0:
         raise ValueError("max_events_per_object must be positive")
+
+    if (
+        sequence.original_values is not None
+        and sequence.original_dt is not None
+        and math.isclose(sequence.original_dt, dt_seconds, rel_tol=1e-6)
+    ):
+        return _original_stim_values(sequence.original_values, n_neurons)
 
     # Prefer pulse-based reconstruction whenever laser TTLPulse events exist.
     # This avoids mode-flips caused by startup-TTL duration thresholds.
