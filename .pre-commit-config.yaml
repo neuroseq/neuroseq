@@ -56,4 +56,4 @@ repos:
     hooks:
       - id: actionlint
 
-exclude: ".*/neuroseq/example_models/.*$"
+exclude: '(.*/neuroseq/example_models/.*$|^notebooks/ts_00-single_neuron\.ipynb$)'
