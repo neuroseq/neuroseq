@@ -383,3 +383,22 @@ def test_real_named_pipe_timeout(direction):
         connection.cancel()
         connection.GetOverlappedResult(True)
         api.CloseHandle(server)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("State:Idle\r\n", "Idle"),
+        ("State: Busy", "Busy"),
+        ("state : uploading\r\n", "uploading"),
+        ("Idle", "Idle"),
+        ("OK\r\nBusy\r\n", "Busy"),
+        ("garbage", "garbage"),
+        ("State:", "State:"),
+        ("", ""),
+    ],
+)
+def test_parse_state_is_tolerant(text: str, expected: str) -> None:
+    from neuroseq.syscon2_client import _parse_state
+
+    assert _parse_state(text) == expected

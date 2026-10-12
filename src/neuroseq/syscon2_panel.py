@@ -654,7 +654,11 @@ class SysCon2Panel(QtWidgets.QWidget):
     def _on_state_changed(self, state: dict) -> None:
         holo4d_state = state.get("Holo4D")
         if holo4d_state is not None:
-            self.holo4d_state_label.setText(f"State: {holo4d_state}")
+            self.holo4d_state_label.setText(
+                f"State: {holo4d_state}"
+                if holo4d_state
+                else "State: unrecognised reply (see log)"
+            )
             self._advance_execution(str(holo4d_state))
 
     def _on_command_finished(self, name: str, result: object) -> None:
@@ -1162,7 +1166,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
         self._hardware_state = state
         if self._execution_phase == "ready_check":
-            if state in {"busy", "disconnected"} or state.startswith("upload"):
+            if state in {"", "busy", "disconnected"} or state.startswith("upload"):
                 self._progress_message = f"Upload acknowledged; waiting for hardware (state: {state or '?'})…"
                 self._update_progress_text()
             else:

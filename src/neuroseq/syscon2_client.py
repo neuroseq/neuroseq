@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import contextlib
 import importlib
+import logging
+import re
 import sys
 import threading
 import time
@@ -29,6 +31,8 @@ from neuroseq.syscon2_protocol import parse_string_response
 from neuroseq.syscon2_protocol import read_string
 
 PIPE_NAME = "SysCon2ControlInterface"
+
+logger = logging.getLogger(__name__)
 
 
 class SysCon2ConnectionError(Exception):
@@ -353,8 +357,27 @@ class SequenceManagerCommands:
         )
 
 
+_STATE_IDS = ("Disconnected", "Idle", "Uploading", "Busy")
+_STATE_ID_RE = re.compile(rf"\b({'|'.join(_STATE_IDS)})\b", re.IGNORECASE)
+
+
 def _parse_state(text: str) -> str:
-    return _parse_key_value_lines(text).get("State", "").strip()
+    """Extract the State-ID from a ``GetState`` reply.
+
+    The manual specifies ``State:<State-ID>``, but the reply is parsed tolerantly: a
+    ``State`` key with any spacing/case, otherwise a bare or embedded State-ID. An
+    unrecognisable reply is logged and returned as the raw (stripped) text so it is
+    visible in the UI rather than showing as a silent blank state.
+    """
+    for line in _split_lines(text):
+        key, _, value = line.partition(":")
+        if key.strip().lower() == "state" and value.strip():
+            return value.strip()
+    match = _STATE_ID_RE.search(text)
+    if match:
+        return match.group(1)
+    logger.warning("Unrecognised GetState reply: %r", text)
+    return text.strip()[:80]
 
 
 class UGA42Commands:
