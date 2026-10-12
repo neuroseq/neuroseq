@@ -46,7 +46,7 @@ class SysconExportSettings:
     ten_spots_per_roi: bool = True
     spot_algorithm: str = "farthest_point"
     laser_wavelength_nm: int = 940
-    target_power_mw: float = 92.0
+    target_power_mw: float = 1.0
 
 
 @dataclass(frozen=True)

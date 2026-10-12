@@ -255,7 +255,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.target_power_spin.setDecimals(2)
         self.target_power_spin.setSuffix(" mW")
         self.target_power_spin.setSingleStep(0.5)
-        self.target_power_spin.setValue(92.0)
+        self.target_power_spin.setValue(1.0)
         self.target_power_spin.setToolTip(
             "Desired delivered power. Set to 0 to disable power control "
             "(Intensity_0 fields written as 0 — current default behavior)."

@@ -218,7 +218,7 @@ def test_stimulation_generator_dialog_export_defaults(
     assert dialog.spot_algorithm_combo.isEnabled()
     assert dialog.spot_algorithm_combo.currentData() == "farthest_point"
     assert dialog._selected_laser_wavelength_nm() == 940
-    assert dialog.target_power_spin.value() == 92.0
+    assert dialog.target_power_spin.value() == 1.0
 
 
 def test_stimulation_generator_dialog_sanity_check_uses_selected_laser_wavelength(
