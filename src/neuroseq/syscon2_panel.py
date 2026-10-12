@@ -580,6 +580,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._manager.connected.connect(self._on_connected)
         self._manager.disconnected.connect(self._on_disconnected)
         self._manager.state_changed.connect(self._on_state_changed)
+        self._manager.state_poll_failed.connect(self._on_state_poll_failed)
         self._manager.command_finished.connect(self._on_command_finished)
         self._manager.command_failed.connect(self._on_command_failed)
 
@@ -644,6 +645,11 @@ class SysCon2Panel(QtWidgets.QWidget):
             "Import status unknown. No current confirmation."
         )
         self.targets_changed.emit(frozenset())
+
+    def _on_state_poll_failed(self, message: str) -> None:
+        self.holo4d_state_label.setText(f"State: unavailable ({message})")
+        self._hardware_state = f"unavailable ({message})"
+        self._update_progress_text()
 
     def _on_state_changed(self, state: dict) -> None:
         holo4d_state = state.get("Holo4D")

@@ -45,6 +45,8 @@ class SysCon2ConnectionManager(QtCore.QObject):
     state_changed = QtCore.Signal(dict)
     command_finished = QtCore.Signal(str, object)
     command_failed = QtCore.Signal(str, str)
+    #: A state poll failed without dropping the connection; carries the reason.
+    state_poll_failed = QtCore.Signal(str)
 
     _request_connect = QtCore.Signal()
     _request_disconnect = QtCore.Signal()
@@ -174,10 +176,12 @@ class SysCon2ConnectionManager(QtCore.QObject):
             self._client = None
             self.disconnected.emit(str(exc))
             return
-        except SysCon2Error:
+        except SysCon2Error as exc:
             # A transient application-level error on the polling call isn't
-            # worth surfacing as a disconnect; just skip this tick and try
-            # again on the next one.
+            # worth surfacing as a disconnect; skip this tick and try again on the
+            # next one, but report it so a persistently failing poll is visible.
+            logger.warning("Holo4D state poll failed: %s", exc)
+            self.state_poll_failed.emit(str(exc))
             return
         except SysCon2ProtocolError as exc:
             # See _handle_command's matching except clause - the transport is
@@ -185,6 +189,8 @@ class SysCon2ConnectionManager(QtCore.QObject):
             self._client = None
             self.disconnected.emit(str(exc))
             return
-        except Exception:
+        except Exception as exc:
+            logger.warning("Holo4D state poll failed: %r", exc)
+            self.state_poll_failed.emit(f"{type(exc).__name__}: {exc}")
             return
         self.state_changed.emit({"Holo4D": state})

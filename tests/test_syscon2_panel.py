@@ -748,6 +748,15 @@ def test_triggered_run_that_finishes_unobserved_explains_how_to_reset(panel, moc
     assert "press Stop to reset" in text and "hardware state: idle" in text
 
 
+def test_failed_state_poll_is_visible(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    run, _ = _finish_upload(panel, submit, mocker)
+    panel._on_command_finished(run, None)
+    panel._manager.state_poll_failed.emit("Error: device busy")
+    assert "unavailable (Error: device busy)" in panel.holo4d_state_label.text()
+    assert "unavailable" in panel.execution_label.text()
+
+
 def test_run_requires_confirmation(panel, mocker):
     panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")
