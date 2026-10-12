@@ -1,0 +1,9 @@
+55-84-10-11-11-22-79-3E-2F-CE-C9-1F-64-EE-12-46
+[_]
+Description=pwm3
+Unit=mW
+Enabled=False
+TuplesCount=2
+Tuple0=0;0
+Tuple1=100;85
+[/_]
