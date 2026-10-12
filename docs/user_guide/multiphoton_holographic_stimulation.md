@@ -205,7 +205,12 @@ than partially imported.
 ## Setup panel and hardware execution
 
 Export defaults are **940 nm**, **Force binary export intensity off**,
-**Spiralling off**, and **Use 10 input spots per ROI on**. Previously remembered
+**Spiralling off**, **Exact stimulus timing on**, and **Use 10 input spots per ROI on**.
+With exact timing, each hologram shape starts one 16.7 ms SLM load window before
+its first pulse instead of on the window grid, and stimuli are delayed only where
+the previous hologram leaves no room for that load (the first stimulus is always
+delayed by one window). Untick it to snap shapes to the window grid, which can
+delay stimuli by up to a window per hologram. Previously remembered
 settings still apply to quick exports. With a linear 85 mW maximum calibration,
 5 mW is exported as approximately `0.058824`, not `5.8824`, in both Shape and
 laser TTL intensity fields. Use the rig's measured wavelength-specific LUT;

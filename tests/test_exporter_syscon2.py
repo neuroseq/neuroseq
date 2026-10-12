@@ -2101,3 +2101,68 @@ def test_multi_spot_roundtrip_keeps_rows_and_timings() -> None:
         assert (
             np.flatnonzero(got).tolist() == np.flatnonzero(values[:, neuron]).tolist()
         )
+
+
+def _export_and_reimport(values: np.ndarray, *, exact: bool) -> np.ndarray:
+    n_neurons = values.shape[1]
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result_many(n_neurons=n_neurons),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        exact_slm_timing=exact,
+    )
+    imported, _ = sequence_to_stim_values(
+        parse_syscon2_seq_text(seq_text),
+        dt_seconds=_DT_S,
+        n_neurons=n_neurons,
+        tick_resolution_us=500,
+    )
+    return imported
+
+
+def _starts(column: np.ndarray) -> list[int]:
+    return np.flatnonzero(np.diff((column > 0).astype(int), prepend=0) == 1).tolist()
+
+
+def test_exact_slm_timing_keeps_timings_when_gaps_leave_room() -> None:
+    values = np.zeros((900, 4), dtype=np.float32)
+    values[100:292, 0] = 1.0
+    values[330:522, 1] = 1.0
+    values[600:792, 2] = 1.0
+    imported = _export_and_reimport(values, exact=True)
+    for neuron in range(3):
+        assert _starts(imported[:, neuron]) == _starts(values[:, neuron])
+        assert imported[:, neuron].sum() == values[:, neuron].sum()
+
+
+def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None:
+    values = np.zeros((1200, 3), dtype=np.float32)
+    values[0:192, 0] = 1.0  # needs the initial load window: delayed by 32
+    values[200:392, 1] = 1.0  # 8-tick gap: needs a delay, but less than a window
+    values[900:1092, 2] = 1.0
+    imported = _export_and_reimport(values, exact=True)
+    assert _starts(imported[:, 0]) == [32]
+    delay_1 = _starts(imported[:, 1])[0] - 200
+    assert 0 < delay_1 < 32 * 2 + 1
+    assert _starts(imported[:, 2]) == [900]
+
+
+def test_export_keeps_trailing_stimuli_when_blank_windows_push_the_tail() -> None:
+    values = np.zeros((500, 4), dtype=np.float32)
+    for neuron in range(4):
+        values[neuron * 110 : neuron * 110 + 64, neuron] = 1.0
+    for exact in (False, True):
+        imported = _export_and_reimport(values, exact=exact)
+        assert np.flatnonzero(imported.any(axis=0)).tolist() == [0, 1, 2, 3]

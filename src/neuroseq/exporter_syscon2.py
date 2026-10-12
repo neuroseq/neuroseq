@@ -230,6 +230,18 @@ class _Hologram:
     preblank_present: bool
 
 
+@dataclass(frozen=True)
+class _ExactShape:
+    """One neuron's shape object placed at an exact tick (not on the window grid)."""
+
+    neuron_index: int
+    start_tick: int
+    end_tick: int
+    stimulation_start_tick: int
+    stimulation_end_tick: int
+    intensity: float
+
+
 @dataclass
 class _SanitizedStimModel:
     window_values: np.ndarray
@@ -241,6 +253,8 @@ class _SanitizedStimModel:
     holograms: list[_Hologram]
     fixes: list[_SanityFix]
     truncated_tail_windows: int
+    # Set when shapes are placed at exact ticks; ``None`` for the window grid.
+    exact_shapes: list[_ExactShape] | None = None
 
 
 @dataclass(frozen=True)
@@ -405,7 +419,11 @@ def _build_pulse_window_state(
             "Check Cellpose mapping and input activity."
         )
 
-    max_pulse_tick = sanitized.window_values.shape[0] * _SYSCON2_WINDOW_TICKS
+    max_pulse_tick = (
+        sanitized.window_values.shape[0] * _SYSCON2_WINDOW_TICKS
+        if sanitized.exact_shapes is None
+        else 2**62
+    )
     pulse_intervals = _merge_tick_intervals(
         [
             (segment.start_idx, min(segment.end_idx, max_pulse_tick))
@@ -417,7 +435,29 @@ def _build_pulse_window_state(
     mapped_holograms = _build_holograms_from_window_values(mapped_window_values)
 
     entity_windows: list[_EntityWindow] = []
-    for hologram in mapped_holograms:
+    for shape in sanitized.exact_shapes or []:
+        cellpose_id = neuron_to_cellpose.get(shape.neuron_index)
+        if cellpose_id is None or cellpose_id not in centroids:
+            continue
+        spots = (
+            stimulation_spots.get(cellpose_id, [centroids[cellpose_id]])
+            if stimulation_spots is not None
+            else [centroids[cellpose_id]]
+        )
+        for spot_x, spot_y in spots:
+            entity_windows.append(
+                _EntityWindow(
+                    neuron_index=shape.neuron_index,
+                    stimulation_start_tick=shape.stimulation_start_tick,
+                    stimulation_end_tick=shape.stimulation_end_tick,
+                    start_tick=shape.start_tick,
+                    end_tick=shape.end_tick,
+                    intensity=shape.intensity,
+                    center_x=spot_x,
+                    center_y=spot_y,
+                )
+            )
+    for hologram in [] if sanitized.exact_shapes is not None else mapped_holograms:
         if len(hologram.neuron_indices) == 0:
             continue
         shape_start_win = max(0, hologram.start_win - 1)
@@ -505,6 +545,7 @@ def generate_syscon2_sequence_text(
     power_lut: PowerLut | None = None,
     stimulation_spots_per_roi: int = 1,
     stimulation_spot_algorithm: str = "farthest_point",
+    exact_slm_timing: bool = False,
 ) -> tuple[str, SysconExportReport]:
     """Generate SysCon2 `.seq` content for Holo4D multiphoton stimulation.
 
@@ -567,6 +608,7 @@ def generate_syscon2_sequence_text(
         active_threshold=active_threshold,
         binary_intensity=binary_intensity,
         force_binary_intensity=force_binary_intensity,
+        exact_slm_timing=exact_slm_timing,
     )
 
     if len(sanitized.sanitized_segments) == 0:
@@ -1295,12 +1337,116 @@ def _apply_preblank_insertions_to_raw_segments(
     return adjusted
 
 
+def _retime_holograms_exactly(
+    raw_segments: list[_RawSegment],
+    window_segments: list[_WindowSegment],
+    holograms: list[_Hologram],
+) -> tuple[list[_RawSegment], list[_ExactShape], list[_SanityFix]]:
+    """Place hologram shapes at exact ticks, delaying only where the SLM needs it.
+
+    Each hologram's shape starts one SLM load window (32 ticks) before its first
+    laser pulse and ends on a window multiple at or after its last pulse.  A
+    hologram is delayed (together with all of its pulses) only when its shape
+    would start before the previous hologram's shapes have ended, so stimuli keep
+    their original timing whenever the gaps leave room for the load.
+    """
+    window = _SYSCON2_WINDOW_TICKS
+    assigned: dict[int, list[_RawSegment]] = {h.hologram_id: [] for h in holograms}
+    unassigned: list[_RawSegment] = []
+    for segment in raw_segments:
+        first_win = segment.start_idx // window
+        last_win = max(segment.start_idx, segment.end_idx - 1) // window
+        candidates = [
+            h
+            for h in holograms
+            if segment.neuron_index in h.neuron_indices
+            and h.start_win <= last_win
+            and first_win < h.end_win
+        ]
+        if not candidates:
+            candidates = [
+                h for h in holograms if segment.neuron_index in h.neuron_indices
+            ]
+            candidates.sort(key=lambda h: abs(h.start_win - first_win))
+        if candidates:
+            assigned[candidates[0].hologram_id].append(segment)
+        else:
+            unassigned.append(segment)
+
+    adjusted: list[_RawSegment] = list(unassigned)
+    shapes: list[_ExactShape] = []
+    fixes: list[_SanityFix] = []
+    previous_max_end = 0
+    for hologram in sorted(holograms, key=lambda h: h.start_win):
+        segments = assigned[hologram.hologram_id]
+        if not segments:
+            continue
+        first_start = min(segment.start_idx for segment in segments)
+        delay = max(0, previous_max_end + window - first_start)
+        shape_start = first_start + delay - window
+        if delay > 0 and first_start + delay > first_start:
+            fixes.append(
+                _SanityFix(
+                    code="insert_preblank_window",
+                    message=(
+                        f"Delayed hologram {hologram.hologram_id} by {delay} ticks "
+                        f"to leave an SLM load window (start tick {first_start})."
+                    ),
+                    value=str(delay),
+                    source_ids=tuple(str(n) for n in hologram.neuron_indices),
+                )
+            )
+        hologram_end = shape_start
+        for neuron_idx in hologram.neuron_indices:
+            neuron_segments = [s for s in segments if s.neuron_index == neuron_idx]
+            if not neuron_segments:
+                continue
+            stim_start = min(s.start_idx for s in neuron_segments) + delay
+            stim_end = max(s.end_idx for s in neuron_segments) + delay
+            span = max(2 * window, -(-(stim_end - shape_start) // window) * window)
+            intensity = max(
+                (
+                    w.intensity_out
+                    for w in window_segments
+                    if w.neuron_index == neuron_idx
+                    and w.start_win < hologram.end_win
+                    and hologram.start_win < w.end_win
+                ),
+                default=1.0,
+            )
+            shapes.append(
+                _ExactShape(
+                    neuron_index=neuron_idx,
+                    start_tick=shape_start,
+                    end_tick=shape_start + span,
+                    stimulation_start_tick=stim_start,
+                    stimulation_end_tick=stim_end,
+                    intensity=float(intensity),
+                )
+            )
+            hologram_end = max(hologram_end, shape_start + span)
+        previous_max_end = hologram_end
+        for segment in segments:
+            adjusted.append(
+                _RawSegment(
+                    segment_id=segment.segment_id,
+                    neuron_index=segment.neuron_index,
+                    start_idx=segment.start_idx + delay,
+                    end_idx=segment.end_idx + delay,
+                    intensity_in=segment.intensity_in,
+                )
+            )
+    adjusted.sort(key=lambda segment: (segment.start_idx, segment.neuron_index))
+    return adjusted, shapes, fixes
+
+
 def _sanitize_stim_array_for_export(
     stim_array: StimArray,
     *,
     active_threshold: float,
     binary_intensity: float,
     force_binary_intensity: bool,
+    exact_slm_timing: bool = False,
 ) -> _SanitizedStimModel:
     """Build a fully sanitized representation of ``stim_array`` for SysCon2 export.
 
@@ -1321,6 +1467,9 @@ def _sanitize_stim_array_for_export(
     n_windows = int(np.ceil(n_timepoints / float(_SYSCON2_WINDOW_TICKS)))
 
     raw_segments = _extract_raw_segments(values, active_threshold=active_threshold)
+    # Every inserted preblank window pushes the tail right by one window; at most
+    # one is needed per segment, so pad the window grid to keep the tail.
+    n_windows += len(raw_segments) + 1
     quantized_segments, quantization_fixes = _raw_to_quantized_window_segments(
         raw_segments,
         binary_intensity=binary_intensity,
@@ -1334,6 +1483,24 @@ def _sanitize_stim_array_for_export(
         n_windows=n_windows,
         n_neurons=n_neurons,
     )
+    if exact_slm_timing:
+        holograms = _build_holograms_from_window_values(window_values)
+        sanitized_segments_unshifted = _window_matrix_to_segments(
+            window_values, segment_prefix="sanitized"
+        )
+        adjusted_exact_raw, exact_shapes, exact_fixes = _retime_holograms_exactly(
+            raw_segments, sanitized_segments_unshifted, holograms
+        )
+        return _SanitizedStimModel(
+            window_values=window_values,
+            raw_segments=raw_segments,
+            adjusted_raw_segments=adjusted_exact_raw,
+            sanitized_segments=sanitized_segments_unshifted,
+            holograms=holograms,
+            fixes=[*quantization_fixes, *overlap_fixes, *exact_fixes],
+            truncated_tail_windows=0,
+            exact_shapes=exact_shapes,
+        )
     (
         adjusted_windows,
         holograms,
@@ -1929,6 +2096,7 @@ def check_syscon2_input_sanity(
     power_lut: PowerLut | None = None,
     stimulation_spots_per_roi: int = 1,
     stimulation_spot_algorithm: str = "farthest_point",
+    exact_slm_timing: bool = False,
 ) -> SysconInputSanityReport:
     """Validate ``stim_array`` for SysCon2 export and perform a dry-run export.
 
@@ -1998,6 +2166,7 @@ def check_syscon2_input_sanity(
         active_threshold=active_threshold,
         binary_intensity=binary_intensity,
         force_binary_intensity=force_binary_intensity,
+        exact_slm_timing=exact_slm_timing,
     )
     if len(sanitized.raw_segments) == 0:
         errors.append("No active input samples found above the active threshold.")
@@ -2119,6 +2288,7 @@ def check_syscon2_input_sanity(
             power_lut=power_lut,
             stimulation_spots_per_roi=stimulation_spots_per_roi,
             stimulation_spot_algorithm=stimulation_spot_algorithm,
+            exact_slm_timing=exact_slm_timing,
         )
     except (TypeError, ValueError) as exc:
         errors.append(str(exc))

@@ -228,6 +228,18 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         )
         config_layout.addWidget(self.spiralling_checkbox)
 
+        self.exact_timing_checkbox = QtWidgets.QCheckBox(
+            "Exact stimulus timing (shapes are not snapped to 16.7 ms windows)"
+        )
+        self.exact_timing_checkbox.setChecked(True)
+        self.exact_timing_checkbox.setToolTip(
+            "Place each hologram shape one SLM load window before its first pulse "
+            "and delay stimuli only where the load would not fit. Uncheck to snap "
+            "shapes to the 16.7 ms window grid (stimuli may be delayed by up to a "
+            "window per hologram)."
+        )
+        config_layout.addWidget(self.exact_timing_checkbox)
+
         self.ten_spots_per_roi_checkbox = QtWidgets.QCheckBox(
             "Use 10 input spots per ROI"
         )
@@ -577,6 +589,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 10 if self.ten_spots_per_roi_checkbox.isChecked() else 1
             ),
             stimulation_spot_algorithm=str(self.spot_algorithm_combo.currentData()),
+            exact_slm_timing=self.exact_timing_checkbox.isChecked(),
         )
 
     def _check_input_sanity(self) -> None:
@@ -1185,6 +1198,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             spiralling=self.spiralling_checkbox.isChecked(),
             ten_spots_per_roi=self.ten_spots_per_roi_checkbox.isChecked(),
             spot_algorithm=str(self.spot_algorithm_combo.currentData()),
+            exact_slm_timing=self.exact_timing_checkbox.isChecked(),
             laser_wavelength_nm=self._selected_laser_wavelength_nm(),
             target_power_mw=self.target_power_spin.value(),
         )
@@ -1194,6 +1208,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.config_data_edit.setPlainText(settings.config_text)
         self.binary_mode_checkbox.setChecked(settings.force_binary_intensity)
         self.spiralling_checkbox.setChecked(settings.spiralling)
+        self.exact_timing_checkbox.setChecked(settings.exact_slm_timing)
         self.ten_spots_per_roi_checkbox.setChecked(settings.ten_spots_per_roi)
         index = self.spot_algorithm_combo.findData(settings.spot_algorithm)
         if index >= 0:

@@ -47,6 +47,7 @@ class SysconExportSettings:
     spot_algorithm: str = "farthest_point"
     laser_wavelength_nm: int = 940
     target_power_mw: float = 1.0
+    exact_slm_timing: bool = True
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ def _export_kwargs(
         "power_lut": _power_lut(project, settings.laser_wavelength_nm),
         "stimulation_spots_per_roi": 10 if settings.ten_spots_per_roi else 1,
         "stimulation_spot_algorithm": settings.spot_algorithm,
+        "exact_slm_timing": settings.exact_slm_timing,
     }
 
 
