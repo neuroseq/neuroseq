@@ -1353,8 +1353,47 @@ def test_default_export_name_counts_todays_exports(tmp_path: Path) -> None:
     (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
     (tmp_path / "export_seq_2026-10-08_2.seq").write_text("x")
     (tmp_path / "export_seq_2026-10-07_9.seq").write_text("x")  # other day
-    (tmp_path / "export_seq_2026-10-08_7_export_debug.csv").write_text("x")
     assert next_default_export_name(tmp_path, day) == "export_seq_2026-10-08_3"
+
+
+def test_default_export_name_avoids_every_collision_source(tmp_path: Path) -> None:
+    import datetime
+
+    from neuroseq.stimulation_generator_dialog import next_default_export_name
+
+    day = datetime.date(2026, 10, 8)
+    (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
+    # Stray sibling files of an export count, even without the .seq.
+    (tmp_path / "export_seq_2026-10-08_4_export_debug.csv").write_text("x")
+    (tmp_path / "EXPORT_SEQ_2026-10-08_5_overview.PNG").write_text("x")
+    assert next_default_export_name(tmp_path, day) == "export_seq_2026-10-08_6"
+    # Names already in the stimulation setup count, with or without a folder part.
+    reserved = ["Exp\\export_seq_2026-10-08_9.seq", "other/export_seq_2026-10-08_7.SEQ"]
+    assert (
+        next_default_export_name(tmp_path, day, reserved) == "export_seq_2026-10-08_10"
+    )
+    # A missing folder is not an error.
+    assert (
+        next_default_export_name(tmp_path / "missing", day) == "export_seq_2026-10-08_1"
+    )
+
+
+def test_dialog_rechecks_default_name_at_export_time(
+    qtbot: QtBot, tmp_path: Path, qmessagebox_calls
+) -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.output_folder = tmp_path
+    dialog._refresh_default_name()
+    stale = dialog.name_edit.text()
+    # Someone else (e.g. the stimulation setup) takes that name after the dialog resolved it.
+    dialog.reserved_names = lambda: [f"{stale}.seq"]
+    dialog._generate_scripts()
+    assert not (tmp_path / f"{stale}.seq").exists()
+    assert any(tmp_path.glob("export_seq_*.seq"))
 
 
 def test_dialog_default_name_advances_but_keeps_custom_names(

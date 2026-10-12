@@ -766,6 +766,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.selection_label.setText(f"Selection pending: {path}")
         self._submit(name, task)
 
+    def _remote_sequence_names(self) -> list[str]:
+        return [
+            self.sequence_list.item(row).text()
+            for row in range(self.sequence_list.count())
+        ]
+
     def _show_preview_for_sequence(self, remote_path: str) -> None:
         """Show a preview for a sequence chosen in the manager.
 
@@ -858,6 +864,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             parent=self.window(),
             current_stim_name=current.name if current else None,
         )
+        dialog.reserved_names = self._remote_sequence_names
         if self._export_settings is not None:
             dialog.apply_settings(self._export_settings)
         dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
@@ -892,7 +899,10 @@ class SysCon2Panel(QtWidgets.QWidget):
                 stim_array,
                 self._export_settings,
                 self.stimulation_host.output_dir,
-                next_default_export_name(self.stimulation_host.output_dir),
+                next_default_export_name(
+                    self.stimulation_host.output_dir,
+                    reserved=self._remote_sequence_names(),
+                ),
                 confirm_warnings=lambda warnings: self._confirm(
                     "Review export changes:\n" + "\n".join(warnings)
                 ),

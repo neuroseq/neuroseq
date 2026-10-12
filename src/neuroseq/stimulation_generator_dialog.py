@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
 import pathlib
 import re
+from collections.abc import Callable
+from collections.abc import Iterable
 from enum import Enum
 from typing import TYPE_CHECKING
 from typing import cast
@@ -47,20 +50,39 @@ if TYPE_CHECKING:
     from neuroseq.stim import StimArray
 
 
+_EXPORT_SUFFIXES = (".seq", "_export_debug.csv", "_overview.png")
+
+
 def next_default_export_name(
-    folder: pathlib.Path | None, today: datetime.date | None = None
+    folder: pathlib.Path | None,
+    today: datetime.date | None = None,
+    reserved: Iterable[str] = (),
 ) -> str:
     """``export_seq_<YYYY-MM-DD>_<n>``, with ``n`` one past the highest number already
-    exported today (``.seq`` files) in ``folder``."""
+    used today.
+
+    Any file of an export (``.seq``, ``_overview.png``, ``_export_debug.csv``) in
+    ``folder`` counts, as do ``reserved`` file names (e.g. sequences already in the
+    stimulation setup's sequence manager, with or without a folder part). Matching is
+    case-insensitive, as on Windows, so a default name never collides.
+    """
     day = (today or datetime.date.today()).isoformat()
     prefix = f"export_seq_{day}_"
+    pattern = re.compile(
+        rf"^{re.escape(prefix)}(\d+)(?:\.seq|_export_debug\.csv|_overview\.png)$",
+        re.IGNORECASE,
+    )
+    names: list[str] = [
+        str(name).replace("\\", "/").rsplit("/", 1)[-1] for name in reserved
+    ]
+    if folder is not None:
+        with contextlib.suppress(OSError):
+            names.extend(path.name for path in folder.iterdir())
     highest = 0
-    if folder is not None and folder.is_dir():
-        pattern = re.compile(rf"^{re.escape(prefix)}(\d+)\.seq$")
-        for path in folder.iterdir():
-            match = pattern.match(path.name)
-            if match:
-                highest = max(highest, int(match.group(1)))
+    for name in names:
+        match = pattern.match(name)
+        if match:
+            highest = max(highest, int(match.group(1)))
     return f"{prefix}{highest + 1}"
 
 
@@ -94,6 +116,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.output_folder: pathlib.Path | None = None
+        #: Extra file names a default export name must avoid (e.g. remote sequences).
+        self.reserved_names: Callable[[], Iterable[str]] = lambda: ()
 
         self.setWindowTitle("Input Script Generator")
         self.setModal(True)
@@ -383,7 +407,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
     def _refresh_default_name(self) -> None:
         """Advance the default script name, unless the user typed their own."""
         if self.name_edit.text().strip() in ("", self._auto_name):
-            self._auto_name = next_default_export_name(self.output_folder)
+            self._auto_name = next_default_export_name(
+                self.output_folder, reserved=self.reserved_names()
+            )
             self.name_edit.setText(self._auto_name)
 
     def _select_output_folder(self) -> None:
@@ -433,6 +459,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
 
             stim_array = self.project.stim_arrays[stim_name]
             hardware_type = self.hardware_combo.currentText()
+            # Re-resolve an untouched default name, so files created since the dialog
+            # opened (another export, the stimulation setup) are never overwritten.
+            self._refresh_default_name()
             script_name = self.name_edit.text() or "stimulation_script"
 
             if hardware_type != "HOLO4D":
