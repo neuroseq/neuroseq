@@ -734,7 +734,21 @@ def generate_syscon2_sequence_text(
         laser_block_rows.append((block_object_id, (start_tick, end_tick)))
         next_object_id += 1
 
-    for start_tick, end_tick in pulse_intervals:
+    # Initial TTL Out 1 pulse at sequence start (the acquisition trigger). It is shortened
+    # to end before the first laser-synchronous TTL Out 1 pulse so the row never overlaps.
+    first_ttl_out_start = min((start for start, _ in pulse_intervals), default=None)
+    start_pulse_ticks = int(
+        np.rint(_TTL_OUT_1_START_PULSE_US / _SYSCON2_TTL_PULSE_QUANTUM_US)
+    )
+    if first_ttl_out_start is not None:
+        start_pulse_ticks = min(
+            start_pulse_ticks, first_ttl_out_start - _TTL_PULSE_BOUNDARY_GUARD_TICKS
+        )
+    ttl_out_intervals = list(pulse_intervals)
+    if start_pulse_ticks >= 1:
+        ttl_out_intervals.insert(0, (0, start_pulse_ticks))
+
+    for start_tick, end_tick in ttl_out_intervals:
         duration_ticks = max(1, end_tick - start_tick)
         block_object_id = next_object_id
         object_blocks.append(

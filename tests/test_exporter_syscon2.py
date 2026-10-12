@@ -180,11 +180,13 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     ttl_out_2_pulses = [obj for obj in pulses if _timeline_index(obj) == 5]
 
     assert len(laser_pulses) == 1
-    assert len(ttl_out_1_pulses) == 1
+    # Initial acquisition-trigger pulse at tick 0 plus one pulse per laser pulse.
+    assert len(ttl_out_1_pulses) == 2
     assert len(ttl_out_2_pulses) == 0
     # TTL pulse comes from the adjusted raw segment position (tick 20 shifted by
     # one preblank window to tick 52 → 52 × 520.8125µs = 27082.25µs).
-    assert ttl_out_1_pulses[0].start_time_us == pytest.approx(27082.25)
+    assert ttl_out_1_pulses[0].start_time_us == 0  # initial trigger pulse
+    assert ttl_out_1_pulses[1].start_time_us == pytest.approx(27082.25)
 
 
 def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
@@ -353,7 +355,49 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
     assert len(laser_pulses) == 1
     assert len(lower_laser_timeline) == 0
     assert len(other_laser_timeline) == 0
-    assert len(ttl_out_1_pulses) == 1
+    assert len(ttl_out_1_pulses) == 2
+
+
+def test_export_seq_starts_with_ttl_out_1_trigger_pulse() -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    ttl_out_1 = sorted(
+        (
+            obj
+            for obj in sequence.objects
+            if obj.object_type == "TTLPulse"
+            and _timeline_index(obj) == report.ttl_out1_timeline_index
+        ),
+        key=lambda obj: obj.start_time_us,
+    )
+    start_pulse, first_pulse = ttl_out_1[0], ttl_out_1[1]
+    assert start_pulse.start_time_us == 0
+    assert (start_pulse.repeats + 1) * _TTL_QUANTUM_US >= 9_000
+    # The trigger pulse ends before the next TTL Out 1 pulse begins.
+    assert (
+        start_pulse.start_time_us + (start_pulse.repeats + 1) * _TTL_QUANTUM_US
+        <= first_pulse.start_time_us
+    )
+    # An exported file is recognised as a Holo4D layout when re-imported.
+    from neuroseq.importer_syscon2 import _looks_like_holo4d_timeline_layout
+
+    assert _looks_like_holo4d_timeline_layout(sequence, tick_resolution_us=500)
 
 
 def test_export_seq_requires_syscon2_tick_rate() -> None:
@@ -612,12 +656,14 @@ def test_export_seq_spiralling_shifts_laser_pulse_one_tick_earlier() -> None:
         for obj in seq_on.objects
         if obj.object_type == "TTLPulse"
         and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+        and obj.start_time_us > 0  # skip the initial trigger pulse
     ]
     ttl_out_1_off = [
         obj
         for obj in seq_off.objects
         if obj.object_type == "TTLPulse"
         and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+        and obj.start_time_us > 0  # skip the initial trigger pulse
     ]
     assert len(ttl_out_1_on) == 1
     assert len(ttl_out_1_off) == 1
@@ -961,9 +1007,9 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
     assert report.exported_segments == 1
     assert report.skipped_segments_unmapped == 1
     assert report.entity_lanes == 1
-    assert report.generated_objects == 3
+    assert report.generated_objects == 4
     assert len(entities) == 1
-    assert len(pulses) == 2
+    assert len(pulses) == 3
 
     assert _timeline_index(entities[0]) == 0
 
