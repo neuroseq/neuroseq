@@ -720,6 +720,22 @@ def test_upload_ready_check_times_out_with_state_message(panel, mocker):
     assert "still 'busy'" in panel.execution_label.text()
 
 
+def test_stop_failure_with_nothing_running_returns_to_idle(panel, mocker):
+    submit, upload = _begin_upload_run(panel, mocker)
+    run, _ = _finish_upload(panel, submit, mocker)
+    panel._on_command_finished(run, None)
+    panel._on_state_changed({"Holo4D": "Busy"})
+    assert "[hardware state: busy]" in panel.execution_label.text()
+    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    panel._on_holo4d_stop_clicked()
+    stop = submit.call_args.args[0]
+    panel._on_command_failed(stop, "Could not stop current sequence")
+    assert panel.btn_holo4d_run.isEnabled()
+    assert "Nothing to stop" in panel.execution_label.text()
+    assert panel.execution_progress.maximum() != 0
+    warning.assert_not_called()
+
+
 def test_run_requires_confirmation(panel, mocker):
     panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")

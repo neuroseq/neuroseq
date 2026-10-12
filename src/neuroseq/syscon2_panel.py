@@ -681,6 +681,15 @@ class SysCon2Panel(QtWidgets.QWidget):
         if name.startswith("holo4d.execute."):
             if not name.startswith(f"holo4d.execute.{self._execution_serial}."):
                 return
+            if name.endswith(".stop") and "could not stop" in message.lower():
+                # SysCon could not stop anything, so the sequence has most likely ended.
+                self._set_execution_progress(
+                    "idle",
+                    "Nothing to stop: the stimulation setup could not stop a sequence, "
+                    "so it has probably already ended "
+                    f"(last hardware state: {self._hardware_state or 'unknown'}).",
+                )
+                return
             self._set_execution_progress(
                 "idle", f"Command failed: {message}. Check hardware state."
             )
@@ -1047,12 +1056,18 @@ class SysCon2Panel(QtWidgets.QWidget):
                 "Check the stimulation setup; Run is available.",
             )
             return
+        busy = self._execution_phase != "idle"
         elapsed = (
             f" ({self._execution_elapsed.elapsed() / 1000:.1f} s)"
-            if self._execution_phase != "idle" and self._execution_elapsed.isValid()
+            if busy and self._execution_elapsed.isValid()
             else ""
         )
-        self.execution_label.setText(self._progress_message + elapsed)
+        hardware = (
+            f" [hardware state: {self._hardware_state}]"
+            if busy and self._hardware_state
+            else ""
+        )
+        self.execution_label.setText(self._progress_message + elapsed + hardware)
 
     def _on_upload_clicked(self) -> None:
         if not self._connected or self._execution_phase != "idle":
@@ -1120,6 +1135,13 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _advance_execution(self, state: str) -> None:
         state = state.lower().removeprefix("state:").strip()
+        if state != self._hardware_state:
+            logger.info(
+                "Holo4D state %r -> %r (execution phase %s)",
+                self._hardware_state,
+                state,
+                self._execution_phase,
+            )
         self._hardware_state = state
         if self._execution_phase == "ready_check":
             if state in {"busy", "disconnected"} or state.startswith("upload"):
