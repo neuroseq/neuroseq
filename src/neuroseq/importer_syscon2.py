@@ -552,11 +552,27 @@ def _extract_entity_center_any_shape(
     )
 
 
+def _neuron_tag(obj: SysconSequenceObject) -> int | None:
+    """Original neuron index written by the NeuroSeq exporter, if present."""
+    raw = _find_property_value_by_suffix(obj.properties, ("_description",))
+    match = re.fullmatch(r"\s*neuron=(\d+)\s*", raw or "")
+    return int(match.group(1)) if match else None
+
+
 def _group_entities_by_center_distance(
     entities: list[SysconSequenceObject],
 ) -> list[list[SysconSequenceObject]]:
     if len(entities) == 0:
         return []
+
+    tags = [_neuron_tag(obj) for obj in entities]
+    if all(tag is not None for tag in tags):
+        # Exported by NeuroSeq: every spot carries its original neuron index,
+        # so multi-spot ROIs collapse back to the original neuron.
+        by_tag: dict[int, list[SysconSequenceObject]] = {}
+        for obj, tag in zip(entities, tags, strict=True):
+            by_tag.setdefault(int(tag), []).append(obj)  # type: ignore[arg-type]
+        return [by_tag[tag] for tag in sorted(by_tag)]
 
     parent = list(range(len(entities)))
 

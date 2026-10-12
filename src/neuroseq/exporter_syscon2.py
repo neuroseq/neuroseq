@@ -653,7 +653,7 @@ def generate_syscon2_sequence_text(
                             window.start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
                         ),
                     ),
-                    ("TimelineInfo0_description", ""),
+                    ("TimelineInfo0_description", f"neuron={window.neuron_index}"),
                     (
                         "TimelineInfo0_repeats",
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),

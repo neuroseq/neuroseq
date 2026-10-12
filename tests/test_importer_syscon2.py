@@ -1968,3 +1968,28 @@ def test_group_merges_simultaneous_multi_spot_shapes() -> None:
     objs += [shape(4 + i, 500_000.0, x, y) for i, (x, y) in enumerate(spots_a)]
     groups = _group_entities_by_center_distance(objs)
     assert sorted(len(g) for g in groups) == [1, 6]
+
+
+def test_group_uses_exported_neuron_tags() -> None:
+    from neuroseq.importer_syscon2 import SysconSequenceObject
+    from neuroseq.importer_syscon2 import _group_entities_by_center_distance
+
+    objs = [
+        SysconSequenceObject(
+            block_index=i,
+            object_id=i,
+            object_type="Shape",
+            properties={
+                "TimelineInfo0_description": f"neuron={tag}",
+                "Shape0_CenterX": str(50.0 * i),
+                "Shape0_CenterY": "0",
+            },
+            start_time_us=0.0,
+            repeats=6,
+            step_size=100,
+            intensity=1.0,
+        )
+        for i, tag in enumerate([4, 2, 4, 2, 4])
+    ]
+    groups = _group_entities_by_center_distance(objs)
+    assert [len(g) for g in groups] == [2, 3]
