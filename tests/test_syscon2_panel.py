@@ -736,6 +736,18 @@ def test_stop_failure_with_nothing_running_returns_to_idle(panel, mocker):
     warning.assert_not_called()
 
 
+def test_triggered_run_that_finishes_unobserved_explains_how_to_reset(panel, mocker):
+    panel.start_condition_combo.setCurrentText("trigger1")
+    submit, upload = _begin_upload_run(panel, mocker)
+    run, _ = _finish_upload(panel, submit, mocker)
+    panel._on_command_finished(run, None)
+    panel._on_state_changed({"Holo4D": "Idle"})
+    mocker.patch.object(panel._execution_elapsed, "elapsed", return_value=6_000)
+    panel._update_progress_text()
+    text = panel.execution_label.text()
+    assert "press Stop to reset" in text and "hardware state: idle" in text
+
+
 def test_run_requires_confirmation(panel, mocker):
     panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")

@@ -157,6 +157,7 @@ class _SequencePreview(QtWidgets.QScrollArea):
 
 
 _READY_CHECK_TIMEOUT_MS = 10_000
+_TRIGGER_HINT_MS = 5_000
 
 
 class SysCon2Panel(QtWidgets.QWidget):
@@ -1057,6 +1058,17 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
             return
         busy = self._execution_phase != "idle"
+        if (
+            self._execution_phase == "awaiting_busy"
+            and self._hardware_state == "idle"
+            and self._execution_elapsed.isValid()
+            and self._execution_elapsed.elapsed() > _TRIGGER_HINT_MS
+        ):
+            self._progress_message = (
+                f"Run accepted; hardware stays Idle, waiting for {self._execution_options[0]}. "
+                "If the trigger already fired, a short sequence may have finished "
+                "before Busy was observed; press Stop to reset."
+            )
         elapsed = (
             f" ({self._execution_elapsed.elapsed() / 1000:.1f} s)"
             if busy and self._execution_elapsed.isValid()
