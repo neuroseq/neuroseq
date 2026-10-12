@@ -182,6 +182,8 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._pending_selections: set[str] = set()
         #: Generated overview images by .seq file name, for previewing selections.
         self._known_previews: dict[str, str] = {}
+        #: File name of a just-imported sequence to select once the list refreshes.
+        self._auto_select_name: str | None = None
         self._known_sources: dict[str, str] = {}
         self._pending_imports: dict[str, frozenset[int] | None] = {}
         self._import_files = tempfile.TemporaryDirectory(prefix="neuroseq-import-")
@@ -638,6 +640,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.btn_delete_sequence.setEnabled(can_change_selection)
 
     def _reset_import_status(self) -> None:
+        self._auto_select_name = None
         self._pending_imports.clear()
         self._pending_selections.clear()
         self._preview_request = None
@@ -671,10 +674,11 @@ class SysCon2Panel(QtWidgets.QWidget):
             targets = self._pending_imports.pop(name)
             if name == self._preview_request:
                 self.preview_status_label.setText(
-                    f"Import confirmed: {self._preview_source}. Select the sequence, then Upload and Run. "
+                    f"Import confirmed: {self._preview_source}; selecting it, then Upload and Run. "
                     "The image is a generated preview, not hardware readback."
                 )
                 self.targets_changed.emit(targets or frozenset())
+                self._auto_select_name = self._preview_source
             self._on_refresh_sequences_clicked()
             return
         if name.startswith("sequence_manager.select."):
@@ -751,6 +755,36 @@ class SysCon2Panel(QtWidgets.QWidget):
         if selected in sequences:
             self.sequence_list.setCurrentRow(sequences.index(selected))
         self._update_sequence_buttons()
+        self._select_imported_sequence()
+
+    def _select_imported_sequence(self) -> None:
+        """Select the sequence this panel just imported, so only Upload and Run remain."""
+        name, self._auto_select_name = self._auto_select_name, None
+        if not name or not self._connected or self._execution_phase != "idle":
+            return
+        key = name.lower()
+        matches = [
+            row
+            for row in range(self.sequence_list.count())
+            if pathlib.PureWindowsPath(
+                self.sequence_list.item(row).text().replace("/", "\\")
+            ).name.lower()
+            == key
+        ]
+        if not matches:
+            return
+        target = self.target_directory_edit.text().strip().lower().replace("/", "\\")
+        in_target = [
+            row
+            for row in matches
+            if self.sequence_list.item(row)
+            .text()
+            .lower()
+            .replace("/", "\\")
+            .startswith(target)
+        ]
+        self.sequence_list.setCurrentRow((in_target or matches)[-1])
+        self._on_select_sequence_clicked()
 
     def _on_sequence_imported(self, _result: object) -> None:
         self.selection_label.setText("Remote selection not confirmed.")

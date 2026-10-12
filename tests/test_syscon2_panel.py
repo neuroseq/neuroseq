@@ -558,6 +558,31 @@ def test_import_ack_tracks_latest_preview_and_snapshots_file(panel, mocker, tmp_
     assert "Import confirmed" in panel.preview_status_label.text()
 
 
+def test_confirmed_import_auto_selects_the_new_sequence(panel, mocker, tmp_path):
+    panel._on_connected()
+    submit = mocker.patch.object(panel, "_submit")
+    source = tmp_path / "export_seq_x_1.seq"
+    source.write_text("seq")
+    panel._import_sequence(str(source), frozenset({1}))
+    name = submit.call_args.args[0]
+    panel._on_command_finished(name, None)
+    assert submit.call_args.args[0] == "sequence_manager.get_sequences"
+
+    panel._on_sequences(["old.seq", "neuroseq\\export_seq_x_1.seq"])
+    select_name, task = submit.call_args.args
+    assert select_name.startswith("sequence_manager.select.")
+    assert panel.sequence_list.currentItem().text() == "neuroseq\\export_seq_x_1.seq"
+    client = mocker.Mock()
+    task(client)
+    client.sequence_manager.select_sequence.assert_called_once_with(
+        "neuroseq\\export_seq_x_1.seq"
+    )
+    # Only the import that just finished triggers a selection, not later refreshes.
+    submit.reset_mock()
+    panel._on_sequences(["old.seq", "neuroseq\\export_seq_x_1.seq"])
+    submit.assert_not_called()
+
+
 def test_failed_and_stale_imports_do_not_confirm_targets(panel, mocker, tmp_path):
     panel._on_connected()
     submit = mocker.patch.object(panel, "_submit")
