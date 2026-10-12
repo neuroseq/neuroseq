@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from neuroseq.stim import StimArray
 
 
-_EXPORT_SUFFIXES = (".seq", "_export_debug.csv", "_overview.png")
+_EXPORT_SUFFIXES = (".seq", "_original_stim.npz", "_overview.png")
 
 
 def next_default_export_name(
@@ -61,7 +61,7 @@ def next_default_export_name(
     """``export_seq_<YYYY-MM-DD>_<n>``, with ``n`` one past the highest number already
     used today.
 
-    Any file of an export (``.seq``, ``_overview.png``, ``_export_debug.csv``) in
+    Any file of an export (``.seq``, ``_overview.png``, ``_original_stim.npz``) in
     ``folder`` counts, as do ``reserved`` file names (e.g. sequences already in the
     stimulation setup's sequence manager, with or without a folder part). Matching is
     case-insensitive, as on Windows, so a default name never collides.
@@ -69,7 +69,7 @@ def next_default_export_name(
     day = (today or datetime.date.today()).isoformat()
     prefix = f"export_seq_{day}_"
     pattern = re.compile(
-        rf"^{re.escape(prefix)}(\d+)(?:\.seq|_export_debug\.csv|_overview\.png)$",
+        rf"^{re.escape(prefix)}(\d+)(?:\.seq|_export_debug\.csv|_original_stim\.npz|_overview\.png)$",
         re.IGNORECASE,
     )
     names: list[str] = [
@@ -481,7 +481,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             validate_export_name(script_name)
             filenames = [
                 f"{script_name}.seq",
-                f"{script_name}_export_debug.csv",
+                f"{script_name}_original_stim.npz",
                 f"{script_name}_overview.png",
             ]
             if any(
@@ -503,10 +503,10 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             export_report = result.report
             script_path, overview_path = result.seq_path, result.overview_png_path
-            script_filename, debug_csv_filename, overview_filename = filenames
+            script_filename, original_filename, overview_filename = filenames
 
             self._log_status(f"✓ Generated: {script_filename}")
-            self._log_status(f"✓ Generated: {debug_csv_filename}")
+            self._log_status(f"✓ Generated: {original_filename}")
             self._log_status(f"✓ Generated: {overview_filename}")
             self._refresh_default_name()
             self._log_status(
@@ -526,7 +526,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 f"Successfully generated script in:\n{self.output_folder}",
                 "",
                 "Generated files: "
-                f"{script_filename}, {debug_csv_filename}, {overview_filename}",
+                f"{script_filename}, {original_filename}, {overview_filename}",
                 "",
                 f"Exported segments: {export_report.exported_segments}/{export_report.total_segments}",
                 "Mapped active neurons: "

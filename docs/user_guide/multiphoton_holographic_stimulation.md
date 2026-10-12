@@ -146,11 +146,11 @@ combobox swaps to that wavelength's LUT slot.
 
 The exporter writes:
 
-| File                      | Content                                             |
-| ------------------------- | --------------------------------------------------- |
-| `<name>.seq`              | SysCon2 sequence — Shape objects + TTLPulse objects |
-| `<name>_export_debug.csv` | per-window/segment/hologram timing debug table      |
-| `<name>_overview.png`     | timeline overview image                             |
+| File                       | Content                                             |
+| -------------------------- | --------------------------------------------------- |
+| `<name>.seq`               | SysCon2 sequence — Shape objects + TTLPulse objects |
+| `<name>_original_stim.npz` | the exported input array, restored on re-import     |
+| `<name>_overview.png`      | timeline overview image                             |
 
 ---
 

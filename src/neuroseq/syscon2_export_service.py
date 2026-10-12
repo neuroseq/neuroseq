@@ -221,7 +221,6 @@ def export_stim_array(
     output_dir.mkdir(parents=True, exist_ok=True)
     seq_path = output_dir / f"{name}.seq"
     overview_path = output_dir / f"{name}_overview.png"
-    debug_csv_path = output_dir / f"{name}_export_debug.csv"
     original_path = original_stim_sidecar_path(seq_path)
     # Render everything before replacing any existing output. Publish the sequence last.
     with tempfile.TemporaryDirectory(
@@ -229,14 +228,11 @@ def export_stim_array(
     ) as staging:
         staged = pathlib.Path(staging)
         (staged / seq_path.name).write_text(script, encoding="utf-8")
-        (staged / debug_csv_path.name).write_text(
-            report.debug_csv_text, encoding="utf-8"
-        )
         write_original_stim_sidecar(
             staged / original_path.name, stim_array.values, stim_array.dt, script
         )
         generate_syscon2_timeline_overview_png(script, staged / overview_path.name)
-        for destination in (overview_path, debug_csv_path, original_path, seq_path):
+        for destination in (overview_path, original_path, seq_path):
             (staged / destination.name).replace(destination)
     targeted = report.exported_neuron_ids
     return SysconExportResult(seq_path, overview_path, targeted, report)

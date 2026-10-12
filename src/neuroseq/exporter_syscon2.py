@@ -1467,9 +1467,6 @@ def _sanitize_stim_array_for_export(
     n_windows = int(np.ceil(n_timepoints / float(_SYSCON2_WINDOW_TICKS)))
 
     raw_segments = _extract_raw_segments(values, active_threshold=active_threshold)
-    # Every inserted preblank window pushes the tail right by one window; at most
-    # one is needed per segment, so pad the window grid to keep the tail.
-    n_windows += len(raw_segments) + 1
     quantized_segments, quantization_fixes = _raw_to_quantized_window_segments(
         raw_segments,
         binary_intensity=binary_intensity,

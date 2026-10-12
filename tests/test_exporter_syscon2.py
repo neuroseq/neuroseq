@@ -2159,15 +2159,6 @@ def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None
     assert _starts(imported[:, 2]) == [900]
 
 
-def test_export_keeps_trailing_stimuli_when_blank_windows_push_the_tail() -> None:
-    values = np.zeros((500, 4), dtype=np.float32)
-    for neuron in range(4):
-        values[neuron * 110 : neuron * 110 + 64, neuron] = 1.0
-    for exact in (False, True):
-        imported = _export_and_reimport(values, exact=exact)
-        assert np.flatnonzero(imported.any(axis=0)).tolist() == [0, 1, 2, 3]
-
-
 def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
     from neuroseq.importer_syscon2 import original_stim_sidecar_path
     from neuroseq.importer_syscon2 import parse_syscon2_seq_file

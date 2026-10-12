@@ -60,7 +60,7 @@ def test_failed_preview_leaves_existing_files_intact(export_input, tmp_path, moc
     project, stim, settings, _, _ = export_input
     existing = [
         tmp_path / "valid.seq",
-        tmp_path / "valid_export_debug.csv",
+        tmp_path / "valid_original_stim.npz",
         tmp_path / "valid_overview.png",
     ]
     for path in existing:
