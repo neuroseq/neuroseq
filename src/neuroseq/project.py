@@ -7,6 +7,7 @@ import math
 import pathlib
 import pickle
 import runpy
+import uuid
 import zipfile
 from collections.abc import Callable
 from collections.abc import Mapping
@@ -150,10 +151,11 @@ class Project:
         self.experiments: dict[str, Experiment] = {}
         self.stim_arrays: dict[str, StimArray] = {}
         self.cellpose_data: CellposeImportResult | None = None
-        self.calcium_video_paths: list[pathlib.Path] = []
-        self.calcium_video_fps: float | None = None
+        # Each video: {"id", "name", "paths", "fps"} plus "run_id" for a
+        # ScanImage recording, whose index lives in imaging_acquisitions.
+        self.calcium_videos: list[dict] = []
+        self.selected_calcium_video_id: str | None = None
         self.imaging_acquisitions: list[dict] = []
-        self.calcium_scanimage_index: dict | None = None
         self.syscon2_export_template_text: str | None = None
         self.power_luts: dict[int, PowerLut] = {}
 
@@ -229,13 +231,7 @@ class Project:
                             "power_luts", {}
                         ).items()
                     }
-                    self.calcium_video_paths = [
-                        pathlib.Path(p) for p in _meta.get("calcium_video_paths", [])
-                    ]
-                    fps = _meta.get("calcium_video_fps")
-                    self.calcium_video_fps = float(fps) if fps is not None else None
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
-                    self.calcium_scanimage_index = _meta.get("calcium_scanimage_index")
                     for acquisition in self.imaging_acquisitions:
                         if "recording" in acquisition:
                             acquisition["recording"] = compact_index(
@@ -248,21 +244,7 @@ class Project:
                             "waiting_for_first_frame",
                         }:
                             acquisition["status"] = "interrupted"
-                    if self.calcium_scanimage_index is not None:
-                        selected = self.calcium_scanimage_index
-                        self.calcium_scanimage_index = (
-                            next(
-                                (
-                                    r["recording"]
-                                    for r in self.imaging_acquisitions
-                                    if r.get("run_id") == selected.get("run_id")
-                                    and "recording" in r
-                                ),
-                                None,
-                            )
-                            if "frames" not in selected
-                            else compact_index(selected)
-                        )
+                    self._load_calcium_videos(_meta)
                     self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
@@ -300,11 +282,114 @@ class Project:
         """
         self.dirty = True
 
-    def set_calcium_video(self, paths: list[pathlib.Path], fps: float | None) -> None:
-        self.calcium_scanimage_index = None
-        self.calcium_video_paths = [pathlib.Path(path) for path in paths]
-        self.calcium_video_fps = float(fps) if fps is not None else None
+    @property
+    def selected_calcium_video(self) -> dict | None:
+        return next(
+            (
+                video
+                for video in self.calcium_videos
+                if video["id"] == self.selected_calcium_video_id
+            ),
+            None,
+        )
+
+    @property
+    def calcium_video_paths(self) -> list[pathlib.Path]:
+        video = self.selected_calcium_video
+        return [pathlib.Path(p) for p in video["paths"]] if video else []
+
+    @property
+    def calcium_video_fps(self) -> float | None:
+        video = self.selected_calcium_video
+        return video["fps"] if video else None
+
+    @property
+    def calcium_scanimage_index(self) -> dict | None:
+        video = self.selected_calcium_video
+        if video is None:
+            return None
+        if "index" in video:
+            return video["index"]
+        return self.scanimage_recording(video.get("run_id"))
+
+    def scanimage_recording(self, run_id: str | None) -> dict | None:
+        if run_id is None:
+            return None
+        return next(
+            (
+                record["recording"]
+                for record in self.imaging_acquisitions
+                if record.get("run_id") == run_id and "recording" in record
+            ),
+            None,
+        )
+
+    def add_calcium_video(
+        self,
+        paths: list[pathlib.Path],
+        fps: float | None,
+        name: str | None = None,
+        run_id: str | None = None,
+    ) -> dict:
+        """Add a video and select it; returns the new entry."""
+        base = name or (pathlib.Path(paths[0]).stem if paths else "Video")
+        names = {video["name"] for video in self.calcium_videos}
+        unique, suffix = base, 2
+        while unique in names:
+            unique, suffix = f"{base} ({suffix})", suffix + 1
+        video: dict = {
+            "id": uuid.uuid4().hex,
+            "name": unique,
+            "paths": [str(path) for path in paths],
+            "fps": float(fps) if fps is not None else None,
+        }
+        if run_id is not None:
+            video["run_id"] = run_id
+        self.calcium_videos.append(video)
+        self.selected_calcium_video_id = video["id"]
         self.mark_dirty()
+        return video
+
+    def select_calcium_video(self, video_id: str | None) -> None:
+        if video_id != self.selected_calcium_video_id:
+            self.selected_calcium_video_id = video_id
+            self.mark_dirty()
+
+    def remove_calcium_video(self, video_id: str | None = None) -> None:
+        """Remove a video (the selected one by default); select the last left."""
+        video_id = video_id or self.selected_calcium_video_id
+        self.calcium_videos = [v for v in self.calcium_videos if v["id"] != video_id]
+        if self.selected_calcium_video_id == video_id:
+            self.selected_calcium_video_id = (
+                self.calcium_videos[-1]["id"] if self.calcium_videos else None
+            )
+        self.mark_dirty()
+
+    def _load_calcium_videos(self, meta: dict) -> None:
+        if "calcium_videos" in meta:
+            self.calcium_videos = meta["calcium_videos"]
+            for video in self.calcium_videos:
+                if "index" in video:
+                    video["index"] = compact_index(video["index"])
+            self.selected_calcium_video_id = meta.get("selected_calcium_video_id")
+            return
+        # Projects saved before multiple videos stored a single selected one.
+        index = meta.get("calcium_scanimage_index")
+        recording = self.scanimage_recording((index or {}).get("run_id"))
+        if recording is None and index is not None and "frames" in index:
+            recording = compact_index(index)
+        paths = meta.get("calcium_video_paths") or (recording or {}).get("paths", [])
+        if not paths:
+            return
+        fps = meta.get("calcium_video_fps", (recording or {}).get("fps"))
+        video = self.add_calcium_video(
+            [pathlib.Path(p) for p in paths], float(fps) if fps is not None else None
+        )
+        if recording is not None:
+            if self.scanimage_recording(recording.get("run_id")) is recording:
+                video["run_id"] = recording["run_id"]
+            else:
+                video["index"] = recording
 
     def import_project(
         self,
@@ -1447,24 +1532,17 @@ class Project:
                     str(wavelength_nm): lut.to_serializable()
                     for wavelength_nm, lut in self.power_luts.items()
                 }
+            if self.calcium_videos:
+                metadata["calcium_videos"] = self.calcium_videos
+                metadata["selected_calcium_video_id"] = self.selected_calcium_video_id
             if self.calcium_video_paths:
+                # Lets earlier NeuroSeq versions still open the selected video.
                 metadata["calcium_video_paths"] = [
                     str(path) for path in self.calcium_video_paths
                 ]
-            if self.calcium_video_fps is not None:
                 metadata["calcium_video_fps"] = self.calcium_video_fps
             if self.imaging_acquisitions:
                 metadata["imaging_acquisitions"] = self.imaging_acquisitions
-            if self.calcium_scanimage_index is not None:
-                selected = self.calcium_scanimage_index
-                run_id = selected.get("run_id")
-                if run_id is not None and any(
-                    r.get("run_id") == run_id and "recording" in r
-                    for r in self.imaging_acquisitions
-                ):
-                    metadata["calcium_scanimage_index"] = {"run_id": run_id}
-                else:
-                    metadata["calcium_scanimage_index"] = compact_index(selected)
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()

@@ -227,10 +227,13 @@ def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path, rec
     from neuroseq.save_load_options import SaveLoadOptions
 
     project = Project()
+    index = index_recording(recording[0])
+    index["run_id"] = "two"
     project.imaging_acquisitions = [
-        {"run_id": "one", "status": "recording", "directory": "C:/recordings/one"}
+        {"run_id": "one", "status": "recording", "directory": "C:/recordings/one"},
+        {"run_id": "two", "status": "completed", "recording": index},
     ]
-    project.calcium_scanimage_index = index_recording(recording[0])
+    project.add_calcium_video([Path(p) for p in recording[0]], 10, run_id="two")
     path = tmp_path / "recording.nseq"
     project.save(path, SaveLoadOptions(True, True, False, False))
     loaded = Project(path)
@@ -395,11 +398,8 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     assert gui.calcium_video_widget.recorded_channel == 2
     assert gui.project.calcium_scanimage_index == result
     assert len(gui.calcium_video_widget._frame_refs) == 4
-    assert gui.scanimage_controls.recordings_combo.count() == 2
-    gui.project.set_calcium_video([], None)
-    gui._select_scanimage_recording("one")
-    assert gui.project.calcium_video_paths
-    assert gui.project.calcium_scanimage_index == result
+    assert gui.cmb_video.count() == 1
+    assert gui.cmb_video.currentText() == "Test"
     gui._close_confirmed = True
     gui.close()
 
@@ -487,13 +487,14 @@ def test_standard_two_channel_run_has_compact_transport_and_metadata(
     project.imaging_acquisitions = [
         {"run_id": "long", "status": "completed", "recording": index}
     ]
-    project.calcium_scanimage_index = index
+    project.add_calcium_video([Path("long.tif")], 30, run_id="long")
     archive = tmp_path / "long.nseq"
     project.save(archive, SaveLoadOptions(True, True, False, False))
     with ZipFile(archive) as zf:
         raw = zf.read("project_metadata.json")
     assert len(raw) < 5_000_000
-    assert json.loads(raw)["calcium_scanimage_index"] == {"run_id": "long"}
+    assert json.loads(raw)["calcium_videos"][0]["run_id"] == "long"
+    assert "index" not in json.loads(raw)["calcium_videos"][0]
     loaded = Project(archive)
     assert loaded.calcium_scanimage_index is loaded.imaging_acquisitions[0]["recording"]
     assert loaded.calcium_scanimage_index == index
@@ -559,7 +560,7 @@ def test_new_recording_preserves_imported_movie(
     qtbot.addWidget(gui)
     project = gui.project
     imported = Path(recording[0][0])
-    project.set_calcium_video([imported], 20)
+    project.add_calcium_video([imported], 20, name="Imported")
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui._start_scanimage_recording(
         {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
@@ -569,15 +570,22 @@ def test_new_recording_preserves_imported_movie(
     result = index_recording(recording[0])
     result.update(run_id="new", status="completed")
     gui._scanimage_recording_ready(result)
-    assert project.calcium_video_paths == [imported]
-    assert project.calcium_video_fps == 20
-    assert project.calcium_scanimage_index is None
+    assert [video["name"] for video in project.calcium_videos] == ["Imported", "New"]
+    assert project.calcium_videos[0]["paths"] == [str(imported)]
+    assert project.calcium_videos[0]["fps"] == 20
+    assert project.calcium_scanimage_index == result
     assert project.imaging_acquisitions[0]["recording"] == result
-    assert "imported video is unchanged" in gui.scanimage_controls.message_label.text()
     if switch_project:
         gui.update_project(project)
+    assert [gui.cmb_video.itemText(i) for i in range(gui.cmb_video.count())] == [
+        "Imported",
+        "New",
+    ]
+    gui.cmb_video.activated.emit(0)
+    assert project.calcium_video_paths == [imported]
+    assert project.calcium_scanimage_index is None
     gui.scanimage_controls.channel_spin.setValue(2)
-    gui._select_scanimage_recording("new")
+    gui.cmb_video.activated.emit(1)
     assert gui.calcium_video_widget.recorded_channel == 2
     gui.scanimage_controls.channel_spin.setValue(3)
     assert gui.calcium_video_widget.recorded_channel == 1
@@ -673,5 +681,134 @@ def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording)
     loaded.save(saved, SaveLoadOptions(True, True, False, False))
     with ZipFile(saved) as zf:
         metadata = json.loads(zf.read("project_metadata.json"))
-    assert metadata["calcium_scanimage_index"] == {"run_id": "old"}
+    assert metadata["calcium_videos"][0]["run_id"] == "old"
+    assert "index" not in metadata["calcium_videos"][0]
+    assert "calcium_scanimage_index" not in metadata
     assert "description" not in json.dumps(metadata["imaging_acquisitions"])
+
+
+def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
+    from qtpy import QtWidgets
+
+    from neuroseq.gui import Gui
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    # The Video tab must keep mirroring the Cell segmentation tab, so no
+    # acquisition controls may be inserted above its canvas.
+    assert gui.scanimage_controls.window() is gui.scanimage_dialog
+    assert not gui.calcium_video_widget.isAncestorOf(gui.scanimage_controls)
+    toolbar = gui.btn_design_dynamic_input.parentWidget()
+    assert isinstance(toolbar, QtWidgets.QToolBar)
+    widgets = [toolbar.widgetForAction(action) for action in toolbar.actions()]
+    position = widgets.index(gui.btn_design_dynamic_input)
+    assert widgets[position + 1 : position + 3] == [
+        gui.btn_image_acquisition,
+        gui.cmb_video,
+    ]
+    assert not gui.cmb_video.isEnabled()
+    gui.btn_image_acquisition.click()
+    assert gui.scanimage_dialog.isVisible()
+    assert not gui.scanimage_dialog.isModal()
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
+    from qtpy import QtCore
+
+    from neuroseq.gui import Gui
+    from tests.test_spatial_footprint_widget import _cellpose_result
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.show()
+    qtbot.waitExposed(gui)
+    footprint = gui.spatial_footprint_widget
+    footprint.set_data(_cellpose_result())
+    gui.project.add_calcium_video([Path(p) for p in recording[0]], 10)
+    gui._refresh_calcium_video_widgets()
+
+    def canvas_rect(canvas):
+        top_left = canvas.mapTo(footprint.tabs, QtCore.QPoint(0, 0))
+        return QtCore.QRect(top_left, canvas.size())
+
+    footprint.tabs.setCurrentIndex(0)
+    qtbot.waitUntil(lambda: footprint.overlay_widget.isVisible())
+    cell_rect = canvas_rect(footprint.overlay_widget)
+    footprint.tabs.setCurrentIndex(1)
+    qtbot.waitUntil(lambda: gui.calcium_video_widget.widget.isVisible())
+    assert canvas_rect(gui.calcium_video_widget.widget) == cell_rect
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
+    from neuroseq.gui import Gui
+    from neuroseq.project import Project
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    first, second = (Path(p) for p in recording[0])
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.project.add_calcium_video([first], 10)
+    gui.project.add_calcium_video([second], 20)
+    gui._refresh_calcium_video_widgets()
+    assert gui.cmb_video.count() == 2
+    assert gui.cmb_video.currentIndex() == 1
+    gui.cmb_video.activated.emit(0)
+    assert gui.project.calcium_video_paths == [first]
+    assert gui.calcium_video_widget._paths == [first]
+
+    archive = tmp_path / "videos.nseq"
+    gui.project.save(archive, SaveLoadOptions(True, True, False, False))
+    loaded = Project(archive)
+    assert [v["paths"] for v in loaded.calcium_videos] == [[str(first)], [str(second)]]
+    assert loaded.calcium_video_paths == [first]
+    assert loaded.calcium_video_fps == 10
+
+    gui._on_calcium_video_remove_requested()
+    assert gui.project.calcium_video_paths == [second]
+    assert gui.cmb_video.count() == 1
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_selecting_a_video_with_missing_files_keeps_the_current_one(
+    qtbot, recording, qmessagebox_calls
+):
+    from neuroseq.gui import Gui
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    present = Path(recording[0][0])
+    gui.project.add_calcium_video([Path("/missing/video.tif")], 10)
+    gui.project.add_calcium_video([present], 10)
+    gui._refresh_calcium_video_widgets()
+    gui.cmb_video.activated.emit(0)
+    assert gui.project.calcium_video_paths == [present]
+    assert gui.cmb_video.currentIndex() == 1
+    assert qmessagebox_calls
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
+    from neuroseq.project import Project
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    archive = tmp_path / "old.nseq"
+    Project().save(archive, SaveLoadOptions(True, True, False, False))
+    with ZipFile(archive) as source:
+        entries = {name: source.read(name) for name in source.namelist()}
+    metadata = json.loads(entries["project_metadata.json"])
+    metadata.update(calcium_video_paths=["/data/movie.tif"], calcium_video_fps=30)
+    entries["project_metadata.json"] = json.dumps(metadata).encode()
+    with ZipFile(archive, "w") as dest:
+        for name, data in entries.items():
+            dest.writestr(name, data)
+    loaded = Project(archive)
+    assert len(loaded.calcium_videos) == 1
+    assert loaded.calcium_video_paths == [Path("/data/movie.tif")]
+    assert loaded.calcium_video_fps == 30
+    assert not loaded.dirty

@@ -1,7 +1,8 @@
 # ScanImage acquisition on the same PC
 
-The calcium-video widget can connect to a running ScanImage MATLAB session,
-show live images, start or externally arm a recording, abort an acquisition,
+The **Image acquisition** toolbar button opens a dialog that connects to a
+running ScanImage MATLAB session. It can show live images in the imaging
+panel's Video tab, start or externally arm a recording, abort an acquisition,
 and open its completed TIFF files. ScanImage owns the scanner and original
 recording. NeuroSeq's preview is sampled at up to 5 updates/second
 (1 update/second during an owned recording), only while **Live view** is checked. Preview images are subsampled
@@ -35,7 +36,7 @@ repeat period is not used.
    `numpy` and `tifffile`, in the helper interpreter. A current unpinned engine
    package is not necessarily compatible with older MATLAB.
 
-3. In the imaging panel's video tab, select that Python executable and enter
+3. Click **Image acquisition** in the toolbar, select that Python executable and enter
    the shared session name. Click **Connect**. The helper connects only to an
    existing session with that name; it never starts another MATLAB instance.
    Required ScanImage properties and user-function registration are probed.
@@ -80,13 +81,16 @@ ScanImage became idle without any terminal callback. Verify restoration on your 
 including after abort, before starting another manual Grab. Acquisition metadata
 retains the settings used during the recording.
 
-A completed acquisition opens automatically if the project has no video or is
-already displaying a ScanImage recording. A separately imported video stays in
-place; the new recording remains available through the acquisition selector.
-The selected channel is retained when present; otherwise the selector changes
-to the first saved channel and displays a message.
+A completed acquisition is added to the project that requested it and becomes
+its selected video. Imported videos and earlier recordings stay in the list.
+The dialog's channel selector applies to both live preview and recorded
+playback. The selected channel is kept when the recording saved it; otherwise
+the selector changes to the first saved channel and displays a message.
 
-The **Recorded acquisitions** selector opens earlier recordings in the project.
+The video selector next to **Image acquisition** lists every video in the
+project: imported TIFF/GIF/movie files and finished recordings. **Import Video**
+adds to this list, and **Remove imaging data** removes only the selected video.
+The dialog is not modal, so the Video tab stays usable while it is open.
 Files remain external to `.nseq`; moving them without restoring their paths
 makes playback unavailable. Projects save the run metadata and index, not the
 raw movie. Frame indexes use compact columns and file indices and are stored

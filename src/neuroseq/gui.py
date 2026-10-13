@@ -405,12 +405,14 @@ class Gui(QtWidgets.QMainWindow):
             self._on_calcium_video_remove_requested
         )
         self.scanimage_connection = ScanImageConnection(self)
+        # Modeless, so the live image stays visible in the Video tab. Keeping
+        # the controls out of that tab keeps it aligned with Cell segmentation.
+        self.scanimage_dialog = QtWidgets.QDialog(self)
+        self.scanimage_dialog.setWindowTitle("Image acquisition")
         self.scanimage_controls = ScanImageControls(
-            self.scanimage_connection, self.calcium_video_widget
+            self.scanimage_connection, self.scanimage_dialog
         )
-        video_layout = self.calcium_video_widget.layout()
-        assert isinstance(video_layout, QtWidgets.QVBoxLayout)
-        video_layout.insertWidget(0, self.scanimage_controls)
+        QtWidgets.QVBoxLayout(self.scanimage_dialog).addWidget(self.scanimage_controls)
         self.scanimage_controls.live_changed.connect(self._set_scanimage_live)
         self.scanimage_controls.channel_changed.connect(self._set_scanimage_channel)
         self.scanimage_connection.frame_received.connect(
@@ -418,9 +420,6 @@ class Gui(QtWidgets.QMainWindow):
         )
         self.scanimage_controls.record_requested.connect(
             self._start_scanimage_recording
-        )
-        self.scanimage_controls.recording_selected.connect(
-            self._select_scanimage_recording
         )
         self.scanimage_connection.status_changed.connect(self._scanimage_status)
         self.scanimage_connection.recording_ready.connect(
@@ -1358,7 +1357,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
-        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
+        self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1384,7 +1383,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
-        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
+        self._refresh_video_selector()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
@@ -2359,12 +2358,12 @@ class Gui(QtWidgets.QMainWindow):
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.spatial_footprint_widget)
             if dialog.imported_tif_paths:
-                self.project.set_calcium_video(
-                    dialog.imported_tif_paths, dialog.imported_fps
+                self.project.add_calcium_video(
+                    dialog.imported_tif_paths,
+                    dialog.imported_fps,
+                    name=dialog.experiment_name,
                 )
-                self.calcium_video_widget.set_video_paths(
-                    dialog.imported_tif_paths, dialog.imported_fps
-                )
+                self._refresh_calcium_video_widgets()
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.calcium_video_widget)
 
@@ -2385,16 +2384,16 @@ class Gui(QtWidgets.QMainWindow):
         if not ok:
             return
         tif_paths = [pathlib.Path(path) for path in paths]
-        self.project.set_calcium_video(tif_paths, fps)
+        self.project.add_calcium_video(tif_paths, fps)
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
 
     def _on_calcium_video_remove_requested(self) -> None:
-        self.project.set_calcium_video([], None)
+        self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
     def _refresh_calcium_video_widgets(self) -> None:
-        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
+        self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_cellpose_data(self.project.cellpose_data)
             widget.set_stim_arrays(self.project.stim_arrays)
@@ -2470,8 +2469,58 @@ class Gui(QtWidgets.QMainWindow):
         if record["status"] != previous:
             project.mark_dirty()
 
+    def _open_image_acquisition_dialog(self) -> None:
+        self.scanimage_dialog.show()
+        self.scanimage_dialog.raise_()
+        self.scanimage_dialog.activateWindow()
+
+    def _refresh_video_selector(self) -> None:
+        if not hasattr(self, "cmb_video"):
+            return
+        self.cmb_video.blockSignals(True)
+        self.cmb_video.clear()
+        for video in self.project.calcium_videos:
+            label = video["name"]
+            run_id = video.get("run_id")
+            record = next(
+                (r for r in self.project.imaging_acquisitions if r["run_id"] == run_id),
+                None,
+            )
+            if record is not None and record.get("status") != "completed":
+                label = f"{label} · {record.get('status')}"
+            self.cmb_video.addItem(label, video["id"])
+        if not self.project.calcium_videos:
+            self.cmb_video.addItem("No video", None)
+        self.cmb_video.setEnabled(bool(self.project.calcium_videos))
+        self.cmb_video.setCurrentIndex(
+            max(0, self.cmb_video.findData(self.project.selected_calcium_video_id))
+        )
+        self.cmb_video.blockSignals(False)
+
+    def _on_video_selected(self, index: int) -> None:
+        video_id = self.cmb_video.itemData(index)
+        if video_id is None or video_id == self.project.selected_calcium_video_id:
+            return
+        video = next(v for v in self.project.calcium_videos if v["id"] == video_id)
+        missing = [path for path in video["paths"] if not pathlib.Path(path).is_file()]
+        if missing:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Video files missing",
+                "These files of the selected video were not found:\n"
+                + "\n".join(missing),
+            )
+            self._refresh_video_selector()
+            return
+        self.project.select_calcium_video(video_id)
+        self.scanimage_controls.live_check.setChecked(False)
+        self._refresh_calcium_video_widgets()
+        self._auto_show_widget(self.calcium_video_widget)
+
     def _set_scanimage_live(self, live: bool) -> None:
         self.calcium_video_widget.set_live(live)
+        if live:
+            self._auto_show_widget(self.calcium_video_widget)
         if not live:
             self._set_scanimage_channel(self.scanimage_controls.channel_spin.value())
 
@@ -2515,19 +2564,13 @@ class Gui(QtWidgets.QMainWindow):
             name=name, duration=result["duration_s"], timepoints=[], data=[]
         )
         record["experiment_name"] = name
-        replace_video = (
-            not project.calcium_video_paths
-            or project.calcium_scanimage_index is not None
+        project.add_calcium_video(
+            [pathlib.Path(p) for p in result["paths"]],
+            result["fps"],
+            name=name,
+            run_id=result["run_id"],
         )
-        if replace_video:
-            project.set_calcium_video(
-                [pathlib.Path(p) for p in result["paths"]], result["fps"]
-            )
-            project.calcium_scanimage_index = result
-        else:
-            self.scanimage_controls.show_message(
-                f"Saved {name}. Your imported video is unchanged; open the new movie from Recorded acquisitions in its project."
-            )
+        self.scanimage_controls.show_message(f"Recording {name} added to the videos.")
         project.mark_dirty()
         project.update_limits()
         self.scanimage_controls.live_check.setChecked(False)
@@ -2537,27 +2580,6 @@ class Gui(QtWidgets.QMainWindow):
             self.update_limits()
         # Movie availability does not imply extracted traces are ready. Do not
         # call SysCon2StimulationHost.acquisition_imported here.
-
-    def _select_scanimage_recording(self, run_id: str) -> None:
-        record = next(
-            (r for r in self.project.imaging_acquisitions if r["run_id"] == run_id),
-            None,
-        )
-        if record is None or "recording" not in record:
-            return
-        result = record["recording"]
-        missing = [path for path in result["paths"] if not pathlib.Path(path).is_file()]
-        if missing:
-            self.scanimage_controls.show_message(
-                "Recording files are missing: " + ", ".join(missing)
-            )
-            return
-        self.project.set_calcium_video(
-            [pathlib.Path(p) for p in result["paths"]], result["fps"]
-        )
-        self.project.calcium_scanimage_index = result
-        self.scanimage_controls.live_check.setChecked(False)
-        self._refresh_calcium_video_widgets()
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -3606,6 +3628,19 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.open_dynamic_input_designer
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
+        self.btn_image_acquisition = QtWidgets.QPushButton("Image acquisition")
+        self.btn_image_acquisition.setToolTip(
+            "Connect to ScanImage to preview and record imaging"
+        )
+        icons.set_widget_icon(self.btn_image_acquisition, "mdi6.microscope")
+        self.btn_image_acquisition.clicked.connect(self._open_image_acquisition_dialog)
+        toolbar.addWidget(self.btn_image_acquisition)
+        self.cmb_video = QtWidgets.QComboBox()
+        self.cmb_video.setMinimumWidth(160)
+        self.cmb_video.setToolTip("Video shown in the Video tab")
+        self.cmb_video.activated.connect(self._on_video_selected)
+        toolbar.addWidget(self.cmb_video)
+        self._refresh_video_selector()
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
         if toggled:

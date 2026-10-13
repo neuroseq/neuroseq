@@ -1,4 +1,4 @@
-"""Acquisition controls embedded above the calcium-video canvas."""
+"""ScanImage acquisition controls, hosted in the Image acquisition dialog."""
 
 from __future__ import annotations
 
@@ -12,14 +12,13 @@ from qtpy import QtWidgets
 from neuroseq.scanimage_connection import ScanImageConnection
 
 
-class ScanImageControls(QtWidgets.QGroupBox):
+class ScanImageControls(QtWidgets.QWidget):
     record_requested = QtCore.Signal(object)
     live_changed = QtCore.Signal(bool)
     channel_changed = QtCore.Signal(int)
-    recording_selected = QtCore.Signal(str)
 
     def __init__(self, connection: ScanImageConnection, parent=None) -> None:
-        super().__init__("ScanImage acquisition", parent)
+        super().__init__(parent)
         self.connection = connection
         self._last_frame_at: float | None = None
         self._waiting_since: float | None = None
@@ -84,14 +83,6 @@ class ScanImageControls(QtWidgets.QGroupBox):
         self.timeout_spin.setSuffix(" s")
         form.addRow("First-frame timeout", self.timeout_spin)
         layout.addLayout(form)
-        self.recordings_combo = QtWidgets.QComboBox()
-        self.recordings_combo.addItem("Recorded acquisitions", "")
-        self.recordings_combo.activated.connect(
-            lambda _: self.recording_selected.emit(
-                self.recordings_combo.currentData() or ""
-            )
-        )
-        layout.addWidget(self.recordings_combo)
         actions = QtWidgets.QHBoxLayout()
         self.live_check = QtWidgets.QCheckBox("Live view")
         self.live_check.toggled.connect(self.live_changed.emit)
@@ -141,16 +132,6 @@ class ScanImageControls(QtWidgets.QGroupBox):
         )
         if path:
             self.python_edit.setText(path)
-
-    def set_recordings(self, records: list[dict]) -> None:
-        self.recordings_combo.clear()
-        self.recordings_combo.addItem("Recorded acquisitions", "")
-        for record in records:
-            if "recording" in record:
-                self.recordings_combo.addItem(
-                    f"{record['name']} · {record['run_id'][:8]} · {record['status']}",
-                    record["run_id"],
-                )
 
     def _browse_directory(self) -> None:
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Recording folder")
