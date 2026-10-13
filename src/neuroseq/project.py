@@ -214,9 +214,14 @@ class Project:
                 )
                 self.experiments = load_from_zip("experimental_data", zf)
                 self.stim_arrays = load_from_zip("stim_arrays", zf)
-                self.cellpose_data = load_from_zip("cellpose_data", zf).get(
-                    "cellpose_import"
-                )
+                # "cellpose_data_v2" holds results in their raw orientation
+                # (#601); older NeuroSeq versions do not read it, so they see no
+                # segmentation instead of a mirrored one. Older archives keep
+                # "cellpose_data", which io.py migrates on load.
+                self.cellpose_data = (
+                    load_from_zip("cellpose_data_v2", zf)
+                    or load_from_zip("cellpose_data", zf)
+                ).get("cellpose_import")
                 if "project_metadata.json" in zf.namelist():
                     _meta = json.loads(zf.read("project_metadata.json"))
                     self.dt = float(_meta.get("dt", 0.001))
@@ -1567,7 +1572,7 @@ class Project:
                 append_to_zip(self.experiments, "experimental_data", zf)
                 if self.cellpose_data is not None:
                     append_to_zip(
-                        {"cellpose_import": self.cellpose_data}, "cellpose_data", zf
+                        {"cellpose_import": self.cellpose_data}, "cellpose_data_v2", zf
                     )
         self.filepath = pathlib.Path(filepath)
         self.dirty = False

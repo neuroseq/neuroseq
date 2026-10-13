@@ -1054,7 +1054,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.importer._original_cellpose_ids,
             self.overlay_widget.overlay_view._label_centers,
             config,
-            self.importer.image_data.shape[0],
         )
 
     def _mapping_to_text(self, mapping: dict[int, int]) -> str:
@@ -1139,24 +1138,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if mapping is None:
             mapping = self._compute_aoi_mapping()
 
-        image_height = self.importer.image_data.shape[0]
         reverse_mapping = {
             cellpose_id: stim_id for stim_id, cellpose_id in mapping.items()
         }
         square_members: list[tuple[int, int]] = []
         circle_members: list[tuple[int, int]] = []
         for cellpose_id, (
-            world_x,
-            world_y,
+            x,
+            y,
         ) in self.overlay_widget.overlay_view._label_centers.items():
-            user_x = float(world_x)
-            user_y = float(image_height - world_y)
             stim_id = reverse_mapping.get(int(cellpose_id))
             if stim_id is None:
                 continue
-            if config.square.enabled and point_in_square(user_x, user_y, config.square):
+            if config.square.enabled and point_in_square(x, y, config.square):
                 square_members.append((int(stim_id), int(cellpose_id)))
-            if config.circle.enabled and point_in_circle(user_x, user_y, config.circle):
+            if config.circle.enabled and point_in_circle(x, y, config.circle):
                 circle_members.append((int(stim_id), int(cellpose_id)))
 
         square_members.sort()

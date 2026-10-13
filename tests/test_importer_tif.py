@@ -286,7 +286,7 @@ def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_p
 
     direct = run_roi_average_pipeline([path], raw_masks, params)
     spatial_result = MagicMock()
-    spatial_result.segmentation_array = np.flipud(raw_masks - 1)
+    spatial_result.segmentation_array = raw_masks - 1
     via_spatial_import = run_roi_average_pipeline(
         [path], _cellpose_result_to_masks(spatial_result), params
     )
@@ -343,15 +343,14 @@ def test_cellpose_result_to_masks_round_trips_background_and_labels():
     result.segmentation_array = seg
 
     masks = _cellpose_result_to_masks(result)
-    # Undo the spatial import's vertical flip, then map 0-based -> 1-based
-    # and -1 -> background zero.
+    # Map 0-based -> 1-based and -1 -> background zero; orientation is kept.
     np.testing.assert_array_equal(
         masks,
         np.array(
             [
-                [0, 0, 2, 2],
-                [0, 1, 1, 2],
                 [0, 0, 1, 1],
+                [0, 1, 1, 2],
+                [0, 0, 2, 2],
             ],
             dtype=np.int32,
         ),

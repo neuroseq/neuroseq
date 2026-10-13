@@ -239,8 +239,7 @@ def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
             if key.endswith("_CenterY")
         )
         coordinates.append((center_x, center_y))
-        row = int(segmentation.shape[0] - 1 - center_y)
-        assert segmentation[row, int(center_x)] == 0
+        assert segmentation[int(center_y), int(center_x)] == 0
     assert len(set(coordinates)) == 10
 
 
@@ -254,8 +253,7 @@ def test_edge_balanced_spots_keep_clear_of_roi_border() -> None:
     )[0]
 
     def edge_clearance(point: tuple[float, float]) -> float:
-        x, flipped_y = point
-        y = segmentation.shape[0] - 1 - flipped_y
+        x, y = point
         return min(x - 2, 21 - x, y - 2, 21 - y)
 
     assert min(map(edge_clearance, legacy)) == 0
@@ -1956,17 +1954,10 @@ def test_check_syscon2_input_sanity_computes_pulse_overrun_fix_values(
 
 
 def test_compute_cell_centroids_uses_top_left_origin() -> None:
-    """SysCon ``.seq`` uses top-left origin; the cellpose importer applies
-    ``np.flipud`` on load (Fiji convention), so the exporter must undo that
-    flip when producing centroids — otherwise SysCon renders cells mirrored
-    along the Y axis. See ``_compute_cell_centroids`` docstring."""
-    # 4×3 image, single cell occupying the *top-left* corner of the original
-    # (pre-flipud) image — i.e. row 0, cols 0-1. After importer_cellpose
-    # applies np.flipud, the cell sits at the *bottom-left* of the stored
-    # segmentation. The exporter must report its centroid using the original
-    # top-left frame: x ≈ 0.5, y = 0.
+    """SysCon ``.seq`` uses a top-left origin, like the stored segmentation
+    (#601): a cell in the top row has y = 0."""
     segmentation = np.full((4, 3), -1, dtype=np.int32)
-    segmentation[3, 0:2] = 0  # post-flipud position of the top-row cell
+    segmentation[0, 0:2] = 0
 
     centroids = _compute_cell_centroids(segmentation)
 
@@ -1977,11 +1968,9 @@ def test_compute_cell_centroids_uses_top_left_origin() -> None:
 
 
 def test_compute_cell_centroids_bottom_cell_maps_to_high_y() -> None:
-    """The mirror case: a cell at the bottom of the original image (row H-1)
-    has been ``flipud``-mapped to row 0 of the stored array. The exporter
-    must report y = H - 1 for it."""
+    """A cell in the bottom row (H - 1) has y = H - 1."""
     segmentation = np.full((4, 3), -1, dtype=np.int32)
-    segmentation[0, 0:2] = 0  # post-flipud position of the bottom-row cell
+    segmentation[3, 0:2] = 0
 
     centroids = _compute_cell_centroids(segmentation)
 

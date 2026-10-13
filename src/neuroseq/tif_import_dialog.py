@@ -40,16 +40,14 @@ from neuroseq.stim import StimArray
 
 
 def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
-    """Convert stored display-oriented masks back to raw TIFF coordinates.
+    """Convert stored masks back to Cellpose's raw label layout.
 
-    The spatial-footprint importer flips Cellpose segmentation vertically for
-    NeuroSeq/Fiji display coordinates. TIFF extraction operates on the original
-    pixel coordinates, so undo that flip as well as restoring Cellpose's
-    1-based labels and zero-valued background.
+    Masks share the TIFFs' pixel coordinates; only Cellpose's 1-based labels
+    and zero-valued background need restoring.
     """
     if result.segmentation_array is None:
         raise ValueError("Cellpose segmentation is missing; re-run Cellpose import.")
-    seg = np.flipud(np.asarray(result.segmentation_array, dtype=np.int32))
+    seg = np.asarray(result.segmentation_array, dtype=np.int32)
     masks = seg.copy()
     # In CellposeImportResult: background = -1, cells = 0..N-1
     # Suite2p / Cellpose raw layout: background = 0, cells = 1..N
@@ -142,10 +140,8 @@ def _build_cellpose_result_from_pipeline(
         and background_image.shape[:2] == result.masks.shape
     ):
         source = background_image
-    importer.image_data = np.flipud(_prepare_background_rgb(source))
-    segmentation = result.masks.astype(np.int32) - 1
-    importer.segmentation_data = np.flipud(segmentation)
-    importer._segmentation_flipped_for_image = True
+    importer.image_data = _prepare_background_rgb(source)
+    importer.segmentation_data = result.masks.astype(np.int32) - 1
     unique_ids = np.unique(importer.segmentation_data)
     importer._original_cellpose_ids = unique_ids[unique_ids >= 0]
     importer.generate_overlay()

@@ -245,7 +245,7 @@ class CalciumVideoWidget(FPLWidget):
             return
         self.empty_state_widget.hide()
         self.widget.show()
-        self.current_frame = self._to_rgb(np.flipud(frame["pixels"]))
+        self.current_frame = self._to_rgb(frame["pixels"])
         # Arrival time is not stimulation time. Never draw planned stimulation
         # crosses on live frames without a measured synchronization mapping.
         self._set_crosses(set())
@@ -347,10 +347,7 @@ class CalciumVideoWidget(FPLWidget):
                 frame = frame[sub_index]
         while frame.ndim > 2:
             frame = frame[0]
-        # CellposeImportDialog flips the reference image and masks vertically
-        # when loading them. Match that in-app coordinate convention so
-        # centroids and stimulation overlays land on the raw movie cells.
-        return np.flipud(frame)
+        return frame
 
     @staticmethod
     def _to_rgb(frame: np.ndarray) -> np.ndarray:
@@ -527,6 +524,7 @@ class CalciumVideoWidget(FPLWidget):
             self.subplot.axes.visible = False
             self.subplot.grids = False
             self.subplot.camera.maintain_aspect = True
+            self.show_images_top_down()
             self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
         else:
             self._frame_graphic.data = frame
@@ -569,7 +567,7 @@ class CalciumVideoWidget(FPLWidget):
             return
         with tifffile.TiffWriter(path) as writer:
             for index in range(len(self._frame_refs)):
-                writer.write(self._export_frame(index), photometric="rgb")
+                writer.write(self._labeled_frame(index), photometric="rgb")
 
     def _export_gif_streaming(self, path: Path) -> None:
         """Write a GIF one frame at a time to avoid buffering the movie."""
@@ -587,7 +585,7 @@ class CalciumVideoWidget(FPLWidget):
                         ),
                     )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
-                    Image.fromarray(self._export_frame(index), mode="RGB")
+                    Image.fromarray(self._labeled_frame(index), mode="RGB")
                 )
                 params = {
                     "duration": duration_ms,
@@ -605,12 +603,6 @@ class CalciumVideoWidget(FPLWidget):
                     file, frame, (0, 0), params
                 )
             file.write(b";")
-
-    def _export_frame(self, index: int) -> np.ndarray:
-        # _read_frame flips frames vertically for display (see there). Undo it
-        # so exported files keep the recording's orientation; crosses drawn in
-        # display coordinates flip with the image and stay on their cells.
-        return np.ascontiguousarray(np.flipud(self._labeled_frame(index)))
 
     def _labeled_frame(self, index: int) -> np.ndarray:
         assert self._fps is not None

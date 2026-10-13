@@ -192,7 +192,7 @@ def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, rec
     widget.set_live(True)
     pixels = np.arange(20, dtype=np.float32).reshape(4, 5)
     widget.show_live_frame({"pixels": pixels})
-    expected = widget._to_rgb(np.flipud(pixels))
+    expected = widget._to_rgb(pixels)  # kept as scanned; the camera flips
     widget.set_time_ms(0)
     np.testing.assert_array_equal(widget.current_frame, expected)
     assert not widget.save_button.isEnabled()
