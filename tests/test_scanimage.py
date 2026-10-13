@@ -700,9 +700,11 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     assert not gui.calcium_video_widget.isAncestorOf(gui.scanimage_controls)
     toolbar = gui.btn_design_dynamic_input.parentWidget()
     assert isinstance(toolbar, QtWidgets.QToolBar)
-    widgets = [toolbar.widgetForAction(action) for action in toolbar.actions()]
+    actions = toolbar.actions()
+    widgets = [toolbar.widgetForAction(action) for action in actions]
     position = widgets.index(gui.btn_design_dynamic_input)
-    assert widgets[position + 1 : position + 3] == [
+    assert actions[position + 1].isSeparator()
+    assert widgets[position + 2 : position + 4] == [
         gui.btn_image_acquisition,
         gui.cmb_video,
     ]

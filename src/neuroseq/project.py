@@ -332,7 +332,7 @@ class Project:
         run_id: str | None = None,
     ) -> dict:
         """Add a video and select it; returns the new entry."""
-        base = name or (pathlib.Path(paths[0]).stem if paths else "Video")
+        base = name or (pathlib.Path(paths[0]).stem if paths else "Imaging")
         names = {video["name"] for video in self.calcium_videos}
         unique, suffix = base, 2
         while unique in names:

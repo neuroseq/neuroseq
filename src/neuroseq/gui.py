@@ -2370,9 +2370,9 @@ class Gui(QtWidgets.QMainWindow):
     def _on_calcium_video_import_requested(self) -> None:
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "Select raw calcium video file(s)",
+            "Select raw calcium imaging file(s)",
             "",
-            "Video files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+            "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
             "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
             "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
         )
@@ -2490,7 +2490,7 @@ class Gui(QtWidgets.QMainWindow):
                 label = f"{label} · {record.get('status')}"
             self.cmb_video.addItem(label, video["id"])
         if not self.project.calcium_videos:
-            self.cmb_video.addItem("No video", None)
+            self.cmb_video.addItem("No imaging data", None)
         self.cmb_video.setEnabled(bool(self.project.calcium_videos))
         self.cmb_video.setCurrentIndex(
             max(0, self.cmb_video.findData(self.project.selected_calcium_video_id))
@@ -2506,8 +2506,8 @@ class Gui(QtWidgets.QMainWindow):
         if missing:
             QtWidgets.QMessageBox.warning(
                 self,
-                "Video files missing",
-                "These files of the selected video were not found:\n"
+                "Imaging files missing",
+                "These files of the selected imaging data were not found:\n"
                 + "\n".join(missing),
             )
             self._refresh_video_selector()
@@ -2570,7 +2570,9 @@ class Gui(QtWidgets.QMainWindow):
             name=name,
             run_id=result["run_id"],
         )
-        self.scanimage_controls.show_message(f"Recording {name} added to the videos.")
+        self.scanimage_controls.show_message(
+            f"Recording {name} added to the imaging data."
+        )
         project.mark_dirty()
         project.update_limits()
         self.scanimage_controls.live_check.setChecked(False)
@@ -3628,6 +3630,7 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.open_dynamic_input_designer
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
+        toolbar.addSeparator()
         self.btn_image_acquisition = QtWidgets.QPushButton("Image acquisition")
         self.btn_image_acquisition.setToolTip(
             "Connect to ScanImage to preview and record imaging"
@@ -3637,7 +3640,7 @@ class Gui(QtWidgets.QMainWindow):
         toolbar.addWidget(self.btn_image_acquisition)
         self.cmb_video = QtWidgets.QComboBox()
         self.cmb_video.setMinimumWidth(160)
-        self.cmb_video.setToolTip("Video shown in the Video tab")
+        self.cmb_video.setToolTip("Imaging data shown in the Imaging tab")
         self.cmb_video.activated.connect(self._on_video_selected)
         toolbar.addWidget(self.cmb_video)
         self._refresh_video_selector()

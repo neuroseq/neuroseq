@@ -2,7 +2,7 @@
 
 The **Image acquisition** toolbar button opens a dialog that connects to a
 running ScanImage MATLAB session. It can show live images in the imaging
-panel's Video tab, start or externally arm a recording, abort an acquisition,
+panel's Imaging tab, start or externally arm a recording, abort an acquisition,
 and open its completed TIFF files. ScanImage owns the scanner and original
 recording. NeuroSeq's preview is sampled at up to 5 updates/second
 (1 update/second during an owned recording), only while **Live view** is checked. Preview images are subsampled
@@ -82,15 +82,17 @@ including after abort, before starting another manual Grab. Acquisition metadata
 retains the settings used during the recording.
 
 A completed acquisition is added to the project that requested it and becomes
-its selected video. Imported videos and earlier recordings stay in the list.
+its selected imaging data. Imported imaging data and earlier recordings stay in
+the list.
 The dialog's channel selector applies to both live preview and recorded
 playback. The selected channel is kept when the recording saved it; otherwise
 the selector changes to the first saved channel and displays a message.
 
-The video selector next to **Image acquisition** lists every video in the
-project: imported TIFF/GIF/movie files and finished recordings. **Import Video**
-adds to this list, and **Remove imaging data** removes only the selected video.
-The dialog is not modal, so the Video tab stays usable while it is open.
+The imaging data selector next to **Image acquisition** lists all imaging data in
+the project: imported TIFF/GIF/movie files and finished recordings. **Import
+Imaging Data** adds to this list, and **Remove imaging data** removes only the
+selected entry. The dialog is not modal, so the Imaging tab stays usable while
+it is open.
 Files remain external to `.nseq`; moving them without restoring their paths
 makes playback unavailable. Projects save the run metadata and index, not the
 raw movie. Frame indexes use compact columns and file indices and are stored
@@ -103,7 +105,7 @@ request, stimulus snapshot, and available SysCon export settings before the
 hardware command. It aids recovery if NeuroSeq exits before the project is
 saved. Its requested state is not evidence that the acquisition completed.
 
-The existing **Save video…** action exports a rendered derivative. It does not
+The existing **Save imaging data…** action exports a rendered derivative. It does not
 replace ScanImage's original TIFF recording. Live preview is not exportable
 through this action. Recorded ScanImage playback uses channel-specific frame
 timestamps; brightness conversion affects only the display/derivative. GIF
@@ -114,7 +116,7 @@ acquisition timing; retain the TIFF timestamps for analysis.
 ## Stimulation and timing
 
 Use the existing SysCon widget to export/select/upload stimulation. Imaging can
-be armed from the video widget and triggered through the configured physical
+be armed from the Image acquisition dialog and triggered through the configured physical
 input. This version does **not** automatically run SysCon or assert that its
 selected sequence matches the editor snapshot. The snapshot records the
 planned input at the time imaging was requested.

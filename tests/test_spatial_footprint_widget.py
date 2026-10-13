@@ -463,7 +463,7 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
 def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
     """The display-toggle checkboxes are the last thing in the Cell
     segmentation tab, in a bar the same size as the Video tab's bottom
-    action bar (Save video.../Remove imaging data) - matching shapes for
+    action bar (Save imaging data.../Remove imaging data) - matching shapes for
     both tabs keeps switching between them from bouncing the panel around."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
@@ -1889,7 +1889,7 @@ def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
 
     assert [widget.tabs.tabText(i) for i in range(widget.tabs.count())] == [
         "Cell segmentation",
-        "Video",
+        "Imaging",
     ]
     assert widget.calcium_video_widget.video_actions_widget.height() == 44
     assert widget.calcium_video_widget.remove_button.text() == "Remove imaging data"

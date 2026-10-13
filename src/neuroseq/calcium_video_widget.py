@@ -62,7 +62,7 @@ class CalciumVideoWidget(FPLWidget):
         self.stim_combo = QtWidgets.QComboBox(self)
         self.stim_combo.setMinimumWidth(180)
         self.stim_combo.currentIndexChanged.connect(self._on_stim_source_changed)
-        self.save_button = QtWidgets.QPushButton("Save video…", self)
+        self.save_button = QtWidgets.QPushButton("Save imaging data…", self)
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
@@ -83,7 +83,7 @@ class CalciumVideoWidget(FPLWidget):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
-        self.import_button = QtWidgets.QPushButton("Import Video", self)
+        self.import_button = QtWidgets.QPushButton("Import Imaging Data", self)
         self.import_button.clicked.connect(self.import_requested.emit)
 
         layout = self.layout()
@@ -91,7 +91,9 @@ class CalciumVideoWidget(FPLWidget):
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
         empty_layout.addStretch(1)
-        label = QtWidgets.QLabel("No calcium video loaded.", self.empty_state_widget)
+        label = QtWidgets.QLabel(
+            "No calcium imaging data loaded.", self.empty_state_widget
+        )
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(label)
         empty_layout.addWidget(
@@ -171,7 +173,7 @@ class CalciumVideoWidget(FPLWidget):
                     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
                     if not capture.isOpened() or frame_count <= 0:
                         capture.release()
-                        raise ValueError("Video contains no readable frames")
+                        raise ValueError("Imaging file contains no readable frames")
                     capture_index = len(self._cv_captures)
                     self._cv_captures.append(capture)
                     frame_refs.extend(
@@ -220,7 +222,7 @@ class CalciumVideoWidget(FPLWidget):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Cell segmentation unavailable",
-                "The video will play normally, but stimulation crosses require "
+                "The imaging data will play normally, but stimulation crosses require "
                 "uploaded Cellpose segmentation masks.",
             )
             self._video_warning_shown = True
@@ -305,7 +307,7 @@ class CalciumVideoWidget(FPLWidget):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Stimulation data unavailable",
-                    "The selected stimulation source is empty. The video will "
+                    "The selected stimulation source is empty. The imaging data will "
                     "continue to play without stimulation crosses.",
                 )
                 self._stim_warning_shown = True
@@ -336,7 +338,7 @@ class CalciumVideoWidget(FPLWidget):
             capture.set(cv2.CAP_PROP_POS_FRAMES, sub_index)
             ok, frame_data = capture.read()
             if not ok:
-                raise ValueError("Could not read video frame")
+                raise ValueError("Could not read imaging frame")
             frame = np.asarray(cv2.cvtColor(frame_data, cv2.COLOR_BGR2GRAY))
         else:
             tif, page_index, _ = self._pages[source_index]
@@ -544,19 +546,19 @@ class CalciumVideoWidget(FPLWidget):
     def _on_save_labeled_video_clicked(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save video",
-            "video.tif",
+            "Save imaging data",
+            "imaging.tif",
             "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
             try:
                 self.export_labeled_video(Path(path))
             except Exception as exc:
-                self.logger.exception("Could not save labeled video")
+                self.logger.exception("Could not save labeled imaging data")
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Could not save video",
-                    f"The video could not be saved:\n{exc}",
+                    "Could not save imaging data",
+                    f"The imaging data could not be saved:\n{exc}",
                 )
 
     def export_labeled_video(self, path: Path) -> None:
