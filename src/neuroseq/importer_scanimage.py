@@ -37,6 +37,13 @@ def index_recording(paths: list[str]) -> dict:
             for i, page in enumerate(tif.pages):
                 if len(page.shape) != 2:
                     raise ValueError("Expected a two-dimensional ScanImage TIFF page")
+                if any(
+                    offset + count > tif.filehandle.size
+                    for offset, count in zip(
+                        page.dataoffsets, page.databytecounts, strict=True
+                    )
+                ):
+                    raise ValueError("ScanImage TIFF pixel data is incomplete")
                 description = getattr(page, "description", "") or ""
                 match = re.search(
                     r"(?:^|\n)frameTimestamps_sec\s*=\s*([-+\deE.]+)", description

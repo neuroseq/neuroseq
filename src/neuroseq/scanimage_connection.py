@@ -34,9 +34,12 @@ class ScanImageConnection(QtCore.QObject):
         self._serial = 0
         self._pending: tuple[int, str] | None = None
         self._abort_requested = False
+        self._queued: tuple[str, dict | None] | None = None
         self.connected = False
+        self._closing = False
         self.channel = 1
         self.run_id: str | None = None
+        self._expected_frames: int | None = None
         self._finalize_since: float | None = None
         self._file_signature: list | None = None
         self._last_status: dict = {}
@@ -52,9 +55,11 @@ class ScanImageConnection(QtCore.QObject):
         if self.process.state() != QtCore.QProcess.ProcessState.NotRunning:
             return
         self._buffer.clear()
+        self._closing = False
         self._stderr = ""
         self._pending = None
         self._abort_requested = False
+        self._queued = None
         self._last_status = {}
         self.process.setProgram(python)
         self.process.setArguments(
@@ -86,11 +91,14 @@ class ScanImageConnection(QtCore.QObject):
             self._abort_requested = True
             return True
         if not self._send(operation, arguments):
-            self.error.emit("ScanImage is responding to another request; try again.")
-            return False
+            if self._queued is not None:
+                self.error.emit("A ScanImage command is already queued.")
+                return False
+            self._queued = (operation, arguments)
         if operation == "record":
             assert arguments is not None
             self.run_id = arguments["run_id"]
+            self._expected_frames = arguments.get("frames")
             self._finalize_since = None
             self._file_signature = None
         return True
@@ -99,7 +107,21 @@ class ScanImageConnection(QtCore.QObject):
         if self.connected and self._pending is None:
             if self._abort_requested:
                 self._abort_requested = False
+                if self._queued is not None and self._queued[0] == "record":
+                    self._queued = None
+                    self.status_changed.emit(
+                        {
+                            "acq_state": "idle",
+                            "run": {"id": self.run_id, "state": "aborted"},
+                        }
+                    )
+                    self.run_id = None
+                    return
                 self._send("abort")
+            elif self._queued is not None:
+                operation, arguments = self._queued
+                self._queued = None
+                self._send(operation, arguments)
             else:
                 self._send("status", {"channel": self.channel})
 
@@ -118,26 +140,73 @@ class ScanImageConnection(QtCore.QObject):
                 return
 
     def _reply(self, reply: dict) -> None:
+        if not isinstance(reply, dict):
+            raise ValueError("Reply must be an object")
         if self._pending is None or reply.get("id") != self._pending[0]:
             return
         _, operation = self._pending
         self._pending = None
         self.deadline.stop()
         if "error" in reply:
-            if operation == "index" and self._finalize_since is not None:
-                if time.monotonic() - self._finalize_since < 15:
-                    return  # File may still be flushing. Retry through status polling.
-                self.run_id = None
+            if (
+                operation == "index"
+                and self._finalize_since is not None
+                and time.monotonic() - self._finalize_since < 15
+            ):
+                return  # File may still be flushing. Retry through status polling.
             self.error.emit(str(reply["error"]))
+            if operation in {"record", "index"}:
+                self.status_changed.emit(
+                    {
+                        "acq_state": "unknown",
+                        "run": {"id": self.run_id, "state": "failed"},
+                    }
+                )
+                self.run_id = None
             if operation == "connect":
                 self.shutdown()
             return
         result = reply["result"]
+        if not isinstance(result, dict):
+            raise ValueError("Result must be an object")
         if operation == "connect":
+            if self.run_id and result.get("run", {}).get("id") != self.run_id:
+                self.error.emit(
+                    "The pending run is no longer tracked by ScanImage. Its outcome is unknown; inspect the recording folder."
+                )
+                self.status_changed.emit(
+                    {
+                        "acq_state": result.get("acq_state", "unknown"),
+                        "run": {"id": self.run_id, "state": "interrupted"},
+                    }
+                )
+                self.run_id = None
             self.connected = True
             self.connected_changed.emit(True)
             self.timer.start()
         if operation == "index":
+            if (
+                self._last_status["run"]["state"] == "completed"
+                and self._expected_frames is not None
+                and len(result["frames"])
+                != self._expected_frames * len(result["channels"])
+            ):
+                if (
+                    self._finalize_since is not None
+                    and time.monotonic() - self._finalize_since < 15
+                ):
+                    return
+                self.error.emit(
+                    "Saved frame count differs from the requested acquisition. Keep the recording for recovery."
+                )
+                self.status_changed.emit(
+                    {
+                        "acq_state": "idle",
+                        "run": {"id": self.run_id, "state": "finalization_failed"},
+                    }
+                )
+                self.run_id = None
+                return
             result["run_id"] = self.run_id
             result["status"] = self._last_status["run"]["state"]
             self.run_id = None
@@ -159,6 +228,22 @@ class ScanImageConnection(QtCore.QObject):
             frame["pixels"] = np.frombuffer(raw, dtype="<f4").reshape(shape, order="F")
             self.frame_received.emit(frame)
         run = result.get("run", {})
+        if (
+            self.run_id
+            and run.get("id") == self.run_id
+            and result.get("acq_state") == "idle"
+            and run.get("state") in {"starting", "waiting_for_first_frame", "recording"}
+        ):
+            self.error.emit(
+                "ScanImage is idle without a completion event. Recording outcome is unknown."
+            )
+            self.status_changed.emit(
+                {
+                    "acq_state": "idle",
+                    "run": {"id": self.run_id, "state": "interrupted"},
+                }
+            )
+            self.run_id = None
         if (
             self.run_id
             and run.get("id") == self.run_id
@@ -184,10 +269,16 @@ class ScanImageConnection(QtCore.QObject):
         if signature and signature == self._file_signature:
             self._send("index", {"paths": files})
         elif time.monotonic() - self._finalize_since > 15:
-            self.run_id = None
             self.error.emit(
                 "Acquisition ended, but recording files could not be finalized. Keep the run directory for recovery."
             )
+            self.status_changed.emit(
+                {
+                    "acq_state": "idle",
+                    "run": {"id": self.run_id, "state": "finalization_failed"},
+                }
+            )
+            self.run_id = None
         self._file_signature = signature
 
     def _drain_stderr(self) -> None:
@@ -202,9 +293,12 @@ class ScanImageConnection(QtCore.QObject):
         )
 
     def _process_error(self, _error) -> None:
+        if self._closing:
+            return
         self._fail(f"ScanImage helper error: {self.process.errorString()}")
 
     def _fail(self, message: str) -> None:
+        self.connected = False
         self.error.emit(message)
         self.shutdown()
 
@@ -212,6 +306,7 @@ class ScanImageConnection(QtCore.QObject):
         unexpected = self.connected or self._pending is not None
         self.connected = False
         self._pending = None
+        self._queued = None
         self.timer.stop()
         self.deadline.stop()
         self.connected_changed.emit(False)
@@ -222,6 +317,7 @@ class ScanImageConnection(QtCore.QObject):
 
     def shutdown(self) -> None:
         """Stop transport only; never kill the microscope's MATLAB process."""
+        self._closing = True
         self.connected = False
         self._pending = None
         self.timer.stop()

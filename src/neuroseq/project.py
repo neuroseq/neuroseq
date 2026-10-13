@@ -151,6 +151,8 @@ class Project:
         self.cellpose_data: CellposeImportResult | None = None
         self.calcium_video_paths: list[pathlib.Path] = []
         self.calcium_video_fps: float | None = None
+        self.imaging_acquisitions: list[dict] = []
+        self.calcium_scanimage_index: dict | None = None
         self.syscon2_export_template_text: str | None = None
         self.power_luts: dict[int, PowerLut] = {}
 
@@ -231,6 +233,16 @@ class Project:
                     ]
                     fps = _meta.get("calcium_video_fps")
                     self.calcium_video_fps = float(fps) if fps is not None else None
+                    self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
+                    self.calcium_scanimage_index = _meta.get("calcium_scanimage_index")
+                    for acquisition in self.imaging_acquisitions:
+                        if acquisition.get("status") in {
+                            "requested",
+                            "starting",
+                            "recording",
+                            "waiting_for_first_frame",
+                        }:
+                            acquisition["status"] = "interrupted"
                     self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
@@ -269,6 +281,7 @@ class Project:
         self.dirty = True
 
     def set_calcium_video(self, paths: list[pathlib.Path], fps: float | None) -> None:
+        self.calcium_scanimage_index = None
         self.calcium_video_paths = [pathlib.Path(path) for path in paths]
         self.calcium_video_fps = float(fps) if fps is not None else None
         self.mark_dirty()
@@ -1420,6 +1433,10 @@ class Project:
                 ]
             if self.calcium_video_fps is not None:
                 metadata["calcium_video_fps"] = self.calcium_video_fps
+            if self.imaging_acquisitions:
+                metadata["imaging_acquisitions"] = self.imaging_acquisitions
+            if self.calcium_scanimage_index is not None:
+                metadata["calcium_scanimage_index"] = self.calcium_scanimage_index
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()

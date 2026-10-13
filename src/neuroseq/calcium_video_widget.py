@@ -54,6 +54,9 @@ class CalciumVideoWidget(FPLWidget):
         self._video_warning_shown = False
         self._stim_warning_shown = False
         self._hovered_cellpose_id: int | None = None
+        self._live = False
+        self._scanimage_index: dict | None = None
+        self._frame_times: np.ndarray | None = None
 
         self.stim_combo = QtWidgets.QComboBox(self)
         self.stim_combo.setMinimumWidth(180)
@@ -104,8 +107,8 @@ class CalciumVideoWidget(FPLWidget):
 
     def _set_canvas_visible(self, visible: bool) -> None:
         self.widget.setVisible(visible)
-        self.save_button.setEnabled(visible)
-        self.remove_button.setEnabled(visible)
+        self.save_button.setEnabled(visible and not self._live)
+        self.remove_button.setEnabled(visible and not self._live)
         self.video_actions_widget.setVisible(visible)
 
     def _close_pages(self) -> None:
@@ -129,9 +132,12 @@ class CalciumVideoWidget(FPLWidget):
         fps: float | None,
         *,
         warn_if_missing_cellpose: bool = True,
+        scanimage_index: dict | None = None,
     ) -> None:
         self._close_pages()
         self.clear_data()
+        self._scanimage_index = None
+        self._frame_times = None
         self._paths = list(paths)
         self._fps = float(fps) if fps is not None and fps > 0 else None
         self._current_frame_index = None
@@ -210,6 +216,51 @@ class CalciumVideoWidget(FPLWidget):
                 "uploaded Cellpose segmentation masks.",
             )
             self._video_warning_shown = True
+        if scanimage_index is not None:
+            self.set_scanimage_index(scanimage_index)
+        self.set_time_ms(0)
+
+    def set_live(self, live: bool) -> None:
+        self._live = live
+        if not live:
+            self._set_canvas_visible(bool(self._frame_refs))
+            self.empty_state_widget.setVisible(not self._frame_refs)
+            self.set_time_ms(0)
+        else:
+            self.save_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+
+    def show_live_frame(self, frame: dict) -> None:
+        if not self._live:
+            return
+        self.empty_state_widget.hide()
+        self.widget.show()
+        self.current_frame = self._to_rgb(np.flipud(frame["pixels"]))
+        # Arrival time is not stimulation time. Never draw planned stimulation
+        # crosses on live frames without a measured synchronization mapping.
+        self._set_crosses(set())
+        self._draw_current_frame()
+
+    def set_scanimage_index(self, index: dict, channel: int | None = None) -> None:
+        self._scanimage_index = index
+        self.set_recorded_channel(channel or index["channels"][0])
+
+    def set_recorded_channel(self, channel: int) -> None:
+        if self._scanimage_index is None:
+            return
+        selected = [
+            f for f in self._scanimage_index["frames"] if f["channel"] == channel
+        ]
+        if not selected:
+            return
+        refs = {
+            (str(tif.filehandle.path), page): ("tiff", i, sub)
+            for i, (tif, page, sub) in enumerate(self._pages)
+        }
+        self._frame_refs = [
+            refs[(str(Path(f["path"]).resolve()), f["page"])] for f in selected
+        ]
+        self._frame_times = np.asarray([f["time_s"] for f in selected])
         self.set_time_ms(0)
 
     def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
@@ -419,15 +470,40 @@ class CalciumVideoWidget(FPLWidget):
         self._frame_graphic.data = frame
 
     def set_time_ms(self, time_ms: int) -> None:
-        if not self._frame_refs or self._fps is None:
+        if self._live or not self._frame_refs or self._fps is None:
             return
         index = max(
             0, min(len(self._frame_refs) - 1, int(float(time_ms) / 1000.0 * self._fps))
         )
+        if self._frame_times is not None:
+            index = max(
+                0,
+                min(
+                    len(self._frame_refs) - 1,
+                    int(
+                        np.searchsorted(self._frame_times, time_ms / 1000, side="right")
+                    )
+                    - 1,
+                ),
+            )
         frame = self._to_rgb(self._read_frame(index))
         self._current_frame_index = index
         self.current_frame_index = index
         self.current_frame = frame
+        self._draw_current_frame()
+        # ScanImage recordings have no assumed alignment with the stimulus.
+        stimulated_ids = (
+            self._stimulated_cellpose_ids_at(int(time_ms))
+            if self._scanimage_index is None
+            else set()
+        )
+        self._set_crosses(stimulated_ids)
+        self.figure.renderer.request_draw()
+
+    def _draw_current_frame(self) -> None:
+        frame = self.current_frame
+        if frame is None:
+            return
         if self._frame_graphic is None:
             self._frame_graphic = self.subplot.add_image(frame, interpolation="nearest")
             self.image_graphic = self._frame_graphic
@@ -438,14 +514,17 @@ class CalciumVideoWidget(FPLWidget):
         else:
             self._frame_graphic.data = frame
         self._update_frame_graphic()
-        stimulated_ids = self._stimulated_cellpose_ids_at(int(time_ms))
-        self._set_crosses(stimulated_ids)
         self.figure.renderer.request_draw()
 
     def _refresh_current_frame(self) -> None:
         if self._current_frame_index is None or self._fps is None:
             return
-        self.set_time_ms(round(self._current_frame_index * 1000.0 / self._fps))
+        time_s = (
+            self._frame_times[self._current_frame_index]
+            if self._frame_times is not None
+            else self._current_frame_index / self._fps
+        )
+        self.set_time_ms(round(time_s * 1000))
 
     def _on_save_labeled_video_clicked(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -466,7 +545,7 @@ class CalciumVideoWidget(FPLWidget):
                 )
 
     def export_labeled_video(self, path: Path) -> None:
-        if not self._frame_refs or self._fps is None:
+        if self._live or not self._frame_refs or self._fps is None:
             return
         if path.suffix.lower() == ".gif":
             self._export_gif_streaming(path)
@@ -482,6 +561,14 @@ class CalciumVideoWidget(FPLWidget):
         duration_ms = max(1, round(1000.0 / self._fps)) if self._fps else 1
         with path.open("wb") as file:
             for index in range(len(self._frame_refs)):
+                if self._frame_times is not None and index + 1 < len(self._frame_times):
+                    duration_ms = max(
+                        1,
+                        round(
+                            1000
+                            * (self._frame_times[index + 1] - self._frame_times[index])
+                        ),
+                    )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
                     Image.fromarray(self._labeled_frame(index), mode="RGB")
                 )
@@ -506,6 +593,8 @@ class CalciumVideoWidget(FPLWidget):
         assert self._fps is not None
         time_ms = round(index * 1000.0 / self._fps)
         frame = self._to_rgb(self._read_frame(index))
+        if self._scanimage_index is not None:
+            return frame
         for cell_id in self._stimulated_cellpose_ids_at(time_ms):
             point = self._centroids.get(cell_id)
             if point is None:

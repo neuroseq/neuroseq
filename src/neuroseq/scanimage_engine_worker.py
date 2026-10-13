@@ -7,9 +7,11 @@ reserved for protocol replies. No arbitrary MATLAB evaluation is exposed.
 
 from __future__ import annotations
 
+import importlib
 import io
 import json
 import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +19,7 @@ from typing import Any
 class EngineAdapter:
     def __init__(self) -> None:
         self.engine: Any = None
+        self.manifest_path: Path | None = None
 
     def dispatch(self, operation: str, arguments: dict) -> dict:
         if operation == "connect":
@@ -28,6 +31,7 @@ class EngineAdapter:
                     "Named MATLAB session not found. Run matlab.engine.shareEngine('NeuroSeqScanImage') in the ScanImage MATLAB window."
                 )
             self.engine = matlab.engine.connect_matlab(name)
+            importlib.import_module("importer_scanimage")
             self.engine.addpath(
                 str(Path(__file__).parent / "resources" / "scanimage"), nargout=0
             )
@@ -36,9 +40,24 @@ class EngineAdapter:
             from importer_scanimage import index_recording
 
             return index_recording(arguments["paths"])
+        if operation == "record":
+            # Write provenance before issuing any hardware command. A sidecar
+            # survives a GUI crash even if the project has not been saved yet.
+            manifest = arguments.pop("manifest", None)
+            if manifest is not None:
+                self.manifest_path = Path(arguments["directory"]).with_suffix(
+                    ".neuroseq.json"
+                )
+                with self.manifest_path.open("x", encoding="utf-8") as file:
+                    json.dump(manifest, file)
         if operation not in {"status", "preview", "record", "abort", "disconnect"}:
             raise ValueError("Unknown ScanImage operation")
-        return self._call(operation, arguments)
+        result = self._call(operation, arguments)
+        if self.manifest_path is not None and operation == "status":
+            # Lifecycle state is available in the project; the sidecar is the
+            # immutable request/snapshot and remains valid after interruption.
+            result["manifest_path"] = str(self.manifest_path)
+        return result
 
     def _call(self, operation: str, arguments: dict) -> dict:
         if self.engine is None:
@@ -60,9 +79,10 @@ def main() -> None:
         request: dict = {}
         try:
             request = json.loads(line)
-            result = adapter.dispatch(
-                request["operation"], request.get("arguments", {})
-            )
+            with redirect_stdout(sys.stderr):
+                result = adapter.dispatch(
+                    request["operation"], request.get("arguments", {})
+                )
             response = {"id": request["id"], "result": result}
         except Exception as exc:
             response = {"id": request.get("id"), "error": str(exc)}

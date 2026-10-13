@@ -7,7 +7,8 @@ if isempty(ownedFocus), ownedFocus = false; end
 if isempty(run), run = struct('id', '', 'state', 'idle', 'directory', ''); end
 args = jsondecode(payload);
 if strcmp(operation, 'event')
-    if ~isempty(run.id)
+    if strcmp(args.name, 'focusDone'), ownedFocus = false; end
+    if ~isempty(run.id) && any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}))
         switch args.name
             case 'acqStart', run.state = 'recording';
             case 'acqModeDone', run.state = 'completed';
@@ -29,7 +30,7 @@ switch operation
         assert(isprop(hSI.hChannels, 'loggingEnable'), 'Missing loggingEnable');
         if ~listenersInstalled
             cfg = hSI.hUserFunctions.userFunctionsCfg;
-            names = {'acqStart','acqModeDone','acqAbort'};
+            names = {'acqStart','acqModeDone','acqAbort','focusDone'};
             for k=1:numel(names)
                 entry = struct('EventName',names{k}, 'UserFcnName','neuroseq_scanimage_event', ...
                     'Arguments',{{}}, 'Enable',true);
@@ -47,6 +48,8 @@ switch operation
         assert(hSI.hStackManager.numSlices == 1, 'Only single-plane acquisition is supported.');
         assert(~hSI.hRoiManager.mroiEnable, 'Multi-ROI acquisition is not supported.');
         assert(~hSI.hFastZ.enable, 'FastZ must be disabled.');
+        assert(isprop(hSI.hScan2D, 'logAverageFactor') && hSI.hScan2D.logAverageFactor == 1, ...
+            'Set ScanImage logging average factor to 1 to preserve raw frames.');
         assert(~isempty(hSI.hChannels.channelSave), 'Select at least one saved channel in ScanImage.');
         assert(args.frames >= 1 && args.frames == fix(args.frames), 'Invalid frame count.');
         assert(~exist(args.directory, 'dir'), 'Run directory already exists.');
@@ -94,7 +97,20 @@ switch operation
 end
 out = struct('acq_state',hSI.acqState, 'run',run, 'fps',hSI.hRoiManager.scanFrameRate, ...
     'matlab_version',version, 'channels',hSI.hChannels.channelDisplay, 'files',{{}});
-if isprop(hSI,'VERSION_MAJOR'), out.scanimage_version = hSI.VERSION_MAJOR; end
+out.can_abort = ownedFocus || any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}));
+out.settings = struct('saved_channels',hSI.hChannels.channelSave, ...
+    'frames_per_slice',hSI.hStackManager.framesPerSlice, ...
+    'external_trigger',hSI.hScan2D.trigAcqEnable, 'logging',hSI.hChannels.loggingEnable, ...
+    'directory',hSI.hScan2D.logFilePath, 'stem',hSI.hScan2D.logFileStem);
+if isprop(hSI,'VERSION_MAJOR')
+    out.scanimage_version = char(string(hSI.VERSION_MAJOR));
+    if isprop(hSI,'VERSION_MINOR')
+        out.scanimage_version = [out.scanimage_version '.' char(string(hSI.VERSION_MINOR))];
+    end
+    if isprop(hSI,'VERSION_UPDATE')
+        out.scanimage_version = [out.scanimage_version '.' char(string(hSI.VERSION_UPDATE))];
+    end
+end
 if ~isempty(run.directory) && strcmp(hSI.acqState,'idle')
     files = dir(fullfile(run.directory, '*.tif'));
     out.files = arrayfun(@(f) fullfile(f.folder,f.name), files, 'UniformOutput',false);

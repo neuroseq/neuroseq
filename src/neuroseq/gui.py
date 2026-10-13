@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import base64
 import contextlib
+import dataclasses
 import gc
+import hashlib
 import inspect
+import json
 import logging
 import pathlib
 import threading
 from collections.abc import Callable
 from collections.abc import Sequence
+from datetime import UTC
+from datetime import datetime
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -65,6 +71,8 @@ from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
+from neuroseq.scanimage_connection import ScanImageConnection
+from neuroseq.scanimage_controls import ScanImageControls
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
@@ -396,6 +404,32 @@ class Gui(QtWidgets.QMainWindow):
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        self.scanimage_connection = ScanImageConnection(self)
+        self.scanimage_controls = ScanImageControls(
+            self.scanimage_connection, self.calcium_video_widget
+        )
+        video_layout = self.calcium_video_widget.layout()
+        assert isinstance(video_layout, QtWidgets.QVBoxLayout)
+        video_layout.insertWidget(0, self.scanimage_controls)
+        self.scanimage_controls.live_changed.connect(self.calcium_video_widget.set_live)
+        self.scanimage_controls.channel_changed.connect(
+            self.calcium_video_widget.set_recorded_channel
+        )
+        self.scanimage_connection.frame_received.connect(
+            self.calcium_video_widget.show_live_frame
+        )
+        self.scanimage_controls.record_requested.connect(
+            self._start_scanimage_recording
+        )
+        self.scanimage_controls.recording_selected.connect(
+            self._select_scanimage_recording
+        )
+        self.scanimage_connection.status_changed.connect(self._scanimage_status)
+        self.scanimage_connection.recording_ready.connect(
+            self._scanimage_recording_ready
+        )
+        self.scanimage_connection.error.connect(self._scanimage_error)
+        self._scanimage_run_projects: dict[str, Project] = {}
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         self.tab_bar = QtWidgets.QTabBar()
@@ -752,7 +786,9 @@ class Gui(QtWidgets.QMainWindow):
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
             )
 
     def _update_combo_box(
@@ -1321,6 +1357,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
+        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1346,6 +1383,7 @@ class Gui(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
+        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
@@ -1357,7 +1395,9 @@ class Gui(QtWidgets.QMainWindow):
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
             )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
@@ -2349,12 +2389,139 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_calcium_video_widgets()
 
     def _refresh_calcium_video_widgets(self) -> None:
+        self.scanimage_controls.set_recordings(self.project.imaging_acquisitions)
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_cellpose_data(self.project.cellpose_data)
             widget.set_stim_arrays(self.project.stim_arrays)
             widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
             )
+
+    def _start_scanimage_recording(self, arguments: dict) -> None:
+        if self.scanimage_connection.run_id is not None:
+            self.scanimage_controls._error("An acquisition is already being finalized.")
+            return
+        project = self.project
+        record = dict(arguments)
+        record.update(
+            status="requested",
+            requested_at=datetime.now(UTC).isoformat(),
+            synchronization="unverified",
+        )
+        stim = self._current_stim_array()
+        if stim is not None:
+            values = np.ascontiguousarray(stim.values)
+            record["stimulus_snapshot"] = {
+                "name": stim.name,
+                "dt": stim.dt,
+                "shape": list(values.shape),
+                "dtype": values.dtype.str,
+                "sha256": hashlib.sha256(values.tobytes()).hexdigest(),
+                "data": base64.b64encode(values.tobytes()).decode(),
+            }
+        settings = self.syscon2_panel.export_settings
+        if settings is not None:
+            record["syscon_export_settings"] = json.loads(
+                json.dumps(dataclasses.asdict(settings), default=str)
+            )
+        if self.scanimage_connection.command(
+            "record", {**arguments, "manifest": record}
+        ):
+            project.imaging_acquisitions.append(record)
+            project.mark_dirty()
+            self._scanimage_run_projects[arguments["run_id"]] = project
+            self.scanimage_controls.live_check.setChecked(True)
+
+    def _scanimage_status(self, status: dict) -> None:
+        run = status.get("run", {})
+        project = self._scanimage_run_projects.get(run.get("id"))
+        if project is None:
+            return
+        record = next(
+            r for r in project.imaging_acquisitions if r["run_id"] == run["id"]
+        )
+        previous = record.get("status")
+        record["status"] = run.get("state", "unknown")
+        for source, target in (
+            ("matlab_version", "matlab_version"),
+            ("scanimage_version", "scanimage_version"),
+            ("settings", "scanimage_settings"),
+            ("files", "files"),
+        ):
+            if source in status:
+                record[target] = status[source]
+        if record["status"] != previous:
+            project.mark_dirty()
+
+    def _scanimage_error(self, message: str) -> None:
+        run_id = self.scanimage_connection.run_id
+        if run_id is None:
+            return
+        project = self._scanimage_run_projects.get(run_id)
+        if project is not None:
+            record = next(
+                r for r in project.imaging_acquisitions if r["run_id"] == run_id
+            )
+            record["error"] = message
+            record["status"] = (
+                "unknown" if not self.scanimage_connection.connected else "error"
+            )
+            project.mark_dirty()
+
+    def _scanimage_recording_ready(self, result: dict) -> None:
+        project = self._scanimage_run_projects.pop(result["run_id"], None)
+        if project is None:
+            return
+        record = next(
+            r for r in project.imaging_acquisitions if r["run_id"] == result["run_id"]
+        )
+        record.update(
+            status=result["status"],
+            recording=result,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
+        name = record["name"]
+        if name in project.experiments:
+            name = f"{name} ({result['run_id'][:8]})"
+        project.experiments[name] = Experiment(
+            name=name, duration=result["duration_s"], timepoints=[], data=[]
+        )
+        record["experiment_name"] = name
+        project.set_calcium_video(
+            [pathlib.Path(p) for p in result["paths"]], result["fps"]
+        )
+        project.calcium_scanimage_index = result
+        project.update_limits()
+        self.scanimage_controls.live_check.setChecked(False)
+        if project is self.project:
+            self._refresh_calcium_video_widgets()
+            self._update_combo_boxes()
+            self.update_limits()
+        # Movie availability does not imply extracted traces are ready. Do not
+        # call SysCon2StimulationHost.acquisition_imported here.
+
+    def _select_scanimage_recording(self, run_id: str) -> None:
+        record = next(
+            (r for r in self.project.imaging_acquisitions if r["run_id"] == run_id),
+            None,
+        )
+        if record is None or "recording" not in record:
+            return
+        result = record["recording"]
+        missing = [path for path in result["paths"] if not pathlib.Path(path).is_file()]
+        if missing:
+            self.scanimage_controls._error(
+                "Recording files are missing: " + ", ".join(missing)
+            )
+            return
+        self.project.set_calcium_video(
+            [pathlib.Path(p) for p in result["paths"]], result["fps"]
+        )
+        self.project.calcium_scanimage_index = result
+        self.scanimage_controls.live_check.setChecked(False)
+        self._refresh_calcium_video_widgets()
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -3644,6 +3811,7 @@ class Gui(QtWidgets.QMainWindow):
         widget.calcium_video_widget.set_video_paths(
             self.project.calcium_video_paths,
             self.project.calcium_video_fps,
+            scanimage_index=self.project.calcium_scanimage_index,
             warn_if_missing_cellpose=False,
         )
         return widget
@@ -4265,6 +4433,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         self._stop_worker_thread(self._io_thread, 10000, "IO worker")
         self.syscon2_panel.shutdown()
+        self.scanimage_connection.shutdown()
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed
