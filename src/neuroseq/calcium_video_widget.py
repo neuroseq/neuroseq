@@ -569,7 +569,7 @@ class CalciumVideoWidget(FPLWidget):
             return
         with tifffile.TiffWriter(path) as writer:
             for index in range(len(self._frame_refs)):
-                writer.write(self._labeled_frame(index), photometric="rgb")
+                writer.write(self._export_frame(index), photometric="rgb")
 
     def _export_gif_streaming(self, path: Path) -> None:
         """Write a GIF one frame at a time to avoid buffering the movie."""
@@ -587,7 +587,7 @@ class CalciumVideoWidget(FPLWidget):
                         ),
                     )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
-                    Image.fromarray(self._labeled_frame(index), mode="RGB")
+                    Image.fromarray(self._export_frame(index), mode="RGB")
                 )
                 params = {
                     "duration": duration_ms,
@@ -605,6 +605,12 @@ class CalciumVideoWidget(FPLWidget):
                     file, frame, (0, 0), params
                 )
             file.write(b";")
+
+    def _export_frame(self, index: int) -> np.ndarray:
+        # _read_frame flips frames vertically for display (see there). Undo it
+        # so exported files keep the recording's orientation; crosses drawn in
+        # display coordinates flip with the image and stay on their cells.
+        return np.ascontiguousarray(np.flipud(self._labeled_frame(index)))
 
     def _labeled_frame(self, index: int) -> np.ndarray:
         assert self._fps is not None

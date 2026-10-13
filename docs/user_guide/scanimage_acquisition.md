@@ -146,7 +146,11 @@ Before experimental use, verify on the acquisition PC:
   completion, abort, failed start, and idle disconnect; a subsequent manual Grab
   uses the original settings.
 - The probe succeeds on the exact ScanImage/MATLAB build and reports settings.
-- Preview orientation matches a known asymmetric image and channel selection.
+- Preview orientation matches a known asymmetric image and channel selection,
+  and NeuroSeq shows that target identically in live preview and in recorded
+  playback. This confirms ScanImage's displayed frame (`hDisplay.lastFrame`)
+  uses the same line/pixel orientation as its saved TIFF pages, which the
+  automated tests assume but cannot check without the rig.
 - A short software-triggered recording has the requested frames and original
   pixel values, including a two-channel recording and a file rollover.
 - External triggering, first-frame timeout and abort behave as expected.

@@ -814,3 +814,65 @@ def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
     assert loaded.calcium_video_paths == [Path("/data/movie.tif")]
     assert loaded.calcium_video_fps == 30
     assert not loaded.dirty
+
+
+@pytest.mark.parametrize("suffix", [".tif", ".gif"])
+def test_exported_imaging_keeps_the_recording_orientation(qtbot, tmp_path, suffix):
+    from PIL import Image
+
+    from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+    raw = np.zeros((20, 30), dtype=np.uint16)
+    raw[:4, :6] = 1000  # bright block at the top-left of the recording
+    movie = tmp_path / "movie.tif"
+    tifffile.imwrite(movie, np.stack([raw, raw]))
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_video_paths([movie], 10, warn_if_missing_cellpose=False)
+    export = tmp_path / f"export{suffix}"
+    widget.export_labeled_video(export)
+    if suffix == ".gif":
+        with Image.open(export) as image:
+            exported = np.asarray(image.convert("RGB"))
+    else:
+        exported = tifffile.imread(export)
+    bright = exported[..., 0] > 127
+    assert bright[:4, :6].all()
+    assert not bright[4:].any()
+
+
+def test_live_preview_and_recorded_playback_share_orientation(
+    qtbot, connection, tmp_path
+):
+    """The same scan lines must look identical live and when played back from TIFF.
+
+    MATLAB sends img(:) column-major (encoding confirmed against the adapter in
+    MATLAB R2025b); a transpose or an extra flip on either path breaks this.
+    """
+    from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+    rows, cols = np.mgrid[0:12, 0:18]
+    raw = (rows * 50 + cols).astype(np.float32)
+    raw[:3, :4] = 5000  # asymmetric marker at the top-left scan corner
+    frame = {
+        "shape": list(raw.shape),
+        "dtype": "float32",
+        "order": "F",
+        "data": base64.b64encode(raw.tobytes(order="F")).decode(),
+    }
+    received = []
+    connection.frame_received.connect(received.append)
+    connection._pending = (1, "status")
+    connection._reply(
+        {"id": 1, "result": {"acq_state": "focus", "run": {}, "frame": frame}}
+    )
+
+    movie = tmp_path / "recorded.tif"
+    tifffile.imwrite(movie, raw[None])
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_video_paths([movie], 10, warn_if_missing_cellpose=False)
+    recorded = widget.current_frame.copy()
+    widget.set_live(True)
+    widget.show_live_frame(received[0])
+    np.testing.assert_array_equal(widget.current_frame, recorded)
