@@ -14,6 +14,8 @@ from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cell_overlay_widget import OverlayView
 from neuroseq.cell_overlay_widget import _pixel_at
 from neuroseq.cell_overlay_widget import compute_cell_centroids
+from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
+from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.io import CELLPOSE_ORIENTATION
@@ -22,7 +24,8 @@ from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from tests.test_exporter_syscon2 import _template_header
 
-# Saved and exported by NeuroSeq before #601; see make_fixture.py there.
+# Saved and exported by NeuroSeq before #601; see make_fixture.py and
+# make_aoi_fixture.py there.
 LEGACY = Path(__file__).parent / "data" / "legacy_cellpose_v1"
 SAVE_ALL = SaveLoadOptions(True, True, False, True)
 
@@ -125,3 +128,54 @@ def test_pointer_positions_round_to_the_nearest_pixel() -> None:
     assert _pixel_at(2.49, 0.51) == (2, 1)
     assert _pixel_at(-0.49, 3.0) == (0, 3)
     assert _pixel_at(-0.51, 0.0) == (-1, 0)
+
+
+def test_reopened_legacy_aoi_project_keeps_shapes_and_mapping(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """AOI shapes saved through the dialog before #601 come back unchanged.
+
+    AOI coordinates were always stored top-left, like the raw image; only the
+    masks were flipped. Reopening the dialog must show the saved shapes over
+    the same cells and reproduce the saved mapping, and re-importing and
+    re-saving must not move anything or flip the masks again.
+    """
+    project = Project(LEGACY / "legacy_aoi_dialog.nseq")
+    saved = project.cellpose_data
+    assert saved is not None and saved.aoi_config is not None
+    masks = np.load(LEGACY / "masks.npy") - 1
+    np.testing.assert_array_equal(saved.segmentation_array, masks)
+    assert saved.mapping_strategy == CUSTOM_AOI_STRATEGY
+    assert saved.stimulus_to_cellpose_mapping == {0: 0, 1: 2, 2: 1}
+    square, circle = saved.aoi_config.square, saved.aoi_config.circle
+    assert (square.x, square.y, square.side) == (0.0, 0.0, 12.0)
+    assert (circle.cx, circle.cy, circle.diameter) == (30.0, 17.0, 12.0)
+
+    dialog = CellposeImportDialog(existing_data=saved)
+    qtbot.addWidget(dialog)
+    checked = [b.text() for b in dialog.mapping_buttons.buttons() if b.isChecked()]
+    assert checked == [CUSTOM_AOI_STRATEGY]
+    shown = dialog._current_aoi_config()
+    assert shown is not None
+    assert (shown.square.x, shown.square.y, shown.square.side) == (0.0, 0.0, 12.0)
+    assert (shown.circle.cx, shown.circle.cy, shown.circle.diameter) == (
+        30.0,
+        17.0,
+        12.0,
+    )
+    # Cell 0 (top left) lies in the preferential square and cell 1 (lower
+    # right) in the exclusion circle, exactly as when the shapes were saved.
+    assert dialog._compute_aoi_mapping() == saved.stimulus_to_cellpose_mapping
+
+    dialog.import_button.click()
+    reimported = dialog.get_imported_data()
+    assert reimported is not None
+    project.cellpose_data = reimported
+    resaved = tmp_path / "resaved.nseq"
+    project.save(resaved, SAVE_ALL)
+    again = Project(resaved).cellpose_data
+    assert again is not None and again.aoi_config is not None
+    np.testing.assert_array_equal(again.segmentation_array, masks)
+    assert again.stimulus_to_cellpose_mapping == saved.stimulus_to_cellpose_mapping
+    assert again.aoi_config.square == saved.aoi_config.square
+    assert again.aoi_config.circle == saved.aoi_config.circle
