@@ -17,6 +17,7 @@ from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_scanimage import compact_index
 from neuroseq.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
@@ -133,6 +134,7 @@ class CalciumVideoWidget(FPLWidget):
         *,
         warn_if_missing_cellpose: bool = True,
         scanimage_index: dict | None = None,
+        channel: int | None = None,
     ) -> None:
         self._close_pages()
         self.clear_data()
@@ -151,7 +153,8 @@ class CalciumVideoWidget(FPLWidget):
         try:
             pages: list[tuple[tifffile.TiffFile, int, int]] = []
             frame_refs: list[tuple[str, int, int]] = []
-            for path in self._paths:
+            self._scanimage_page_refs = {}
+            for file_index, path in enumerate(self._paths):
                 if path.suffix.lower() == ".gif":
                     image = Image.open(path)
                     frame_count = int(getattr(image, "n_frames", 1))
@@ -186,6 +189,11 @@ class CalciumVideoWidget(FPLWidget):
                             pages.append((tif, index, sub))
                             frame_refs.append(("tiff", len(pages) - 1, sub))
                     else:
+                        self._scanimage_page_refs[(file_index, index)] = (
+                            "tiff",
+                            len(pages),
+                            0,
+                        )
                         pages.append((tif, index, 0))
                         frame_refs.append(("tiff", len(pages) - 1, 0))
             self._pages = pages
@@ -217,7 +225,7 @@ class CalciumVideoWidget(FPLWidget):
             )
             self._video_warning_shown = True
         if scanimage_index is not None:
-            self.set_scanimage_index(scanimage_index)
+            self.set_scanimage_index(scanimage_index, channel)
         self.set_time_ms(0)
 
     def set_live(self, live: bool) -> None:
@@ -242,25 +250,23 @@ class CalciumVideoWidget(FPLWidget):
         self._draw_current_frame()
 
     def set_scanimage_index(self, index: dict, channel: int | None = None) -> None:
-        self._scanimage_index = index
+        self._scanimage_index = compact_index(index)
         self.set_recorded_channel(channel or index["channels"][0])
 
     def set_recorded_channel(self, channel: int) -> None:
         if self._scanimage_index is None:
             return
-        selected = [
-            f for f in self._scanimage_index["frames"] if f["channel"] == channel
-        ]
-        if not selected:
-            return
-        refs = {
-            (str(tif.filehandle.path), page): ("tiff", i, sub)
-            for i, (tif, page, sub) in enumerate(self._pages)
-        }
+        frames = self._scanimage_index["frames"]
+        channels = self._scanimage_index["channels"]
+        if channel not in channels:
+            channel = channels[0]
+        self.recorded_channel = channel
+        selected = [i for i, c in enumerate(frames["channel"]) if c == channel]
         self._frame_refs = [
-            refs[(str(Path(f["path"]).resolve()), f["page"])] for f in selected
+            self._scanimage_page_refs[(frames["file"][i], frames["page"][i])]
+            for i in selected
         ]
-        self._frame_times = np.asarray([f["time_s"] for f in selected])
+        self._frame_times = np.asarray([frames["time_s"][i] for i in selected])
         self.set_time_ms(0)
 
     def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
@@ -504,6 +510,15 @@ class CalciumVideoWidget(FPLWidget):
         frame = self.current_frame
         if frame is None:
             return
+        if (
+            self._frame_graphic is not None
+            and self._frame_graphic.data.value.shape != frame.shape
+        ):
+            # Live previews are downsampled, so they rarely match the recorded
+            # movie; fastplotlib images cannot change shape in place.
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._frame_graphic)
+            self._frame_graphic = None
         if self._frame_graphic is None:
             self._frame_graphic = self.subplot.add_image(frame, interpolation="nearest")
             self.image_graphic = self._frame_graphic

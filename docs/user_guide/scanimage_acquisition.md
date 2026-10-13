@@ -3,14 +3,19 @@
 The calcium-video widget can connect to a running ScanImage MATLAB session,
 show live images, start or externally arm a recording, abort an acquisition,
 and open its completed TIFF files. ScanImage owns the scanner and original
-recording. NeuroSeq's preview is sampled at up to 5 updates/second and is not
-the recording stream.
+recording. NeuroSeq's preview is sampled at up to 5 updates/second
+(1 update/second during an owned recording), only while **Live view** is checked. Preview images are subsampled
+to at most 256 pixels per dimension; original TIFF pixels are unchanged. Preview
+is not the recording stream.
 
 This integration targets **ScanImage Premium 2023.1.0**, single-plane raster
 imaging. Its MATLAB adapter requires validation on the actual acquisition PC;
 automated Python tests do not establish hardware compatibility or timing.
 Volumes, FastZ, multi-ROI and arbitrary-line acquisitions are outside this
-initial implementation. Logging averaging must be 1 to retain raw frames.
+initial implementation. Logging averaging must be 1 to retain raw frames. Set
+**acquisitions per loop to 1** when that property is available; this is checked
+on connection and before recording. NeuroSeq uses Grab, not Loop, so the loop
+repeat period is not used.
 
 ## Setup
 
@@ -40,8 +45,10 @@ initial implementation. Logging averaging must be 1 to retain raw frames.
 
 The bundled `.m` files are added to the MATLAB path for the session. The adapter
 registers acquisition lifecycle callbacks alongside existing user functions;
-it does not replace the user's callback table. A normal idle disconnect removes
-its callbacks. It does not shut down MATLAB.
+it does not replace the user's callback table. Reconnecting reconciles the
+adapter's entries without duplicating them, including after clearing MATLAB
+functions. New callback registration requires ScanImage to be idle. A normal
+idle disconnect removes its callbacks. It does not shut down MATLAB.
 
 ## Preview and recording
 
@@ -60,13 +67,32 @@ The first-frame timeout requests an abort if no acquisition start is observed.
 NeuroSeq reports state from ScanImage, waits for completed/aborted acquisition
 events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame
-count. Split TIFF files are grouped as one recording. Aborted recordings with
-readable complete channel groups can also be attached, labeled as aborted.
+count. ScanImage's existing frames-per-file setting is retained; split TIFF
+files are grouped as one recording. Aborted recordings with readable complete
+channel groups can also be attached, labeled as aborted.
+
+After completion, abort, or a failed start, the adapter restores the previous
+logging folder, filename stem/counter, logging enable, external-trigger enable,
+and frames-per-slice settings once ScanImage is idle. If the terminal callback
+precedes the idle state, the next status poll retries restoration; idle
+Disconnect also restores pending settings, as do the next Preview and Record if
+ScanImage became idle without any terminal callback. Verify restoration on your rig,
+including after abort, before starting another manual Grab. Acquisition metadata
+retains the settings used during the recording.
+
+A completed acquisition opens automatically if the project has no video or is
+already displaying a ScanImage recording. A separately imported video stays in
+place; the new recording remains available through the acquisition selector.
+The selected channel is retained when present; otherwise the selector changes
+to the first saved channel and displays a message.
 
 The **Recorded acquisitions** selector opens earlier recordings in the project.
 Files remain external to `.nseq`; moving them without restoring their paths
 makes playback unavailable. Projects save the run metadata and index, not the
-raw movie. Save the project to retain its acquisition history.
+raw movie. Frame indexes use compact columns and file indices and are stored
+once per run; the selected movie references that run. Full frame descriptions
+remain in the original TIFFs and can be reread for future alignment analysis.
+Save the project to retain its acquisition history.
 
 A `<run-id>.neuroseq.json` sidecar beside the run directory stores the original
 request, stimulus snapshot, and available SysCon export settings before the
@@ -76,7 +102,10 @@ saved. Its requested state is not evidence that the acquisition completed.
 The existing **Save video…** action exports a rendered derivative. It does not
 replace ScanImage's original TIFF recording. Live preview is not exportable
 through this action. Recorded ScanImage playback uses channel-specific frame
-timestamps; brightness conversion affects only the display/derivative.
+timestamps; brightness conversion affects only the display/derivative. GIF
+exports use the recorded inter-frame intervals, subject to GIF timing precision.
+Other movie formats use a constant frame rate and do not preserve irregular
+acquisition timing; retain the TIFF timestamps for analysis.
 
 ## Stimulation and timing
 
@@ -91,8 +120,8 @@ stimulation crosses are suppressed for these recordings and for live images:
 software command arrival times are not measured stimulation times.
 The 2023 [auxiliary trigger feature](https://archive.scanimage.org/SI2023/Concepts/Triggers/Auxiliary%2BTrigger.html)
 can record stimulation markers on supported resonant systems. Their frame
-descriptions are preserved by the recording index for a future calibrated
-alignment step. Verify the rig's trigger topology before automating joint runs.
+descriptions remain in the original TIFFs for a future calibrated alignment
+step. Verify the rig's trigger topology before automating joint runs.
 
 Movie completion does not automatically resume experimental routines that need
 calcium traces or inferred activity. That requires a separate analysis handoff.
@@ -107,6 +136,9 @@ and verify idle before closing when you intend to stop imaging.
 
 Before experimental use, verify on the acquisition PC:
 
+- Previous ScanImage logging/trigger/frame-count settings are restored after
+  completion, abort, failed start, and idle disconnect; a subsequent manual Grab
+  uses the original settings.
 - The probe succeeds on the exact ScanImage/MATLAB build and reports settings.
 - Preview orientation matches a known asymmetric image and channel selection.
 - A short software-triggered recording has the requested frames and original
@@ -133,3 +165,17 @@ Do not assume the built-in ScanImage TCP server speaks this protocol: its
 [2023 documentation](<https://archive.scanimage.org/SI2023/Premium%2BFeatures/ScanImage%2BRemote%2BControl%2B(TCP_IP).html>)
 describes a MATLAB client. Native [ZeroMQ streaming](https://docs.scanimage.org/Premium%2BFeatures/ZeroMQ.html)
 requires ScanImage Premium 2025 or later and is not used here.
+
+## Adapter regression tests without a microscope
+
+In a separate MATLAB session with no `hSI` variable, from the repository root:
+
+```matlab
+results = runtests('tests/matlab');
+assertSuccess(results);
+```
+
+These tests use simulated ScanImage components to exercise settings restoration,
+callback registration, single-acquisition validation, and preview generation.
+They do not establish compatibility with the installed ScanImage version or
+hardware timing.

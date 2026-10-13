@@ -411,10 +411,8 @@ class Gui(QtWidgets.QMainWindow):
         video_layout = self.calcium_video_widget.layout()
         assert isinstance(video_layout, QtWidgets.QVBoxLayout)
         video_layout.insertWidget(0, self.scanimage_controls)
-        self.scanimage_controls.live_changed.connect(self.calcium_video_widget.set_live)
-        self.scanimage_controls.channel_changed.connect(
-            self.calcium_video_widget.set_recorded_channel
-        )
+        self.scanimage_controls.live_changed.connect(self._set_scanimage_live)
+        self.scanimage_controls.channel_changed.connect(self._set_scanimage_channel)
         self.scanimage_connection.frame_received.connect(
             self.calcium_video_widget.show_live_frame
         )
@@ -428,7 +426,6 @@ class Gui(QtWidgets.QMainWindow):
         self.scanimage_connection.recording_ready.connect(
             self._scanimage_recording_ready
         )
-        self.scanimage_connection.error.connect(self._scanimage_error)
         self._scanimage_run_projects: dict[str, Project] = {}
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
@@ -789,6 +786,10 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.calcium_video_paths,
                 self.project.calcium_video_fps,
                 scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
 
     def _update_combo_box(
@@ -1398,6 +1399,10 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.calcium_video_paths,
                 self.project.calcium_video_fps,
                 scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
@@ -2397,11 +2402,17 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.calcium_video_paths,
                 self.project.calcium_video_fps,
                 scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
 
     def _start_scanimage_recording(self, arguments: dict) -> None:
         if self.scanimage_connection.run_id is not None:
-            self.scanimage_controls._error("An acquisition is already being finalized.")
+            self.scanimage_controls.show_message(
+                "An acquisition is already being finalized."
+            )
             return
         project = self.project
         record = dict(arguments)
@@ -2444,6 +2455,10 @@ class Gui(QtWidgets.QMainWindow):
         )
         previous = record.get("status")
         record["status"] = run.get("state", "unknown")
+        if "error" in run:
+            record["error"] = run["error"]
+        elif record["status"] in {"recording", "completed", "aborted"}:
+            record.pop("error", None)
         for source, target in (
             ("matlab_version", "matlab_version"),
             ("scanimage_version", "scanimage_version"),
@@ -2455,20 +2470,30 @@ class Gui(QtWidgets.QMainWindow):
         if record["status"] != previous:
             project.mark_dirty()
 
-    def _scanimage_error(self, message: str) -> None:
-        run_id = self.scanimage_connection.run_id
-        if run_id is None:
-            return
-        project = self._scanimage_run_projects.get(run_id)
-        if project is not None:
-            record = next(
-                r for r in project.imaging_acquisitions if r["run_id"] == run_id
+    def _set_scanimage_live(self, live: bool) -> None:
+        self.calcium_video_widget.set_live(live)
+        if not live:
+            self._set_scanimage_channel(self.scanimage_controls.channel_spin.value())
+
+    def _set_scanimage_channel(self, channel: int) -> None:
+        index = self.project.calcium_scanimage_index
+        if index is not None and not self.scanimage_controls.live_check.isChecked():
+            channel = self._recorded_scanimage_channel(index, channel)
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_recorded_channel(channel)
+
+    def _recorded_scanimage_channel(self, index: dict | None, channel: int) -> int:
+        if index is not None and channel not in index["channels"]:
+            selected = index["channels"][0]
+            self.scanimage_controls.show_message(
+                f"Channel {channel} was not saved in this recording; showing channel {selected}."
             )
-            record["error"] = message
-            record["status"] = (
-                "unknown" if not self.scanimage_connection.connected else "error"
-            )
-            project.mark_dirty()
+            self.scanimage_controls.channel_spin.blockSignals(True)
+            self.scanimage_controls.channel_spin.setValue(selected)
+            self.scanimage_controls.channel_spin.blockSignals(False)
+            self.scanimage_connection.channel = selected
+            return selected
+        return channel
 
     def _scanimage_recording_ready(self, result: dict) -> None:
         project = self._scanimage_run_projects.pop(result["run_id"], None)
@@ -2482,6 +2507,7 @@ class Gui(QtWidgets.QMainWindow):
             recording=result,
             finished_at=datetime.now(UTC).isoformat(),
         )
+        record.pop("error", None)
         name = record["name"]
         if name in project.experiments:
             name = f"{name} ({result['run_id'][:8]})"
@@ -2489,10 +2515,20 @@ class Gui(QtWidgets.QMainWindow):
             name=name, duration=result["duration_s"], timepoints=[], data=[]
         )
         record["experiment_name"] = name
-        project.set_calcium_video(
-            [pathlib.Path(p) for p in result["paths"]], result["fps"]
+        replace_video = (
+            not project.calcium_video_paths
+            or project.calcium_scanimage_index is not None
         )
-        project.calcium_scanimage_index = result
+        if replace_video:
+            project.set_calcium_video(
+                [pathlib.Path(p) for p in result["paths"]], result["fps"]
+            )
+            project.calcium_scanimage_index = result
+        else:
+            self.scanimage_controls.show_message(
+                f"Saved {name}. Your imported video is unchanged; open the new movie from Recorded acquisitions in its project."
+            )
+        project.mark_dirty()
         project.update_limits()
         self.scanimage_controls.live_check.setChecked(False)
         if project is self.project:
@@ -2512,7 +2548,7 @@ class Gui(QtWidgets.QMainWindow):
         result = record["recording"]
         missing = [path for path in result["paths"] if not pathlib.Path(path).is_file()]
         if missing:
-            self.scanimage_controls._error(
+            self.scanimage_controls.show_message(
                 "Recording files are missing: " + ", ".join(missing)
             )
             return
@@ -3812,6 +3848,10 @@ class Gui(QtWidgets.QMainWindow):
             self.project.calcium_video_paths,
             self.project.calcium_video_fps,
             scanimage_index=self.project.calcium_scanimage_index,
+            channel=self._recorded_scanimage_channel(
+                self.project.calcium_scanimage_index,
+                self.scanimage_controls.channel_spin.value(),
+            ),
             warn_if_missing_cellpose=False,
         )
         return widget

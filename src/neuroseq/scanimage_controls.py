@@ -95,6 +95,9 @@ class ScanImageControls(QtWidgets.QGroupBox):
         actions = QtWidgets.QHBoxLayout()
         self.live_check = QtWidgets.QCheckBox("Live view")
         self.live_check.toggled.connect(self.live_changed.emit)
+        self.live_check.toggled.connect(
+            lambda checked: setattr(connection, "live_preview", checked)
+        )
         self.channel_spin = QtWidgets.QSpinBox()
         self.channel_spin.setRange(1, 32)
         self.channel_spin.valueChanged.connect(self._channel)
@@ -114,6 +117,9 @@ class ScanImageControls(QtWidgets.QGroupBox):
         ):
             actions.addWidget(action_widget)
         layout.addLayout(actions)
+        self.message_label = QtWidgets.QLabel()
+        self.message_label.setWordWrap(True)
+        layout.addWidget(self.message_label)
         self.status_label = QtWidgets.QLabel("Disconnected")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -122,7 +128,7 @@ class ScanImageControls(QtWidgets.QGroupBox):
         connection.connected_changed.connect(self._connected)
         connection.status_changed.connect(self._status)
         connection.frame_received.connect(self._frame)
-        connection.error.connect(self._error)
+        connection.error.connect(self.show_message)
         self._connected(False)
         self._freshness_timer = QtCore.QTimer(self)
         self._freshness_timer.setInterval(1000)
@@ -154,7 +160,7 @@ class ScanImageControls(QtWidgets.QGroupBox):
     def _connect(self) -> None:
         python = self.python_edit.text().strip()
         if not Path(python).is_file():
-            self._error(
+            self.show_message(
                 "Select a Python executable containing MATLAB Engine, numpy and tifffile."
             )
             return
@@ -190,7 +196,7 @@ class ScanImageControls(QtWidgets.QGroupBox):
     def _record(self) -> None:
         directory = Path(self.directory_edit.text().strip())
         if not self.directory_edit.text().strip() or not directory.is_dir():
-            self._error("Select an existing recording folder on this PC.")
+            self.show_message("Select an existing recording folder on this PC.")
             return
         run_id = uuid.uuid4().hex
         QtCore.QSettings().setValue("scanimage/directory", str(directory))
@@ -244,5 +250,6 @@ class ScanImageControls(QtWidgets.QGroupBox):
             self.connection.command("abort")
             self.status_label.setText("First-frame timeout; abort requested.")
 
-    def _error(self, message: str) -> None:
-        self.status_label.setText(message)
+    def show_message(self, message: str) -> None:
+        """Show a user message independently of periodic acquisition status."""
+        self.message_label.setText(message)

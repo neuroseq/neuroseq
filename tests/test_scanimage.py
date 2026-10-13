@@ -1,6 +1,9 @@
 import base64
+import json
 import sys
+from pathlib import Path
 from types import ModuleType
+from zipfile import ZipFile
 
 import numpy as np
 import pytest
@@ -42,9 +45,13 @@ def test_scanimage_index_preserves_channels_timestamps_and_raw_pixels(recording)
     paths, _ = recording
     result = index_recording(paths)
     assert result["channels"] == [1, 2]
-    assert len(result["frames"]) == 8
+    assert len(result["frames"]["page"]) == 8
     assert [
-        f["time_s"] for f in result["frames"] if f["channel"] == 2
+        t
+        for t, c in zip(
+            result["frames"]["time_s"], result["frames"]["channel"], strict=True
+        )
+        if c == 2
     ] == pytest.approx([0, 0.1, 0.2, 0.3])
     assert result["duration_s"] == pytest.approx(0.4)
     assert tifffile.imread(paths[0]).dtype == np.int16
@@ -88,6 +95,8 @@ def connection(qtbot, mocker):
 
 def test_preview_protocol_decodes_matlab_column_order(connection, mocker):
     received = mocker.Mock()
+    statuses = []
+    connection.status_changed.connect(lambda status: statuses.append(dict(status)))
     connection.frame_received.connect(received)
     pixels = np.arange(12, dtype="<f4").reshape(3, 4)
     connection._send("status")
@@ -104,6 +113,7 @@ def test_preview_protocol_decodes_matlab_column_order(connection, mocker):
         }
     )
     np.testing.assert_array_equal(received.call_args.args[0]["pixels"], pixels)
+    assert "frame" not in statuses[0]
 
 
 def test_poll_is_bounded_and_abort_has_priority(connection):
@@ -190,7 +200,29 @@ def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, rec
     assert widget.current_frame_index == 0
 
 
-def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path):
+def test_live_frame_of_other_shape_replaces_recorded_image(qtbot, recording):
+    from pathlib import Path
+
+    from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+    paths, _ = recording
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_video_paths(
+        [Path(p) for p in paths],
+        10,
+        warn_if_missing_cellpose=False,
+        scanimage_index=index_recording(paths),
+    )
+    recorded_shape = widget._frame_graphic.data.value.shape
+    widget.set_live(True)
+    widget.show_live_frame({"pixels": np.zeros((2, 3), dtype=np.float32)})
+    assert widget._frame_graphic.data.value.shape[:2] == (2, 3)
+    widget.set_live(False)
+    assert widget._frame_graphic.data.value.shape == recorded_shape
+
+
+def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path, recording):
     from neuroseq.project import Project
     from neuroseq.save_load_options import SaveLoadOptions
 
@@ -198,7 +230,7 @@ def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path):
     project.imaging_acquisitions = [
         {"run_id": "one", "status": "recording", "directory": "C:/recordings/one"}
     ]
-    project.calcium_scanimage_index = {"channels": [2], "frames": [], "fps": 10}
+    project.calcium_scanimage_index = index_recording(recording[0])
     path = tmp_path / "recording.nseq"
     project.save(path, SaveLoadOptions(True, True, False, False))
     loaded = Project(path)
@@ -352,12 +384,15 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     )
     record = gui.project.imaging_acquisitions[0]
     assert record["matlab_version"] == "2023a"
-    gui._scanimage_error("temporary error")
-    assert record["error"] == "temporary error"
+    gui.scanimage_connection.error.emit("temporary error")
+    assert "error" not in record
+    assert record["status"] == "recording"
     result = index_recording(recording[0])
     result.update(run_id="one", status="completed")
     gui.scanimage_connection.run_id = None
+    gui.scanimage_controls.channel_spin.setValue(2)
     gui._scanimage_recording_ready(result)
+    assert gui.calcium_video_widget.recorded_channel == 2
     assert gui.project.calcium_scanimage_index == result
     assert len(gui.calcium_video_widget._frame_refs) == 4
     assert gui.scanimage_controls.recordings_combo.count() == 2
@@ -404,3 +439,239 @@ class Engine:
         conn.shutdown()
         conn.deleteLater()
         qtbot.wait(1)
+
+
+def test_standard_two_channel_run_has_compact_transport_and_metadata(
+    tmp_path, recording
+):
+    from neuroseq.project import Project
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    _, metadata = recording
+    metadata["FrameData"]["SI.hRoiManager.scanFrameRate"] = 30
+    path = tmp_path / "short.tif"
+    pixels = np.zeros((4, 4), dtype=np.int16)
+    with tifffile.TiffWriter(path) as writer:
+        for frame in range(30):
+            for _ in range(2):
+                writer.write(
+                    pixels,
+                    metadata=None,
+                    description=(
+                        f"frameTimestamps_sec = {frame / 30}\nframeNumbers = {frame}\n"
+                        "auxTrigger0 = []\n" + "x" * 1000
+                    ),
+                )
+    index = index_recording([str(path)])
+    assert set(index["frames"]) == {
+        "file",
+        "page",
+        "channel",
+        "time_s",
+        "scanimage_time_s",
+    }
+    # Writing 54,000 real TIFF pages takes minutes under coverage tracing, so
+    # extend the real index's columns to the standard 15 min, 30 Hz protocol.
+    frames = 27000
+    index["frames"] = {
+        "file": [0] * (2 * frames),
+        "page": list(range(2 * frames)),
+        "channel": [1, 2] * frames,
+        "time_s": [frame / 30 for frame in range(frames) for _ in range(2)],
+        "scanimage_time_s": [frame / 30 for frame in range(frames) for _ in range(2)],
+    }
+    index["duration_s"] = frames / 30
+    index.update(run_id="long", status="completed")
+    assert len(json.dumps({"id": 1, "result": index}).encode()) < 5_000_000
+    project = Project()
+    project.imaging_acquisitions = [
+        {"run_id": "long", "status": "completed", "recording": index}
+    ]
+    project.calcium_scanimage_index = index
+    archive = tmp_path / "long.nseq"
+    project.save(archive, SaveLoadOptions(True, True, False, False))
+    with ZipFile(archive) as zf:
+        raw = zf.read("project_metadata.json")
+    assert len(raw) < 5_000_000
+    assert json.loads(raw)["calcium_scanimage_index"] == {"run_id": "long"}
+    loaded = Project(archive)
+    assert loaded.calcium_scanimage_index is loaded.imaging_acquisitions[0]["recording"]
+    assert loaded.calcium_scanimage_index == index
+
+
+def test_recorded_channel_uses_file_indices_through_symlink(qtbot, recording, tmp_path):
+    from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+    paths, _ = recording
+    link = tmp_path / "linked"
+    link.symlink_to(tmp_path, target_is_directory=True)
+    linked_paths = [str(link / Path(p).name) for p in paths]
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_video_paths(
+        [Path(p) for p in linked_paths],
+        10,
+        warn_if_missing_cellpose=False,
+        scanimage_index=index_recording(linked_paths),
+        channel=2,
+    )
+    assert widget.recorded_channel == 2
+    assert len(widget._frame_refs) == 4
+    for frame, expected in enumerate((1, 2, 1, 2)):
+        np.testing.assert_array_equal(
+            widget._read_frame(frame), np.full((4, 5), expected)
+        )
+
+
+def test_preview_is_opt_in_and_throttled_during_recording(connection, mocker):
+    connection.connected = True
+
+    def poll_args():
+        connection._poll()
+        request = json.loads(connection.process.write.call_args.args[0])
+        connection._reply({"id": request["id"], "result": {}})
+        return request["arguments"]
+
+    assert poll_args() == {}
+    connection.live_preview = True
+    connection.run_id = "recording"
+    clock = mocker.patch(
+        "neuroseq.scanimage_connection.time.monotonic", return_value=10
+    )
+    assert poll_args() == {"channel": 1}
+    clock.return_value = 10.2
+    assert poll_args() == {}
+    clock.return_value = 11.0
+    assert poll_args() == {"channel": 1}
+    connection.live_preview = False
+    clock.return_value = 12.0
+    assert poll_args() == {}
+
+
+@pytest.mark.parametrize("switch_project", [False, True])
+def test_new_recording_preserves_imported_movie(
+    qtbot, mocker, recording, switch_project
+):
+    from neuroseq.gui import Gui
+    from neuroseq.project import Project
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = gui.project
+    imported = Path(recording[0][0])
+    project.set_calcium_video([imported], 20)
+    mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
+    gui._start_scanimage_recording(
+        {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
+    )
+    if switch_project:
+        gui.update_project(Project())
+    result = index_recording(recording[0])
+    result.update(run_id="new", status="completed")
+    gui._scanimage_recording_ready(result)
+    assert project.calcium_video_paths == [imported]
+    assert project.calcium_video_fps == 20
+    assert project.calcium_scanimage_index is None
+    assert project.imaging_acquisitions[0]["recording"] == result
+    assert "imported video is unchanged" in gui.scanimage_controls.message_label.text()
+    if switch_project:
+        gui.update_project(project)
+    gui.scanimage_controls.channel_spin.setValue(2)
+    gui._select_scanimage_recording("new")
+    assert gui.calcium_video_widget.recorded_channel == 2
+    gui.scanimage_controls.channel_spin.setValue(3)
+    assert gui.calcium_video_widget.recorded_channel == 1
+    assert gui.scanimage_controls.channel_spin.value() == 1
+    assert "was not saved" in gui.scanimage_controls.message_label.text()
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocker):
+    states = mocker.Mock()
+    connection.status_changed.connect(states)
+    connection.run_id = "owned"
+    connection.error.emit("A command is already queued")
+    states.assert_not_called()
+    connection._timed_out()
+    assert states.call_args.args[0]["run"]["id"] == "owned"
+    assert states.call_args.args[0]["run"]["state"] == "unknown"
+    assert "30 seconds" in states.call_args.args[0]["run"]["error"]
+    assert connection.run_id == "owned"  # Reconnect can reconcile this run.
+
+
+def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
+    from neuroseq.data import Experiment
+    from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
+    from neuroseq.gui import Gui
+    from neuroseq.import_experiment_dialog import ImportExperimentDialog
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.project.experiments["Imaging"] = Experiment("Imaging", 10, [], [])
+    gui.update_project(gui.project)
+    for combo in (gui.cmb_trace, gui.cmb_spike, gui.cmb_synapse, gui.cmb_data):
+        assert all("Imaging" not in combo.itemText(i) for i in range(combo.count()))
+    manager = ExperimentsManagerDialog(gui.project)
+    qtbot.addWidget(manager)
+    row = next(
+        i
+        for i in range(manager.table.rowCount())
+        if manager.table.item(i, 0).text() == "Imaging"
+    )
+    manager.table.selectRow(row)
+    assert manager.table.item(row, 2).text() == "0"
+    dialog = ImportExperimentDialog(Experiment("Import", 1, [], []), gui.project)
+    qtbot.addWidget(dialog)
+    dialog.cmb_experiments.setCurrentText("Imaging")
+    assert dialog.cmb_offset.count() == 0
+    assert dialog.offset == 0
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording):
+    from neuroseq.project import Project
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    index = index_recording(recording[0])
+    columns = index["frames"]
+    legacy = {
+        **index,
+        "run_id": "old",
+        "frames": [
+            {
+                "path": index["paths"][file],
+                "description": "legacy metadata",
+                **{
+                    key: columns[key][i]
+                    for key in ("page", "channel", "time_s", "scanimage_time_s")
+                },
+            }
+            for i, file in enumerate(columns["file"])
+        ],
+    }
+    project = Project()
+    # Simulate the initial PR's archive format, including its duplicate index.
+    archive = tmp_path / "old.nseq"
+    project.save(archive, SaveLoadOptions(True, True, False, False))
+    with ZipFile(archive) as source:
+        entries = {name: source.read(name) for name in source.namelist()}
+    metadata = json.loads(entries["project_metadata.json"])
+    metadata.update(
+        imaging_acquisitions=[{"run_id": "old", "recording": legacy}],
+        calcium_scanimage_index=legacy,
+    )
+    entries["project_metadata.json"] = json.dumps(metadata).encode()
+    with ZipFile(archive, "w") as dest:
+        for name, data in entries.items():
+            dest.writestr(name, data)
+    loaded = Project(archive)
+    assert loaded.calcium_scanimage_index["frames"] == columns
+    assert loaded.imaging_acquisitions[0]["recording"]["frames"] == columns
+    saved = tmp_path / "new.nseq"
+    loaded.save(saved, SaveLoadOptions(True, True, False, False))
+    with ZipFile(saved) as zf:
+        metadata = json.loads(zf.read("project_metadata.json"))
+    assert metadata["calcium_scanimage_index"] == {"run_id": "old"}
+    assert "description" not in json.dumps(metadata["imaging_acquisitions"])

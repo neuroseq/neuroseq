@@ -1,0 +1,234 @@
+scanimage_acquisition — review of the Codex implementation for #589 (PR #600)
+==============================================================================
+Branch: scanimage-acquisition-589 (commits 891dc3a, 83a61fb on top of origin/main)
+Repo: /mnt/live3/svintila/neuroseq
+
+ROUND 2 UPDATE — read this first
+---------------------------------
+Codex addressed items 1-13 (uncommitted working tree; Codex ran out of
+credits before committing). Claude verified each fix and finished the
+remaining work:
+
+- 1  RESOLVED. Column-wise index (file/page/channel/time_s/scanimage_time_s),
+     no descriptions; stored once, with calcium_scanimage_index saved as a
+     {"run_id"} reference. compact_index() upgrades older list-of-dicts
+     indexes on load. The 27k x 2-channel test wrote 54 000 real TIFF pages
+     and took >600 s under coverage. Claude reworked it: a real index over a
+     short two-channel file, then synthetic 27k-frame columns for the
+     size/persistence assertions.
+- 2  RESOLVED, plus a gap Claude fixed. Settings are restored on terminal
+     state and on disconnect. But if ScanImage went idle WITHOUT a terminal
+     callback, the next Preview overwrote `run` (losing `old`), and the next
+     Record captured NeuroSeq's own settings as the "originals". Preview and
+     Record now force-restore first. MATLAB tests added:
+     testNextRecordAfterMissingEventKeepsOriginalSettings and
+     testPreviewAfterMissingEventRestoresSettings.
+- 3  RESOLVED (acqsPerLoop checked in probe and record).
+- 4  RESOLVED, plus a gap Claude fixed. `isempty(cfg) && isempty(fieldnames(cfg))`
+     errored when userFunctionsCfg is a plain [] (fieldnames on a double).
+     Disconnect also dot-indexed a possibly empty cfg. Both are now guarded;
+     testEmptyNumericCallbackTable added.
+- 5  RESOLVED (frame only when Live view is on, 1 Hz during an owned run,
+     <=256 px subsampling). Claude fixed a regression this introduced:
+     fastplotlib images cannot change shape in place, so a 256 px live frame
+     over a 512 px recorded image raised "could not broadcast". The same
+     happened when going back to the recording. _draw_current_frame now
+     re-creates the graphic on shape change;
+     test_live_frame_of_other_shape_replaces_recorded_image added.
+- 6-13 RESOLVED as specified.
+
+Verification: 14/14 MATLAB adapter tests (local R2025b with a simulated
+rig; not ScanImage 2023.1.0). 298 passed across test_scanimage, test_project,
+test_gui, test_syscon2_panel and test_import_experiment_dialog; diff-cover
+84%. The pre-existing exit-139 crash at interpreter shutdown remains. Still
+unvalidated on real hardware.
+
+
+ORIGINAL REVIEW (round 1)
+-------------------------
+Overall: the architecture is sound. MATLAB adapter -> isolated Python 3.10/3.11
+engine helper over JSON lines -> single-in-flight QProcess transport -> controls
+embedded in the calcium-video widget. Ownership checks (only abort runs/focus
+NeuroSeq started), the pre-acquisition sidecar, per-project run routing across
+project switches, "interrupted" on reload, and suppressing stim crosses on
+unsynchronised recordings are all correct and well motivated.
+tests/test_scanimage.py + tests/test_project.py pass locally (84 passed).
+
+The adapter has never run against real ScanImage. Several items below matter
+for the lab's standard protocol: 27 000 frames / 15 min at 30 Hz, 512x512,
+sometimes two channels. Please fix the MUST-FIX items, add tests where noted,
+and keep the existing tests green.
+
+
+MUST-FIX
+--------
+
+1. Recording index size breaks on standard-length recordings.
+   importer_scanimage.py:65 stores the full ScanImage frame `description`
+   string on every frame entry. A SI2023 frame description is a few hundred
+   bytes to ~1 KB (frameNumbers, acquisitionNumbers, frameTimestamps_sec,
+   acqTriggerTimestamps_sec, nextFileMarkerTimestamps_sec, endOfAcquisition*,
+   dcOverVoltage, epoch, auxTrigger0-3, I2CData), and each JSON frame entry
+   also repeats the full file path. At 27 000 frames that is roughly
+   25-50 MB, and with two channels it can reach the 64 MiB reply cap in
+   scanimage_connection.py:130. Hitting the cap calls _fail(), which drops
+   the connection right at the end of a successful recording. The same
+   index is then written twice into project_metadata.json (project.py:1437
+   via imaging_acquisitions[].recording, and project.py:1439 via
+   calcium_scanimage_index). It is also reparsed on every project load.
+
+   Required:
+   - Do not ship per-frame descriptions through the transport or into
+     project metadata. Keep only what playback needs: path index, page,
+     channel, time_s, scanimage_time_s. Use a `files` list plus an integer
+     file index per frame instead of repeating the path string. Better:
+     store frame arrays column-wise (lists or npy blobs), not as a list of
+     dicts.
+   - Keep the descriptions for the future alignment step, but extract only
+     the fields that step needs (acqTriggerTimestamps_sec, auxTrigger0-3,
+     frameNumbers). Alternatively, re-read descriptions from the TIFFs when
+     that step actually runs; they stay on disk anyway.
+   - Store the index once. Make calcium_scanimage_index a reference
+     ({"run_id": ...}) into imaging_acquisitions, or keep the bulky index in
+     an .npy blob in the .nseq archive (io/project already uses npy blobs
+     for arrays) and only small metadata in JSON.
+   - Test: index a synthetic 27 000-frame x 2-channel recording (tifffile
+     can write ScanImage-like descriptions; small 4x4 pages are fine). Assert
+     the serialised reply and the project metadata stay well under the cap
+     (e.g. < 5 MB).
+
+2. ScanImage configuration is left modified after every successful run.
+   neuroseq_scanimage.m:57-78 saves the old logFilePath/logFileStem/
+   logFileCounter/trigAcqEnable/framesPerSlice/loggingEnable but restores
+   them only in the `catch` branch. After a normal or aborted acquisition,
+   the user's ScanImage stays on NeuroSeq's run directory, logging enabled,
+   NeuroSeq's frame count, and possibly external triggering. Their next
+   manual Grab in ScanImage then writes into the NeuroSeq run folder and/or
+   silently waits for a trigger. That is a real rig hazard.
+
+   Required: keep `old` in the persistent run struct. Restore it when the
+   run reaches completed/aborted (in the 'event' branch, after acqModeDone/
+   acqAbort, once acqState is idle), and on 'disconnect'. Document this in
+   docs/user_guide/scanimage_acquisition.md.
+
+3. Loop / multi-acquisition settings are not validated.
+   The 'record' preconditions (neuroseq_scanimage.m:46-53) check slices,
+   mROI, FastZ and log averaging, but not hSI.acqsPerLoop (and the loop
+   repeat period). With acqsPerLoop > 1, acqModeDone fires only after all
+   acquisitions. The frame-count check in scanimage_connection.py
+   (frames * channels) then fails as `finalization_failed`, or files from
+   several acquisitions are concatenated into one "recording".
+   Required: assert acqsPerLoop == 1 (guard with isprop). Either set
+   hSI.hScan2D.logFramesPerFile explicitly or document that file rollover
+   is expected and handled. Add the new precondition to the probe/docs list.
+
+4. Callback registration can fail on a rig with existing user functions.
+   neuroseq_scanimage.m:37 appends with `cfg(end+1) = entry` where `entry`
+   is a hand-built struct with exactly EventName/UserFcnName/Arguments/
+   Enable. If the rig's existing userFunctionsCfg struct array has more
+   fields or a different field order, MATLAB errors with "Subscripted
+   assignment between dissimilar structures" and connect fails.
+   Required: build the entry from the existing struct's field set. If cfg
+   is non-empty, copy cfg(1), set every field to a default, then set the
+   four known fields; otherwise use the literal. Also skip adding events
+   that already have a neuroseq_scanimage_event entry. `listenersInstalled`
+   is a persistent var that resets on `clear functions`/`clear all`, so a
+   reconnect after that would register duplicates. Make the check
+   idempotent by looking at cfg itself.
+
+
+SHOULD-FIX
+----------
+
+5. Preview frames are transferred during recordings.
+   neuroseq_scanimage.m:118 sends a frame on every status poll whenever
+   acqState is not idle, including while NeuroSeq's own recording is
+   running. Each 200 ms poll then makes MATLAB build single() ->
+   typecast -> base64 -> jsonencode of a full frame on ScanImage's own
+   thread. For 512x512 that is ~1 MB raw / ~1.4 MB base64, five times a
+   second, during the acquisition we care about not dropping frames in.
+   Required: only include the frame when the Python side actually wants
+   one. Send `channel` in the status arguments only while Live view is
+   checked; scanimage_connection._poll currently always sends it. Also
+   lower the preview rate during an owned recording (e.g. 1 Hz) and/or
+   downsample on the MATLAB side (img(1:2:end,1:2:end)) when larger than
+   ~256 px. Keep the polling for status itself.
+
+6. Any transport error is attributed to the active run.
+   gui.py:2458 `_scanimage_error` marks the in-flight run's record with
+   `error` and status "error"/"unknown" for every `error` signal while
+   run_id is set. That includes messages unrelated to the run, e.g. "A
+   ScanImage command is already queued." (scanimage_connection.py:95) or a
+   failed preview/abort command. A run that later completes keeps a stale
+   `error` field.
+   Required: emit run-scoped failures with the run id (e.g. a separate
+   `run_failed(run_id, message)` signal, or include the run id in the
+   status_changed payloads that already exist). Keep `error` for UI
+   messages only. Do not change run status from the generic error handler.
+
+7. A finished recording silently replaces the project's calcium video.
+   gui.py:2492 calls project.set_calcium_video(...) for the originating
+   project on recording_ready, even if that project is not the active one
+   and even if the user had imported a TIFF/video there. The previous
+   video reference is lost without notice (set_calcium_video also clears
+   calcium_scanimage_index).
+   Required: at minimum, only replace it automatically if the project has
+   no calcium video or its current video is a ScanImage recording. Leave a
+   user-imported video in place and make the recording available via
+   "Recorded acquisitions" plus a status message. Add a test.
+
+8. Channel lookup in recorded playback can KeyError on Windows.
+   calcium_video_widget.py:261 builds the lookup key with
+   `Path(f["path"]).resolve()` but compares it against tifffile's
+   `tif.filehandle.path`, which is opened from the unresolved path
+   (absolute, not resolved). On mapped network drives Path.resolve()
+   returns the UNC form, and symlinked folders differ too, so the dict
+   lookup raises KeyError and playback breaks. This is exactly the setup
+   on the acquisition PC (recording folder on a mapped share).
+   Required: key the lookup by the index into `self._paths` (the order of
+   result["paths"] is the order passed to set_video_paths) plus the page
+   number, not by path strings. Test with a symlinked directory on Linux.
+
+9. The channel selector is ignored when loading a recording.
+   calcium_video_widget.py:246 `set_scanimage_index(index, channel=None)`
+   always falls back to index["channels"][0]. GUI callers never pass the
+   channel spin value, so after Record or after selecting from "Recorded
+   acquisitions" the widget shows channel 1 even though the spinbox says 2.
+   Also, if the user picks a channel not in the recording,
+   set_recorded_channel returns silently.
+   Required: pass self.scanimage_controls.channel_spin.value() through.
+   When the channel is absent, fall back to the first saved channel and
+   tell the user (status label), or limit the spin to the recorded
+   channels while a recording is shown.
+
+
+MINOR
+-----
+
+10. gui.py:2404 and gui.py:2515 call ScanImageControls._error (private).
+    Add a public `show_message(str)` method or emit through the connection.
+
+11. scanimage_connection._reply emits status_changed(result) before popping
+    `frame` (scanimage_connection.py:219 vs the pop just after). All status
+    listeners therefore receive the base64 frame payload. Pop the frame
+    first, then emit.
+
+12. ScanImage-recorded experiments are created as
+    Experiment(timepoints=[], data=[]) (gui.py, _scanimage_recording_ready).
+    Check that every consumer of project.experiments tolerates an empty
+    experiment: combo boxes, the trace/spike widgets when selected, export,
+    and the analysis widgets. Add a GUI test that selects such an
+    experiment in the experiment combo box.
+
+13. Labeled-video export uses the actual frame timestamps for GIF
+    (_export_gif_streaming) but the constant fps for the other formats.
+    Either make this consistent or note it in the docs.
+
+
+Please don't change
+-------------------
+- The single-in-flight transport design, abort pre-emption, the 30 s
+  deadline, and never quitting MATLAB.
+- The sidecar written before the hardware command.
+- Crosses suppressed on ScanImage/live frames (synchronisation is unverified).
+- The not-wired-in call to SysCon2StimulationHost.acquisition_imported.

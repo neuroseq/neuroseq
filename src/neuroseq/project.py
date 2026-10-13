@@ -24,6 +24,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importer_scanimage import compact_index
 from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
@@ -236,6 +237,10 @@ class Project:
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
                     self.calcium_scanimage_index = _meta.get("calcium_scanimage_index")
                     for acquisition in self.imaging_acquisitions:
+                        if "recording" in acquisition:
+                            acquisition["recording"] = compact_index(
+                                acquisition["recording"]
+                            )
                         if acquisition.get("status") in {
                             "requested",
                             "starting",
@@ -243,6 +248,21 @@ class Project:
                             "waiting_for_first_frame",
                         }:
                             acquisition["status"] = "interrupted"
+                    if self.calcium_scanimage_index is not None:
+                        selected = self.calcium_scanimage_index
+                        self.calcium_scanimage_index = (
+                            next(
+                                (
+                                    r["recording"]
+                                    for r in self.imaging_acquisitions
+                                    if r.get("run_id") == selected.get("run_id")
+                                    and "recording" in r
+                                ),
+                                None,
+                            )
+                            if "frames" not in selected
+                            else compact_index(selected)
+                        )
                     self._loaded_schema_version = int(_meta.get("schema_version", 1))
             if not _dt_from_metadata:
                 self.dt = self._derive_dt_from_data()
@@ -1436,7 +1456,15 @@ class Project:
             if self.imaging_acquisitions:
                 metadata["imaging_acquisitions"] = self.imaging_acquisitions
             if self.calcium_scanimage_index is not None:
-                metadata["calcium_scanimage_index"] = self.calcium_scanimage_index
+                selected = self.calcium_scanimage_index
+                run_id = selected.get("run_id")
+                if run_id is not None and any(
+                    r.get("run_id") == run_id and "recording" in r
+                    for r in self.imaging_acquisitions
+                ):
+                    metadata["calcium_scanimage_index"] = {"run_id": run_id}
+                else:
+                    metadata["calcium_scanimage_index"] = compact_index(selected)
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()

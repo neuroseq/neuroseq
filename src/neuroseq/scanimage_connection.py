@@ -38,6 +38,8 @@ class ScanImageConnection(QtCore.QObject):
         self.connected = False
         self._closing = False
         self.channel = 1
+        self.live_preview = False
+        self._last_preview_request = float("-inf")
         self.run_id: str | None = None
         self._expected_frames: int | None = None
         self._finalize_since: float | None = None
@@ -123,7 +125,14 @@ class ScanImageConnection(QtCore.QObject):
                 self._queued = None
                 self._send(operation, arguments)
             else:
-                self._send("status", {"channel": self.channel})
+                arguments = {}
+                now = time.monotonic()
+                if self.live_preview and (
+                    self.run_id is None or now - self._last_preview_request >= 1
+                ):
+                    arguments["channel"] = self.channel
+                    self._last_preview_request = now
+                self._send("status", arguments)
 
     def _read(self) -> None:
         self._buffer.extend(self.process.readAllStandardOutput().data())
@@ -159,7 +168,11 @@ class ScanImageConnection(QtCore.QObject):
                 self.status_changed.emit(
                     {
                         "acq_state": "unknown",
-                        "run": {"id": self.run_id, "state": "failed"},
+                        "run": {
+                            "id": self.run_id,
+                            "state": "failed",
+                            "error": str(reply["error"]),
+                        },
                     }
                 )
                 self.run_id = None
@@ -188,7 +201,7 @@ class ScanImageConnection(QtCore.QObject):
             if (
                 self._last_status["run"]["state"] == "completed"
                 and self._expected_frames is not None
-                and len(result["frames"])
+                and len(result["frames"]["page"])
                 != self._expected_frames * len(result["channels"])
             ):
                 if (
@@ -215,9 +228,9 @@ class ScanImageConnection(QtCore.QObject):
         if operation == "disconnect":
             self.shutdown()
             return
+        frame = result.pop("frame", None)
         self._last_status = result
         self.status_changed.emit(result)
-        frame = result.pop("frame", None)
         if frame is not None:
             shape = tuple(int(n) for n in frame["shape"])
             if len(shape) != 2 or min(shape) < 1 or max(shape) > 16384:
@@ -299,6 +312,7 @@ class ScanImageConnection(QtCore.QObject):
 
     def _fail(self, message: str) -> None:
         self.connected = False
+        self._unknown_run(message)
         self.error.emit(message)
         self.shutdown()
 
@@ -311,8 +325,18 @@ class ScanImageConnection(QtCore.QObject):
         self.deadline.stop()
         self.connected_changed.emit(False)
         if unexpected:
+            self._unknown_run("ScanImage helper exited. Acquisition state is unknown.")
             self.error.emit(
                 "ScanImage helper exited. Acquisition state is unknown. " + self._stderr
+            )
+
+    def _unknown_run(self, message: str) -> None:
+        if self.run_id:
+            self.status_changed.emit(
+                {
+                    "acq_state": "unknown",
+                    "run": {"id": self.run_id, "state": "unknown", "error": message},
+                }
             )
 
     def shutdown(self) -> None:

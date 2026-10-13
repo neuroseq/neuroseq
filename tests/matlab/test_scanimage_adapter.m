@@ -1,0 +1,164 @@
+function tests = test_scanimage_adapter
+% Run with runtests('tests/matlab') in a separate MATLAB session without a rig.
+tests = functiontests(localfunctions);
+end
+
+function setupOnce(testCase)
+assert(~evalin('base','exist(''hSI'',''var'')'), 'Run in a separate MATLAB session without hSI.');
+root = fileparts(fileparts(fileparts(mfilename('fullpath'))));
+addpath(fullfile(root,'src','neuroseq','resources','scanimage'));
+addpath(fullfile(root,'tests','matlab'));
+end
+
+function setup(testCase)
+clear neuroseq_scanimage
+rig = ScanImageTestRig();
+assignin('base','hSI',rig);
+testCase.TestData.rig = rig;
+testCase.TestData.directory = tempname;
+neuroseq_scanimage('probe','{}');
+end
+
+function teardown(testCase)
+evalin('base','clear hSI');
+clear neuroseq_scanimage
+if exist(testCase.TestData.directory,'dir'), rmdir(testCase.TestData.directory,'s'); end
+end
+
+function args = request(testCase)
+args = struct('run_id','run', 'directory',testCase.TestData.directory, 'frames',100, 'external_trigger',true);
+end
+
+function old = settings(rig)
+old = {rig.hScan2D.logFilePath,rig.hScan2D.logFileStem,rig.hScan2D.logFileCounter, ...
+    rig.hScan2D.trigAcqEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable};
+end
+
+function testRestoreOnCompletion(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+verifyNotEqual(testCase,settings(rig),old);
+rig.complete(false);
+verifyEqual(testCase,settings(rig),old);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'completed');
+verifyEqual(testCase,status.settings.frames_per_slice,100);
+verifyEqual(testCase,status.settings.directory,testCase.TestData.directory);
+verifyFalse(testCase,isfield(status.run,'old'));
+end
+
+function testRestoreAfterEarlyTerminalEvent(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.complete(true);
+neuroseq_scanimage('status','{}');
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testRestoreOnAbort(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+status = jsondecode(neuroseq_scanimage('abort','{}'));
+verifyEqual(testCase,settings(rig),old);
+verifyEqual(testCase,status.run.state,'aborted');
+end
+
+function testRestoreOnDisconnect(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.complete(true);
+neuroseq_scanimage('disconnect','{}');
+verifyEqual(testCase,settings(rig),old);
+verifyEqual(testCase,numel(rig.hUserFunctions.userFunctionsCfg),1);
+end
+
+function testRestoreOnStartFailure(testCase)
+rig = testCase.TestData.rig; old = settings(rig); rig.failStart = true;
+verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase))), 'Test:StartFailed');
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testCallbackRegistrationSurvivesClear(testCase)
+rig = testCase.TestData.rig;
+cfg = rig.hUserFunctions.userFunctionsCfg;
+verifyEqual(testCase,numel(cfg),5);
+verifyEqual(testCase,cfg(1).ExtraField,'preserve me');
+clear neuroseq_scanimage
+neuroseq_scanimage('probe','{}');
+verifyEqual(testCase,rig.hUserFunctions.userFunctionsCfg,cfg);
+% Duplicate stale adapter registrations are reconciled as well.
+rig.hUserFunctions.userFunctionsCfg(end+1) = cfg(2);
+neuroseq_scanimage('probe','{}');
+verifyEqual(testCase,numel(rig.hUserFunctions.userFunctionsCfg),5);
+end
+
+function testEmptyCallbackTable(testCase)
+rig = testCase.TestData.rig;
+rig.hUserFunctions.userFunctionsCfg = struct([]);
+neuroseq_scanimage('probe','{}');
+verifyEqual(testCase,numel(rig.hUserFunctions.userFunctionsCfg),4);
+end
+
+function testLoopRejectedBeforeMutatingSettings(testCase)
+rig = testCase.TestData.rig; old = settings(rig); rig.acqsPerLoop = 2;
+verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase))), 'NeuroSeq:MultipleAcquisitions');
+verifyEqual(testCase,settings(rig),old);
+verifyFalse(testCase,logical(exist(testCase.TestData.directory,'dir')));
+verifyError(testCase,@()neuroseq_scanimage('probe','{}'), 'NeuroSeq:MultipleAcquisitions');
+end
+
+function testPreviewOnlyOnRequestAndReduced(testCase)
+neuroseq_scanimage('preview','{}');
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyFalse(testCase,isfield(status,'frame'));
+status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
+verifyEqual(testCase,status.frame.shape,[256;256]);
+raw = matlab.net.base64decode(status.frame.data);
+pixels = reshape(typecast(raw,'single'),256,256);
+rig = testCase.TestData.rig;
+verifyEqual(testCase,pixels,rig.hDisplay.lastFrame{1}(1:2:end,1:2:end));
+end
+
+function testReconnectWhileRecordingDoesNotChangeCallbacks(testCase)
+rig = testCase.TestData.rig;
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+cfg = rig.hUserFunctions.userFunctionsCfg;
+status = jsondecode(neuroseq_scanimage('probe','{}'));
+verifyEqual(testCase,status.run.state,'recording');
+verifyEqual(testCase,rig.hUserFunctions.userFunctionsCfg,cfg);
+end
+
+function testDisconnectRestoresAfterMissingEvent(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle';
+neuroseq_scanimage('disconnect','{}');
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testEmptyNumericCallbackTable(testCase)
+rig = testCase.TestData.rig;
+rig.hUserFunctions.userFunctionsCfg = [];
+neuroseq_scanimage('probe','{}');
+verifyEqual(testCase,numel(rig.hUserFunctions.userFunctionsCfg),4);
+end
+
+function testNextRecordAfterMissingEventKeepsOriginalSettings(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle';
+second = request(testCase); second.run_id = 'second'; second.directory = [testCase.TestData.directory '_2'];
+testCase.addTeardown(@() rmdir(second.directory,'s'));
+neuroseq_scanimage('record',jsonencode(second));
+rig.complete(false);
+neuroseq_scanimage('status','{}');
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testPreviewAfterMissingEventRestoresSettings(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle';
+neuroseq_scanimage('preview','{}');
+verifyEqual(testCase,settings(rig),old);
+end
