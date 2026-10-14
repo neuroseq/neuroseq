@@ -31,7 +31,8 @@ end
 
 function old = settings(rig)
 old = {rig.hScan2D.logFilePath,rig.hScan2D.logFileStem,rig.hScan2D.logFileCounter, ...
-    rig.extTrigEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable};
+    rig.extTrigEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable, ...
+    rig.hScan2D.logAverageFactor,rig.acqsPerLoop};
 end
 
 function testRestoreOnCompletion(testCase)
@@ -99,12 +100,28 @@ neuroseq_scanimage('probe','{}');
 verifyEqual(testCase,numel(rig.hUserFunctions.userFunctionsCfg),4);
 end
 
-function testLoopRejectedBeforeMutatingSettings(testCase)
-rig = testCase.TestData.rig; old = settings(rig); rig.acqsPerLoop = 2;
-verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase))), 'NeuroSeq:MultipleAcquisitions');
+function testRecordsRawSingleAcquisitionThenRestoresUserValues(testCase)
+% As on the rig: logging averages 10 frames and a loop has 2 acquisitions.
+rig = testCase.TestData.rig;
+verifyEqual(testCase,[rig.hScan2D.logAverageFactor rig.acqsPerLoop],[10 2]);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+verifyEqual(testCase,[rig.hScan2D.logAverageFactor rig.acqsPerLoop],[1 1]);
+rig.complete(false);
+verifyEqual(testCase,[rig.hScan2D.logAverageFactor rig.acqsPerLoop],[10 2]);
+end
+
+function testDisabledStackKeepsSlicesButRecordsOnePlane(testCase)
+% As on the rig: a 25-slice stack is configured but stacks are disabled.
+rig = testCase.TestData.rig; rig.hStackManager.numSlices = 25;
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+verifyEqual(testCase,rig.acqState,'grab');
+end
+
+function testActiveStackRejected(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+rig.hStackManager.numSlices = 25; rig.hStackManager.actualNumSlices = 25;
+verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase))), 'NeuroSeq:MultiplePlanes');
 verifyEqual(testCase,settings(rig),old);
-verifyFalse(testCase,logical(exist(testCase.TestData.directory,'dir')));
-verifyError(testCase,@()neuroseq_scanimage('probe','{}'), 'NeuroSeq:MultipleAcquisitions');
 end
 
 function testPreviewOnlyOnRequestAndReduced(testCase)

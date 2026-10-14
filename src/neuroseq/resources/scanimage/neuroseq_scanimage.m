@@ -30,7 +30,6 @@ switch operation
         end
         assert(isprop(hSI.hStackManager, 'framesPerSlice'), 'Missing framesPerSlice');
         assert(isprop(hSI.hChannels, 'loggingEnable'), 'Missing loggingEnable');
-        validate_single_acquisition(hSI);
         cfg = hSI.hUserFunctions.userFunctionsCfg;
         originalCfg = cfg;
         names = {'acqStart','acqModeDone','acqAbort','focusDone'};
@@ -71,19 +70,24 @@ switch operation
         % Otherwise a run that never reported completion would leave its
         % NeuroSeq settings to be captured below as the user's originals.
         run = restore_settings(hSI, run, true);
-        validate_single_acquisition(hSI);
-        assert(hSI.hStackManager.numSlices == 1, 'Only single-plane acquisition is supported.');
+        % numSlices keeps the configured stack size while stacks are disabled;
+        % actualNumSlices is what Grab will acquire.
+        if isprop(hSI.hStackManager, 'actualNumSlices')
+            slices = hSI.hStackManager.actualNumSlices;
+        else
+            slices = hSI.hStackManager.numSlices;
+        end
+        assert(slices == 1, 'NeuroSeq:MultiplePlanes', 'Only single-plane acquisition is supported.');
         assert(~hSI.hRoiManager.mroiEnable, 'Multi-ROI acquisition is not supported.');
         assert(~hSI.hFastZ.enable, 'FastZ must be disabled.');
-        assert(isprop(hSI.hScan2D, 'logAverageFactor') && hSI.hScan2D.logAverageFactor == 1, ...
-            'Set ScanImage logging average factor to 1 to preserve raw frames.');
         assert(~isempty(hSI.hChannels.channelSave), 'Select at least one saved channel in ScanImage.');
         assert(args.frames >= 1 && args.frames == fix(args.frames), 'Invalid frame count.');
         assert(~exist(args.directory, 'dir'), 'Run directory already exists.');
         [ok, msg] = mkdir(args.directory); assert(ok, msg);
         % Retain settings until completion/abort and restore only once idle.
         old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
-            hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable};
+            hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
+            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop')};
         run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, 'old',{old});
         try
             hSI.hScan2D.logFilePath = args.directory;
@@ -92,6 +96,10 @@ switch operation
             hSI.extTrigEnable = logical(args.external_trigger);
             hSI.hStackManager.framesPerSlice = args.frames;
             hSI.hChannels.loggingEnable = true;
+            % Raw frames, one acquisition: averaging would drop frames and a
+            % multi-acquisition loop could delay acqModeDone.
+            if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = 1; end
+            if ~isempty(old{8}), hSI.acqsPerLoop = 1; end
             run.settings = recording_settings(hSI);
             hSI.startGrab();
             if strcmp(run.state,'starting')
@@ -160,11 +168,10 @@ end
 reply = jsonencode(out);
 end
 
-function validate_single_acquisition(hSI)
-% startGrab is used, never startLoop; reject ambiguous multi-acquisition setups.
-if isprop(hSI,'acqsPerLoop')
-    assert(hSI.acqsPerLoop == 1, 'NeuroSeq:MultipleAcquisitions', 'Set ScanImage acquisitions per loop to 1.');
-end
+function value = optional_prop(obj, name)
+% Empty when this ScanImage release lacks the property; restored only if set.
+value = [];
+if isprop(obj, name), value = obj.(name); end
 end
 
 function run = restore_settings(hSI, run, force)
@@ -177,6 +184,8 @@ if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
     hSI.hScan2D.logFilePath = old{1}; hSI.hScan2D.logFileStem = old{2};
     hSI.hScan2D.logFileCounter = old{3}; hSI.extTrigEnable = old{4};
     hSI.hStackManager.framesPerSlice = old{5}; hSI.hChannels.loggingEnable = old{6};
+    if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = old{7}; end
+    if ~isempty(old{8}), hSI.acqsPerLoop = old{8}; end
     run = rmfield(run,'old');
 end
 end

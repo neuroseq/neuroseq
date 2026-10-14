@@ -8,7 +8,7 @@ classdef ScanImageTestRig < handle
         hFastZ
         hUserFunctions
         acqState = 'idle'
-        acqsPerLoop = 1
+        acqsPerLoop = 2
         extTrigEnable = false
         failStart = false
     end

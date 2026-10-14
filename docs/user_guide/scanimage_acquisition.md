@@ -13,10 +13,11 @@ This integration targets **ScanImage Premium 2023.1.0**, single-plane raster
 imaging. Its MATLAB adapter requires validation on the actual acquisition PC;
 automated Python tests do not establish hardware compatibility or timing.
 Volumes, FastZ, multi-ROI and arbitrary-line acquisitions are outside this
-initial implementation. Logging averaging must be 1 to retain raw frames. Set
-**acquisitions per loop to 1** when that property is available; this is checked
-on connection and before recording. NeuroSeq uses Grab, not Loop, so the loop
-repeat period is not used.
+initial implementation. A configured Z-stack is fine as long as stacks are
+disabled. For its own recordings NeuroSeq sets logging averaging and
+acquisitions per loop to 1, so every raw frame is saved in one acquisition, and
+restores your values when the recording ends, is aborted or fails to start.
+NeuroSeq uses Grab, not Loop, so the loop repeat period is not used.
 
 ## Setup
 

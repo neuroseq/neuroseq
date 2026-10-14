@@ -6,8 +6,9 @@ classdef ScanImageTestComponent < handle
         logFileCounter = 42
         framesPerSlice = 15
         loggingEnable = false
-        logAverageFactor = 1
+        logAverageFactor = 10
         numSlices = 1
+        actualNumSlices = 1
         mroiEnable = false
         enable = false
         channelSave = [1 2]
