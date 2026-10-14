@@ -31,7 +31,7 @@ end
 
 function old = settings(rig)
 old = {rig.hScan2D.logFilePath,rig.hScan2D.logFileStem,rig.hScan2D.logFileCounter, ...
-    rig.hScan2D.trigAcqEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable};
+    rig.extTrigEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable};
 end
 
 function testRestoreOnCompletion(testCase)

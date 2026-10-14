@@ -23,7 +23,8 @@ switch operation
     case 'probe'
         assert(isprop(hSI, 'hDisplay') && isprop(hSI.hDisplay, 'lastFrame'), ...
             'This adapter requires the ScanImage 2023 hDisplay API.');
-        required = {'logFilePath','logFileStem','logFileCounter','trigAcqEnable'};
+        assert(isprop(hSI, 'extTrigEnable'), 'Missing ScanImage property: extTrigEnable');
+        required = {'logFilePath','logFileStem','logFileCounter'};
         for k=1:numel(required)
             assert(isprop(hSI.hScan2D, required{k}), 'Missing ScanImage property: %s', required{k});
         end
@@ -82,13 +83,13 @@ switch operation
         [ok, msg] = mkdir(args.directory); assert(ok, msg);
         % Retain settings until completion/abort and restore only once idle.
         old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
-            hSI.hScan2D.trigAcqEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable};
+            hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable};
         run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, 'old',{old});
         try
             hSI.hScan2D.logFilePath = args.directory;
             hSI.hScan2D.logFileStem = 'acquisition';
             hSI.hScan2D.logFileCounter = 1;
-            hSI.hScan2D.trigAcqEnable = logical(args.external_trigger);
+            hSI.extTrigEnable = logical(args.external_trigger);
             hSI.hStackManager.framesPerSlice = args.frames;
             hSI.hChannels.loggingEnable = true;
             run.settings = recording_settings(hSI);
@@ -174,7 +175,7 @@ if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
         (force || any(strcmp(run.state, {'completed','aborted','failed'})))
     old = run.old;
     hSI.hScan2D.logFilePath = old{1}; hSI.hScan2D.logFileStem = old{2};
-    hSI.hScan2D.logFileCounter = old{3}; hSI.hScan2D.trigAcqEnable = old{4};
+    hSI.hScan2D.logFileCounter = old{3}; hSI.extTrigEnable = old{4};
     hSI.hStackManager.framesPerSlice = old{5}; hSI.hChannels.loggingEnable = old{6};
     run = rmfield(run,'old');
 end
@@ -183,6 +184,6 @@ end
 function settings = recording_settings(hSI)
 settings = struct('saved_channels',hSI.hChannels.channelSave, ...
     'frames_per_slice',hSI.hStackManager.framesPerSlice, ...
-    'external_trigger',hSI.hScan2D.trigAcqEnable, 'logging',hSI.hChannels.loggingEnable, ...
+    'external_trigger',hSI.extTrigEnable, 'logging',hSI.hChannels.loggingEnable, ...
     'directory',hSI.hScan2D.logFilePath, 'stem',hSI.hScan2D.logFileStem);
 end

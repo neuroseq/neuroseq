@@ -4,7 +4,6 @@ classdef ScanImageTestComponent < handle
         logFilePath = 'original-path'
         logFileStem = 'original-stem'
         logFileCounter = 42
-        trigAcqEnable = false
         framesPerSlice = 15
         loggingEnable = false
         logAverageFactor = 1

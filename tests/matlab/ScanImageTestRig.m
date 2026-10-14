@@ -9,6 +9,7 @@ classdef ScanImageTestRig < handle
         hUserFunctions
         acqState = 'idle'
         acqsPerLoop = 1
+        extTrigEnable = false
         failStart = false
     end
     methods
