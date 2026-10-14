@@ -31,6 +31,12 @@ cd neuroseq
 pip install .
 ```
 
+## Windows desktop shortcut
+
+On Windows, NeuroSeq can instead be installed with a desktop shortcut that
+updates it from GitHub before each start. See
+[Windows desktop shortcut](windows_shortcut.md).
+
 ## How to install Cython on Windows
 
 To speed up simulations with cython on Windows one will need an installation of the Microsoft Visual C++ 14.0 or higher.

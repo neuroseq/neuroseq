@@ -1,23 +1,77 @@
 # Windows desktop shortcut
 
-On a Windows PC that runs NeuroSeq from a git clone with `uv`, a desktop
-shortcut can keep that clone up to date with `main` on GitHub and start
-NeuroSeq from it, so nobody has to open a prompt.
+On Windows, NeuroSeq can be started from a desktop shortcut that first updates
+it from `main` on GitHub. NeuroSeq then runs from a git clone with
+[uv](https://docs.astral.sh/uv/), so the installed version always matches the
+code, and nobody has to open a prompt to start or update it.
 
 ## Install
 
-Run once, from a prompt where `uv --version` works (for example the Anaconda
-Prompt with the environment that provides `uv` active), in the NeuroSeq clone:
+### 1. Install Git and uv
+
+- **Git:** install [Git for Windows](https://git-scm.com/download/win) with
+  the default options.
+- **uv:** in PowerShell, run the
+  [standalone installer](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer):
+
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+
+  If you already use conda, `pip install uv` inside a conda environment works
+  as well.
+
+Open a new prompt afterwards and check that both work:
+
+```bat
+git --version
+uv --version
+```
+
+### 2. Get NeuroSeq
+
+Clone the repository, for example into `Documents\GitHub`:
+
+```bat
+cd %USERPROFILE%\Documents
+mkdir GitHub
+cd GitHub
+git clone https://github.com/ssciwr/neuroseq.git
+cd neuroseq
+```
+
+The HTTPS address needs no GitHub login, so the shortcut can update without
+asking for a password.
+
+### 3. Create the shortcut
+
+In the same prompt, inside the clone, run:
 
 ```bat
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\windows\install_shortcut.ps1
 ```
 
-This creates **NeuroSeq** on the desktop. It also removes an older desktop
-shortcut that starts a pip-installed `neuroseq.exe`, since that copy does not
-follow the clone. Pass `-KeepOld` to keep it.
+It creates **NeuroSeq** on the desktop and prints the clone and the `uv` it
+will use. If `uv` came from a conda environment, run this from the Anaconda
+Prompt with that environment active, because the shortcut remembers that `uv`.
 
-Run the command again after moving the clone or `uv`.
+The script also removes an older desktop shortcut that starts a pip-installed
+`neuroseq.exe`, since that copy does not follow the clone. Pass `-KeepOld` to
+keep it. Run the script again after moving the clone or `uv`.
+
+### 4. First start
+
+The first install downloads all dependencies, including PyTorch with CUDA
+support (several GB), which can take many minutes. Run it once in the same
+prompt so you can follow its progress:
+
+```bat
+uv sync
+```
+
+Then double-click **NeuroSeq**. Later starts are quick, unless an update
+changed the dependencies; the shortcut shows no progress while it installs
+them, so give it time instead of starting it again.
 
 ## What the shortcut does
 
