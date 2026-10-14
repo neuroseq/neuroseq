@@ -410,7 +410,7 @@ class Gui(QtWidgets.QMainWindow):
         self.scanimage_dialog = QtWidgets.QDialog(self)
         self.scanimage_dialog.setWindowTitle("Image acquisition")
         self.scanimage_controls = ScanImageControls(
-            self.scanimage_connection, self.scanimage_dialog
+            self.scanimage_connection, self.settings, self.scanimage_dialog
         )
         QtWidgets.QVBoxLayout(self.scanimage_dialog).addWidget(self.scanimage_controls)
         self.scanimage_controls.live_changed.connect(self._set_scanimage_live)

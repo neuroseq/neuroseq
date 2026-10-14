@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from neuroseq.gui_settings import GuiSettings
 from neuroseq.importer_scanimage import index_recording
 from neuroseq.scanimage_connection import ScanImageConnection
 from neuroseq.scanimage_engine_worker import EngineAdapter
@@ -265,10 +266,12 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     gui.close()
 
 
-def test_controls_trigger_timeout_and_foreign_acquisition(qtbot, connection, mocker):
+def test_controls_trigger_timeout_and_foreign_acquisition(
+    qtbot, connection, mocker, tmp_config_dir
+):
     from neuroseq.scanimage_controls import ScanImageControls
 
-    panel = ScanImageControls(connection)
+    panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
     command = mocker.patch.object(connection, "command", return_value=True)
     panel._status({"acq_state": "grab", "run": {}, "can_abort": False})
@@ -287,6 +290,55 @@ def test_controls_trigger_timeout_and_foreign_acquisition(qtbot, connection, moc
     panel._freshness()
     command.assert_called_once_with("abort")
     assert "timeout" in panel.status_label.text()
+
+
+def test_controls_remember_python_and_folder_across_sessions(
+    qtbot, connection, mocker, tmp_config_dir, tmp_path
+):
+    from neuroseq.scanimage_controls import ScanImageControls
+
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    mocker.patch(
+        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getOpenFileName",
+        return_value=(str(python), ""),
+    )
+    panel._browse_python()
+    mocker.patch(
+        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getExistingDirectory",
+        return_value=str(tmp_path),
+    )
+    panel._browse_directory()
+
+    # A new session reads them back from the config file as the defaults.
+    reopened = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(reopened)
+    assert reopened.python_edit.text() == str(python)
+    assert reopened.directory_edit.text() == str(tmp_path)
+
+    connect = mocker.patch.object(connection, "connect_session")
+    other = tmp_path / "other-python.exe"
+    other.write_text("")
+    reopened.python_edit.setText(str(other))
+    reopened.connect_button.click()
+    connect.assert_called_once_with(str(other), "NeuroSeqScanImage")
+    assert GuiSettings().scanimage_python_path == str(other)
+
+
+def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
+    from qtpy import QtCore
+
+    from neuroseq.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    for label in (panel.message_label, panel.status_label, panel.frame_label):
+        assert (
+            label.textInteractionFlags()
+            & QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
 
 
 def test_protocol_rejects_corrupt_pixels(connection):

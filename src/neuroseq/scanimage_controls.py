@@ -9,6 +9,7 @@ from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.gui_settings import GuiSettings
 from neuroseq.scanimage_connection import ScanImageConnection
 
 
@@ -17,21 +18,23 @@ class ScanImageControls(QtWidgets.QWidget):
     live_changed = QtCore.Signal(bool)
     channel_changed = QtCore.Signal(int)
 
-    def __init__(self, connection: ScanImageConnection, parent=None) -> None:
+    def __init__(
+        self, connection: ScanImageConnection, settings: GuiSettings, parent=None
+    ) -> None:
         super().__init__(parent)
         self.connection = connection
+        # Remembered across sessions in NeuroSeq's config file, like the Fiji path.
+        self.settings = settings
         self._last_frame_at: float | None = None
         self._waiting_since: float | None = None
         self._last_frame_number = None
         layout = QtWidgets.QVBoxLayout(self)
-        settings = QtCore.QSettings()
         connection_row = QtWidgets.QHBoxLayout()
-        self.python_edit = QtWidgets.QLineEdit(
-            settings.value("scanimage/python", "", type=str)
-        )
+        self.python_edit = QtWidgets.QLineEdit(settings.scanimage_python_path)
         self.python_edit.setPlaceholderText("MATLAB-compatible Python executable")
         self.python_edit.setToolTip(
-            "Python containing the MATLAB Engine matching your MATLAB release, numpy and tifffile"
+            "Python containing the MATLAB Engine matching your MATLAB release, numpy "
+            "and tifffile. Remembered as the default for next time."
         )
         browse = QtWidgets.QToolButton()
         browse.setText("…")
@@ -55,7 +58,7 @@ class ScanImageControls(QtWidgets.QWidget):
         layout.addLayout(connection_row)
         form = QtWidgets.QFormLayout()
         self.directory_edit = QtWidgets.QLineEdit(
-            settings.value("scanimage/directory", "", type=str)
+            settings.scanimage_recording_directory
         )
         directory_row = QtWidgets.QHBoxLayout()
         directory_row.addWidget(self.directory_edit)
@@ -116,6 +119,12 @@ class ScanImageControls(QtWidgets.QWidget):
         layout.addWidget(self.status_label)
         self.frame_label = QtWidgets.QLabel("No live frame received")
         layout.addWidget(self.frame_label)
+        # Errors carry MATLAB file/line details worth pasting into a bug report.
+        for label in (self.message_label, self.status_label, self.frame_label):
+            label.setTextInteractionFlags(
+                QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+                | QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard
+            )
         connection.connected_changed.connect(self._connected)
         connection.status_changed.connect(self._status)
         connection.frame_received.connect(self._frame)
@@ -132,11 +141,13 @@ class ScanImageControls(QtWidgets.QWidget):
         )
         if path:
             self.python_edit.setText(path)
+            self.settings.scanimage_python_path = path
 
     def _browse_directory(self) -> None:
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Recording folder")
         if path:
             self.directory_edit.setText(path)
+            self.settings.scanimage_recording_directory = path
 
     def _connect(self) -> None:
         python = self.python_edit.text().strip()
@@ -145,7 +156,7 @@ class ScanImageControls(QtWidgets.QWidget):
                 "Select a Python executable containing MATLAB Engine, numpy and tifffile."
             )
             return
-        QtCore.QSettings().setValue("scanimage/python", python)
+        self.settings.scanimage_python_path = python
         self.connect_button.setEnabled(False)
         self.status_label.setText("Connecting to the named MATLAB session…")
         self.connection.connect_session(python, self.session_edit.text().strip())
@@ -180,7 +191,7 @@ class ScanImageControls(QtWidgets.QWidget):
             self.show_message("Select an existing recording folder on this PC.")
             return
         run_id = uuid.uuid4().hex
-        QtCore.QSettings().setValue("scanimage/directory", str(directory))
+        self.settings.scanimage_recording_directory = str(directory)
         self.record_requested.emit(
             {
                 "run_id": run_id,

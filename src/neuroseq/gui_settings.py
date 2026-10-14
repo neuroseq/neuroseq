@@ -59,6 +59,8 @@ class GuiSettings:
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
     fiji_executable_path: str = ""
+    scanimage_python_path: str = ""
+    scanimage_recording_directory: str = ""
     recent_projects: list[str] = field(default_factory=list)
 
     def __init__(self) -> None:
@@ -100,6 +102,8 @@ class GuiSettings:
                         "llm_ollama_base_url": self.llm_ollama_base_url,
                         "llm_openai_base_url": self.llm_openai_base_url,
                         "fiji_executable_path": self.fiji_executable_path,
+                        "scanimage_python_path": self.scanimage_python_path,
+                        "scanimage_recording_directory": self.scanimage_recording_directory,
                         "recent_projects": self.recent_projects,
                     },
                     f,
@@ -145,6 +149,10 @@ class GuiSettings:
                 "llm_openai_base_url", self.llm_openai_base_url
             )
             fiji_executable_path = config.get("fiji_executable_path", None)
+            scanimage_python_path = config.get("scanimage_python_path", "")
+            scanimage_recording_directory = config.get(
+                "scanimage_recording_directory", ""
+            )
             recent_projects = config.get("recent_projects", [])
 
             # setting values
@@ -224,6 +232,10 @@ class GuiSettings:
                 self.__dict__["fiji_executable_path"] = _autodetect_fiji()
             else:
                 self.__dict__["fiji_executable_path"] = str(fiji_executable_path)
+            self.__dict__["scanimage_python_path"] = str(scanimage_python_path or "")
+            self.__dict__["scanimage_recording_directory"] = str(
+                scanimage_recording_directory or ""
+            )
             if isinstance(recent_projects, list) and all(
                 isinstance(p, str) for p in recent_projects
             ):

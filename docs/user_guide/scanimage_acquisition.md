@@ -40,6 +40,8 @@ repeat period is not used.
    the shared session name. Click **Connect**. The helper connects only to an
    existing session with that name; it never starts another MATLAB instance.
    Required ScanImage properties and user-function registration are probed.
+   NeuroSeq remembers the Python executable and the recording folder as the
+   defaults for next time.
 
 4. Configure scanners, PMTs, saved/displayed channels and trigger wiring in
    ScanImage. Choose a displayed channel in NeuroSeq for live viewing.
