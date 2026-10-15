@@ -25,6 +25,9 @@ from neuroseq.stim import StimArray
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
 NO_STIM_ARRAY = "None"
 HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
+# Frames and percentiles that set the grey scale of saved imaging data.
+EXPORT_SCALE_SAMPLE_FRAMES = 50
+EXPORT_SCALE_PERCENTILES = (0.1, 99.9)
 
 
 class CalciumVideoWidget(FPLWidget):
@@ -501,12 +504,20 @@ class CalciumVideoWidget(FPLWidget):
         return frame
 
     @staticmethod
-    def _to_rgb(frame: np.ndarray) -> np.ndarray:
+    def _to_rgb(
+        frame: np.ndarray, value_range: tuple[float, float] | None = None
+    ) -> np.ndarray:
+        """Grey RGB of a frame, scaled to ``value_range`` or else to the
+        frame's own minimum and maximum."""
         frame = np.asarray(frame)
         if frame.ndim != 2:
             frame = frame.squeeze()
         values = frame.astype(np.float32, copy=False)
-        lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
+        lo, hi = (
+            value_range
+            if value_range is not None
+            else (float(np.nanmin(values)), float(np.nanmax(values)))
+        )
         if hi <= lo:
             gray = np.zeros(values.shape, dtype=np.uint8)
         else:
@@ -752,12 +763,31 @@ class CalciumVideoWidget(FPLWidget):
         if original:
             self._export_original_tiff(path, indices)
             return
+        value_range = self._export_value_range(indices)
         if path.suffix.lower() == ".gif":
-            self._export_gif_streaming(path, indices)
+            self._export_gif_streaming(path, indices, value_range)
             return
         with tifffile.TiffWriter(path) as writer:
             for index in indices:
-                writer.write(self._labeled_frame(index), photometric="rgb")
+                writer.write(self._labeled_frame(index, value_range), photometric="rgb")
+
+    def _export_value_range(self, indices: range) -> tuple[float, float]:
+        """One grey scale for every saved frame. Scaling each frame to its own
+        minimum and maximum made the background flicker in the saved movie,
+        as noise and hot pixels change those from frame to frame (issue
+        #618). Robust percentiles of up to 50 frames spread over the range
+        set the scale instead."""
+        step = max(1, len(indices) // EXPORT_SCALE_SAMPLE_FRAMES)
+        sample = np.stack(
+            [
+                np.asarray(self._read_frame(index), dtype=np.float32)
+                for index in indices[::step][:EXPORT_SCALE_SAMPLE_FRAMES]
+            ]
+        )
+        lo, hi = np.nanpercentile(sample, EXPORT_SCALE_PERCENTILES)
+        if hi <= lo:
+            lo, hi = float(np.nanmin(sample)), float(np.nanmax(sample))
+        return float(lo), float(hi)
 
     def _export_original_tiff(self, path: Path, indices: range) -> None:
         """Write the recorded frames as one stack, like Fiji's substack."""
@@ -777,7 +807,9 @@ class CalciumVideoWidget(FPLWidget):
             else None,
         )
 
-    def _export_gif_streaming(self, path: Path, indices: range) -> None:
+    def _export_gif_streaming(
+        self, path: Path, indices: range, value_range: tuple[float, float]
+    ) -> None:
         """Write a GIF one frame at a time to avoid buffering the movie."""
         from PIL import GifImagePlugin
 
@@ -793,7 +825,7 @@ class CalciumVideoWidget(FPLWidget):
                         ),
                     )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
-                    Image.fromarray(self._labeled_frame(index), mode="RGB")
+                    Image.fromarray(self._labeled_frame(index, value_range), mode="RGB")
                 )
                 params = {
                     "duration": duration_ms,
@@ -812,23 +844,34 @@ class CalciumVideoWidget(FPLWidget):
                 )
             file.write(b";")
 
-    def _labeled_frame(self, index: int) -> np.ndarray:
+    def _labeled_frame(
+        self, index: int, value_range: tuple[float, float] | None = None
+    ) -> np.ndarray:
         assert self._fps is not None
         time_ms = round(index * 1000.0 / self._fps)
-        frame = self._to_rgb(self._read_frame(index))
+        frame = self._to_rgb(self._read_frame(index), value_range)
         if self._scanimage_index is not None:
             return frame
+        height, width = frame.shape[:2]
+        # An "x" like the one in the Imaging tab, scaled with the image so it
+        # stays visible in a full-size recording (issue #618).
+        arm = max(2, round(min(height, width) / 64))
+        thickness = max(1, round(arm / 3))
+        steps = np.arange(-arm, arm + 1)
+        widths = np.arange(thickness) - (thickness - 1) // 2
         for cell_id in self._stimulated_cellpose_ids_at(time_ms):
             point = self._centroids.get(cell_id)
             if point is None:
                 continue
             x, y = round(point[0]), round(point[1])
-            if not (0 <= y < frame.shape[0] and 0 <= x < frame.shape[1]):
+            if not (0 <= y < height and 0 <= x < width):
                 continue
-            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-                xx, yy = x + dx, y + dy
-                if 0 <= yy < frame.shape[0] and 0 <= xx < frame.shape[1]:
-                    frame[yy, xx] = (255, 0, 0)
+            for direction in (1, -1):
+                for offset in widths:
+                    xx = x + steps + offset
+                    yy = y + direction * steps
+                    inside = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+                    frame[yy[inside], xx[inside]] = (255, 0, 0)
         return frame
 
     def clear_data(self) -> None:

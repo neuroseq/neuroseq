@@ -88,7 +88,9 @@ by scrubbing can be saved directly. Choose what to save:
 - **Original frames (TIFF substack)** — the recorded pixel values of the shown
   channel, as one stack that Fiji opens with its frame interval.
 - **With stimulation marks (TIFF or GIF)** — the frames as displayed, with the
-  stimulated cells marked in red.
+  stimulated cells marked by a red "x" sized to the image. All saved frames
+  share one grey scale, taken from robust percentiles of the saved frames, so
+  the background does not flicker from frame to frame.
 
 ### Generating test data
 

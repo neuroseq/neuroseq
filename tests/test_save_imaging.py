@@ -111,3 +111,59 @@ def test_save_button_asks_for_the_range_first(
     video.save_button.click()
     np.testing.assert_array_equal(tifffile.imread(export)[:, 0, 0], [105, 106])
     assert video._save_original  # remembered for the next save
+
+
+def test_saved_frames_share_one_grey_scale(qtbot: QtBot, tmp_path: Path) -> None:
+    """Issue #618: scaling each saved frame to its own minimum and maximum
+    made the background flicker; one hot pixel changed a whole frame."""
+    rng = np.random.default_rng(0)
+    frames = rng.poisson(100, (6, 32, 32)).astype(np.uint16)
+    frames[2, 0, 0] = 60000  # a hot pixel in one frame only
+    path = tmp_path / "noisy.tif"
+    tifffile.imwrite(path, frames)
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_video_paths([path], 10.0, warn_if_missing_cellpose=False)
+
+    export = tmp_path / "marked.tif"
+    widget.export_labeled_video(export)
+    with tifffile.TiffFile(export) as tif:
+        means = [page.asarray()[1:, 1:, 0].mean() for page in tif.pages]
+    assert max(means) - min(means) < 0.05 * np.mean(means)
+
+
+def test_stimulation_marks_scale_with_the_image(qtbot: QtBot, tmp_path: Path) -> None:
+    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.stim import StimArray
+    from neuroseq.stim import StimType
+
+    size = 512
+    segmentation = -np.ones((size, size), dtype=np.int32)
+    segmentation[250:262, 250:262] = 0
+    path = tmp_path / "large.tif"
+    tifffile.imwrite(path, np.full((2, size, size), 100, dtype=np.uint16))
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_cellpose_data(
+        CellposeImportResult(
+            image_path=tmp_path / "cells.png",
+            segmentation_array=segmentation,
+            overlay_image=np.zeros((size, size, 3), dtype=np.uint8),
+            trace_data=None,
+            spike_data=None,
+            original_cellpose_ids=np.array([0], dtype=np.int32),
+            stimulus_to_cellpose_mapping=None,
+        )
+    )
+    widget.set_stim_arrays(
+        {"stim": StimArray("stim", StimType.Excitation, np.ones((100, 1)), "mW", 0.01)}
+    )
+    widget.set_video_paths([path], 10.0, warn_if_missing_cellpose=False)
+
+    frame = widget._labeled_frame(0)
+    red = np.all(frame == (255, 0, 0), axis=-1)
+    rows, cols = np.nonzero(red)
+    # An "x" about 1/32 of the image wide, not a 3-pixel plus.
+    assert cols.max() - cols.min() >= 16
+    assert rows.max() - rows.min() >= 16
+    assert red[255, 255] or red[256, 256]  # centred on the cell
