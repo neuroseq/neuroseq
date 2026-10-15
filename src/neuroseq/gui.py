@@ -1554,27 +1554,45 @@ class Gui(QtWidgets.QMainWindow):
         self._last_sim_timeline_secs = timeline
         # Refresh in place without auto-showing hidden widgets or changing the
         # focused neuron range -- this is a re-window of already-shown data,
-        # not a new user selection.
-        if self.cmb_trace.currentText():
+        # not a new user selection. While the project is being replaced the
+        # selectors can still name the previous project's data (issue #595),
+        # which this project may not have; those are refilled right after.
+        trace_name = self._current_data_name(self.cmb_trace, TraceData)
+        if trace_name:
             self.project.max_ram_trace_plot_matrix = (
                 self.settings.max_ram_trace_plot_matrix
             )
-            self.trace_widget.set_data(
-                self.project.get_data(self.cmb_trace.currentText(), TraceData)
-            )
-        if self.cmb_spike.currentText():
-            self.spike_widget.set_data(
-                self.project.get_data(self.cmb_spike.currentText(), SpikeData)
-            )
-        if self.cmb_synapse.currentText():
+            self.trace_widget.set_data(self.project.get_data(trace_name, TraceData))
+        spike_name = self._current_data_name(self.cmb_spike, SpikeData)
+        if spike_name:
+            self.spike_widget.set_data(self.project.get_data(spike_name, SpikeData))
+        synapse_name = self._current_data_name(self.cmb_synapse, SynapseData)
+        if synapse_name:
             self.project.max_ram_synapse_plot_matrix = (
                 self.settings.max_ram_synapse_plot_matrix
             )
             self.heatmap_widget.set_data(
-                self.project.get_data(self.cmb_synapse.currentText(), SynapseData)
+                self.project.get_data(synapse_name, SynapseData)
             )
-        if self.cmb_data.currentText():
-            self._apply_data_selection(self.cmb_data.currentText())
+        data_name = self.cmb_data.currentText()
+        for data_type, suffix in (
+            (TraceData, " [trace]"),
+            (SpikeData, " [spike]"),
+            (SynapseData, " [synapse]"),
+        ):
+            if data_name.endswith(suffix) and data_name[: -len(suffix)] in (
+                self.project.get_data_names(data_type)
+            ):
+                self._apply_data_selection(data_name)
+
+    def _current_data_name(
+        self,
+        combo: QtWidgets.QComboBox,
+        data_type: type[TraceData | SpikeData | SynapseData],
+    ) -> str:
+        """The combo's selection, or "" if this project has no such data."""
+        name = combo.currentText()
+        return name if name in self.project.get_data_names(data_type) else ""
 
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)

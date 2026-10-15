@@ -1077,6 +1077,25 @@ def test_right_click_on_a_cell_centres_its_trace(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_switching_project_ignores_the_previous_projects_data_names(
+    qtbot: QtBot,
+) -> None:
+    """Issue #595: closing a tab or opening a project re-windows the shown
+    data before the data selectors are refilled, so they can still name the
+    previous project's simulation monitors, which this project lacks."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    for combo in (gui.cmb_trace, gui.cmb_spike, gui.cmb_synapse):
+        combo.addItem("Simulation :: P")
+        combo.setCurrentText("Simulation :: P")
+    gui.cmb_data.addItem("Simulation :: P [spike]")
+    gui.cmb_data.setCurrentText("Simulation :: P [spike]")
+    gui._last_sim_timeline_secs = None
+
+    gui._rewindow_simulation_views()  # raised KeyError: 'Simulation :: P'
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:
