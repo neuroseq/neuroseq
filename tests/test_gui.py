@@ -138,11 +138,6 @@ def _make_spike_export_gui(
             "btn_import_syscon2_seq_clicked",
         ),
         (
-            "btn_import_stimulus_patchclamp_clicked",
-            "Igor2",
-            "btn_import_igor2_wave_clicked",
-        ),
-        (
             "btn_import_trace_patchclamp_clicked",
             "Igor2",
             "btn_import_igor2_trace_clicked",
@@ -186,7 +181,6 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
 @pytest.mark.parametrize(
     ("method_name", "inner_name"),
     [
-        ("btn_import_stimulus_patchclamp_clicked", "btn_import_igor2_wave_clicked"),
         ("btn_import_trace_patchclamp_clicked", "btn_import_igor2_trace_clicked"),
     ],
 )
@@ -214,11 +208,6 @@ def test_gui_patchclamp_csv_option(
             "btn_import_stimulus_light_clicked",
             "SysCon2",
             "btn_import_syscon2_seq_clicked",
-        ),
-        (
-            "btn_import_stimulus_patchclamp_clicked",
-            "Igor2",
-            "btn_import_igor2_wave_clicked",
         ),
         (
             "btn_import_trace_patchclamp_clicked",
@@ -278,15 +267,10 @@ def test_patchclamp_pre_dialogs_include_cc_vc_convention(
         btn_import_igor2_trace_clicked=lambda: None,
     )
 
-    Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
     Gui.btn_import_trace_patchclamp_clicked(fake_gui)
 
-    assert len(captured_labels) == 2
-    stim_label, trace_label = captured_labels
-    assert "Current Clamp (CC)" in stim_label
-    assert "Voltage Clamp (VC)" in stim_label
-    assert "CURRENT is the input" in stim_label
-    assert "VOLTAGE is the input" in stim_label
+    assert len(captured_labels) == 1
+    trace_label = captured_labels[0]
     assert "Current Clamp (CC)" in trace_label
     assert "Voltage Clamp (VC)" in trace_label
     assert "VOLTAGE is the trace" in trace_label
@@ -4903,3 +4887,16 @@ def test_main_menu_export_updates_setup_preview_without_import(
     assert "not imported" in gui.syscon2_panel.preview_status_label.text()
     assert gui.syscon2_panel.export_settings is not None
     gui.close()
+
+
+def test_patchclamp_input_opens_importer_directly(monkeypatch: MonkeyPatch) -> None:
+    def unexpected_chooser(*args, **kwargs):
+        pytest.fail("Input import must open directly without a format pre-dialog")
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", unexpected_chooser)
+    called = []
+    fake_gui: Any = SimpleNamespace(
+        btn_import_igor2_wave_clicked=lambda: called.append(True)
+    )
+    Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
+    assert called == [True]

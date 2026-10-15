@@ -2959,27 +2959,8 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_syscon2_seq_clicked()
 
     def btn_import_stimulus_patchclamp_clicked(self) -> None:
-        """Pre-dialog: choose software, then import a patch-clamp stimulus waveform."""
-        software, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Import patch clamp input",
-            (
-                "Patch-clamp convention:\n"
-                "  • Current Clamp (CC): the injected CURRENT is the input\n"
-                "  • Voltage Clamp (VC): the commanded VOLTAGE is the input\n"
-                "\n"
-                "Import from:"
-            ),
-            ["Igor2", "CSV / Text (.csv, .txt)"],
-            0,
-            False,
-        )
-        if not ok:
-            return
-        if software == "Igor2":
-            self.btn_import_igor2_wave_clicked()
-        elif software == "CSV / Text (.csv, .txt)":
-            self.btn_import_igor2_wave_clicked(csv_only=True)
+        """Open the patch-clamp input dialog with its format selector."""
+        self.btn_import_igor2_wave_clicked()
 
     def btn_import_trace_patchclamp_clicked(self) -> None:
         """Pre-dialog: choose software, then import recorded patch-clamp traces.

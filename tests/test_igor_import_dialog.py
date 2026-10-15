@@ -18,6 +18,32 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
+def test_input_format_selector(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    dialog = IgorImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog.show()
+    assert dialog.windowTitle() == "Import patch clamp input"
+    labels = "\n".join(label.text() for label in dialog.findChildren(QtWidgets.QLabel))
+    assert "CURRENT is the input" in labels
+    assert "VOLTAGE is the input" in labels
+    filters = []
+
+    def choose_file(parent, title, directory, file_filter):
+        filters.append(file_filter)
+        return "", ""
+
+    monkeypatch.setattr("neuroseq.igor_import_dialog.getopenfilename", choose_file)
+    dialog.format_combo.setCurrentIndex(1)
+    assert dialog.sampling_rate_spin.isVisible()
+    dialog._browse_file()
+    assert filters[-1] == "CSV / Text files (*.csv *.txt)"
+    dialog.format_combo.setCurrentIndex(0)
+    assert not dialog.sampling_rate_spin.isVisible()
+    dialog._browse_file()
+    assert "*.ibw" in filters[-1]
+    dialog.close()
+
+
 @pytest.mark.parametrize("suffix", [".csv", ".txt", ".TXT"])
 @pytest.mark.parametrize("rate", [500.0, 2000.0])
 @pytest.mark.parametrize("header", ["", "injected_current\n"])

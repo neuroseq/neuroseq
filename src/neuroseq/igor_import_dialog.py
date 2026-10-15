@@ -56,9 +56,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Import Igor2 Wave")
-        if self.csv_only:
-            self.setWindowTitle("Import CSV / Text patch clamp input")
+        self.setWindowTitle("Import patch clamp input")
         self.setModal(True)
         self.resize(860, 700)
 
@@ -74,21 +72,31 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.scroll_area.setWidget(content_widget)
         root_layout.addWidget(self.scroll_area)
 
-        intro = QtWidgets.QLabel(
+        convention = QtWidgets.QLabel(
+            "Patch-clamp convention:\n"
+            "Current Clamp (CC): the injected CURRENT is the input\n"
+            "Voltage Clamp (VC): the commanded VOLTAGE is the input"
+        )
+        convention.setWordWrap(True)
+        layout.addWidget(convention)
+
+        format_layout = QtWidgets.QFormLayout()
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItems(["Igor2", "CSV / Text (.csv, .txt)"])
+        self.format_combo.setCurrentIndex(1 if self.csv_only else 0)
+        format_layout.addRow("Import from:", self.format_combo)
+        layout.addLayout(format_layout)
+
+        self.intro = QtWidgets.QLabel(
             "Import Igor2/Sutter input waves from .ibw, .pxp, or the simple "
             "NeuroSeq-compatible .csv format. Packed experiments can contain many "
             "waves; import as many as you need from the same file, then click Close "
             "when done. Imported waves are placed on NeuroSeq's 1 ms timeline using "
             "zero-order-hold resampling when needed."
         )
-        intro.setWordWrap(True)
-        if self.csv_only:
-            intro.setText(
-                "Import a CSV or text input waveform with one numeric sample per row and "
-                "an optional name/header on the first row. Set the source sampling "
-                "rate in Hz before importing. Choose the input units below."
-            )
-        layout.addWidget(intro)
+        self.igor_intro = self.intro.text()
+        self.intro.setWordWrap(True)
+        layout.addWidget(self.intro)
 
         file_group = QtWidgets.QGroupBox("File Selection")
         file_layout = QtWidgets.QHBoxLayout(file_group)
@@ -174,6 +182,8 @@ class IgorImportDialog(QtWidgets.QDialog):
         source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
         self.sampling_rate_label.setVisible(self.csv_only)
         self.sampling_rate_spin.setVisible(self.csv_only)
+        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
+        self._on_format_changed(self.format_combo.currentIndex())
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(
             "Adjust NeuroSeq input grid to source/file grid"
         )
@@ -345,6 +355,23 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.neuron_index_spin.setValue(max_neuron_index)
         self._update_preview()
         self._update_import_button_state()
+
+    def _on_format_changed(self, index: int) -> None:
+        self.csv_only = index == 1
+        self.intro.setText(
+            "Import a CSV or text input waveform with one numeric sample per row and "
+            "an optional name/header on the first row. Set the source sampling "
+            "rate in Hz before importing. Choose the input units below."
+            if self.csv_only
+            else self.igor_intro
+        )
+        is_csv = (
+            self.loaded_wave.source_format == "csv"
+            if self.loaded_wave is not None
+            else self.csv_only
+        )
+        self.sampling_rate_label.setVisible(is_csv)
+        self.sampling_rate_spin.setVisible(is_csv)
 
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
