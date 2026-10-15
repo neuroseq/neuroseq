@@ -95,21 +95,27 @@ For common stimulation motifs you do not need to draw manually. The toolbar
 action **Design static input** opens a generator dialog that writes
 patterns directly into the selected stim array:
 
-| Pattern         | Description                                                                       |
-| --------------- | --------------------------------------------------------------------------------- |
-| Sequential      | One pulse per neuron, fired one after another with a configurable inter-pulse gap |
-| Simultaneous    | All neurons (or one neuron) fire together, repeated N times                       |
-| Für Elise       | A test motif used by the ELiSe sequence-learning examples                         |
-| Constant        | Hold a single value across the requested window                                   |
-| Linear gradient | Linearly ramp from an initial to a final magnitude across the pulse               |
-| Ramp stimulus   | Repeated ramps with controllable rise/fall and inter-pulse interval               |
+The same patterns, with the same names, are offered for **All neurons** and for
+**Specific neurons**; Für Elise, which plays fixed neurons, is for all neurons
+only.
+
+| Pattern         | Description                                                                          |
+| --------------- | ------------------------------------------------------------------------------------ |
+| Sequential      | One neuron after another, each firing **Pulses per neuron** pulses before the next   |
+| Simultaneous    | All neurons of the scope fire together, with the same magnitude every pulse          |
+| Linear gradient | Like Simultaneous, but the magnitude steps linearly from the first to the last pulse |
+| Ramp            | A continuous linear ramp of the magnitude, repeated                                  |
+| Für Elise       | The opening notes of Für Elise on neurons 0-5, with **Pulses per note**              |
 
 Common controls:
 
-- **Scope** — apply to all neurons or to a specific neuron index.
-- **Pulse duration / inter-pulse interval** — in milliseconds.
-- **Magnitude** (or **Initial / Final magnitude** for the gradient patterns).
-- **Repeats** — how many times the pattern is tiled along the time axis.
+- **Scope** — apply to all neurons or to specific neuron indices.
+- **Pulse duration / Inter-pulse interval** (or **Ramp duration / Interval
+  between ramps**) — in milliseconds.
+- **Magnitude**, or **First / Last pulse magnitude** for Linear gradient and
+  **Start / End magnitude** for Ramp.
+- **Sequence repetitions**, **Number of pulses**, **Number of ramps** or
+  **Melody repetitions** — how often the pattern repeats, named for the pattern.
 - **Start time** — where in the array the pattern begins.
 
 The dialog stays open so you can iterate: change parameters, click **Apply**
