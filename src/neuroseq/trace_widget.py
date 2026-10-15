@@ -147,6 +147,9 @@ class TraceWidget(TimeseriesWidget):
     # the line is always visible on top, without affecting the grid (z=199).
     STIM_OVERLAY_Z = -1.0
     STIM_OVERLAY_ALPHA = 0.6
+    # Stimulus onset marks: screen pixels wide, rows (neurons) high.
+    STIM_ONSET_THICKNESS = 6.0
+    STIM_ONSET_HALF_HEIGHT = 0.5
 
     def __init__(
         self,
@@ -186,6 +189,7 @@ class TraceWidget(TimeseriesWidget):
         self._stim_overlay_enabled = False
         self._stim_overlay_array: StimArray | None = None
         self._stim_overlay_graphic: fpl.ImageGraphic | None = None
+        self._stim_onset_graphic: fpl.LineGraphic | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
         self._state = state if state is not None else TraceWidgetState()
@@ -717,6 +721,7 @@ class TraceWidget(TimeseriesWidget):
         # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
         # the setting survives a data refresh.
         self._stim_overlay_graphic = None
+        self._stim_onset_graphic = None
         if self._base_max_height is not None and self.controller is not None:
             self.controller.max_height = self._base_max_height
         self._base_max_height = None
@@ -739,10 +744,12 @@ class TraceWidget(TimeseriesWidget):
         self._rebuild_stim_overlay()
 
     def _rebuild_stim_overlay(self) -> None:
-        if self._stim_overlay_graphic is not None:
-            with contextlib.suppress(Exception):
-                self.subplot.remove_graphic(self._stim_overlay_graphic)
-            self._stim_overlay_graphic = None
+        for graphic in (self._stim_overlay_graphic, self._stim_onset_graphic):
+            if graphic is not None:
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(graphic)
+        self._stim_overlay_graphic = None
+        self._stim_onset_graphic = None
 
         stim_array = self._stim_overlay_array
         if (
@@ -780,3 +787,39 @@ class TraceWidget(TimeseriesWidget):
         dt_ms = float(stim_array.dt) * 1000.0
         self._stim_overlay_graphic.offset = (0.5 * dt_ms, 0.0, self.STIM_OVERLAY_Z)
         self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
+        self._add_stim_onsets(visible_values, dt_ms, stim_array.stim_type)
+
+    def _add_stim_onsets(
+        self, visible_values: np.ndarray, dt_ms: float, stim_type: StimType
+    ) -> None:
+        """Mark where each stimulus starts with a line of fixed screen width.
+
+        The overlay image has one texel per sample, so a short pulse becomes
+        narrower than a screen pixel once zoomed out and is not drawn at all
+        (issue #615). These marks stay visible at any zoom.
+        """
+        active = visible_values != 0
+        starts = active & ~np.vstack([np.zeros_like(active[:1]), active[:-1]])
+        sample_indices, rows = np.nonzero(starts)
+        if sample_indices.size == 0:
+            return
+        cmap = get_cmap(stim_type)
+        positive = np.asarray(cmap(1.0), dtype=np.float32)
+        negative = np.asarray(cmap(0.0), dtype=np.float32)
+        signs = visible_values[sample_indices, rows] > 0
+        centers = np.array(
+            [self._display_row_center_y(int(row)) for row in rows], dtype=np.float32
+        )
+        x = sample_indices.astype(np.float32) * dt_ms
+        # Each mark is two points plus a NaN break before the next one.
+        points = np.full((3 * x.size, 3), np.nan, dtype=np.float32)
+        points[0::3, 0] = x
+        points[1::3, 0] = x
+        points[0::3, 1] = centers - self.STIM_ONSET_HALF_HEIGHT
+        points[1::3, 1] = centers + self.STIM_ONSET_HALF_HEIGHT
+        points[0::3, 2] = points[1::3, 2] = self.STIM_OVERLAY_Z / 2
+        colors = np.repeat(np.where(signs[:, None], positive, negative), 3, axis=0)
+        colors[:, 3] = 1.0
+        self._stim_onset_graphic = self.subplot.add_line(
+            points, thickness=self.STIM_ONSET_THICKNESS, colors=colors
+        )

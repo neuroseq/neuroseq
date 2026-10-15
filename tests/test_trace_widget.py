@@ -1949,3 +1949,31 @@ def test_wheel_scrolling_moves_the_traces_at_once(
     qtbot.wait(200)  # with easing it was still moving for 200 ms or more
     assert controller.vertical_view() == pytest.approx(moved)
     trace_widget.close()
+
+
+def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -> None:
+    """Issue #615: short stimuli vanish from the overlay image once zoomed
+    out, so each stimulus start also gets a mark of fixed screen width."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=100))
+    values = np.zeros((1000, 3), dtype=np.float32)
+    values[100:117, 1] = 30.0  # one 17 ms pulse on neuron 1
+    values[500:503, 2] = 30.0  # and a 3 ms pulse on neuron 2
+    values[600:700, 2] = 30.0
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_stim_overlay_data(
+        StimArray("stim", neuroseq.stim.StimType.Excitation, values, "mW", 0.001)
+    )
+
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    points = marks.data.value
+    starts = points[0::3]
+    assert starts[:, 0].tolist() == pytest.approx([100.0, 500.0, 600.0])
+    assert (starts[:, 1] + 0.5).tolist() == pytest.approx([1.0, 2.0, 2.0])
+    assert np.isnan(points[2::3]).all()  # breaks between marks
+
+    trace_widget.set_stim_overlay_enabled(False)
+    assert trace_widget._stim_onset_graphic is None
+    trace_widget.close()
