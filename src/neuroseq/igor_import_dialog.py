@@ -358,6 +358,11 @@ class IgorImportDialog(QtWidgets.QDialog):
         if filename:
             self._load_file(filename)
 
+    def load_file(self, filename: str) -> None:
+        """Load ``filename`` as if it had been browsed for, e.g. a file
+        dropped onto the main window (issue #597)."""
+        self._load_file(filename)
+
     def _load_file(self, filename: str) -> None:
         self.loaded_pxp_waves = {}
         self.pxp_wave_list.clear()

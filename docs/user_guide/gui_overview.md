@@ -19,6 +19,23 @@ All data import and export actions are grouped under two sub-menus:
 
 Each import or export action that supports multiple third-party software packages opens a small pre-dialog first so you can choose the source/target software (e.g. Igor2, SysCon2).
 
+### Dropping files
+
+Files can also be dragged from the file explorer onto the NeuroSeq window.
+Each opens its usual import dialog with the file already loaded, so the
+imported data can be named and checked first:
+
+| File                           | Dropped on                | Import                                     |
+| ------------------------------ | ------------------------- | ------------------------------------------ |
+| `.nseq`                        | anywhere                  | opens the project in a new tab             |
+| `.seq`                         | anywhere                  | SysCon2 sequence as an input array         |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | the input array editor    | patch-clamp input wave                     |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | anywhere else             | patch-clamp traces                         |
+| TIFF or PNG                    | the Cell segmentation tab | asks for the Cellpose model, then segments |
+| TIFF                           | the traces                | calcium trace extraction (Suite2p or ROI)  |
+| TIFF, GIF or movie             | the Imaging tab           | adds it as imaging data                    |
+| TIFF, PNG, GIF or movie        | anywhere else             | asks which of the three imaging imports    |
+
 ## General Layout
 
 ![GUI layout](../images/layout.png)

@@ -676,8 +676,12 @@ class TifImportDialog(QtWidgets.QDialog):
             "",
             "TIFF files (*.tif *.tiff);;All files (*)",
         )
-        for filename in filenames:
-            path = Path(filename)
+        self.add_tif_paths([Path(filename) for filename in filenames])
+
+    def add_tif_paths(self, paths: list[Path]) -> None:
+        """Add TIFF stacks to the list, e.g. files dropped onto the main
+        window (issue #597)."""
+        for path in paths:
             if path not in self._tif_paths:
                 self._tif_paths.append(path)
                 self._tif_list.addItem(str(path))

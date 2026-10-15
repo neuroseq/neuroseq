@@ -1326,8 +1326,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "Image files (*.tif *.tiff *.png);;TIFF files (*.tif *.tiff);;"
             "PNG files (*.png);;All files (*)",
         )
-        if not filename:
-            return
+        if filename:
+            self.segment_file(filename)
+
+    def segment_file(self, filename: str) -> None:
+        """Segment ``filename`` with the chosen model and load the result, as
+        "Select file for segmentation..." does after choosing a file."""
         if importlib.util.find_spec("cellpose") is None:
             QtWidgets.QMessageBox.information(
                 self,

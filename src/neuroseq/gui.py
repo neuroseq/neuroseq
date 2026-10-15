@@ -337,6 +337,23 @@ def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
     return "progress" in sig.parameters
 
 
+# File drops (issue #597): imaging files and what can be done with them.
+DROP_IMAGE_SUFFIXES = {
+    ".tif",
+    ".tiff",
+    ".png",
+    ".gif",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".webm",
+}
+DROP_SEGMENT = "Segment cells with Cellpose"
+DROP_TRACES = "Extract calcium traces"
+DROP_VIDEO = "Add as imaging data (video)"
+
+
 class Gui(QtWidgets.QMainWindow):
     TOOLBAR_ICON_SIZE = QtCore.QSize(20, 20)
 
@@ -665,6 +682,8 @@ class Gui(QtWidgets.QMainWindow):
         else:
             self.load_project(default_project(), new_tab=False)
         self.apply_theme(self.settings.theme)
+        # Files dropped from the file explorer are imported (issue #597).
+        self.setAcceptDrops(True)
 
     @property
     def project(self) -> Project:
@@ -2423,8 +2442,11 @@ class Gui(QtWidgets.QMainWindow):
                 )
             )
 
-    def btn_import_tif_clicked(self) -> None:
-        """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs."""
+    def btn_import_tif_clicked(
+        self, *, paths: list[pathlib.Path] | None = None
+    ) -> None:
+        """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs,
+        optionally with ``paths`` already listed."""
         from neuroseq.tif_import_dialog import TifImportDialog
 
         dialog = TifImportDialog(
@@ -2432,6 +2454,8 @@ class Gui(QtWidgets.QMainWindow):
             cellpose_import=self.last_cellpose_import,
             stim_arrays=self.project.stim_arrays,
         )
+        if paths:
+            dialog.add_tif_paths(paths)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(
@@ -2457,15 +2481,19 @@ class Gui(QtWidgets.QMainWindow):
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.calcium_video_widget)
 
-    def _on_calcium_video_import_requested(self) -> None:
-        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self,
-            "Select raw calcium imaging file(s)",
-            "",
-            "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
-            "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
-            "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
-        )
+    def _on_calcium_video_import_requested(
+        self, *, paths: list[pathlib.Path] | None = None
+    ) -> None:
+        if paths is None:
+            chosen, _ = QtWidgets.QFileDialog.getOpenFileNames(
+                self,
+                "Select raw calcium imaging file(s)",
+                "",
+                "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+                "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
+                "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
+            )
+            paths = [pathlib.Path(path) for path in chosen]
         if not paths:
             return
         fps, ok = QtWidgets.QInputDialog.getDouble(
@@ -2698,12 +2726,21 @@ class Gui(QtWidgets.QMainWindow):
 
         resolve_fiji_path(self, force_prompt=True)
 
-    def btn_import_cellpose_data_clicked(self) -> None:
+    def btn_import_cellpose_data_clicked(
+        self, *, segment: pathlib.Path | None = None, model: str | None = None
+    ) -> None:
+        """Open the cell segmentation dialog; with ``segment``, it segments
+        that image with ``model`` right away."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
             delete_handler=self._delete_cellpose_data,
         )
+        if segment is not None:
+            if model is not None:
+                dialog.cellpose_model_combo.setCurrentText(model)
+            # Once the dialog is shown, so it is there while Cellpose runs.
+            QtCore.QTimer.singleShot(0, lambda: dialog.segment_file(str(segment)))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             imported = dialog.get_imported_data()
             if imported is None:
@@ -2727,27 +2764,37 @@ class Gui(QtWidgets.QMainWindow):
             )
             self._warn_if_cellpose_model_mismatch()
 
-    def btn_import_syscon2_seq_clicked(self) -> None:
+    def btn_import_syscon2_seq_clicked(
+        self, *, path: pathlib.Path | None = None
+    ) -> None:
         dialog = Syscon2ImportDialog(self.project, parent=self)
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_wave_clicked(self, *, csv_only: bool = False) -> None:
+    def btn_import_igor2_wave_clicked(
+        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    ) -> None:
         dialog = (
             IgorImportDialog(self.project, parent=self, csv_only=True)
             if csv_only
             else IgorImportDialog(self.project, parent=self)
         )
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_trace_clicked(self, *, csv_only: bool = False) -> None:
+    def btn_import_igor2_trace_clicked(
+        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    ) -> None:
         from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 
         dialog = (
@@ -2755,6 +2802,8 @@ class Gui(QtWidgets.QMainWindow):
             if csv_only
             else IgorTraceImportDialog(self.project, parent=self)
         )
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
@@ -4613,6 +4662,151 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.warning(
                 f"{label} did not stop in {timeout_ms} ms during shutdown."
             )
+
+    @staticmethod
+    def _dropped_paths(
+        event: QtGui.QDropEvent | QtGui.QDragEnterEvent,
+    ) -> list[pathlib.Path]:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return []
+        return [
+            pathlib.Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()
+        ]
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent | None) -> None:
+        if event is None:
+            return
+        if self._dropped_paths(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent | None) -> None:
+        if event is not None:
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QtGui.QDropEvent | None) -> None:
+        if event is None:
+            return
+        paths = self._dropped_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        target = self._drop_target(event.position().toPoint())
+        # After the drop returns, so the file explorer is not left waiting
+        # while an import dialog is open.
+        QtCore.QTimer.singleShot(0, lambda: self.import_dropped_files(paths, target))
+
+    def _drop_target(self, pos: QtCore.QPoint) -> str | None:
+        """The kind of panel under ``pos``: "segmentation", "imaging",
+        "input", "traces", or None elsewhere."""
+        widget = self.childAt(pos)
+        while widget is not None:
+            if widget is self.spatial_footprint_widget:
+                return (
+                    "imaging"
+                    if self.spatial_footprint_widget.tabs.currentIndex() == 1
+                    else "segmentation"
+                )
+            if widget is self.stim_editor:
+                return "input"
+            if widget in (self.trace_widget, self.spike_widget, self.data_widget):
+                return "traces"
+            widget = widget.parentWidget()
+        return None
+
+    def import_dropped_files(
+        self, paths: list[pathlib.Path], target: str | None = None
+    ) -> None:
+        """Import files dropped onto the window (issue #597), choosing the
+        import from each file's type and, where a type fits several, from the
+        panel it was dropped on (``target``, see _drop_target). Each import
+        opens its usual dialog with the file already loaded, so the data can
+        be named and checked before it is added."""
+        images = [p for p in paths if p.suffix.lower() in DROP_IMAGE_SUFFIXES]
+        unsupported = []
+        for path in paths:
+            suffix = path.suffix.lower()
+            if suffix == ".nseq":
+                self.load_project(path)
+            elif suffix == ".seq":
+                self.btn_import_syscon2_seq_clicked(path=path)
+            elif suffix in {".ibw", ".pxp", ".csv", ".txt"}:
+                csv_only = suffix in {".csv", ".txt"}
+                if target == "input":
+                    self.btn_import_igor2_wave_clicked(csv_only=csv_only, path=path)
+                else:
+                    self.btn_import_igor2_trace_clicked(csv_only=csv_only, path=path)
+            elif suffix not in DROP_IMAGE_SUFFIXES:
+                unsupported.append(path.name)
+        if images:
+            self._import_dropped_images(images, target)
+        if unsupported:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cannot import these files",
+                "NeuroSeq does not know how to import:\n"
+                + "\n".join(unsupported)
+                + "\n\nDrop projects (.nseq), SysCon2 sequences (.seq), "
+                "patch-clamp waves (.ibw, .pxp, .csv, .txt), or imaging data "
+                "(TIFF, PNG, GIF, movies).",
+            )
+
+    def _import_dropped_images(
+        self, paths: list[pathlib.Path], target: str | None
+    ) -> None:
+        segmentable = [
+            p for p in paths if p.suffix.lower() in {".tif", ".tiff", ".png"}
+        ]
+        tiffs = [p for p in paths if p.suffix.lower() in {".tif", ".tiff"}]
+        movies = [p for p in paths if p.suffix.lower() != ".png"]
+        choices = {
+            DROP_SEGMENT: bool(segmentable),
+            DROP_TRACES: bool(tiffs),
+            DROP_VIDEO: bool(movies),
+        }
+        action = {
+            "segmentation": DROP_SEGMENT,
+            "traces": DROP_TRACES,
+            "imaging": DROP_VIDEO,
+        }.get(target or "")
+        if action is None or not choices[action]:
+            options = [name for name, possible in choices.items() if possible]
+            if not options:
+                return
+            action, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                "Import imaging data",
+                f"What should NeuroSeq do with {paths[0].name}"
+                + (f" and {len(paths) - 1} more" if len(paths) > 1 else "")
+                + "?",
+                options,
+                0,
+                False,
+            )
+            if not ok:
+                return
+        if action == DROP_SEGMENT:
+            from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
+
+            model, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                "Segment cells",
+                f"Cellpose model for {segmentable[0].name}:",
+                list(CELLPOSE_MODEL_NAMES),
+                0,
+                False,
+            )
+            if ok:
+                self.btn_import_cellpose_data_clicked(
+                    segment=segmentable[0], model=model
+                )
+        elif action == DROP_TRACES:
+            self.btn_import_tif_clicked(paths=tiffs)
+        else:
+            self._on_calcium_video_import_requested(paths=movies)
 
     def closeEvent(self, event):
         if not self._close_confirmed and not self._prompt_save_before_close():
