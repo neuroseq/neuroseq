@@ -75,6 +75,18 @@ start with its channel count and functional channel. The choice is saved per
 imaging data entry. ScanImage recordings use the channel selector in the
 **Image acquisition** dialog instead.
 
+### Saving imaging data
+
+**Save imaging data…** in the Imaging tab first asks which frames to save.
+Frames are counted from 1, as in the time slider tooltip and in Fiji; **Current
+frame** fills in the frame shown at the slider position, so a short period found
+by scrubbing can be saved directly. Choose what to save:
+
+- **Original frames (TIFF substack)** — the recorded pixel values of the shown
+  channel, as one stack that Fiji opens with its frame interval.
+- **With stimulation marks (TIFF or GIF)** — the frames as displayed, with the
+  stimulated cells marked in red.
+
 ### Generating test data
 
 If you do not have a real recording yet, NeuroSeq can synthesize a Cellpose

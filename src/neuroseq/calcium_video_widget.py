@@ -19,6 +19,7 @@ from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_scanimage import compact_index
+from neuroseq.save_imaging_dialog import SaveImagingDialog
 from neuroseq.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
@@ -48,6 +49,8 @@ class CalciumVideoWidget(FPLWidget):
         self._all_frame_refs: list[tuple[str, int, int]] = []
         self._channels = 1
         self._shown_channel = 1
+        # The last "Save imaging data" choice of original or marked frames.
+        self._save_original = False
         self._cellpose_data: CellposeImportResult | None = None
         self._centroids: dict[int, tuple[float, float]] = {}
         self._id_label_graphics: list[fpl.TextGraphic] = []
@@ -694,15 +697,32 @@ class CalciumVideoWidget(FPLWidget):
         self.set_time_ms(round(time_s * 1000))
 
     def _on_save_labeled_video_clicked(self) -> None:
+        if self._live or not self._frame_refs or self._fps is None:
+            return
+        current = self._current_frame_index or 0
+        options = SaveImagingDialog(
+            len(self._frame_refs),
+            current + 1,
+            original=self._save_original,
+            parent=self,
+        )
+        if options.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self._save_original = options.original
+        first, last = options.frame_range
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save imaging data",
             "imaging.tif",
-            "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
+            "TIFF files (*.tif *.tiff)"
+            if options.original
+            else "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
             try:
-                self.export_labeled_video(Path(path))
+                self.export_labeled_video(
+                    Path(path), first=first, last=last, original=options.original
+                )
             except Exception as exc:
                 self.logger.exception("Could not save labeled imaging data")
                 QtWidgets.QMessageBox.critical(
@@ -711,23 +731,59 @@ class CalciumVideoWidget(FPLWidget):
                     f"The imaging data could not be saved:\n{exc}",
                 )
 
-    def export_labeled_video(self, path: Path) -> None:
+    def export_labeled_video(
+        self,
+        path: Path,
+        *,
+        first: int = 0,
+        last: int | None = None,
+        original: bool = False,
+    ) -> None:
+        """Save frames ``first`` to ``last`` (counted from 0, both included,
+        all by default) of the shown channel. ``original`` keeps the recorded
+        pixel values as a TIFF stack; otherwise the frames are saved as
+        displayed, with the stimulated cells marked."""
         if self._live or not self._frame_refs or self._fps is None:
             return
+        last = len(self._frame_refs) - 1 if last is None else last
+        indices = range(max(0, first), min(len(self._frame_refs) - 1, last) + 1)
+        if not indices:
+            raise ValueError("No frames in the chosen range")
+        if original:
+            self._export_original_tiff(path, indices)
+            return
         if path.suffix.lower() == ".gif":
-            self._export_gif_streaming(path)
+            self._export_gif_streaming(path, indices)
             return
         with tifffile.TiffWriter(path) as writer:
-            for index in range(len(self._frame_refs)):
+            for index in indices:
                 writer.write(self._labeled_frame(index), photometric="rgb")
 
-    def _export_gif_streaming(self, path: Path) -> None:
+    def _export_original_tiff(self, path: Path, indices: range) -> None:
+        """Write the recorded frames as one stack, like Fiji's substack."""
+        sample = np.asarray(self._read_frame(indices[0]))
+        frames = (np.asarray(self._read_frame(index)) for index in indices)
+        # ImageJ hyperstacks (frame interval, Fiji's frame axis) support only
+        # these sample types.
+        imagej = sample.dtype in (np.uint8, np.uint16, np.float32)
+        tifffile.imwrite(
+            path,
+            data=frames,
+            shape=(len(indices), *sample.shape),
+            dtype=sample.dtype,
+            imagej=imagej,
+            metadata={"axes": "TYX", "finterval": 1.0 / self._fps}
+            if imagej and self._fps
+            else None,
+        )
+
+    def _export_gif_streaming(self, path: Path, indices: range) -> None:
         """Write a GIF one frame at a time to avoid buffering the movie."""
         from PIL import GifImagePlugin
 
         duration_ms = max(1, round(1000.0 / self._fps)) if self._fps else 1
         with path.open("wb") as file:
-            for index in range(len(self._frame_refs)):
+            for index in indices:
                 if self._frame_times is not None and index + 1 < len(self._frame_times):
                     duration_ms = max(
                         1,
@@ -744,9 +800,9 @@ class CalciumVideoWidget(FPLWidget):
                     "disposal": 2,
                     # Keep a local palette per frame; this avoids collecting
                     # all frames just to calculate one global palette.
-                    "include_color_table": index > 0,
+                    "include_color_table": index > indices[0],
                 }
-                if index == 0:
+                if index == indices[0]:
                     for header in GifImagePlugin._get_global_header(  # type: ignore[attr-defined]
                         frame, {"duration": duration_ms, "loop": 0}
                     ):
