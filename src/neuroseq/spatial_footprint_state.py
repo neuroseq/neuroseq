@@ -80,6 +80,15 @@ class SpatialFootprintState(QtCore.QObject):
             return set()
         return self._all_cellpose_ids() - self.selected_cellpose_ids
 
+    @property
+    def greyed_stim_ids(self) -> set[int]:
+        """Neurons hidden by the current cell selection."""
+        stim_ids = (
+            self._cellpose_to_stim_id(cellpose_id)
+            for cellpose_id in self.greyed_cellpose_ids
+        )
+        return {stim_id for stim_id in stim_ids if stim_id is not None}
+
     def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
         """Resolve a segmented cell to the trace/stim row it drives, or
         `None` if it doesn't drive one at all.

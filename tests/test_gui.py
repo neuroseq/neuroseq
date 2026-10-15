@@ -1096,6 +1096,33 @@ def test_switching_project_ignores_the_previous_projects_data_names(
     gui.close()
 
 
+def test_cell_selection_applies_to_every_trace_view(qtbot: QtBot) -> None:
+    """Issue #596: a selected cell also filters the universal data widget,
+    and choosing data again keeps the selection in every view."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.data_widget)
+    gui._apply_data_selection("Experiment :: trace [trace]")
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    views = [gui.trace_widget, gui.spike_widget, gui.data_widget.trace_widget]
+    for view in views:
+        assert [n for n in range(3) if view.is_neuron_greyed(n)] == [0, 2]
+
+    gui.set_neuron(gui.cmb_trace.currentText())
+    gui.set_spike(gui.cmb_spike.currentText())
+    gui._apply_data_selection("Experiment :: spikes [spike]")
+    views[2] = gui.data_widget.spike_widget
+    for view in views:
+        assert [n for n in range(3) if view.is_neuron_greyed(n)] == [0, 2]
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)  # deselect
+    for view in views:
+        assert not any(view.is_neuron_greyed(n) for n in range(3))
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:
@@ -3712,6 +3739,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
         trace_widget=trace_widget,
         update_project=_update_project,
         _focus_neuron_range=lambda n_neurons: None,
+        _keep_cell_selection=lambda widget: None,
     )
     fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
         fake_gui, cmb_name
@@ -3809,6 +3837,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         trace_widget=trace_widget,
         update_project=_update_project,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
     fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
         fake_gui, cmb_name
@@ -3950,6 +3979,7 @@ def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
         ),
         trace_widget=trace_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_trace_selection(fake_gui, "Cellpose :: traces")
@@ -3983,6 +4013,7 @@ def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
         ),
         spike_widget=spike_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_spike_selection(fake_gui, "Cellpose :: spikes")
@@ -4017,6 +4048,7 @@ def test_apply_spike_selection_does_not_auto_show_for_a_never_simulated_monitor(
         project=SimpleNamespace(get_data=lambda name, data_type: empty_spike_data),
         spike_widget=spike_widget,
         _focus_neuron_range=lambda n_neurons: None,
+        _keep_cell_selection=lambda widget: None,
         _auto_show_widget=lambda widget: auto_show_calls.append(widget),
     )
 
@@ -4096,6 +4128,7 @@ def test_gui_set_data_refocuses_combined_trace_view() -> None:
         ),
         data_widget=data_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")

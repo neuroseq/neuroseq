@@ -1563,9 +1563,11 @@ class Gui(QtWidgets.QMainWindow):
                 self.settings.max_ram_trace_plot_matrix
             )
             self.trace_widget.set_data(self.project.get_data(trace_name, TraceData))
+            self._keep_cell_selection(self.trace_widget)
         spike_name = self._current_data_name(self.cmb_spike, SpikeData)
         if spike_name:
             self.spike_widget.set_data(self.project.get_data(spike_name, SpikeData))
+            self._keep_cell_selection(self.spike_widget)
         synapse_name = self._current_data_name(self.cmb_synapse, SynapseData)
         if synapse_name:
             self.project.max_ram_synapse_plot_matrix = (
@@ -1594,9 +1596,17 @@ class Gui(QtWidgets.QMainWindow):
         name = combo.currentText()
         return name if name in self.project.get_data_names(data_type) else ""
 
+    def _keep_cell_selection(self, widget: TimeseriesWidget | DataWidget) -> None:
+        """New data shows every neuron; hide again those that the cells
+        selected in the spatial footprints exclude (issue #596)."""
+        hidden = self._spatial_footprint_state.greyed_stim_ids
+        if hidden:
+            widget.set_neurons_greyed(sorted(hidden), [])
+
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
+        self._keep_cell_selection(self.trace_widget)
         if data is not None and hasattr(self, "_auto_show_widget"):
             self._auto_show_widget(self.trace_widget)
         self._focus_neuron_range(self.trace_widget.n_neurons)
@@ -1632,6 +1642,7 @@ class Gui(QtWidgets.QMainWindow):
         self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
         self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
         self.spike_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        self.data_widget.set_neurons_greyed(newly_hidden, newly_shown)
         after = frozenset(self._trace_state.greyed_neuron_ids)
         if after == before:
             return
@@ -1711,6 +1722,7 @@ class Gui(QtWidgets.QMainWindow):
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+        self._keep_cell_selection(self.spike_widget)
         # set_data() itself treats a spike-less SpikeData (e.g. a model that
         # defines a spike monitor but was never simulated) as empty and
         # leaves self.data unset - check that, not the pre-fetch value, so an
@@ -1736,6 +1748,7 @@ class Gui(QtWidgets.QMainWindow):
         elif cmb_name.endswith(" [synapse]"):
             data = self.project.get_data(cmb_name[:-10], SynapseData)
         self.data_widget.set_data(data)
+        self._keep_cell_selection(self.data_widget)
         if isinstance(data, TraceData):
             self._focus_neuron_range(self.data_widget.trace_widget.n_neurons)
         elif isinstance(data, SpikeData):
