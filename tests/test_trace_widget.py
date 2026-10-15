@@ -1916,3 +1916,36 @@ def test_center_on_neuron_keeps_zoom_and_other_traces(
     # Neuron 5 is hidden, so neuron 12 is now on display row 11.
     assert controller.vertical_view() == pytest.approx((4.0, 11.0))
     trace_widget.close()
+
+
+def test_wheel_scrolling_moves_the_traces_at_once(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """Issue #596: a wheel step must not keep easing the traces along over
+    the following frames."""
+    controller = ConstrainedPanZoomController()
+    assert controller.damping == 0
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.resize(800, 400)
+    trace_widget.show()
+    qtbot.waitExposed(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=40, n_timestamps=10))
+    controller.set_limits(0.01, 40)
+    controller.set_vertical_view((8.0, 20.0))
+    qtbot.wait(100)
+
+    x, y, width, height = trace_widget.subplot.frame.get_render_rect()
+    controller.handle_event(
+        pygfx.WheelEvent(
+            type="wheel", x=x + width / 2, y=y + height / 2, dx=0.0, dy=120.0
+        ),
+        pygfx.Viewport.from_viewport_or_renderer(trace_widget.subplot.viewport),
+    )
+    qtbot.wait(50)  # the step is applied when the next frame is drawn
+    moved = controller.vertical_view()
+    assert moved is not None
+    assert moved[1] < 20.0
+    qtbot.wait(200)  # with easing it was still moving for 200 ms or more
+    assert controller.vertical_view() == pytest.approx(moved)
+    trace_widget.close()

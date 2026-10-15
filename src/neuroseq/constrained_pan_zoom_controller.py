@@ -46,6 +46,10 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         self.grid_lines: list[GridLines] = []
         self._state_change_listeners: list[Callable[[], None]] = []
         super().__init__(*args, **kwargs)
+        # pygfx eases every wheel step over several frames, so the traces
+        # kept sliding after the wheel stopped and linked plots trailed
+        # behind them (issue #596). Move the view at once instead.
+        self.damping = 0
 
     def add_state_change_listener(self, listener: Callable[[], None]) -> None:
         if listener not in self._state_change_listeners:
