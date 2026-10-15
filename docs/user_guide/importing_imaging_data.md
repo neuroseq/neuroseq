@@ -60,6 +60,18 @@ sample image. You can:
   their position after import — the cell-to-neuron assignment recomputes
   whenever an AOI moves.
 
+### Showing one channel of a movie
+
+Movies recorded with several channels store them interleaved frame by frame,
+so playing every frame makes the Imaging tab flicker between channels. Set
+**Channels** in the Imaging tab's bottom bar to the number of channels and pick
+the one to watch under **Show**; **All frames** plays every frame in file
+order. The frame rate entered on import is the rate of each channel, so one
+channel plays in step with the time slider. Imports through the TIFF pipeline
+start with its channel count and functional channel. The choice is saved per
+imaging data entry. ScanImage recordings use the channel selector in the
+**Image acquisition** dialog instead.
+
 ### Generating test data
 
 If you do not have a real recording yet, NeuroSeq can synthesize a Cellpose

@@ -187,6 +187,8 @@ def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, rec
         scanimage_index=index_recording(paths),
     )
     assert len(widget._frame_refs) == 4
+    # ScanImage recordings pick channels from their metadata instead.
+    assert widget.channel_controls.isHidden()
     widget.set_recorded_channel(2)
     widget.set_time_ms(250)
     assert widget.current_frame_index == 2

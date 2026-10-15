@@ -409,6 +409,9 @@ class Gui(QtWidgets.QMainWindow):
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        self.calcium_video_widget.channels_changed.connect(
+            self._on_calcium_video_channels_changed
+        )
         self.scanimage_connection = ScanImageConnection(self)
         # Modeless, so the live image stays visible in the Video tab. Keeping
         # the controls out of that tab keeps it aligned with Cell segmentation.
@@ -794,6 +797,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
 
     def _update_combo_box(
@@ -1408,6 +1413,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
@@ -2392,6 +2399,8 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.imported_tif_paths,
                     dialog.imported_fps,
                     name=dialog.experiment_name,
+                    channels=dialog.imported_channels,
+                    shown_channel=dialog.imported_functional_channel,
                 )
                 self._refresh_calcium_video_widgets()
                 if hasattr(self, "_auto_show_widget"):
@@ -2422,6 +2431,13 @@ class Gui(QtWidgets.QMainWindow):
         self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
+    def _on_calcium_video_channels_changed(
+        self, channels: int, shown_channel: int
+    ) -> None:
+        self.project.set_calcium_video_channels(channels, shown_channel)
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_channels(channels, shown_channel)
+
     def _refresh_calcium_video_widgets(self) -> None:
         self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
@@ -2435,6 +2451,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
 
     def _start_scanimage_recording(self, arguments: dict) -> None:
@@ -3922,6 +3940,9 @@ class Gui(QtWidgets.QMainWindow):
         widget.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        widget.calcium_video_widget.channels_changed.connect(
+            self._on_calcium_video_channels_changed
+        )
         widget.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
         widget.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
         widget.calcium_video_widget.set_video_paths(
@@ -3932,6 +3953,8 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.calcium_scanimage_index,
                 self.scanimage_controls.channel_spin.value(),
             ),
+            channels=self.project.calcium_video_channels[0],
+            shown_channel=self.project.calcium_video_channels[1],
             warn_if_missing_cellpose=False,
         )
         return widget

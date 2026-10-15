@@ -30,6 +30,8 @@ class CalciumVideoWidget(FPLWidget):
 
     import_requested = QtCore.Signal()
     remove_requested = QtCore.Signal()
+    # Interleaved channels in the movie and the one shown (0 = all).
+    channels_changed = QtCore.Signal(int, int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         self._pages: list[tuple[tifffile.TiffFile, int, int]] = []
@@ -39,6 +41,12 @@ class CalciumVideoWidget(FPLWidget):
         super().__init__(parent=parent)
         self._paths: list[Path] = []
         self._fps: float | None = None
+        # Frame rate of each channel and every page of the movie, before a
+        # channel is picked; _fps and _frame_refs are what is played.
+        self._channel_fps: float | None = None
+        self._all_frame_refs: list[tuple[str, int, int]] = []
+        self._channels = 1
+        self._shown_channel = 1
         self._cellpose_data: CellposeImportResult | None = None
         self._centroids: dict[int, tuple[float, float]] = {}
         self._stim_arrays: dict[str, StimArray] = {}
@@ -66,6 +74,25 @@ class CalciumVideoWidget(FPLWidget):
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
+        self.channels_spin = QtWidgets.QSpinBox(self)
+        self.channels_spin.setRange(1, 8)
+        self.channels_spin.setToolTip(
+            "Number of channels interleaved frame by frame in the movie"
+        )
+        self.channel_combo = QtWidgets.QComboBox(self)
+        self.channel_combo.setToolTip(
+            "Show one channel, or every frame as stored in the file"
+        )
+        self.channels_spin.valueChanged.connect(self._on_channel_controls_changed)
+        self.channel_combo.activated.connect(self._on_channel_controls_changed)
+        self._fill_channel_combo()
+        self.channel_controls = QtWidgets.QWidget(self)
+        channel_layout = QtWidgets.QHBoxLayout(self.channel_controls)
+        channel_layout.setContentsMargins(0, 0, 0, 0)
+        channel_layout.addWidget(QtWidgets.QLabel("Channels:"))
+        channel_layout.addWidget(self.channels_spin)
+        channel_layout.addWidget(QtWidgets.QLabel("Show:"))
+        channel_layout.addWidget(self.channel_combo)
         self.video_actions_widget = QtWidgets.QWidget(self)
         actions = QtWidgets.QHBoxLayout(self.video_actions_widget)
         actions.setContentsMargins(4, 4, 4, 4)
@@ -75,6 +102,7 @@ class CalciumVideoWidget(FPLWidget):
         # bottom bar) and switching between them doesn't shift anything.
         actions.addWidget(QtWidgets.QLabel("Stim source:"))
         actions.addWidget(self.stim_combo)
+        actions.addWidget(self.channel_controls)
         actions.addStretch(1)
         actions.addWidget(self.save_button)
         actions.addWidget(self.remove_button)
@@ -128,6 +156,7 @@ class CalciumVideoWidget(FPLWidget):
                 capture.release()
         self._cv_captures = []
         self._frame_refs = []
+        self._all_frame_refs = []
 
     def set_video_paths(
         self,
@@ -137,13 +166,25 @@ class CalciumVideoWidget(FPLWidget):
         warn_if_missing_cellpose: bool = True,
         scanimage_index: dict | None = None,
         channel: int | None = None,
+        channels: int = 1,
+        shown_channel: int = 1,
     ) -> None:
+        """Load a movie. ``fps`` is the frame rate of each channel; a movie
+        with ``channels`` interleaved channels shows ``shown_channel``
+        (counted from 1, 0 for every frame)."""
         self._close_pages()
         self.clear_data()
         self._scanimage_index = None
         self._frame_times = None
         self._paths = list(paths)
         self._fps = float(fps) if fps is not None and fps > 0 else None
+        self._channel_fps = self._fps
+        self._channels = max(1, int(channels))
+        self._shown_channel = (
+            min(max(0, int(shown_channel)), self._channels) if self._channels > 1 else 1
+        )
+        self._sync_channel_controls()
+        self.channel_controls.setVisible(True)
         self._current_frame_index = None
         self.current_frame_index = None
         self.current_frame = None
@@ -199,7 +240,8 @@ class CalciumVideoWidget(FPLWidget):
                         pages.append((tif, index, 0))
                         frame_refs.append(("tiff", len(pages) - 1, 0))
             self._pages = pages
-            self._frame_refs = frame_refs
+            self._all_frame_refs = frame_refs
+            self._apply_channels()
         except Exception:
             for tif, _, _ in pages:
                 with contextlib.suppress(Exception):
@@ -251,8 +293,71 @@ class CalciumVideoWidget(FPLWidget):
         self._set_crosses(set())
         self._draw_current_frame()
 
+    def _apply_channels(self) -> None:
+        if self._channels > 1 and self._shown_channel > 0:
+            self._frame_refs = self._all_frame_refs[
+                self._shown_channel - 1 :: self._channels
+            ]
+            self._fps = self._channel_fps
+        else:
+            # Every page in file order: the channels share each frame period.
+            self._frame_refs = list(self._all_frame_refs)
+            self._fps = (
+                self._channel_fps * self._channels
+                if self._channel_fps is not None
+                else None
+            )
+
+    def set_channels(self, channels: int, shown_channel: int) -> None:
+        """Choose how many channels the movie interleaves and which to show
+        (counted from 1, 0 for every frame)."""
+        channels = max(1, int(channels))
+        shown_channel = min(max(0, int(shown_channel)), channels) if channels > 1 else 1
+        if (channels, shown_channel) == (self._channels, self._shown_channel):
+            return
+        self._channels = channels
+        self._shown_channel = shown_channel
+        self._sync_channel_controls()
+        if self._scanimage_index is None and self._all_frame_refs:
+            time_ms = self._current_time_ms()
+            self._apply_channels()
+            self.set_time_ms(time_ms)
+
+    def _current_time_ms(self) -> int:
+        if self._current_frame_index is None or not self._fps:
+            return 0
+        return round(self._current_frame_index * 1000.0 / self._fps)
+
+    def _fill_channel_combo(self) -> None:
+        self.channel_combo.clear()
+        if self._channels > 1:
+            for channel in range(1, self._channels + 1):
+                self.channel_combo.addItem(f"Channel {channel}", channel)
+        self.channel_combo.addItem("All frames", 0)
+
+    def _sync_channel_controls(self) -> None:
+        self.channels_spin.blockSignals(True)
+        self.channels_spin.setValue(self._channels)
+        self.channels_spin.blockSignals(False)
+        self._fill_channel_combo()
+        self.channel_combo.setCurrentIndex(
+            self.channel_combo.findData(
+                self._shown_channel if self._channels > 1 else 0
+            )
+        )
+        self.channel_combo.setEnabled(self._channels > 1)
+
+    def _on_channel_controls_changed(self, *_args: object) -> None:
+        channels = self.channels_spin.value()
+        # A new channel count starts with its first channel.
+        shown = 1 if channels != self._channels else self.channel_combo.currentData()
+        self.set_channels(channels, shown)
+        self.channels_changed.emit(self._channels, self._shown_channel)
+
     def set_scanimage_index(self, index: dict, channel: int | None = None) -> None:
         self._scanimage_index = compact_index(index)
+        # ScanImage recordings choose their channel from their own metadata.
+        self.channel_controls.setVisible(False)
         self.set_recorded_channel(channel or index["channels"][0])
 
     def set_recorded_channel(self, channel: int) -> None:
