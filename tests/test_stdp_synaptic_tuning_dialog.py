@@ -534,6 +534,7 @@ def test_stdp_synaptic_tuning_initializes_when_only_imported_trace_exists(
     editor = _FakeEditor(project)
     dialog = StdpSynapticTuningDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
+    qtbot.addWidget(dialog.plot_window)
     requested: list[float] = []
     dialog.simulation_requested.connect(requested.append)
 
