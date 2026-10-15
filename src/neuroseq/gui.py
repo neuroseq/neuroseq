@@ -399,6 +399,9 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
+        self.spatial_footprint_widget.neuron_focus_requested.connect(
+            self._focus_traces_on_neuron
+        )
         # The calcium video now lives in the second tab of the imaging panel;
         # keep this attribute as a compatibility handle for timeline and
         # project synchronization code.
@@ -1627,6 +1630,12 @@ class Gui(QtWidgets.QMainWindow):
             ):
                 if view is not None:
                     controller.set_vertical_view(view)
+
+    def _focus_traces_on_neuron(self, neuron_id: int) -> None:
+        """Centre the traces on a neuron right-clicked in the spatial
+        footprints, keeping the zoom and the other traces (issue #603)."""
+        if not self.trace_widget.center_on_neuron(neuron_id):
+            self.logger.info("Neuron %d has no visible trace to centre on", neuron_id)
 
     def _plot_controllers(self) -> list[ConstrainedPanZoomController]:
         return [self.controller, self.trace_controller, self.spike_controller]
@@ -3934,6 +3943,7 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.neuron_focus_requested.connect(self._focus_traces_on_neuron)
         widget.calcium_video_widget.import_requested.connect(
             self._on_calcium_video_import_requested
         )

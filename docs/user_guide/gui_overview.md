@@ -95,6 +95,19 @@ the per-widget normalization dialogs — median normalization, clip/unclip
 range, and per-neuron scaling all live in those dialogs rather than in the
 Settings menu.
 
+## Cell spatial footprints
+
+The **Cell segmentation** tab shows the imported Cellpose cells, labelled with
+their neuron ids. With the mouse:
+
+- **Left click** a cell to select it; the trace, input array and spike plots
+  then show only the selected neurons. Click it again to deselect it.
+- **Right drag** around cells to select several at once (lasso).
+- **Double-click** empty space to clear the selection.
+- **Right click** a cell to scroll the traces to its neuron. The vertical zoom
+  stays the same and all other traces stay visible. A neuron whose trace is
+  hidden by the current selection is not scrolled to.
+
 ## Synaptic data widget
 
 The synaptic data widget contains the information about the states of synaptic connections in a given time point. Using the replay mechanism described below one can access the modifications of synapic changes.

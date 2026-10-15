@@ -684,6 +684,25 @@ class TimeseriesWidget(FPLWidget):
         self.n_neurons = len(self._visible_neuron_ids)
         self.n_neurons_total = len(self._all_neuron_ids)
 
+    def center_on_neuron(self, neuron_id: int) -> bool:
+        """Scroll vertically so this neuron's row is in the middle, keeping
+        the zoom and every other row. False if the neuron is not shown."""
+        display_row = self._neuron_id_to_display_row.get(neuron_id)
+        controller = self.controller
+        if display_row is None or not isinstance(
+            controller, ConstrainedPanZoomController
+        ):
+            return False
+        view = controller.vertical_view()
+        if view is None:
+            return False
+        controller.set_vertical_view((view[0], self._display_row_center_y(display_row)))
+        return True
+
+    def _display_row_center_y(self, display_row: int) -> float:
+        """World y of a display row's centre; rows are one unit apart."""
+        return float(display_row)
+
     def _display_row_to_neuron_id(self, display_row: int) -> int | None:
         if 0 <= display_row < len(self._visible_neuron_ids):
             return self._visible_neuron_ids[display_row]

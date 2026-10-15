@@ -396,6 +396,11 @@ class TraceWidget(TimeseriesWidget):
         stop = int(np.searchsorted(boundaries, max(y_a, y_b), side="right")) + 1
         return slice(start, stop)
 
+    def _display_row_center_y(self, display_row: int) -> float:
+        if self.auto_extend_vertical_space and display_row < len(self._row_centers):
+            return self._row_centers[display_row]
+        return float(display_row)
+
     def _refit_view_to_visible_neurons(self) -> None:
         if not self.auto_extend_vertical_space or not self._row_half_heights:
             super()._refit_view_to_visible_neurons()

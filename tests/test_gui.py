@@ -1062,6 +1062,21 @@ def test_deselecting_a_cell_restores_the_vertical_zoom(qtbot: QtBot) -> None:
     gui.close()
 
 
+def test_right_click_on_a_cell_centres_its_trace(qtbot: QtBot) -> None:
+    """Issue #603: right-clicking a cell scrolls the traces to its neuron
+    and keeps the vertical zoom, without hiding any trace."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui.trace_controller.set_vertical_view((1.0, 0.0))
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_right_clicked.emit(2)
+
+    assert gui.trace_controller.vertical_view() == pytest.approx((1.0, 2.0))
+    assert not any(gui.trace_widget.is_neuron_greyed(n) for n in range(3))
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:

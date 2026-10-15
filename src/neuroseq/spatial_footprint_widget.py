@@ -13,6 +13,7 @@ from neuroseq.brightness_contrast import DisplayRange
 from neuroseq.brightness_contrast import apply_display_range
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cell_overlay_widget import CellOverlayWidget
+from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -162,6 +163,8 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     import_requested = QtCore.Signal()
     neuron_greyed_out_changed = QtCore.Signal(int, bool)
     neurons_greyed_out_changed = QtCore.Signal(list, list)
+    # Right click on a cell: show this neuron's trace (issue #603).
+    neuron_focus_requested = QtCore.Signal(int)
 
     def __init__(
         self,
@@ -273,6 +276,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._on_neuron_lasso_selected
         )
         self.overlay_widget.background_clicked.connect(self.clear_selection)
+        self.overlay_widget.neuron_right_clicked.connect(self._on_neuron_right_clicked)
         layout.addWidget(self.overlay_widget)
         # At the bottom, like CalciumVideoWidget's action bar - see the
         # checkbox_container size comment above.
@@ -673,6 +677,11 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
 
     def _on_neuron_clicked(self, cellpose_id: int) -> None:
         self._state.toggle_selected(cellpose_id)
+
+    def _on_neuron_right_clicked(self, cellpose_id: int) -> None:
+        neuron_id = cellpose_to_stim_id(cellpose_id, self._cellpose_data)
+        if neuron_id is not None:
+            self.neuron_focus_requested.emit(neuron_id)
 
     def _on_neuron_lasso_selected(self, cellpose_ids: list[int]) -> None:
         self._state.toggle_selected_many(cellpose_ids)

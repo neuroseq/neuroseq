@@ -1345,11 +1345,14 @@ def test_overlay_view_left_click_selects_right_click_does_not(
     )
     emitted: list[int] = []
     overlay_view.neuron_clicked.connect(emitted.append)
+    right_clicked: list[int] = []
+    overlay_view.neuron_right_clicked.connect(right_clicked.append)
 
     overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
     assert emitted == []  # a plain right click does not select
+    assert right_clicked == [1]  # but reports the cell (issue #603)
 
     overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
     overlay_view._cell_selection_pointer_up(None)
@@ -1992,3 +1995,14 @@ def test_switching_tabs_keeps_zoom_and_pan(qtbot: QtBot) -> None:
     before = _camera(video)
     widget.tabs.setCurrentIndex(1)
     assert _camera(video) == before
+
+
+def test_right_click_on_a_cell_requests_its_neuron(qtbot: QtBot) -> None:
+    """Issue #603: the right-clicked cell is reported as its neuron id."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    with qtbot.waitSignal(widget.neuron_focus_requested) as blocker:
+        widget.overlay_widget.neuron_right_clicked.emit(2)
+    assert blocker.args == [0]
+    assert widget._selected_cellpose_ids == set()  # nothing selected or hidden

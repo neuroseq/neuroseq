@@ -1891,3 +1891,28 @@ def test_hover_text_moves_left_of_cursor_near_right_border(
     trace_widget.pointer_move(SimpleNamespace(x=100.0))
     assert trace_widget.text.text.anchor == "middle-left"
     trace_widget.close()
+
+
+def test_center_on_neuron_keeps_zoom_and_other_traces(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """Issue #603: centring on a neuron scrolls to it without zooming or
+    hiding the other traces."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=20, n_timestamps=10))
+    controller.set_limits(0.01, 20)
+    controller.set_vertical_view((4.0, 2.0))
+
+    assert trace_widget.center_on_neuron(12)
+    assert controller.vertical_view() == pytest.approx((4.0, 12.0))
+    assert trace_widget.n_neurons == 20
+
+    trace_widget.set_neuron_greyed(5, True)
+    controller.set_vertical_view((4.0, 2.0))
+    assert not trace_widget.center_on_neuron(5)  # hidden: nothing to show
+    assert trace_widget.center_on_neuron(12)
+    # Neuron 5 is hidden, so neuron 12 is now on display row 11.
+    assert controller.vertical_view() == pytest.approx((4.0, 11.0))
+    trace_widget.close()
