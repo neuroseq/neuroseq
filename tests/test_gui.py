@@ -1041,6 +1041,27 @@ def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
     gui.close()
 
 
+def test_deselecting_a_cell_restores_the_vertical_zoom(qtbot: QtBot) -> None:
+    """Issue #604: selecting a cell fits the plots to its rows; deselecting
+    it must go back to the earlier vertical zoom, not zoom all the way out."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    controllers = [gui.controller, gui.trace_controller, gui.spike_controller]
+    for controller in controllers:
+        controller.set_vertical_view((1.5, 1.25))
+    zoomed_in = [controller.vertical_view() for controller in controllers]
+    assert zoomed_in[1] == pytest.approx((1.5, 1.25))
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui.trace_controller.vertical_view() != pytest.approx(zoomed_in[1])
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    for controller, view in zip(controllers, zoomed_in, strict=True):
+        assert controller.vertical_view() == pytest.approx(view)
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:

@@ -372,6 +372,11 @@ class Gui(QtWidgets.QMainWindow):
         self.controller = ConstrainedPanZoomController()
         self.trace_controller = ConstrainedPanZoomController()
         self.spike_controller = ConstrainedPanZoomController()
+        # Vertical views of the plots per set of hidden neurons; see
+        # _on_neurons_greyed_out_changed().
+        self._saved_vertical_views: dict[
+            frozenset[int], list[tuple[float, float] | None]
+        ] = {}
         self._trace_state = TraceWidgetState(parent=self)
         self._spatial_footprint_state = SpatialFootprintState(parent=self)
         self.trace_widget = TraceWidget(
@@ -1339,6 +1344,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         preserve_dynamic_input = preserve_dynamic_input and project is self.project
         self.project = project
+        self._saved_vertical_views.clear()
         self._update_window_title()
         if hasattr(self, "tab_bar"):
             self.tab_bar.setTabText(
@@ -1593,9 +1599,33 @@ class Gui(QtWidgets.QMainWindow):
         newly_hidden: list[int],
         newly_shown: list[int],
     ) -> None:
+        before = frozenset(self._trace_state.greyed_neuron_ids)
+        views = self._vertical_views()
         self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
         self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
         self.spike_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        after = frozenset(self._trace_state.greyed_neuron_ids)
+        if after == before:
+            return
+        # Hiding rows fits the plots to the remaining neurons. Going back to
+        # an earlier selection, e.g. deselecting a cell, restores the vertical
+        # zoom and position it had then instead of zooming out (issue #604).
+        self._saved_vertical_views[before] = views
+        while len(self._saved_vertical_views) > 8:
+            del self._saved_vertical_views[next(iter(self._saved_vertical_views))]
+        restored = self._saved_vertical_views.pop(after, None)
+        if restored is not None:
+            for controller, view in zip(
+                self._plot_controllers(), restored, strict=True
+            ):
+                if view is not None:
+                    controller.set_vertical_view(view)
+
+    def _plot_controllers(self) -> list[ConstrainedPanZoomController]:
+        return [self.controller, self.trace_controller, self.spike_controller]
+
+    def _vertical_views(self) -> list[tuple[float, float] | None]:
+        return [controller.vertical_view() for controller in self._plot_controllers()]
 
     def _current_stim_array(self) -> StimArray | None:
         modifier = self.stim_editor.current_stim_modifier

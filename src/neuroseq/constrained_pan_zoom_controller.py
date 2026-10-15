@@ -159,6 +159,33 @@ class ConstrainedPanZoomController(pygfx.PanZoomController):
         center = float(state["position"][0])
         return ((center - half_width) / 1000.0, (center + half_width) / 1000.0)
 
+    def vertical_view(self) -> tuple[float, float] | None:
+        """Return the visible height and the camera's y position, if a camera
+        is attached."""
+        try:
+            state = self._get_camera_state()
+        except ValueError:
+            return None
+        return float(state["height"]), float(state["position"][1])
+
+    def set_vertical_view(self, view: tuple[float, float]) -> None:
+        """Restore a view returned by vertical_view(), keeping the time axis."""
+        try:
+            state = self._get_camera_state()
+        except ValueError:
+            return
+        height, y = view
+        self._set_camera_state(
+            {
+                "height": height,
+                "position": (
+                    float(state["position"][0]),
+                    y,
+                    float(state["position"][2]),
+                ),
+            }
+        )
+
     def _set_camera_state(self, new_state):
         """Override the _set_camera_state method
         - limit the width, height and position to prevent scrolling or zooming beyond the data
