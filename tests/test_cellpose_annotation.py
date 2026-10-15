@@ -115,3 +115,18 @@ def test_load_annotation_image_accepts_a_png_snapshot(tmp_path: Path) -> None:
     image = load_annotation_image(image_path)
 
     np.testing.assert_array_equal(image, pixels)
+
+
+def test_adjusted_annotation_image() -> None:
+    """Issue #611: the window applies to the image's 8-bit display version;
+    without one, Cellpose gets the original image."""
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.cellpose_annotation import adjusted_annotation_image
+
+    image = np.array([[0.0, 500.0], [1000.0, 2000.0]], dtype=np.float32)
+    assert adjusted_annotation_image(image, None) is image
+    assert adjusted_annotation_image(image, DisplayRange()) is image
+    adjusted = adjusted_annotation_image(image, DisplayRange(0, 128))
+    assert adjusted.dtype == np.uint8
+    # 500 of 2000 is level 64 of 255; the window 0-128 doubles it.
+    np.testing.assert_array_equal(adjusted, [[0, 127], [255, 255]])

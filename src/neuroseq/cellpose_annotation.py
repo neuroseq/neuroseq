@@ -10,6 +10,9 @@ import numpy as np
 import tifffile
 from PIL import Image
 
+from neuroseq.brightness_contrast import DisplayRange
+from neuroseq.brightness_contrast import apply_display_range
+from neuroseq.brightness_contrast import to_8bit
 from neuroseq.gpu import torch_gpu_status
 
 MAX_SOURCE_FRAMES = 300
@@ -52,10 +55,21 @@ def load_annotation_image(image_path: str | Path) -> np.ndarray:
     return np.mean(frames, axis=0)
 
 
+def adjusted_annotation_image(
+    image: np.ndarray, display_range: DisplayRange | None
+) -> np.ndarray:
+    """The image Cellpose segments: unchanged, or with a brightness/contrast
+    window applied to its 8-bit display version (issue #611)."""
+    if display_range is None or display_range.is_identity:
+        return image
+    return apply_display_range(to_8bit(image), display_range)
+
+
 def annotate_mean_fluorescence_tiff(
     image_path: str | Path,
     *,
     model_name: str = "cpsam",
+    display_range: DisplayRange | None = None,
 ) -> tuple[Path, Path]:
     """Annotate a TIFF or PNG image and save Cellpose GUI and mask outputs
     beside it.
@@ -76,7 +90,7 @@ def annotate_mean_fluorescence_tiff(
     from cellpose import models
 
     path = Path(image_path).resolve()
-    image_array = load_annotation_image(path)
+    image_array = adjusted_annotation_image(load_annotation_image(path), display_range)
 
     # GPU availability was verified above. Passing True is intentional: never
     # silently downgrade this interactive annotation workflow to the CPU.
@@ -108,6 +122,11 @@ def annotate_mean_fluorescence_tiff(
         segmentation = np.load(scratch_segmentation, allow_pickle=True).item()
         segmentation["filename"] = str(path)
         segmentation["model_name"] = model_name
+        if display_range is not None and not display_range.is_identity:
+            segmentation["display_range"] = (
+                display_range.minimum,
+                display_range.maximum,
+            )
         np.save(segmentation_path, segmentation, allow_pickle=True)
         scratch_mask = Path(scratch) / f"{path.stem}_cp_masks.png"
         if scratch_mask.exists():

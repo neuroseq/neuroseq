@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 from PIL import Image
 from pytestqt.qtbot import QtBot
+from qtpy import QtWidgets
 
 from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
@@ -364,7 +365,9 @@ def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, moc
 
     dialog._annotate_mean_tiff()
 
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=None
+    )
     assert dialog.image_path == image_path
     assert dialog.segmentation_path == segmentation_path
     assert dialog.image_path_label.text() == image_path.name
@@ -402,7 +405,9 @@ def test_annotate_mean_tiff_uses_selected_cellpose_model(
 
     dialog._annotate_mean_tiff()
 
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam_v2")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam_v2", display_range=None
+    )
 
 
 def test_annotate_mean_tiff_accepts_a_png_snapshot(
@@ -440,7 +445,9 @@ def test_annotate_mean_tiff_accepts_a_png_snapshot(
     dialog._annotate_mean_tiff()
 
     tiff_frame_count.assert_not_called()
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=None
+    )
     assert dialog.image_path == image_path
     assert dialog.segmentation_path == segmentation_path
 
@@ -511,3 +518,67 @@ def test_linear_mapping_has_adjustable_shapes_that_leave_it_unchanged(
     assert imported.aoi_config is not None
     assert imported.aoi_config.square.x == pytest.approx(1.0, abs=0.01)
     dialog.close()
+
+
+@pytest.mark.parametrize("accept", [True, False])
+def test_brightness_is_adjusted_before_segmentation(
+    tmp_path, qtbot: QtBot, mocker, accept: bool
+) -> None:
+    """Issue #611: with "Adjust brightness first", the chosen window is
+    passed on to the segmentation; cancelling segments nothing."""
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    image_path = tmp_path / "mean_fluorescence.png"
+    Image.fromarray(np.arange(36, dtype=np.uint8).reshape(6, 6)).save(image_path)
+    segmentation_path = tmp_path / "mean_fluorescence_cpsam_seg.npy"
+    np.save(segmentation_path, np.zeros((6, 6), dtype=np.int32))
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.getopenfilename",
+        return_value=(str(image_path), ""),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, tmp_path / "masks.png"),
+    )
+    chosen = DisplayRange(40, 200)
+
+    def _exec(brightness: SegmentationBrightnessDialog) -> int:
+        assert brightness.controls.histogram_view is not None
+        brightness.controls.set_display_range(chosen)
+        return (
+            QtWidgets.QDialog.DialogCode.Accepted
+            if accept
+            else QtWidgets.QDialog.DialogCode.Rejected
+        )
+
+    mocker.patch.object(SegmentationBrightnessDialog, "exec", _exec)
+    dialog.adjust_brightness_checkbox.setChecked(True)
+    dialog._annotate_mean_tiff()
+
+    if accept:
+        annotate.assert_called_once_with(
+            str(image_path), model_name="cpsam", display_range=chosen
+        )
+    else:
+        annotate.assert_not_called()
+
+
+def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+    image = np.linspace(0, 4000, 64, dtype=np.float32).reshape(8, 8)
+    dialog = SegmentationBrightnessDialog(image)
+    qtbot.addWidget(dialog)
+    assert dialog.display_range.is_identity
+    before = dialog.preview.pixmap().toImage()
+    dialog.controls.set_display_range(DisplayRange(100, 150))
+    assert dialog.display_range == DisplayRange(100, 150)
+    assert dialog.preview.pixmap().toImage() != before

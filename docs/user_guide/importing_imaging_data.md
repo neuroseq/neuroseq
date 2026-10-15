@@ -29,7 +29,10 @@ Open one of:
   beside the image with the model in their name, e.g. `fov_cpsam_seg.npy` and
   `fov_cpsam_cp_masks.png`, so segmenting with another model keeps the
   earlier results, and an `fov_seg.npy` made in the Cellpose GUI is not
-  overwritten.
+  overwritten. With **Adjust brightness first** ticked, the image is shown
+  with the Brightness/Contrast controls of the Spatial Footprints panel before
+  Cellpose runs, and Cellpose segments the adjusted image; **Reset** keeps the
+  original. The window used is stored in the `_seg.npy`.
 - **Data Information** — read-only summary: image dimensions, number of
   detected cells, value range.
 - **ID Mapping Options** — choose how Cellpose IDs are mapped onto the

@@ -13,6 +13,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.brightness_contrast import DisplayRange
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
 from neuroseq.importer_cellpose import AOIRole
@@ -139,6 +140,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "signal-to-noise fields of view, at a similar runtime cost."
         )
         cellpose_button_layout.addWidget(self.cellpose_model_combo)
+        self.adjust_brightness_checkbox = QtWidgets.QCheckBox("Adjust brightness first")
+        self.adjust_brightness_checkbox.setToolTip(
+            "Before segmenting, show the image with Brightness/Contrast "
+            "controls; Cellpose then segments the adjusted image."
+        )
+        cellpose_button_layout.addWidget(self.adjust_brightness_checkbox)
         cellpose_button_layout.addStretch()
         self.annotate_tiff_button = QtWidgets.QPushButton(
             "Select file for segmentation…"
@@ -1355,13 +1362,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 "average, and process that average with Cellpose.",
             )
 
+        display_range = None
+        if self.adjust_brightness_checkbox.isChecked():
+            display_range = self._choose_segmentation_brightness(filename)
+            if display_range is None:
+                return
+
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self.annotate_tiff_button.setEnabled(False)
         try:
             from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
 
             segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
-                filename, model_name=self.cellpose_model_combo.currentText()
+                filename,
+                model_name=self.cellpose_model_combo.currentText(),
+                display_range=display_range,
             )
             self._load_image_file(filename)
             self._load_segmentation_file(str(segmentation_path))
@@ -1381,6 +1396,24 @@ class CellposeImportDialog(QtWidgets.QDialog):
         finally:
             self.annotate_tiff_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _choose_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+        """Show the image to segment with brightness/contrast controls
+        (issue #611); None if the user cancels."""
+        from neuroseq.cellpose_annotation import load_annotation_image
+        from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+        try:
+            image = load_annotation_image(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Could not read image", f"Could not read {filename}:\n{exc}"
+            )
+            return None
+        dialog = SegmentationBrightnessDialog(image, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.display_range
 
     def _open_in_fiji(self) -> None:
         """Launch Fiji/ImageJ, optionally opening the currently selected image."""
