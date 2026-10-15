@@ -108,10 +108,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         project: Project,
         parent: QtWidgets.QWidget | None = None,
         current_stim_name: str | None = None,
+        output_folder: pathlib.Path | None = None,
     ) -> None:
         """`current_stim_name` is the input array the user has open in the
         editor; it is preselected so exporting doesn't default to the first
-        array created (#588). Ignored if it isn't one of the project's."""
+        array created (#588). Ignored if it isn't one of the project's.
+        `output_folder` is where the scripts go unless the user picks another
+        folder (issue #614)."""
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
@@ -375,6 +378,8 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         button_layout.addWidget(self.generate_button)
         button_layout.addWidget(self.close_button)
         main_layout.addLayout(button_layout)
+        if output_folder is not None:
+            self._set_output_folder(output_folder)
 
     class _SlmFixChoice(Enum):
         SPACE_OUT = "space_out"
@@ -429,15 +434,18 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         folder = getexistingdirectory(
             self,
             "Select Output Folder",
-            "",
+            str(self.output_folder or ""),
         )
 
         if folder:
-            self.output_folder = pathlib.Path(folder)
-            self.folder_edit.setText(str(self.output_folder))
-            self.generate_button.setEnabled(True)
-            self._refresh_default_name()
-            self._log_status(f"Output folder set to: {self.output_folder}")
+            self._set_output_folder(pathlib.Path(folder))
+
+    def _set_output_folder(self, folder: pathlib.Path) -> None:
+        self.output_folder = folder
+        self.folder_edit.setText(str(self.output_folder))
+        self.generate_button.setEnabled(True)
+        self._refresh_default_name()
+        self._log_status(f"Output folder set to: {self.output_folder}")
 
     def _log_status(self, message: str, *args: object) -> None:
         """Log a status message."""

@@ -16,8 +16,10 @@ from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.syscon2_export_service import SysconExportError
 from neuroseq.syscon2_export_service import SysconExportResult
 from neuroseq.syscon2_export_service import SysconExportSettings
+from neuroseq.syscon2_export_service import default_export_directory
 from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.syscon2_protocol import encode_string
 
@@ -257,7 +259,10 @@ def test_send_to_syscon2_opens_dialog_with_current_project(
     qtbot.mouseClick(panel.btn_send_to_syscon2, QtCore.Qt.MouseButton.LeftButton)
 
     dialog_cls.assert_called_once_with(
-        project, parent=panel.window(), current_stim_name=None
+        project,
+        parent=panel.window(),
+        current_stim_name=None,
+        output_folder=default_export_directory(),
     )
     dialog_cls.return_value.sequence_generated.connect.assert_called_once_with(
         panel._on_dialog_sequence_generated
@@ -961,3 +966,65 @@ def test_selecting_sequence_renders_preview_from_local_seq_file(
     panel._show_preview_for_sequence("Experiment\\Sequence2.seq")
 
     assert not panel.preview_label._source.isNull()
+
+
+def test_scripts_go_to_a_dated_folder_on_the_syscon_pc(panel: SysCon2Panel) -> None:
+    """Issue #614: one folder per experiment day instead of all in "neuroseq"."""
+    import datetime
+
+    from neuroseq.syscon2_export_service import default_target_directory
+
+    assert default_target_directory(datetime.date(2026, 10, 15)) == (
+        "neuroseq\\2026-10-15"
+    )
+    assert panel.target_directory_edit.text() == default_target_directory()
+
+
+def test_export_dialog_starts_in_the_folder_used_last(
+    qtbot: QtBot, mocker, tmp_path
+) -> None:
+    """Issue #614: no need to pick the output folder for every export."""
+    from types import SimpleNamespace
+
+    settings = SimpleNamespace(syscon_export_directory="")
+    widget = SysCon2Panel(
+        manager=SysCon2ConnectionManager(poll_interval_ms=3_600_000),
+        settings=settings,  # type: ignore[arg-type]
+    )
+    qtbot.addWidget(widget)
+    widget.set_project(Project())
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    dialog_cls.return_value.output_folder = tmp_path / "chosen"
+
+    widget._on_send_to_syscon2_clicked()
+    assert dialog_cls.call_args.kwargs["output_folder"] == default_export_directory()
+    assert settings.syscon_export_directory == str(tmp_path / "chosen")
+
+    widget._on_send_to_syscon2_clicked()
+    assert dialog_cls.call_args.kwargs["output_folder"] == tmp_path / "chosen"
+    widget.shutdown()
+
+
+def test_target_power_beside_the_export_button(
+    panel: SysCon2Panel, mocker, tmp_path
+) -> None:
+    """Issue #616: changing only the power reuses the other export settings."""
+    project = Project()
+    panel.set_project(project)
+    stim = StimArray("stim", StimType.Excitation, np.ones((10, 2)), "mW", 0.001)
+    panel.set_current_stim_provider(lambda: stim)
+    panel._show_export_settings(
+        SysconExportSettings(config_text="cfg", spiralling=True, target_power_mw=5.0)
+    )
+    assert panel.target_power_spin.value() == pytest.approx(5.0)
+
+    panel.target_power_spin.setValue(12.5)
+    export = mocker.patch.object(
+        syscon2_panel_module, "export_stim_array", side_effect=SysconExportError("x")
+    )
+    mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    panel._on_export_current_clicked()
+
+    used = export.call_args.args[2]
+    assert used.target_power_mw == pytest.approx(12.5)
+    assert used.spiralling  # the other settings are kept

@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from qtpy import QtCore
@@ -32,10 +33,13 @@ from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
 from neuroseq.syscon2_export_service import SysconExportError
 from neuroseq.syscon2_export_service import SysconExportResult
 from neuroseq.syscon2_export_service import SysconExportSettings
+from neuroseq.syscon2_export_service import default_export_directory
+from neuroseq.syscon2_export_service import default_target_directory
 from neuroseq.syscon2_export_service import export_stim_array
 from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 
 if TYPE_CHECKING:
+    from neuroseq.gui_settings import GuiSettings
     from neuroseq.project import Project
 
 logger = logging.getLogger(__name__)
@@ -170,9 +174,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         parent: QtWidgets.QWidget | None = None,
         *,
         manager: SysCon2ConnectionManager | None = None,
+        settings: GuiSettings | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        #: Remembers the export folder between sessions, if given.
+        self._settings = settings
         self._manager = manager if manager is not None else SysCon2ConnectionManager()
         self._project: Project | None = None
         self._connected = False
@@ -318,7 +325,24 @@ class SysCon2Panel(QtWidgets.QWidget):
             "export dialog first if there are no settings yet."
         )
         self.btn_export_current.clicked.connect(self._on_export_current_clicked)
-        layout.addWidget(self.btn_export_current)
+        # Next to the export button, so changing only the power needs no trip
+        # through the export dialog (issue #616).
+        self.target_power_spin = _NoScrollDoubleSpinBox()
+        self.target_power_spin.setRange(0.0, 1000.0)
+        self.target_power_spin.setDecimals(2)
+        self.target_power_spin.setSuffix(" mW")
+        self.target_power_spin.setSingleStep(0.5)
+        self.target_power_spin.setValue(1.0)
+        self.target_power_spin.setToolTip(
+            "Target power of the export: used by the button beside it and filled "
+            "into 'Export with settings…'. Set to 0 to disable power control."
+        )
+        self.target_power_spin.valueChanged.connect(self._on_target_power_changed)
+        export_row = QtWidgets.QHBoxLayout()
+        export_row.addWidget(self.btn_export_current, stretch=1)
+        export_row.addWidget(QtWidgets.QLabel("Target power:"))
+        export_row.addWidget(self.target_power_spin)
+        layout.addLayout(export_row)
 
         self.sequence_list = QtWidgets.QListWidget()
         self.sequence_list.setMaximumHeight(120)
@@ -355,7 +379,11 @@ class SysCon2Panel(QtWidgets.QWidget):
 
         target_row = QtWidgets.QHBoxLayout()
         target_row.addWidget(QtWidgets.QLabel("Target directory:"))
-        self.target_directory_edit = QtWidgets.QLineEdit("neuroseq")
+        self.target_directory_edit = QtWidgets.QLineEdit(default_target_directory())
+        self.target_directory_edit.setToolTip(
+            "Folder on the stimulation PC that imported scripts go to; by "
+            "default one per day, named after the date."
+        )
         target_row.addWidget(self.target_directory_edit, stretch=1)
         self.btn_import_sequence = QtWidgets.QPushButton("Import")
         self.btn_import_sequence.clicked.connect(self._on_import_sequence_clicked)
@@ -917,16 +945,37 @@ class SysCon2Panel(QtWidgets.QWidget):
             self._project,
             parent=self.window(),
             current_stim_name=current.name if current else None,
+            output_folder=self._export_directory(),
         )
         dialog.reserved_names = self._remote_sequence_names
         if self._export_settings is not None:
             dialog.apply_settings(self._export_settings)
+        dialog.target_power_spin.setValue(self.target_power_spin.value())
         dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
         self._active_dialog = dialog
         try:
             dialog.exec()
         finally:
             self._active_dialog = None
+        if self._settings is not None and dialog.output_folder is not None:
+            self._settings.syscon_export_directory = str(dialog.output_folder)
+
+    def _export_directory(self) -> pathlib.Path:
+        """The folder used last, or a default one (issue #614)."""
+        stored = self._settings.syscon_export_directory if self._settings else ""
+        return pathlib.Path(stored) if stored else default_export_directory()
+
+    def _on_target_power_changed(self, value: float) -> None:
+        if self._export_settings is not None:
+            self._export_settings = replace(
+                self._export_settings, target_power_mw=float(value)
+            )
+
+    def _show_export_settings(self, settings: SysconExportSettings) -> None:
+        self._export_settings = settings
+        self.target_power_spin.blockSignals(True)
+        self.target_power_spin.setValue(settings.target_power_mw)
+        self.target_power_spin.blockSignals(False)
 
     def _on_export_current_clicked(self) -> None:
         if self._project is None:
@@ -977,7 +1026,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         targeted_stim_ids: frozenset[int],
     ) -> None:
         if self._active_dialog is not None:
-            self._export_settings = self._active_dialog.export_settings()
+            self._show_export_settings(self._active_dialog.export_settings())
         self._show_preview(overview_png_path)
         self._remember_preview(seq_path, overview_png_path)
         self.import_path_edit.setText(seq_path)
@@ -1036,7 +1085,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         settings: SysconExportSettings | None = None,
     ) -> None:
         if settings is not None:
-            self._export_settings = settings
+            self._show_export_settings(settings)
         self._show_preview(png_path)
         self._remember_preview(seq_path, png_path)
         self.import_path_edit.setText(seq_path)

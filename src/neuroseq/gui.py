@@ -465,7 +465,7 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        self.syscon2_panel = SysCon2Panel(parent=self)
+        self.syscon2_panel = SysCon2Panel(parent=self, settings=self.settings)
         self.syscon2_panel.setVisible(False)
         # Mark, with a cross in the Spatial Footprints panel, every neuron
         # targeted by the preview whose import SysCon2 most recently confirmed -

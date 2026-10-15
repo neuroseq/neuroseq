@@ -1433,3 +1433,15 @@ def test_loaded_940_lut_marks_dirty_and_survives_project_save(qtbot, tmp_path):
     project.save(saved, SaveLoadOptions(True, True, True, True))
     loaded = Project(saved)
     assert loaded.power_luts[940] == project.power_luts[940]
+
+
+def test_dialog_starts_with_the_given_output_folder(qtbot, tmp_path) -> None:
+    """Issue #614: scripts can be generated without browsing for a folder."""
+    from neuroseq.project import Project
+    from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
+
+    dialog = StimulationGeneratorDialog(Project(), output_folder=tmp_path)
+    qtbot.addWidget(dialog)
+    assert dialog.output_folder == tmp_path
+    assert dialog.folder_edit.text() == str(tmp_path)
+    assert dialog.generate_button.isEnabled()

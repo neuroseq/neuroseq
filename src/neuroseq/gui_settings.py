@@ -61,6 +61,7 @@ class GuiSettings:
     fiji_executable_path: str = ""
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
+    syscon_export_directory: str = ""
     recent_projects: list[str] = field(default_factory=list)
 
     def __init__(self) -> None:
@@ -104,6 +105,7 @@ class GuiSettings:
                         "fiji_executable_path": self.fiji_executable_path,
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
+                        "syscon_export_directory": self.syscon_export_directory,
                         "recent_projects": self.recent_projects,
                     },
                     f,
@@ -153,6 +155,7 @@ class GuiSettings:
             scanimage_recording_directory = config.get(
                 "scanimage_recording_directory", ""
             )
+            syscon_export_directory = config.get("syscon_export_directory", "")
             recent_projects = config.get("recent_projects", [])
 
             # setting values
@@ -235,6 +238,9 @@ class GuiSettings:
             self.__dict__["scanimage_python_path"] = str(scanimage_python_path or "")
             self.__dict__["scanimage_recording_directory"] = str(
                 scanimage_recording_directory or ""
+            )
+            self.__dict__["syscon_export_directory"] = str(
+                syscon_export_directory or ""
             )
             if isinstance(recent_projects, list) and all(
                 isinstance(p, str) for p in recent_projects
