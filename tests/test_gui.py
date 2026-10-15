@@ -1893,7 +1893,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
         (
             action
             for action in gui.menu_file.actions()
-            if action.menu() is not None and action.text() == "&Import data"
+            if action.menu() is not None and action.text() == "&Input data"
         ),
         None,
     )
@@ -1901,6 +1901,8 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     import_data_menu = import_data_action.menu()
     assert import_data_menu is not None
     import_data_action_texts = [action.text() for action in import_data_menu.actions()]
+    assert "&Output" in import_data_action_texts
+    assert "&Trace" not in import_data_action_texts
     assert "Import cell &segmentation" not in import_data_action_texts
     assert "Cell &segmentation" not in import_data_action_texts
 

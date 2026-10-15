@@ -3110,7 +3110,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.content-save-edit",
         )
 
-        import_data_menu = menu.addMenu("&Import data")
+        import_data_menu = menu.addMenu("&Input data")
         assert import_data_menu is not None
 
         import_stimulus_menu = import_data_menu.addMenu("&Input")
@@ -3130,7 +3130,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.waveform",
         )
 
-        import_trace_menu = import_data_menu.addMenu("&Trace")
+        import_trace_menu = import_data_menu.addMenu("&Output")
         assert import_trace_menu is not None
         add_action(
             "&Calcium Imaging (raw .tif)",
