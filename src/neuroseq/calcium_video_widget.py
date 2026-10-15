@@ -474,23 +474,26 @@ class CalciumVideoWidget(FPLWidget):
                 ).astype(np.uint8)
         self._frame_graphic.data = frame
 
-    def set_time_ms(self, time_ms: int) -> None:
+    def frame_index_at(self, time_ms: float) -> int | None:
+        """Index of the movie frame shown at ``time_ms``; None without a movie."""
         if self._live or not self._frame_refs or self._fps is None:
-            return
-        index = max(
-            0, min(len(self._frame_refs) - 1, int(float(time_ms) / 1000.0 * self._fps))
-        )
+            return None
         if self._frame_times is not None:
-            index = max(
-                0,
-                min(
-                    len(self._frame_refs) - 1,
-                    int(
-                        np.searchsorted(self._frame_times, time_ms / 1000, side="right")
-                    )
-                    - 1,
-                ),
+            index = (
+                int(np.searchsorted(self._frame_times, time_ms / 1000, side="right"))
+                - 1
             )
+        else:
+            index = int(float(time_ms) / 1000.0 * self._fps)
+        return max(0, min(len(self._frame_refs) - 1, index))
+
+    def frame_count(self) -> int:
+        return len(self._frame_refs)
+
+    def set_time_ms(self, time_ms: int) -> None:
+        index = self.frame_index_at(time_ms)
+        if index is None:
+            return
         frame = self._to_rgb(self._read_frame(index))
         self._current_frame_index = index
         self.current_frame_index = index
