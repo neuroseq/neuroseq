@@ -859,7 +859,7 @@ def test_trace_widget_hover_value_units(
                 units=trace_units,
             )
         )
-    widget.pointer_move(None)
+    widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == f"Neuron 0\n{expected}"
     assert isinstance(widget.data, TraceData)
     np.testing.assert_allclose(widget.data.traces, sample)
@@ -890,7 +890,7 @@ def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
         lambda ev: np.array([0.0, 0.0, 0.0]),  # the only (display row 0) visible row
     )
 
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
     trace_widget.close()
@@ -914,8 +914,10 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
     )
-    trace_widget.pointer_move(None)
-    trace_widget.pointer_move(None)  # same row - no duplicate emission
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
+    trace_widget.pointer_move(
+        SimpleNamespace(x=0.0)
+    )  # same row - no duplicate emission
 
     assert emitted == [1]
 
@@ -924,14 +926,14 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 2.0, 0.0]),  # row 2
     )
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert emitted == [1, 2]
 
     monkeypatch.setattr(
         trace_widget.subplot, "map_screen_to_world", lambda ev: None
     )  # pointer left the plot area
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert emitted == [1, 2, None]
     trace_widget.close()
@@ -960,7 +962,7 @@ def test_pointer_leave_clears_hover_state(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
     )
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
     assert emitted == [1]
     assert trace_widget.text.visible
 
@@ -1864,3 +1866,28 @@ def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
 
     with qtbot.waitSignal(spike_widget.custom_analysis_requested):
         pearson_action.trigger()
+
+
+def test_hover_text_moves_left_of_cursor_near_right_border(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, make_trace_data
+) -> None:
+    """Issue #602: the hover text must not be cut off at the right border."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10))
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([1.0, 0.0, 0.0]),
+    )
+    monkeypatch.setattr(
+        trace_widget.subplot.frame, "get_render_rect", lambda: (10, 0, 500, 300)
+    )
+
+    trace_widget.pointer_move(SimpleNamespace(x=100.0))
+    assert trace_widget.text.text.anchor == "middle-left"
+    trace_widget.pointer_move(SimpleNamespace(x=480.0))
+    assert trace_widget.text.text.anchor == "middle-right"
+    trace_widget.pointer_move(SimpleNamespace(x=100.0))
+    assert trace_widget.text.text.anchor == "middle-left"
+    trace_widget.close()

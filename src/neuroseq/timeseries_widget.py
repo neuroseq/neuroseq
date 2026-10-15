@@ -837,6 +837,8 @@ class TimeseriesWidget(FPLWidget):
         if self.mouse_pos is None:
             self._clear_hover()
             return
+        x, _, width, _ = self.subplot.frame.get_render_rect()
+        self.text.room_right_px = x + width - ev.x
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
         hover_value_text = ""
