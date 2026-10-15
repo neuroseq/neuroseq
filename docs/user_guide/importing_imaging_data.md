@@ -24,6 +24,12 @@ Open one of:
 - **File Selection** — point at the Cellpose output (a NumPy `.npy` array of
   per-pixel segmentation IDs, or the `_seg.npy` file produced by the Cellpose
   GUI).
+- **Select file for segmentation…** — segments a mean-fluorescence TIFF or
+  PNG with the chosen Cellpose model and loads the result. The files are saved
+  beside the image with the model in their name, e.g. `fov_cpsam_seg.npy` and
+  `fov_cpsam_cp_masks.png`, so segmenting with another model keeps the
+  earlier results, and an `fov_seg.npy` made in the Cellpose GUI is not
+  overwritten.
 - **Data Information** — read-only summary: image dimensions, number of
   detected cells, value range.
 - **ID Mapping Options** — choose how Cellpose IDs are mapped onto the

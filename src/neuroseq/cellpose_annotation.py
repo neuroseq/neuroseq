@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -58,8 +60,10 @@ def annotate_mean_fluorescence_tiff(
     """Annotate a TIFF or PNG image and save Cellpose GUI and mask outputs
     beside it.
 
-    Returns the standard ``*_seg.npy`` file and the ``*_cp_masks.png`` mask.
-    Cellpose is imported lazily so NeuroSeq can still show a useful GUI error if
+    Returns the ``*_<model>_seg.npy`` file and the ``*_<model>_cp_masks.png``
+    mask. The model name in the file names keeps the results of different
+    models apart (issue #598), and an ``*_seg.npy`` made in the Cellpose GUI is
+    never overwritten. Cellpose is imported lazily so NeuroSeq can still show a useful GUI error if
     the optional dependency is unavailable.
     """
     gpu_available, gpu_message = torch_gpu_status()
@@ -79,20 +83,33 @@ def annotate_mean_fluorescence_tiff(
     model = models.CellposeModel(gpu=True, pretrained_model=model_name)
     masks, flows, _styles = model.eval(image_array)
 
-    # Save the editable Cellpose GUI payload as well as an ordinary labelled mask.
-    io.masks_flows_to_seg(image_array, masks, flows, str(path))
-    io.save_masks(
-        image_array,
-        masks,
-        flows,
-        str(path),
-        png=True,
-        tif=False,
-        suffix="_cp_masks",
-    )
-
-    segmentation_path = path.with_name(f"{path.stem}_seg.npy")
-    mask_path = path.with_name(f"{path.stem}_cp_masks.png")
-    if not segmentation_path.exists():
-        raise RuntimeError(f"Cellpose did not create {segmentation_path.name}")
+    segmentation_path = path.with_name(f"{path.stem}_{model_name}_seg.npy")
+    mask_path = path.with_name(f"{path.stem}_{model_name}_cp_masks.png")
+    # Cellpose names its outputs after the image, so let it write them in a
+    # scratch folder next to the image and move them to their final names.
+    with tempfile.TemporaryDirectory(dir=path.parent) as scratch:
+        scratch_image = Path(scratch) / path.name
+        # Save the editable Cellpose GUI payload as well as an ordinary
+        # labelled mask.
+        io.masks_flows_to_seg(image_array, masks, flows, str(scratch_image))
+        io.save_masks(
+            image_array,
+            masks,
+            flows,
+            str(scratch_image),
+            png=True,
+            tif=False,
+            suffix="_cp_masks",
+        )
+        scratch_segmentation = Path(scratch) / f"{path.stem}_seg.npy"
+        if not scratch_segmentation.exists():
+            raise RuntimeError(f"Cellpose did not create {segmentation_path.name}")
+        # The Cellpose GUI finds the image through the stored file name.
+        segmentation = np.load(scratch_segmentation, allow_pickle=True).item()
+        segmentation["filename"] = str(path)
+        segmentation["model_name"] = model_name
+        np.save(segmentation_path, segmentation, allow_pickle=True)
+        scratch_mask = Path(scratch) / f"{path.stem}_cp_masks.png"
+        if scratch_mask.exists():
+            os.replace(scratch_mask, mask_path)
     return segmentation_path, mask_path

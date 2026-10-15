@@ -146,7 +146,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.annotate_tiff_button.setToolTip(
             "Select a mean-fluorescence TIFF or a PNG snapshot and "
             "immediately segment it with the Cellpose model chosen above. "
-            "Results are saved beside the selected file."
+            "Results are saved beside the selected file, named after the "
+            "model (e.g. image_cpsam_seg.npy), so other models' results are kept."
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
