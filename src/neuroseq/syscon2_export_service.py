@@ -7,6 +7,7 @@ export settings and the same sanity gate.
 
 from __future__ import annotations
 
+import datetime
 import pathlib
 import re
 import tempfile
@@ -32,6 +33,18 @@ if TYPE_CHECKING:
     from neuroseq.project import Project
 
 TICK_RESOLUTION_US = 500
+
+
+def default_export_directory() -> pathlib.Path:
+    """Where exported scripts go until the user picks a folder (issue #614)."""
+    return pathlib.Path.home() / "Documents" / "NeuroSeq" / "SysCon exports"
+
+
+def default_target_directory(day: datetime.date | None = None) -> str:
+    """Folder on the SysCon PC for imported scripts: one per experiment day,
+    so scripts are not all collected in "neuroseq" (issue #614)."""
+    day = day or datetime.date.today()
+    return f"neuroseq\\{day.isoformat()}"
 
 
 class SysconExportError(RuntimeError):

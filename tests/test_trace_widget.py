@@ -859,7 +859,7 @@ def test_trace_widget_hover_value_units(
                 units=trace_units,
             )
         )
-    widget.pointer_move(None)
+    widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == f"Neuron 0\n{expected}"
     assert isinstance(widget.data, TraceData)
     np.testing.assert_allclose(widget.data.traces, sample)
@@ -890,7 +890,7 @@ def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
         lambda ev: np.array([0.0, 0.0, 0.0]),  # the only (display row 0) visible row
     )
 
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
     trace_widget.close()
@@ -914,8 +914,10 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
     )
-    trace_widget.pointer_move(None)
-    trace_widget.pointer_move(None)  # same row - no duplicate emission
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
+    trace_widget.pointer_move(
+        SimpleNamespace(x=0.0)
+    )  # same row - no duplicate emission
 
     assert emitted == [1]
 
@@ -924,14 +926,14 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 2.0, 0.0]),  # row 2
     )
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert emitted == [1, 2]
 
     monkeypatch.setattr(
         trace_widget.subplot, "map_screen_to_world", lambda ev: None
     )  # pointer left the plot area
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert emitted == [1, 2, None]
     trace_widget.close()
@@ -960,7 +962,7 @@ def test_pointer_leave_clears_hover_state(
         "map_screen_to_world",
         lambda ev: np.array([0.0, 1.0, 0.0]),  # row 1
     )
-    trace_widget.pointer_move(None)
+    trace_widget.pointer_move(SimpleNamespace(x=0.0))
     assert emitted == [1]
     assert trace_widget.text.visible
 
@@ -1864,3 +1866,114 @@ def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
 
     with qtbot.waitSignal(spike_widget.custom_analysis_requested):
         pearson_action.trigger()
+
+
+def test_hover_text_moves_left_of_cursor_near_right_border(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, make_trace_data
+) -> None:
+    """Issue #602: the hover text must not be cut off at the right border."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=2, n_timestamps=10))
+    monkeypatch.setattr(
+        trace_widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([1.0, 0.0, 0.0]),
+    )
+    monkeypatch.setattr(
+        trace_widget.subplot.frame, "get_render_rect", lambda: (10, 0, 500, 300)
+    )
+
+    trace_widget.pointer_move(SimpleNamespace(x=100.0))
+    assert trace_widget.text.text.anchor == "middle-left"
+    trace_widget.pointer_move(SimpleNamespace(x=480.0))
+    assert trace_widget.text.text.anchor == "middle-right"
+    trace_widget.pointer_move(SimpleNamespace(x=100.0))
+    assert trace_widget.text.text.anchor == "middle-left"
+    trace_widget.close()
+
+
+def test_center_on_neuron_keeps_zoom_and_other_traces(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """Issue #603: centring on a neuron scrolls to it without zooming or
+    hiding the other traces."""
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=20, n_timestamps=10))
+    controller.set_limits(0.01, 20)
+    controller.set_vertical_view((4.0, 2.0))
+
+    assert trace_widget.center_on_neuron(12)
+    assert controller.vertical_view() == pytest.approx((4.0, 12.0))
+    assert trace_widget.n_neurons == 20
+
+    trace_widget.set_neuron_greyed(5, True)
+    controller.set_vertical_view((4.0, 2.0))
+    assert not trace_widget.center_on_neuron(5)  # hidden: nothing to show
+    assert trace_widget.center_on_neuron(12)
+    # Neuron 5 is hidden, so neuron 12 is now on display row 11.
+    assert controller.vertical_view() == pytest.approx((4.0, 11.0))
+    trace_widget.close()
+
+
+def test_wheel_scrolling_moves_the_traces_at_once(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """Issue #596: a wheel step must not keep easing the traces along over
+    the following frames."""
+    controller = ConstrainedPanZoomController()
+    assert controller.damping == 0
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.resize(800, 400)
+    trace_widget.show()
+    qtbot.waitExposed(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=40, n_timestamps=10))
+    controller.set_limits(0.01, 40)
+    controller.set_vertical_view((8.0, 20.0))
+    qtbot.wait(100)
+
+    x, y, width, height = trace_widget.subplot.frame.get_render_rect()
+    controller.handle_event(
+        pygfx.WheelEvent(
+            type="wheel", x=x + width / 2, y=y + height / 2, dx=0.0, dy=120.0
+        ),
+        pygfx.Viewport.from_viewport_or_renderer(trace_widget.subplot.viewport),
+    )
+    qtbot.wait(50)  # the step is applied when the next frame is drawn
+    moved = controller.vertical_view()
+    assert moved is not None
+    assert moved[1] < 20.0
+    qtbot.wait(200)  # with easing it was still moving for 200 ms or more
+    assert controller.vertical_view() == pytest.approx(moved)
+    trace_widget.close()
+
+
+def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -> None:
+    """Issue #615: short stimuli vanish from the overlay image once zoomed
+    out, so each stimulus start also gets a mark of fixed screen width."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=100))
+    values = np.zeros((1000, 3), dtype=np.float32)
+    values[100:117, 1] = 30.0  # one 17 ms pulse on neuron 1
+    values[500:503, 2] = 30.0  # and a 3 ms pulse on neuron 2
+    values[600:700, 2] = 30.0
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_stim_overlay_data(
+        StimArray("stim", neuroseq.stim.StimType.Excitation, values, "mW", 0.001)
+    )
+
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    points = marks.data.value
+    starts = points[0::3]
+    assert starts[:, 0].tolist() == pytest.approx([100.0, 500.0, 600.0])
+    assert (starts[:, 1] + 0.5).tolist() == pytest.approx([1.0, 2.0, 2.0])
+    assert np.isnan(points[2::3]).all()  # breaks between marks
+
+    trace_widget.set_stim_overlay_enabled(False)
+    assert trace_widget._stim_onset_graphic is None
+    trace_widget.close()

@@ -337,6 +337,23 @@ def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
     return "progress" in sig.parameters
 
 
+# File drops (issue #597): imaging files and what can be done with them.
+DROP_IMAGE_SUFFIXES = {
+    ".tif",
+    ".tiff",
+    ".png",
+    ".gif",
+    ".mp4",
+    ".avi",
+    ".mov",
+    ".mkv",
+    ".webm",
+}
+DROP_SEGMENT = "Segment cells with Cellpose"
+DROP_TRACES = "Extract calcium traces"
+DROP_VIDEO = "Add as imaging data (video)"
+
+
 class Gui(QtWidgets.QMainWindow):
     TOOLBAR_ICON_SIZE = QtCore.QSize(20, 20)
 
@@ -372,6 +389,11 @@ class Gui(QtWidgets.QMainWindow):
         self.controller = ConstrainedPanZoomController()
         self.trace_controller = ConstrainedPanZoomController()
         self.spike_controller = ConstrainedPanZoomController()
+        # Vertical views of the plots per set of hidden neurons; see
+        # _on_neurons_greyed_out_changed().
+        self._saved_vertical_views: dict[
+            frozenset[int], list[tuple[float, float] | None]
+        ] = {}
         self._trace_state = TraceWidgetState(parent=self)
         self._spatial_footprint_state = SpatialFootprintState(parent=self)
         self.trace_widget = TraceWidget(
@@ -394,6 +416,9 @@ class Gui(QtWidgets.QMainWindow):
         self.spatial_footprint_widget.neurons_greyed_out_changed.connect(
             self._on_neurons_greyed_out_changed
         )
+        self.spatial_footprint_widget.neuron_focus_requested.connect(
+            self._focus_traces_on_neuron
+        )
         # The calcium video now lives in the second tab of the imaging panel;
         # keep this attribute as a compatibility handle for timeline and
         # project synchronization code.
@@ -403,6 +428,9 @@ class Gui(QtWidgets.QMainWindow):
         )
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
+        )
+        self.calcium_video_widget.channels_changed.connect(
+            self._on_calcium_video_channels_changed
         )
         self.scanimage_connection = ScanImageConnection(self)
         # Modeless, so the live image stays visible in the Video tab. Keeping
@@ -454,7 +482,7 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        self.syscon2_panel = SysCon2Panel(parent=self)
+        self.syscon2_panel = SysCon2Panel(parent=self, settings=self.settings)
         self.syscon2_panel.setVisible(False)
         # Mark, with a cross in the Spatial Footprints panel, every neuron
         # targeted by the preview whose import SysCon2 most recently confirmed -
@@ -654,6 +682,8 @@ class Gui(QtWidgets.QMainWindow):
         else:
             self.load_project(default_project(), new_tab=False)
         self.apply_theme(self.settings.theme)
+        # Files dropped from the file explorer are imported (issue #597).
+        self.setAcceptDrops(True)
 
     @property
     def project(self) -> Project:
@@ -725,8 +755,19 @@ class Gui(QtWidgets.QMainWindow):
             # nothing to look at - open the Getting Started example instead.
             self.update_project(getting_started_project(), reset_controller=True)
             return
+        # Show the tab that takes the closed one's place. Removing it from
+        # self.tabs first shifts the later projects down, so the stale
+        # active index would already point at another project, and the tab
+        # bar's change signal would then look like no change at all: the
+        # widgets kept showing the closed project's data on top of another
+        # project (issues #612, #621). Nothing is saved back to the closed
+        # project either.
+        self._active_tab_index = -1
         del self.tabs[index]
+        self.tab_bar.blockSignals(True)
         self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        self._activate_tab_index(self.tab_bar.currentIndex(), reset_controller=True)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
@@ -789,6 +830,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
 
     def _update_combo_box(
@@ -1339,6 +1382,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         preserve_dynamic_input = preserve_dynamic_input and project is self.project
         self.project = project
+        self._saved_vertical_views.clear()
         self._update_window_title()
         if hasattr(self, "tab_bar"):
             self.tab_bar.setTabText(
@@ -1402,6 +1446,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
@@ -1538,31 +1584,59 @@ class Gui(QtWidgets.QMainWindow):
         self._last_sim_timeline_secs = timeline
         # Refresh in place without auto-showing hidden widgets or changing the
         # focused neuron range -- this is a re-window of already-shown data,
-        # not a new user selection.
-        if self.cmb_trace.currentText():
+        # not a new user selection. While the project is being replaced the
+        # selectors can still name the previous project's data (issue #595),
+        # which this project may not have; those are refilled right after.
+        trace_name = self._current_data_name(self.cmb_trace, TraceData)
+        if trace_name:
             self.project.max_ram_trace_plot_matrix = (
                 self.settings.max_ram_trace_plot_matrix
             )
-            self.trace_widget.set_data(
-                self.project.get_data(self.cmb_trace.currentText(), TraceData)
-            )
-        if self.cmb_spike.currentText():
-            self.spike_widget.set_data(
-                self.project.get_data(self.cmb_spike.currentText(), SpikeData)
-            )
-        if self.cmb_synapse.currentText():
+            self.trace_widget.set_data(self.project.get_data(trace_name, TraceData))
+            self._keep_cell_selection(self.trace_widget)
+        spike_name = self._current_data_name(self.cmb_spike, SpikeData)
+        if spike_name:
+            self.spike_widget.set_data(self.project.get_data(spike_name, SpikeData))
+            self._keep_cell_selection(self.spike_widget)
+        synapse_name = self._current_data_name(self.cmb_synapse, SynapseData)
+        if synapse_name:
             self.project.max_ram_synapse_plot_matrix = (
                 self.settings.max_ram_synapse_plot_matrix
             )
             self.heatmap_widget.set_data(
-                self.project.get_data(self.cmb_synapse.currentText(), SynapseData)
+                self.project.get_data(synapse_name, SynapseData)
             )
-        if self.cmb_data.currentText():
-            self._apply_data_selection(self.cmb_data.currentText())
+        data_name = self.cmb_data.currentText()
+        for data_type, suffix in (
+            (TraceData, " [trace]"),
+            (SpikeData, " [spike]"),
+            (SynapseData, " [synapse]"),
+        ):
+            if data_name.endswith(suffix) and data_name[: -len(suffix)] in (
+                self.project.get_data_names(data_type)
+            ):
+                self._apply_data_selection(data_name)
+
+    def _current_data_name(
+        self,
+        combo: QtWidgets.QComboBox,
+        data_type: type[TraceData | SpikeData | SynapseData],
+    ) -> str:
+        """The combo's selection, or "" if this project has no such data."""
+        name = combo.currentText()
+        return name if name in self.project.get_data_names(data_type) else ""
+
+    def _keep_cell_selection(self, widget: TimeseriesWidget | DataWidget) -> None:
+        """New data shows every neuron; hide again those that the cells
+        selected in the spatial footprints exclude (issue #596)."""
+        hidden = self._spatial_footprint_state.greyed_stim_ids
+        if hidden:
+            widget.set_neurons_greyed(sorted(hidden), [])
 
     def _apply_trace_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, TraceData)
         self.trace_widget.set_data(data)
+        self._keep_cell_selection(self.trace_widget)
         if data is not None and hasattr(self, "_auto_show_widget"):
             self._auto_show_widget(self.trace_widget)
         self._focus_neuron_range(self.trace_widget.n_neurons)
@@ -1593,9 +1667,40 @@ class Gui(QtWidgets.QMainWindow):
         newly_hidden: list[int],
         newly_shown: list[int],
     ) -> None:
+        before = frozenset(self._trace_state.greyed_neuron_ids)
+        views = self._vertical_views()
         self._trace_state.set_neurons_greyed(newly_hidden, newly_shown)
         self.stim_editor.stim_widget.set_neurons_greyed(newly_hidden, newly_shown)
         self.spike_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        self.data_widget.set_neurons_greyed(newly_hidden, newly_shown)
+        after = frozenset(self._trace_state.greyed_neuron_ids)
+        if after == before:
+            return
+        # Hiding rows fits the plots to the remaining neurons. Going back to
+        # an earlier selection, e.g. deselecting a cell, restores the vertical
+        # zoom and position it had then instead of zooming out (issue #604).
+        self._saved_vertical_views[before] = views
+        while len(self._saved_vertical_views) > 8:
+            del self._saved_vertical_views[next(iter(self._saved_vertical_views))]
+        restored = self._saved_vertical_views.pop(after, None)
+        if restored is not None:
+            for controller, view in zip(
+                self._plot_controllers(), restored, strict=True
+            ):
+                if view is not None:
+                    controller.set_vertical_view(view)
+
+    def _focus_traces_on_neuron(self, neuron_id: int) -> None:
+        """Centre the traces on a neuron right-clicked in the spatial
+        footprints, keeping the zoom and the other traces (issue #603)."""
+        if not self.trace_widget.center_on_neuron(neuron_id):
+            self.logger.info("Neuron %d has no visible trace to centre on", neuron_id)
+
+    def _plot_controllers(self) -> list[ConstrainedPanZoomController]:
+        return [self.controller, self.trace_controller, self.spike_controller]
+
+    def _vertical_views(self) -> list[tuple[float, float] | None]:
+        return [controller.vertical_view() for controller in self._plot_controllers()]
 
     def _current_stim_array(self) -> StimArray | None:
         modifier = self.stim_editor.current_stim_modifier
@@ -1647,6 +1752,7 @@ class Gui(QtWidgets.QMainWindow):
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
         self.spike_widget.set_data(data)
+        self._keep_cell_selection(self.spike_widget)
         # set_data() itself treats a spike-less SpikeData (e.g. a model that
         # defines a spike monitor but was never simulated) as empty and
         # leaves self.data unset - check that, not the pre-fetch value, so an
@@ -1672,6 +1778,7 @@ class Gui(QtWidgets.QMainWindow):
         elif cmb_name.endswith(" [synapse]"):
             data = self.project.get_data(cmb_name[:-10], SynapseData)
         self.data_widget.set_data(data)
+        self._keep_cell_selection(self.data_widget)
         if isinstance(data, TraceData):
             self._focus_neuron_range(self.data_widget.trace_widget.n_neurons)
         elif isinstance(data, SpikeData):
@@ -2335,8 +2442,11 @@ class Gui(QtWidgets.QMainWindow):
                 )
             )
 
-    def btn_import_tif_clicked(self) -> None:
-        """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs."""
+    def btn_import_tif_clicked(
+        self, *, paths: list[pathlib.Path] | None = None
+    ) -> None:
+        """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs,
+        optionally with ``paths`` already listed."""
         from neuroseq.tif_import_dialog import TifImportDialog
 
         dialog = TifImportDialog(
@@ -2344,6 +2454,8 @@ class Gui(QtWidgets.QMainWindow):
             cellpose_import=self.last_cellpose_import,
             stim_arrays=self.project.stim_arrays,
         )
+        if paths:
+            dialog.add_tif_paths(paths)
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(
@@ -2362,20 +2474,26 @@ class Gui(QtWidgets.QMainWindow):
                     dialog.imported_tif_paths,
                     dialog.imported_fps,
                     name=dialog.experiment_name,
+                    channels=dialog.imported_channels,
+                    shown_channel=dialog.imported_functional_channel,
                 )
                 self._refresh_calcium_video_widgets()
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.calcium_video_widget)
 
-    def _on_calcium_video_import_requested(self) -> None:
-        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
-            self,
-            "Select raw calcium imaging file(s)",
-            "",
-            "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
-            "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
-            "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
-        )
+    def _on_calcium_video_import_requested(
+        self, *, paths: list[pathlib.Path] | None = None
+    ) -> None:
+        if paths is None:
+            chosen, _ = QtWidgets.QFileDialog.getOpenFileNames(
+                self,
+                "Select raw calcium imaging file(s)",
+                "",
+                "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+                "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
+                "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
+            )
+            paths = [pathlib.Path(path) for path in chosen]
         if not paths:
             return
         fps, ok = QtWidgets.QInputDialog.getDouble(
@@ -2392,6 +2510,13 @@ class Gui(QtWidgets.QMainWindow):
         self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
+    def _on_calcium_video_channels_changed(
+        self, channels: int, shown_channel: int
+    ) -> None:
+        self.project.set_calcium_video_channels(channels, shown_channel)
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_channels(channels, shown_channel)
+
     def _refresh_calcium_video_widgets(self) -> None:
         self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
@@ -2405,6 +2530,8 @@ class Gui(QtWidgets.QMainWindow):
                     self.project.calcium_scanimage_index,
                     self.scanimage_controls.channel_spin.value(),
                 ),
+                channels=self.project.calcium_video_channels[0],
+                shown_channel=self.project.calcium_video_channels[1],
             )
 
     def _start_scanimage_recording(self, arguments: dict) -> None:
@@ -2599,12 +2726,21 @@ class Gui(QtWidgets.QMainWindow):
 
         resolve_fiji_path(self, force_prompt=True)
 
-    def btn_import_cellpose_data_clicked(self) -> None:
+    def btn_import_cellpose_data_clicked(
+        self, *, segment: pathlib.Path | None = None, model: str | None = None
+    ) -> None:
+        """Open the cell segmentation dialog; with ``segment``, it segments
+        that image with ``model`` right away."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
             delete_handler=self._delete_cellpose_data,
         )
+        if segment is not None:
+            if model is not None:
+                dialog.cellpose_model_combo.setCurrentText(model)
+            # Once the dialog is shown, so it is there while Cellpose runs.
+            QtCore.QTimer.singleShot(0, lambda: dialog.segment_file(str(segment)))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             imported = dialog.get_imported_data()
             if imported is None:
@@ -2628,27 +2764,37 @@ class Gui(QtWidgets.QMainWindow):
             )
             self._warn_if_cellpose_model_mismatch()
 
-    def btn_import_syscon2_seq_clicked(self) -> None:
+    def btn_import_syscon2_seq_clicked(
+        self, *, path: pathlib.Path | None = None
+    ) -> None:
         dialog = Syscon2ImportDialog(self.project, parent=self)
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_wave_clicked(self, *, csv_only: bool = False) -> None:
+    def btn_import_igor2_wave_clicked(
+        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    ) -> None:
         dialog = (
             IgorImportDialog(self.project, parent=self, csv_only=True)
             if csv_only
             else IgorImportDialog(self.project, parent=self)
         )
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_trace_clicked(self, *, csv_only: bool = False) -> None:
+    def btn_import_igor2_trace_clicked(
+        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    ) -> None:
         from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 
         dialog = (
@@ -2656,6 +2802,8 @@ class Gui(QtWidgets.QMainWindow):
             if csv_only
             else IgorTraceImportDialog(self.project, parent=self)
         )
+        if path is not None:
+            dialog.load_file(str(path))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
@@ -3886,11 +4034,15 @@ class Gui(QtWidgets.QMainWindow):
             parent=None, state=self._spatial_footprint_state
         )
         widget.import_requested.connect(self.btn_import_cellpose_data_clicked)
+        widget.neuron_focus_requested.connect(self._focus_traces_on_neuron)
         widget.calcium_video_widget.import_requested.connect(
             self._on_calcium_video_import_requested
         )
         widget.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
+        )
+        widget.calcium_video_widget.channels_changed.connect(
+            self._on_calcium_video_channels_changed
         )
         widget.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
         widget.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
@@ -3902,6 +4054,8 @@ class Gui(QtWidgets.QMainWindow):
                 self.project.calcium_scanimage_index,
                 self.scanimage_controls.channel_spin.value(),
             ),
+            channels=self.project.calcium_video_channels[0],
+            shown_channel=self.project.calcium_video_channels[1],
             warn_if_missing_cellpose=False,
         )
         return widget
@@ -4508,6 +4662,151 @@ class Gui(QtWidgets.QMainWindow):
             self.logger.warning(
                 f"{label} did not stop in {timeout_ms} ms during shutdown."
             )
+
+    @staticmethod
+    def _dropped_paths(
+        event: QtGui.QDropEvent | QtGui.QDragEnterEvent,
+    ) -> list[pathlib.Path]:
+        mime = event.mimeData()
+        if mime is None or not mime.hasUrls():
+            return []
+        return [
+            pathlib.Path(url.toLocalFile()) for url in mime.urls() if url.isLocalFile()
+        ]
+
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent | None) -> None:
+        if event is None:
+            return
+        if self._dropped_paths(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event: QtGui.QDragMoveEvent | None) -> None:
+        if event is not None:
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QtGui.QDropEvent | None) -> None:
+        if event is None:
+            return
+        paths = self._dropped_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        target = self._drop_target(event.position().toPoint())
+        # After the drop returns, so the file explorer is not left waiting
+        # while an import dialog is open.
+        QtCore.QTimer.singleShot(0, lambda: self.import_dropped_files(paths, target))
+
+    def _drop_target(self, pos: QtCore.QPoint) -> str | None:
+        """The kind of panel under ``pos``: "segmentation", "imaging",
+        "input", "traces", or None elsewhere."""
+        widget = self.childAt(pos)
+        while widget is not None:
+            if widget is self.spatial_footprint_widget:
+                return (
+                    "imaging"
+                    if self.spatial_footprint_widget.tabs.currentIndex() == 1
+                    else "segmentation"
+                )
+            if widget is self.stim_editor:
+                return "input"
+            if widget in (self.trace_widget, self.spike_widget, self.data_widget):
+                return "traces"
+            widget = widget.parentWidget()
+        return None
+
+    def import_dropped_files(
+        self, paths: list[pathlib.Path], target: str | None = None
+    ) -> None:
+        """Import files dropped onto the window (issue #597), choosing the
+        import from each file's type and, where a type fits several, from the
+        panel it was dropped on (``target``, see _drop_target). Each import
+        opens its usual dialog with the file already loaded, so the data can
+        be named and checked before it is added."""
+        images = [p for p in paths if p.suffix.lower() in DROP_IMAGE_SUFFIXES]
+        unsupported = []
+        for path in paths:
+            suffix = path.suffix.lower()
+            if suffix == ".nseq":
+                self.load_project(path)
+            elif suffix == ".seq":
+                self.btn_import_syscon2_seq_clicked(path=path)
+            elif suffix in {".ibw", ".pxp", ".csv", ".txt"}:
+                csv_only = suffix in {".csv", ".txt"}
+                if target == "input":
+                    self.btn_import_igor2_wave_clicked(csv_only=csv_only, path=path)
+                else:
+                    self.btn_import_igor2_trace_clicked(csv_only=csv_only, path=path)
+            elif suffix not in DROP_IMAGE_SUFFIXES:
+                unsupported.append(path.name)
+        if images:
+            self._import_dropped_images(images, target)
+        if unsupported:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Cannot import these files",
+                "NeuroSeq does not know how to import:\n"
+                + "\n".join(unsupported)
+                + "\n\nDrop projects (.nseq), SysCon2 sequences (.seq), "
+                "patch-clamp waves (.ibw, .pxp, .csv, .txt), or imaging data "
+                "(TIFF, PNG, GIF, movies).",
+            )
+
+    def _import_dropped_images(
+        self, paths: list[pathlib.Path], target: str | None
+    ) -> None:
+        segmentable = [
+            p for p in paths if p.suffix.lower() in {".tif", ".tiff", ".png"}
+        ]
+        tiffs = [p for p in paths if p.suffix.lower() in {".tif", ".tiff"}]
+        movies = [p for p in paths if p.suffix.lower() != ".png"]
+        choices = {
+            DROP_SEGMENT: bool(segmentable),
+            DROP_TRACES: bool(tiffs),
+            DROP_VIDEO: bool(movies),
+        }
+        action = {
+            "segmentation": DROP_SEGMENT,
+            "traces": DROP_TRACES,
+            "imaging": DROP_VIDEO,
+        }.get(target or "")
+        if action is None or not choices[action]:
+            options = [name for name, possible in choices.items() if possible]
+            if not options:
+                return
+            action, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                "Import imaging data",
+                f"What should NeuroSeq do with {paths[0].name}"
+                + (f" and {len(paths) - 1} more" if len(paths) > 1 else "")
+                + "?",
+                options,
+                0,
+                False,
+            )
+            if not ok:
+                return
+        if action == DROP_SEGMENT:
+            from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
+
+            model, ok = QtWidgets.QInputDialog.getItem(
+                self,
+                "Segment cells",
+                f"Cellpose model for {segmentable[0].name}:",
+                list(CELLPOSE_MODEL_NAMES),
+                0,
+                False,
+            )
+            if ok:
+                self.btn_import_cellpose_data_clicked(
+                    segment=segmentable[0], model=model
+                )
+        elif action == DROP_TRACES:
+            self.btn_import_tif_clicked(paths=tiffs)
+        else:
+            self._on_calcium_video_import_requested(paths=movies)
 
     def closeEvent(self, event):
         if not self._close_confirmed and not self._prompt_save_before_close():

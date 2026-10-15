@@ -417,3 +417,18 @@ def test_generate_sequential_repeats_with_specific_neurons() -> None:
 def test_generate_sequential_rejects_zero_repeats() -> None:
     with pytest.raises(ValueError, match="repeats"):
         generate_sequential(3, 10, 5, 1.0, 0.001, repeats=0)
+
+
+def test_generate_sequential_pulses_per_neuron() -> None:
+    from neuroseq.stim_patterns import generate_sequential
+
+    values = generate_sequential(
+        n_neurons=2,
+        pulse_ms=1,
+        ipi_ms=1,
+        magnitude=1.0,
+        dt_seconds=0.001,
+        pulse_repetitions=2,
+    )
+    np.testing.assert_array_equal(values[:, 0], [1, 0, 1, 0, 0, 0, 0, 0])
+    np.testing.assert_array_equal(values[:, 1], [0, 0, 0, 0, 1, 0, 1, 0])

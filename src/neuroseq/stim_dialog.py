@@ -21,6 +21,7 @@ class EditStimDialog(QDialog):
         stim_array: StimArray,
         existing_names: list[str],
         parent: QtWidgets.QWidget | None = None,
+        title: str = "Edit input array",
     ) -> None:
         super().__init__(parent)
         self.existing_names = existing_names
@@ -33,7 +34,7 @@ class EditStimDialog(QDialog):
         self._name_error = ""
         self._dt_error = ""
 
-        self.setWindowTitle("Edit Input Array")
+        self.setWindowTitle(title)
         self.setModal(True)
 
         self.layout = QGridLayout()

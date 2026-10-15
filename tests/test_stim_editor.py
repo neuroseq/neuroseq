@@ -10,6 +10,7 @@ from brian2.tests.utils import assert_allclose
 from pytest import MonkeyPatch
 from pytest import approx
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
@@ -827,7 +828,7 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
             self.n_neurons = stim_array.values.shape[1]
@@ -1182,8 +1183,9 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
     captured = {}
 
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             captured["dt"] = stim_array.dt
+            captured["title"] = title
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
             self.n_neurons = stim_array.values.shape[1]
@@ -1216,6 +1218,7 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
     stim_editor.create_stim_array()
 
     assert captured["dt"] == approx(0.002)
+    assert captured["title"] == "Create input array"
     stim_editor.close()
 
 
@@ -1341,7 +1344,7 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
     captured = {}
 
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             captured["dt"] = stim_array.dt
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
@@ -1706,6 +1709,24 @@ def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> N
     assert stim_editor._stdp_synaptic_tuning_dialog is None
     assert stim_editor._rheobase_dialog is None
     assert stim_editor._stdp_window_dialog is None
+    stim_editor.close()
+
+
+def test_discard_after_routine_selector_was_deleted(qtbot: QtBot) -> None:
+    """Issues #595/#610: replacing the project after the selector closed (and
+    Qt deleted it) must not touch the deleted dialog."""
+    stim_editor, _ = _make_ramp_editor(qtbot)
+    stim_editor.open_dynamic_input_designer()
+    selector = stim_editor._routine_selector_dialog
+    assert selector is not None
+
+    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector._on_continue()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    assert stim_editor._routine_selector_dialog is None
+
+    stim_editor.discard_dynamic_input_dialogs()
+    assert stim_editor._rheobase_dialog is None
     stim_editor.close()
 
 

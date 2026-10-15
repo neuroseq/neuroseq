@@ -97,6 +97,17 @@ def build_lut(display_range: DisplayRange) -> np.ndarray:
     return np.clip(scaled * DATA_MAX, 0, DATA_MAX).astype(np.uint8)
 
 
+def to_8bit(image: np.ndarray) -> np.ndarray:
+    """Stretch any image's own minimum-maximum onto 0-255 (uint8), the
+    scale the display window works on."""
+    values = np.asarray(image, dtype=np.float32)
+    lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
+    if hi <= lo:
+        return np.zeros(values.shape, dtype=np.uint8)
+    scaled = (values - lo) * (DATA_MAX / (hi - lo))
+    return np.clip(np.rint(np.nan_to_num(scaled)), DATA_MIN, DATA_MAX).astype(np.uint8)
+
+
 def apply_display_range(image: np.ndarray, display_range: DisplayRange) -> np.ndarray:
     """Return `image` (uint8) with the display window applied."""
     if display_range.is_identity:

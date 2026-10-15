@@ -1041,6 +1041,94 @@ def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
     gui.close()
 
 
+def test_deselecting_a_cell_restores_the_vertical_zoom(qtbot: QtBot) -> None:
+    """Issue #604: selecting a cell fits the plots to its rows; deselecting
+    it must go back to the earlier vertical zoom, not zoom all the way out."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    controllers = [gui.controller, gui.trace_controller, gui.spike_controller]
+    for controller in controllers:
+        controller.set_vertical_view((1.5, 1.25))
+    zoomed_in = [controller.vertical_view() for controller in controllers]
+    assert zoomed_in[1] == pytest.approx((1.5, 1.25))
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    assert gui.trace_controller.vertical_view() != pytest.approx(zoomed_in[1])
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    for controller, view in zip(controllers, zoomed_in, strict=True):
+        assert controller.vertical_view() == pytest.approx(view)
+    gui.close()
+
+
+def test_right_click_on_a_cell_centres_its_trace(qtbot: QtBot) -> None:
+    """Issue #603: right-clicking a cell scrolls the traces to its neuron
+    and keeps the vertical zoom, without hiding any trace."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui.trace_controller.set_vertical_view((1.0, 0.0))
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_right_clicked.emit(2)
+
+    assert gui.trace_controller.vertical_view() == pytest.approx((1.0, 2.0))
+    assert not any(gui.trace_widget.is_neuron_greyed(n) for n in range(3))
+    gui.close()
+
+
+def test_switching_project_ignores_the_previous_projects_data_names(
+    qtbot: QtBot,
+) -> None:
+    """Issue #595: closing a tab or opening a project re-windows the shown
+    data before the data selectors are refilled, so they can still name the
+    previous project's simulation monitors, which this project lacks."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    # As while update_project() runs: the selectors are not refilled yet,
+    # and their own change handlers have not run.
+    for combo in (gui.cmb_trace, gui.cmb_spike, gui.cmb_synapse):
+        combo.blockSignals(True)
+        combo.addItem("Simulation :: P")
+        combo.setCurrentText("Simulation :: P")
+        combo.blockSignals(False)
+    gui.cmb_data.blockSignals(True)
+    gui.cmb_data.addItem("Simulation :: P [spike]")
+    gui.cmb_data.setCurrentText("Simulation :: P [spike]")
+    gui.cmb_data.blockSignals(False)
+    gui._last_sim_timeline_secs = None
+
+    gui._rewindow_simulation_views()  # raised KeyError: 'Simulation :: P'
+    gui.close()
+
+
+def test_cell_selection_applies_to_every_trace_view(qtbot: QtBot) -> None:
+    """Issue #596: a selected cell also filters the universal data widget,
+    and choosing data again keeps the selection in every view."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    gui._auto_show_widget(gui.data_widget)
+    gui._apply_data_selection("Experiment :: trace [trace]")
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
+    views = [gui.trace_widget, gui.spike_widget, gui.data_widget.trace_widget]
+    for view in views:
+        assert [n for n in range(3) if view.is_neuron_greyed(n)] == [0, 2]
+
+    gui.set_neuron(gui.cmb_trace.currentText())
+    gui.set_spike(gui.cmb_spike.currentText())
+    gui._apply_data_selection("Experiment :: spikes [spike]")
+    views[2] = gui.data_widget.spike_widget
+    for view in views:
+        assert [n for n in range(3) if view.is_neuron_greyed(n)] == [0, 2]
+
+    gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)  # deselect
+    for view in views:
+        assert not any(view.is_neuron_greyed(n) for n in range(3))
+    gui.close()
+
+
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:
@@ -1292,6 +1380,40 @@ def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
     assert warn_calls == []  # nothing unsaved, so no prompt was needed
     assert len(gui.tabs) == 1
     assert gui.project.project_name == "Getting Started Project"
+    gui.close()
+
+
+def test_closing_a_tab_shows_the_next_projects_own_data(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Issues #612/#621: after closing a tab, the window showed the closed
+    project's imaging, cells, traces and input arrays on top of the project
+    that took its place."""
+    import tifffile
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    movie = tmp_path / "movie.tif"
+    tifffile.imwrite(movie, np.zeros((3, 4, 4), dtype=np.uint16))
+    gui.project.add_calcium_video([movie], 10.0)
+    gui._refresh_calcium_video_widgets()
+    closed = gui.project
+    gui._open_project_in_new_tab(Project())
+    blank = gui.project
+    gui._open_project_in_new_tab(Project())
+
+    gui.tab_bar.setCurrentIndex(0)
+    gui._remove_tab(0)
+
+    assert gui.tabs[gui._active_tab_index] is blank
+    assert gui.tab_bar.currentIndex() == gui._active_tab_index == 0
+    assert gui.calcium_video_widget._paths == []
+    assert gui.spatial_footprint_widget._cellpose_data is None
+    assert gui.trace_widget.data is None
+    assert gui.cmb_trace.count() == 0
+    assert blank.calcium_videos == [] and blank.cellpose_data is None
+    assert closed not in gui.tabs
     gui.close()
 
 
@@ -3657,6 +3779,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
         trace_widget=trace_widget,
         update_project=_update_project,
         _focus_neuron_range=lambda n_neurons: None,
+        _keep_cell_selection=lambda widget: None,
     )
     fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
         fake_gui, cmb_name
@@ -3754,6 +3877,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         trace_widget=trace_widget,
         update_project=_update_project,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
     fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
         fake_gui, cmb_name
@@ -3895,6 +4019,7 @@ def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
         ),
         trace_widget=trace_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_trace_selection(fake_gui, "Cellpose :: traces")
@@ -3928,6 +4053,7 @@ def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
         ),
         spike_widget=spike_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_spike_selection(fake_gui, "Cellpose :: spikes")
@@ -3962,6 +4088,7 @@ def test_apply_spike_selection_does_not_auto_show_for_a_never_simulated_monitor(
         project=SimpleNamespace(get_data=lambda name, data_type: empty_spike_data),
         spike_widget=spike_widget,
         _focus_neuron_range=lambda n_neurons: None,
+        _keep_cell_selection=lambda widget: None,
         _auto_show_widget=lambda widget: auto_show_calls.append(widget),
     )
 
@@ -4041,6 +4168,7 @@ def test_gui_set_data_refocuses_combined_trace_view() -> None:
         ),
         data_widget=data_widget,
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
+        _keep_cell_selection=lambda widget: None,
     )
 
     Gui._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")

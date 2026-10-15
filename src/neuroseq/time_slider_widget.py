@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 
 from qtpy import QtCore
 from qtpy import QtGui
@@ -11,12 +12,14 @@ from neuroseq.timeseries_widget import TimeseriesWidget
 
 
 class HandleTooltipSlider(QtWidgets.QSlider):
-    """A QSlider that shows a tooltip above the handle with the current value in milliseconds."""
+    """A QSlider that shows a tooltip above the handle describing the current
+    value, a time in milliseconds."""
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(QtCore.Qt.Orientation.Horizontal, parent)
         self.setPageStep(1000)  # 1 second in milliseconds
         self.setMouseTracking(True)
+        self.describe_value: Callable[[int], str] = lambda value: f"{value} ms"
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         super().mouseMoveEvent(event)
@@ -38,7 +41,9 @@ class HandleTooltipSlider(QtWidgets.QSlider):
         handle_center = self.mapToGlobal(handle_rect.center())
         offset = QtCore.QPoint(0, -handle_rect.height() - 35)
         tooltip_pos = handle_center + offset
-        QtWidgets.QToolTip.showText(tooltip_pos, f"{self.value()} ms", self)
+        QtWidgets.QToolTip.showText(
+            tooltip_pos, self.describe_value(self.value()), self
+        )
 
 
 class TimeSliderWidget(QtWidgets.QWidget):
@@ -61,6 +66,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.slider = HandleTooltipSlider(self)
         self.slider.setMinimum(0)
         self.slider.setMaximum(1)
+        self.slider.describe_value = self.describe_time
         layout.addWidget(self.slider)
         self.setLayout(layout)
         self.slider.valueChanged.connect(self._value_changed)
@@ -74,6 +80,17 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self, widget: TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
     ) -> None:
         self.widgets.append(widget)
+
+    def describe_time(self, time_ms: int) -> str:
+        """Tooltip text: the time in seconds and milliseconds, and the movie
+        frame shown at that time, counted from 1 as in Fiji."""
+        text = f"{time_ms / 1000:.3f} s ({time_ms} ms)"
+        for widget in self.widgets:
+            if isinstance(widget, CalciumVideoWidget):
+                index = widget.frame_index_at(time_ms)
+                if index is not None:
+                    return f"{text}\nframe {index + 1} / {widget.frame_count()}"
+        return text
 
     def set_max_time_secs(self, max_time_secs: float) -> None:
         self.t_max_ms = int(float(max_time_secs) * 1000)

@@ -1345,11 +1345,14 @@ def test_overlay_view_left_click_selects_right_click_does_not(
     )
     emitted: list[int] = []
     overlay_view.neuron_clicked.connect(emitted.append)
+    right_clicked: list[int] = []
+    overlay_view.neuron_right_clicked.connect(right_clicked.append)
 
     overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
     qtbot.wait(10)
     assert emitted == []  # a plain right click does not select
+    assert right_clicked == [1]  # but reports the cell (issue #603)
 
     overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
     overlay_view._cell_selection_pointer_up(None)
@@ -1941,3 +1944,87 @@ def test_show_targets_checkbox_sits_left_of_brightness_button(qtbot: QtBot) -> N
     assert order.index(widget.show_targets_checkbox) + 1 == order.index(
         widget.brightness_contrast_button
     )
+
+
+def _camera(view) -> tuple[float, float, float, float]:
+    state = view.subplot.camera.get_state()
+    return (*map(float, state["position"][:2]), state["width"], state["height"])
+
+
+def test_switching_tabs_keeps_zoom_and_pan(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = -1 * np.ones((8, 12), dtype=np.int32)
+    segmentation[1:3, 1:3] = 0
+    widget.set_data(
+        CellposeImportResult(
+            image_path=Path("cellpose.png"),
+            segmentation_array=segmentation,
+            overlay_image=np.zeros((8, 12, 3), dtype=np.uint8),
+            trace_data=None,
+            spike_data=None,
+            original_cellpose_ids=np.array([0], dtype=np.int32),
+        )
+    )
+    overlay = widget.overlay_widget.overlay_view
+    video = widget.calcium_video_widget
+    video.current_frame = np.zeros((8, 12, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    assert widget.tabs.currentIndex() == 0
+
+    # Zoomed into the cell at the top left of the segmentation...
+    overlay.subplot.camera.set_state(
+        {"position": (5.0, 3.0, 0.0), "width": 6.0, "height": 4.0}
+    )
+    widget.tabs.setCurrentIndex(1)
+    # ... the Imaging tab shows the same pixels.
+    assert _camera(video) == (5.0, 3.0, 6.0, 4.0)
+
+    # A half-resolution live preview: the same part of the field of view.
+    video.current_frame = np.zeros((4, 6, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    video.subplot.camera.set_state(
+        {"position": (2.0, 1.0, 0.0), "width": 3.0, "height": 2.0}
+    )
+    widget.tabs.setCurrentIndex(0)
+    assert _camera(overlay) == (4.5, 2.5, 6.0, 4.0)
+
+    # A different aspect ratio is a different field of view: left alone.
+    video.current_frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    before = _camera(video)
+    widget.tabs.setCurrentIndex(1)
+    assert _camera(video) == before
+
+
+def test_right_click_on_a_cell_requests_its_neuron(qtbot: QtBot) -> None:
+    """Issue #603: the right-clicked cell is reported as its neuron id."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    with qtbot.waitSignal(widget.neuron_focus_requested) as blocker:
+        widget.overlay_widget.neuron_right_clicked.emit(2)
+    assert blocker.args == [0]
+    assert widget._selected_cellpose_ids == set()  # nothing selected or hidden
+
+
+def test_hover_shows_the_cursor_pixel_coordinates(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Issue #596: the hover text gives the cursor's pixel position (x right,
+    y down from the top left, as in Fiji), on cells and on the background."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    view = widget.overlay_widget.overlay_view
+    position = [np.array([1.0, 1.0, 0.0])]
+    monkeypatch.setattr(view.subplot, "map_screen_to_world", lambda ev: position[0])
+
+    view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
+    assert view.text is not None
+    assert view.text.visible
+    assert view.text.text == "0\nx 1, y 1"  # cell 2, neuron 0
+
+    position[0] = np.array([0.0, 2.0, 0.0])
+    view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
+    assert view.text.text == "x 0, y 2"  # background

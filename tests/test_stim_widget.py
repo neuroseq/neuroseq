@@ -302,7 +302,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
         lambda ev: np.array([2.0, 1.0, 0.0]),
     )
 
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert len(stim_widget._background_stim_arrays) == 1
     assert captured["additional_text"] == "Neuron 1\n-4.5 pA\nStart: 2 ms\nEnd: 3 ms"
@@ -440,7 +440,7 @@ def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
         lambda ev: np.array([2.0, 0.0, 0.0]),  # the only (display row 0) visible row
     )
 
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
     stim_widget.close()
@@ -702,7 +702,7 @@ def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
     )
 
     # The event argument is ignored because map_screen_to_world is monkeypatched above.
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert stim_widget.hover_slice_graphic is not None
     assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
@@ -1002,7 +1002,7 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
     monkeypatch.setattr(
         stim_widget.subplot, "map_screen_to_world", lambda ev: np.array([1.3, 2.2, 0.0])
     )
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
 
     # Second move within the SAME cell (x=1.45): the preview must stay snapped to
@@ -1013,7 +1013,7 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
         "map_screen_to_world",
         lambda ev: np.array([1.45, 2.2, 0.0]),
     )
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
     assert stim_widget.hover_slice_graphic.offset[2] == pytest.approx(
         stim_widget.HOVER_Z
@@ -1052,11 +1052,11 @@ def test_stim_widget_hover_shows_start_and_end_of_stimulus(
         stim_widget.subplot, "map_screen_to_world", lambda ev: world["pos"]
     )
 
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == "Neuron 1\n5 pA\nStart: 6 ms\nEnd: 14 ms"
 
     # Empty space: no start/end lines.
     world["pos"] = np.array([1.0, 1.0, 0.0])
-    stim_widget.pointer_move(None)
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == "Neuron 1\n0 pA"
     stim_widget.close()

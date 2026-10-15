@@ -13,6 +13,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.brightness_contrast import DisplayRange
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
 from neuroseq.importer_cellpose import AOIRole
@@ -139,6 +140,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "signal-to-noise fields of view, at a similar runtime cost."
         )
         cellpose_button_layout.addWidget(self.cellpose_model_combo)
+        self.adjust_brightness_checkbox = QtWidgets.QCheckBox("Adjust brightness first")
+        self.adjust_brightness_checkbox.setToolTip(
+            "Before segmenting, show the image with Brightness/Contrast "
+            "controls; Cellpose then segments the adjusted image."
+        )
+        cellpose_button_layout.addWidget(self.adjust_brightness_checkbox)
         cellpose_button_layout.addStretch()
         self.annotate_tiff_button = QtWidgets.QPushButton(
             "Select file for segmentation…"
@@ -146,7 +153,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.annotate_tiff_button.setToolTip(
             "Select a mean-fluorescence TIFF or a PNG snapshot and "
             "immediately segment it with the Cellpose model chosen above. "
-            "Results are saved beside the selected file."
+            "Results are saved beside the selected file, named after the "
+            "model (e.g. image_cpsam_seg.npy), so other models' results are kept."
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
@@ -327,6 +335,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.square_role_buttons.addButton(square_pref_radio)
         self.square_role_buttons.addButton(square_excl_radio)
         square_pref_radio.setChecked(True)
+        self._aoi_role_radios = [square_pref_radio, square_excl_radio]
         square_header = QtWidgets.QHBoxLayout()
         square_header.addWidget(self.square_enabled_cb)
         square_header.addWidget(square_pref_radio)
@@ -353,6 +362,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.circle_role_buttons.addButton(circle_pref_radio)
         self.circle_role_buttons.addButton(circle_excl_radio)
         circle_excl_radio.setChecked(True)
+        self._aoi_role_radios += [circle_pref_radio, circle_excl_radio]
         circle_header = QtWidgets.QHBoxLayout()
         circle_header.addWidget(self.circle_enabled_cb)
         circle_header.addWidget(circle_pref_radio)
@@ -792,8 +802,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.linear_offset_spin.setVisible(not is_any_custom)
         self.linear_offset_label.setVisible(not is_any_custom)
-        self.aoi_group.setVisible(is_aoi)
-        self.show_shapes_checkbox.setVisible(is_aoi)
+        # Linear keeps adjustable shapes as well; they don't change its
+        # mapping and have no preferential/exclusion role there (issue #606).
+        shapes_editable = is_aoi or mapping_strategy == "Linear"
+        self.aoi_group.setVisible(shapes_editable)
+        self.show_shapes_checkbox.setVisible(shapes_editable)
+        for radio in self._aoi_role_radios:
+            radio.setVisible(is_aoi)
         if hasattr(self, "guidance_label"):
             self.guidance_label.setVisible(is_any_custom)
         if not is_aoi:
@@ -1171,6 +1186,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _regenerate_aoi_mapping(self, *_args) -> None:
         if self._suppress_aoi_signals:
             return
+        if self._get_mapping_strategy() == "Linear":
+            # The shapes are only drawn; the linear mapping ignores them.
+            self._update_aoi_overlay_visibility()
+            return
         if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
             return
 
@@ -1194,6 +1213,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _update_aoi_overlay_visibility(self, *_args) -> None:
         strategy = self._get_mapping_strategy()
         is_aoi = strategy == CUSTOM_AOI_STRATEGY
+        if strategy == "Linear":
+            self._ensure_aoi_defaults()
+            self.overlay_widget.set_aoi_editable(True)
+            self.overlay_widget.set_aoi_overlay(
+                self._current_aoi_config(), show=self.show_shapes_checkbox.isChecked()
+            )
+            return
         # Under plain Custom the shapes are only a reference for the click
         # order: drawn on request, and never draggable (a drag there would
         # change nothing, since the mapping doesn't use them).
@@ -1209,6 +1235,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
 
     def _on_overlay_aoi_geometry_changed(self, config: AreasOfInterestConfig) -> None:
+        if self._get_mapping_strategy() == "Linear":
+            self._set_aoi_controls(config)
+            return
         if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
             return
         self._set_aoi_controls(config)
@@ -1297,8 +1326,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
             "Image files (*.tif *.tiff *.png);;TIFF files (*.tif *.tiff);;"
             "PNG files (*.png);;All files (*)",
         )
-        if not filename:
-            return
+        if filename:
+            self.segment_file(filename)
+
+    def segment_file(self, filename: str) -> None:
+        """Segment ``filename`` with the chosen model and load the result, as
+        "Select file for segmentation..." does after choosing a file."""
         if importlib.util.find_spec("cellpose") is None:
             QtWidgets.QMessageBox.information(
                 self,
@@ -1333,13 +1366,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 "average, and process that average with Cellpose.",
             )
 
+        display_range = None
+        if self.adjust_brightness_checkbox.isChecked():
+            display_range = self._choose_segmentation_brightness(filename)
+            if display_range is None:
+                return
+
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
         self.annotate_tiff_button.setEnabled(False)
         try:
             from neuroseq.cellpose_annotation import annotate_mean_fluorescence_tiff
 
             segmentation_path, mask_path = annotate_mean_fluorescence_tiff(
-                filename, model_name=self.cellpose_model_combo.currentText()
+                filename,
+                model_name=self.cellpose_model_combo.currentText(),
+                display_range=display_range,
             )
             self._load_image_file(filename)
             self._load_segmentation_file(str(segmentation_path))
@@ -1359,6 +1400,24 @@ class CellposeImportDialog(QtWidgets.QDialog):
         finally:
             self.annotate_tiff_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
+
+    def _choose_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+        """Show the image to segment with brightness/contrast controls
+        (issue #611); None if the user cancels."""
+        from neuroseq.cellpose_annotation import load_annotation_image
+        from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+        try:
+            image = load_annotation_image(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Could not read image", f"Could not read {filename}:\n{exc}"
+            )
+            return None
+        dialog = SegmentationBrightnessDialog(image, self)
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return None
+        return dialog.display_range
 
     def _open_in_fiji(self) -> None:
         """Launch Fiji/ImageJ, optionally opening the currently selected image."""
@@ -1588,7 +1647,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             stored_aoi_config = (
                 clone_aoi_config(self._current_aoi_config())
-                if mapping_strategy == CUSTOM_AOI_STRATEGY
+                if mapping_strategy in ("Linear", CUSTOM_AOI_STRATEGY)
                 else None
             )
 
@@ -1667,6 +1726,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             aoi_config = clone_aoi_config(
                 getattr(self.existing_data, "aoi_config", None)
             )
+            if mapping_strategy == "Linear" and aoi_config is not None:
+                self._set_aoi_controls(aoi_config)
             if mapping_strategy == CUSTOM_AOI_STRATEGY:
                 if aoi_config is None and self.importer.image_data is not None:
                     aoi_config = default_aoi_config(self.importer.image_data.shape[:2])

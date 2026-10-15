@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import pygfx
 from qtpy import QtCore
 from qtpy import QtGui
@@ -303,6 +305,13 @@ class DataWidget(QtWidgets.QWidget):
             target_controller._set_camera_state(new_state)
         finally:
             self._sync_in_progress = False
+
+    def set_neurons_greyed(
+        self, newly_hidden: Iterable[int], newly_shown: Iterable[int]
+    ) -> None:
+        hidden, shown = list(newly_hidden), list(newly_shown)
+        self.trace_widget.set_neurons_greyed(hidden, shown)
+        self.spike_widget.set_neurons_greyed(hidden, shown)
 
     def clear_data(self) -> None:
         self.trace_widget.clear_data()

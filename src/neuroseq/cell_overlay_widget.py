@@ -175,6 +175,8 @@ def compute_cell_centroids(
 
 class OverlayView(FullScreenFPLWidget):
     neuron_clicked = QtCore.Signal(int)
+    # A right click on a cell, where a right drag is the lasso.
+    neuron_right_clicked = QtCore.Signal(int)
     neuron_lasso_selected = QtCore.Signal(list)
     background_clicked = QtCore.Signal()
 
@@ -226,6 +228,7 @@ class OverlayView(FullScreenFPLWidget):
         self._cell_click_down_world: tuple[float, float] | None = None
         self._cell_selection_gesture_allows_click = False
         self._cell_selection_gesture_allows_lasso = False
+        self._cell_selection_gesture_button = 0
         # A cell-selection gesture starts as a plain click; if the pointer
         # moves past _world_tolerance() before release, it becomes a lasso
         # (see pointer_move) - _lasso_points truthiness is that state, there
@@ -1007,6 +1010,7 @@ class OverlayView(FullScreenFPLWidget):
         self._cell_click_down_world = (float(mouse_pos[0]), float(mouse_pos[1]))
         self._cell_selection_gesture_allows_click = allows_click
         self._cell_selection_gesture_allows_lasso = allows_lasso
+        self._cell_selection_gesture_button = ev.button
         self._lasso_points = []
 
     def _cell_selection_pointer_up(self, ev: pygfx.PointerEvent) -> None:
@@ -1027,8 +1031,10 @@ class OverlayView(FullScreenFPLWidget):
             return
         down_x, down_y = self._cell_click_down_world
         allows_click = self._cell_selection_gesture_allows_click
+        # A right click where only the right drag selects (a lasso).
+        right_click = not allows_click and self._cell_selection_gesture_button == 2
         self._cell_click_down_world = None
-        if not allows_click:
+        if not (allows_click or right_click):
             return
         mouse_pos = self.subplot.map_screen_to_world(ev)
         if mouse_pos is None:
@@ -1039,6 +1045,10 @@ class OverlayView(FullScreenFPLWidget):
         ):
             return
         cellpose_id = self._segmentation_id_at(float(mouse_pos[0]), float(mouse_pos[1]))
+        if right_click:
+            if cellpose_id is not None:
+                self.neuron_right_clicked.emit(cellpose_id)
+            return
         if cellpose_id is not None:
             self._last_background_click_time = None
             self._last_background_click_world = None
@@ -1344,14 +1354,22 @@ class OverlayView(FullScreenFPLWidget):
             self.text.visible = False
             return
 
-        neuron_index = self.segmentation[y, x]
-        if neuron_index < 0:
-            self.text.visible = False
-            return
+        # Pixel coordinates as in Fiji: x to the right, y down from the top
+        # left of the raw image (issue #596).
+        coordinates = f"x {x}, y {y}"
+        cell_text = self._cell_hover_text(int(self.segmentation[y, x]))
+        self.text.visible = True
+        self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
+        self.text.text = (
+            f"{cell_text}\n{coordinates}" if cell_text is not None else coordinates
+        )
 
+    def _cell_hover_text(self, neuron_index: int) -> str | None:
+        """The ids of the cell under the cursor, or None if none are shown."""
+        if neuron_index < 0:
+            return None
         if not self.show_cellpose_ids and not self.show_stimulus_ids:
-            self.text.visible = False
-            return
+            return None
 
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
         stim_id = reverse_mapping.get(neuron_index)
@@ -1372,25 +1390,20 @@ class OverlayView(FullScreenFPLWidget):
         )
 
         if overwritten:
-            hover_text = f"Overwritten | ({cellpose_id})"
-        elif cellpose_visible and stim_visible:
-            hover_text = f"{stim_id}:{cellpose_id}"
-        elif stim_visible:
-            hover_text = f"{stim_id}"
-        elif cellpose_visible:
-            hover_text = f"{cellpose_id}"
-        else:
-            self.text.visible = False
-            return
-
-        self.text.visible = True
-        self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
-        self.text.text = hover_text
+            return f"Overwritten | ({cellpose_id})"
+        if cellpose_visible and stim_visible:
+            return f"{stim_id}:{cellpose_id}"
+        if stim_visible:
+            return f"{stim_id}"
+        if cellpose_visible:
+            return f"{cellpose_id}"
+        return None
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):
     aoi_geometry_changed = QtCore.Signal(object)
     neuron_clicked = QtCore.Signal(int)
+    neuron_right_clicked = QtCore.Signal(int)
     neuron_lasso_selected = QtCore.Signal(list)
     background_clicked = QtCore.Signal()
 
@@ -1442,6 +1455,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
             self.aoi_geometry_changed.emit(config)
         )
         self.overlay_view.neuron_clicked.connect(self.neuron_clicked.emit)
+        self.overlay_view.neuron_right_clicked.connect(self.neuron_right_clicked.emit)
         self.overlay_view.neuron_lasso_selected.connect(self.neuron_lasso_selected.emit)
         self.overlay_view.background_clicked.connect(self.background_clicked.emit)
         layout.addWidget(self.overlay_view)

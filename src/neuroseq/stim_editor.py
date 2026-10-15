@@ -1151,6 +1151,7 @@ class StimEditor(QtWidgets.QWidget):
             stim_array,
             existing_names=list(self.project.stim_arrays.keys()),
             parent=self,
+            title="Create input array",
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             n_timestamps = seconds_to_samples_ceil(
@@ -1318,11 +1319,18 @@ class StimEditor(QtWidgets.QWidget):
             list(self.DYNAMIC_INPUT_ROUTINES), self._dynamic_input_theme
         )
         dialog.routine_chosen.connect(self._open_routine_dialog_for)
+        dialog.finished.connect(lambda _result: self._forget_routine_selector(dialog))
         dialog.finished.connect(dialog.deleteLater)
         self._routine_selector_dialog = dialog
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _forget_routine_selector(self, dialog: RoutineSelectorDialog) -> None:
+        # The selector deletes itself once closed; drop the reference so
+        # discard_dynamic_input_dialogs does not close a deleted C++ object.
+        if self._routine_selector_dialog is dialog:
+            self._routine_selector_dialog = None
 
     def _open_routine_dialog_for(self, routine: str) -> None:
         if routine == self.STDP_SYNAPTIC_TUNING_ROUTINE:

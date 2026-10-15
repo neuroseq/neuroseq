@@ -87,20 +87,38 @@ class StimPatternDialog(_SelfRaisingDialog):
 
         pattern_group = QtWidgets.QGroupBox("Pattern type", self)
         pattern_layout = QtWidgets.QVBoxLayout(pattern_group)
+        # The same names in both scopes (#613): "Constant" for specific
+        # neurons was the same pattern as "Simultaneous" for all neurons.
         self.radio_sequential = QtWidgets.QRadioButton("Sequential", self)
+        self.radio_sequential.setToolTip(
+            "One neuron after another, each firing its pulses in turn."
+        )
         self.radio_simultaneous = QtWidgets.QRadioButton("Simultaneous", self)
-        self.radio_fuer_elise = QtWidgets.QRadioButton("Für Elise", self)
-        self.radio_constant = QtWidgets.QRadioButton("Constant", self)
+        self.radio_simultaneous.setToolTip(
+            "All neurons of the scope fire together, with the same magnitude "
+            "every pulse."
+        )
         self.radio_linear = QtWidgets.QRadioButton("Linear gradient", self)
-        self.radio_ramp = QtWidgets.QRadioButton("Ramp input", self)
-        for widget in [
+        self.radio_linear.setToolTip(
+            "Like Simultaneous, but the magnitude steps linearly from the first "
+            "pulse to the last."
+        )
+        self.radio_ramp = QtWidgets.QRadioButton("Ramp", self)
+        self.radio_ramp.setToolTip(
+            "A continuous linear ramp of the magnitude, repeated."
+        )
+        self.radio_fuer_elise = QtWidgets.QRadioButton("Für Elise", self)
+        self.radio_fuer_elise.setToolTip(
+            "The opening notes of Für Elise on neurons 0-5 (all neurons only)."
+        )
+        self._pattern_buttons = [
             self.radio_sequential,
             self.radio_simultaneous,
-            self.radio_fuer_elise,
-            self.radio_constant,
             self.radio_linear,
             self.radio_ramp,
-        ]:
+            self.radio_fuer_elise,
+        ]
+        for widget in self._pattern_buttons:
             pattern_layout.addWidget(widget)
         layout.addWidget(pattern_group)
 
@@ -118,17 +136,17 @@ class StimPatternDialog(_SelfRaisingDialog):
         self.spin_pulse_repetitions.setValue(1)
         self.spin_start_time_ms = self._make_double_spin(0.0, minimum=0.0)
 
+        # Texts depend on the pattern; see _pattern_changed().
+        self.lbl_pulse_ms = QtWidgets.QLabel(self)
+        self.lbl_ipi_ms = QtWidgets.QLabel(self)
         self.lbl_magnitude = QtWidgets.QLabel("Magnitude:", self)
-        self.lbl_value1 = QtWidgets.QLabel("Initial magnitude:", self)
-        self.lbl_value2 = QtWidgets.QLabel("Final magnitude:", self)
-        self.lbl_repeats = QtWidgets.QLabel("Repeats:", self)
-        self.lbl_pulse_repetitions = QtWidgets.QLabel("Pulse repetition:", self)
+        self.lbl_value1 = QtWidgets.QLabel(self)
+        self.lbl_value2 = QtWidgets.QLabel(self)
+        self.lbl_repeats = QtWidgets.QLabel(self)
+        self.lbl_pulse_repetitions = QtWidgets.QLabel(self)
 
-        self.parameters_form.addRow("Pulse duration (ms):", self.spin_pulse_ms)
-        self.parameters_form.addRow(
-            "Inter-pulse interval (ms):",
-            self.spin_ipi_ms,
-        )
+        self.parameters_form.addRow(self.lbl_pulse_ms, self.spin_pulse_ms)
+        self.parameters_form.addRow(self.lbl_ipi_ms, self.spin_ipi_ms)
         self.parameters_form.addRow(self.lbl_magnitude, self.spin_magnitude)
         self.parameters_form.addRow(self.lbl_value1, self.spin_value1)
         self.parameters_form.addRow(self.lbl_value2, self.spin_value2)
@@ -153,14 +171,7 @@ class StimPatternDialog(_SelfRaisingDialog):
 
         self.radio_scope_all.toggled.connect(self._scope_changed)
         self.radio_scope_specific.toggled.connect(self._scope_changed)
-        for button in [
-            self.radio_sequential,
-            self.radio_simultaneous,
-            self.radio_fuer_elise,
-            self.radio_constant,
-            self.radio_linear,
-            self.radio_ramp,
-        ]:
+        for button in self._pattern_buttons:
             button.toggled.connect(self._pattern_changed)
         self.btn_apply.clicked.connect(self.apply_pattern)
         self.btn_reset_start.clicked.connect(self.reset_start_time)
@@ -192,7 +203,7 @@ class StimPatternDialog(_SelfRaisingDialog):
             f"valid range 0–{max(0, context.n_neurons - 1)}."
         )
         if self.radio_scope_specific.isChecked():
-            self.radio_constant.setChecked(True)
+            self.radio_simultaneous.setChecked(True)
         else:
             self.radio_sequential.setChecked(True)
         self._scope_changed()
@@ -239,35 +250,15 @@ class StimPatternDialog(_SelfRaisingDialog):
         is_all = self.radio_scope_all.isChecked()
         self.edit_neuron_indices.setVisible(not is_all)
         self.lbl_neuron_hint.setVisible(not is_all)
-        for button in [
-            self.radio_simultaneous,
-            self.radio_fuer_elise,
-        ]:
-            button.setVisible(is_all)
-        for button in [
-            self.radio_constant,
-            self.radio_linear,
-        ]:
-            button.setVisible(not is_all)
-        # Sequential and Ramp both live in both scopes (#582).
-        self.radio_sequential.setVisible(True)
-        self.radio_ramp.setVisible(True)
-        all_options = [
-            self.radio_sequential,
-            self.radio_simultaneous,
-            self.radio_fuer_elise,
-            self.radio_ramp,
-        ]
-        specific_options = [
-            self.radio_sequential,
-            self.radio_constant,
-            self.radio_linear,
-            self.radio_ramp,
-        ]
-        if is_all and not any(b.isChecked() for b in all_options):
-            self.radio_sequential.setChecked(True)
-        if not is_all and not any(b.isChecked() for b in specific_options):
-            self.radio_constant.setChecked(True)
+        # Every pattern but Für Elise, whose notes are fixed neurons, exists
+        # in both scopes (#582, #613).
+        self.radio_fuer_elise.setVisible(is_all)
+        if not is_all and self.radio_fuer_elise.isChecked():
+            self.radio_simultaneous.setChecked(True)
+        if not any(button.isChecked() for button in self._pattern_buttons):
+            (self.radio_sequential if is_all else self.radio_simultaneous).setChecked(
+                True
+            )
         self._pattern_changed()
 
     def _set_row_visible(
@@ -280,15 +271,41 @@ class StimPatternDialog(_SelfRaisingDialog):
         field_widget.setVisible(visible)
 
     def _pattern_changed(self) -> None:
-        is_all = self.radio_scope_all.isChecked()
-        is_specific = not is_all
         is_ramp = self.radio_ramp.isChecked()
+        is_gradient = self.radio_linear.isChecked()
+        is_sequential = self.radio_sequential.isChecked()
+        is_fuer_elise = self.radio_fuer_elise.isChecked()
         # Every pattern uses either a single magnitude or a start/end value
         # pair, never both/neither - so "single magnitude" is just "not a
-        # value pair" (Ramp, and Linear gradient in specific scope).
-        uses_value_pair = is_ramp or (is_specific and self.radio_linear.isChecked())
+        # value pair" (Ramp and Linear gradient).
+        uses_value_pair = is_ramp or is_gradient
         uses_single_magnitude = not uses_value_pair
-        uses_pulse_repetitions = is_all and self.radio_fuer_elise.isChecked()
+        uses_pulse_repetitions = is_sequential or is_fuer_elise
+
+        # Name each value for what it means in the chosen pattern (#613).
+        self.lbl_pulse_ms.setText(
+            "Ramp duration (ms):" if is_ramp else "Pulse duration (ms):"
+        )
+        self.lbl_ipi_ms.setText(
+            "Interval between ramps (ms):" if is_ramp else "Inter-pulse interval (ms):"
+        )
+        self.lbl_value1.setText(
+            "Start magnitude:" if is_ramp else "First pulse magnitude:"
+        )
+        self.lbl_value2.setText(
+            "End magnitude:" if is_ramp else "Last pulse magnitude:"
+        )
+        if is_sequential:
+            self.lbl_repeats.setText("Sequence repetitions:")
+        elif is_fuer_elise:
+            self.lbl_repeats.setText("Melody repetitions:")
+        elif is_ramp:
+            self.lbl_repeats.setText("Number of ramps:")
+        else:
+            self.lbl_repeats.setText("Number of pulses:")
+        self.lbl_pulse_repetitions.setText(
+            "Pulses per note:" if is_fuer_elise else "Pulses per neuron:"
+        )
 
         self._set_row_visible(
             self.lbl_magnitude, self.spin_magnitude, uses_single_magnitude
@@ -300,10 +317,6 @@ class StimPatternDialog(_SelfRaisingDialog):
             self.spin_pulse_repetitions,
             uses_pulse_repetitions,
         )
-
-        if uses_value_pair:
-            self.lbl_value1.setText("Initial magnitude:")
-            self.lbl_value2.setText("Final magnitude:")
 
     def _validate_inputs(self) -> bool:
         pulse_ms = float(self.spin_pulse_ms.value())
@@ -341,7 +354,7 @@ class StimPatternDialog(_SelfRaisingDialog):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Invalid pattern",
-                "Pulse repetition must be at least 1.",
+                f"{self.lbl_pulse_repetitions.text().rstrip(':')} must be at least 1.",
             )
             return False
         if not all(is_finite_number(value) for value in magnitude_values):
@@ -352,11 +365,6 @@ class StimPatternDialog(_SelfRaisingDialog):
             )
             return False
         return True
-
-    def _current_profile(self) -> DrawStimType:
-        if self.radio_constant.isChecked():
-            return DrawStimType.Constant
-        return DrawStimType.Linear
 
     def apply_pattern(self) -> None:
         if self._context is None or not self._validate_inputs():
@@ -398,41 +406,41 @@ class StimPatternDialog(_SelfRaisingDialog):
                     dt_seconds=dt_seconds,
                     neuron_index=neuron_indices,
                     repeats=repeats,
+                    pulse_repetitions=int(self.spin_pulse_repetitions.value()),
                 )
-            elif self.radio_scope_all.isChecked():
-                if self.radio_simultaneous.isChecked():
-                    pattern = generate_simultaneous(
-                        n_neurons=n_neurons,
-                        pulse_ms=pulse_ms,
-                        ipi_ms=ipi_ms,
-                        magnitude=float(self.spin_magnitude.value()),
-                        repeats=repeats,
-                        dt_seconds=dt_seconds,
-                    )
-                else:
-                    pattern = generate_fuer_elise(
-                        n_neurons=n_neurons,
-                        pulse_ms=pulse_ms,
-                        ipi_ms=ipi_ms,
-                        magnitude=float(self.spin_magnitude.value()),
-                        repeats=repeats,
-                        dt_seconds=dt_seconds,
-                        pulse_repetitions=int(self.spin_pulse_repetitions.value()),
-                    )
-            else:
-                assert neuron_indices is not None
-                pattern = generate_per_neuron(
-                    neuron_index=neuron_indices,
+            elif self.radio_fuer_elise.isChecked():
+                pattern = generate_fuer_elise(
                     n_neurons=n_neurons,
                     pulse_ms=pulse_ms,
                     ipi_ms=ipi_ms,
-                    profile=self._current_profile(),
+                    magnitude=float(self.spin_magnitude.value()),
+                    repeats=repeats,
+                    dt_seconds=dt_seconds,
+                    pulse_repetitions=int(self.spin_pulse_repetitions.value()),
+                )
+            elif self.radio_simultaneous.isChecked() and neuron_indices is None:
+                pattern = generate_simultaneous(
+                    n_neurons=n_neurons,
+                    pulse_ms=pulse_ms,
+                    ipi_ms=ipi_ms,
+                    magnitude=float(self.spin_magnitude.value()),
+                    repeats=repeats,
+                    dt_seconds=dt_seconds,
+                )
+            else:
+                gradient = self.radio_linear.isChecked()
+                pattern = generate_per_neuron(
+                    neuron_index=neuron_indices
+                    if neuron_indices is not None
+                    else list(range(n_neurons)),
+                    n_neurons=n_neurons,
+                    pulse_ms=pulse_ms,
+                    ipi_ms=ipi_ms,
+                    profile=DrawStimType.Linear if gradient else DrawStimType.Constant,
                     value1=float(self.spin_value1.value())
-                    if self.radio_linear.isChecked()
+                    if gradient
                     else float(self.spin_magnitude.value()),
-                    value2=float(self.spin_value2.value())
-                    if self.radio_linear.isChecked()
-                    else 0.0,
+                    value2=float(self.spin_value2.value()) if gradient else 0.0,
                     repeats=repeats,
                     dt_seconds=dt_seconds,
                 )

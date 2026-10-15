@@ -309,6 +309,28 @@ class Project:
         return video["fps"] if video else None
 
     @property
+    def calcium_video_channels(self) -> tuple[int, int]:
+        """Interleaved channels of the selected video and the one shown
+        (counted from 1, 0 for every frame)."""
+        video = self.selected_calcium_video
+        if video is None:
+            return 1, 1
+        return int(video.get("channels", 1)), int(video.get("shown_channel", 1))
+
+    def set_calcium_video_channels(self, channels: int, shown_channel: int) -> None:
+        video = self.selected_calcium_video
+        if video is None:
+            return
+        if (video.get("channels", 1), video.get("shown_channel", 1)) == (
+            channels,
+            shown_channel,
+        ):
+            return
+        video["channels"] = int(channels)
+        video["shown_channel"] = int(shown_channel)
+        self.mark_dirty()
+
+    @property
     def calcium_scanimage_index(self) -> dict | None:
         video = self.selected_calcium_video
         if video is None:
@@ -335,6 +357,8 @@ class Project:
         fps: float | None,
         name: str | None = None,
         run_id: str | None = None,
+        channels: int = 1,
+        shown_channel: int = 1,
     ) -> dict:
         """Add a video and select it; returns the new entry."""
         base = name or (pathlib.Path(paths[0]).stem if paths else "Imaging")
@@ -348,6 +372,9 @@ class Project:
             "paths": [str(path) for path in paths],
             "fps": float(fps) if fps is not None else None,
         }
+        if channels > 1:
+            video["channels"] = int(channels)
+            video["shown_channel"] = int(shown_channel)
         if run_id is not None:
             video["run_id"] = run_id
         self.calcium_videos.append(video)

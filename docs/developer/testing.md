@@ -73,7 +73,8 @@ following details matter when testing the current implementation.
    Configure emission, shutter, and laser intensity in SysCon2 itself.
 6. Edit the array and test **Export current array to stimulation setup**. It reuses the last
    dialog export's settings but writes `export_seq_<date>_<n>.seq` and its diagnostic
-   files to a temporary directory, not the dialog's chosen output folder. It
+   files to a temporary directory, not the dialog's chosen output folder. The
+   **Target power** box beside it overrides only the power. It
    opens the full export dialog if settings are unavailable. As above, verify
    the import, then select and use Upload then Run for the changed sequence.
 7. For rheobase, select the SysCon2 target, disable binary intensity export, use

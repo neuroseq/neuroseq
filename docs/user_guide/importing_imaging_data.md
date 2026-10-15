@@ -24,6 +24,15 @@ Open one of:
 - **File Selection** — point at the Cellpose output (a NumPy `.npy` array of
   per-pixel segmentation IDs, or the `_seg.npy` file produced by the Cellpose
   GUI).
+- **Select file for segmentation…** — segments a mean-fluorescence TIFF or
+  PNG with the chosen Cellpose model and loads the result. The files are saved
+  beside the image with the model in their name, e.g. `fov_cpsam_seg.npy` and
+  `fov_cpsam_cp_masks.png`, so segmenting with another model keeps the
+  earlier results, and an `fov_seg.npy` made in the Cellpose GUI is not
+  overwritten. With **Adjust brightness first** ticked, the image is shown
+  with the Brightness/Contrast controls of the Spatial Footprints panel before
+  Cellpose runs, and Cellpose segments the adjusted image; **Reset** keeps the
+  original. The window used is stored in the `_seg.npy`.
 - **Data Information** — read-only summary: image dimensions, number of
   detected cells, value range.
 - **ID Mapping Options** — choose how Cellpose IDs are mapped onto the
@@ -35,7 +44,10 @@ Open one of:
     neuron layout (e.g. a grid of square AOIs) does not match Cellpose's
     discovery order.
 - **Areas of Interest** — optional roles drawn on top of the segmentation
-  (square/circle AOIs). Cells that fall inside an AOI inherit its role.
+  (square/circle AOIs). Cells that fall inside an AOI inherit its role. The
+  **Linear** strategy shows the same shapes, which can be moved and resized
+  there too, but they do not change its mapping; they are kept with the
+  imported segmentation.
 
 After import, the cell footprints are available in the cell overlay widget
 and are bundled into the project file. They are required for the
@@ -53,6 +65,32 @@ sample image. You can:
 - Drag the corner/edge handles of square and circle AOI overlays to refine
   their position after import — the cell-to-neuron assignment recomputes
   whenever an AOI moves.
+
+### Showing one channel of a movie
+
+Movies recorded with several channels store them interleaved frame by frame,
+so playing every frame makes the Imaging tab flicker between channels. Set
+**Channels** in the Imaging tab's bottom bar to the number of channels and pick
+the one to watch under **Show**; **All frames** plays every frame in file
+order. The frame rate entered on import is the rate of each channel, so one
+channel plays in step with the time slider. Imports through the TIFF pipeline
+start with its channel count and functional channel. The choice is saved per
+imaging data entry. ScanImage recordings use the channel selector in the
+**Image acquisition** dialog instead.
+
+### Saving imaging data
+
+**Save imaging data…** in the Imaging tab first asks which frames to save.
+Frames are counted from 1, as in the time slider tooltip and in Fiji; **Current
+frame** fills in the frame shown at the slider position, so a short period found
+by scrubbing can be saved directly. Choose what to save:
+
+- **Original frames (TIFF substack)** — the recorded pixel values of the shown
+  channel, as one stack that Fiji opens with its frame interval.
+- **With stimulation marks (TIFF or GIF)** — the frames as displayed, with the
+  stimulated cells marked by a red "x" sized to the image. All saved frames
+  share one grey scale, taken from robust percentiles of the saved frames, so
+  the background does not flicker from frame to frame.
 
 ### Generating test data
 

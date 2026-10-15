@@ -333,6 +333,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self.new_cellpose_result: CellposeImportResult | None = None
         self.imported_tif_paths: list[Path] = []
         self.imported_fps: float = DEFAULT_FS
+        self.imported_channels = 1
+        self.imported_functional_channel = 1
         self._propagate_new_segmentation: bool = False
         self._new_segmentation_path: Path | None = None
 
@@ -674,8 +676,12 @@ class TifImportDialog(QtWidgets.QDialog):
             "",
             "TIFF files (*.tif *.tiff);;All files (*)",
         )
-        for filename in filenames:
-            path = Path(filename)
+        self.add_tif_paths([Path(filename) for filename in filenames])
+
+    def add_tif_paths(self, paths: list[Path]) -> None:
+        """Add TIFF stacks to the list, e.g. files dropped onto the main
+        window (issue #597)."""
+        for path in paths:
             if path not in self._tif_paths:
                 self._tif_paths.append(path)
                 self._tif_list.addItem(str(path))
@@ -929,6 +935,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self.experiment_duration = n_timepoints * dt
         self.imported_tif_paths = list(self._tif_paths)
         self.imported_fps = fs
+        self.imported_channels = self._nchannels_spin.value()
+        self.imported_functional_channel = self._functional_chan_spin.value()
 
         if self._propagate_new_segmentation:
             self.new_cellpose_result = _build_cellpose_result_from_pipeline(

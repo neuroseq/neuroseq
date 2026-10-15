@@ -38,7 +38,10 @@ def test_annotation_constructs_cellpose_with_gpu_enabled(
             return np.zeros(image.shape, dtype=np.int32), [np.zeros(image.shape)], None
 
     def save_seg(_image, masks, _flows, filename) -> None:
-        np.save(Path(filename).with_name(f"{Path(filename).stem}_seg.npy"), masks)
+        np.save(
+            Path(filename).with_name(f"{Path(filename).stem}_seg.npy"),
+            np.array({"masks": masks, "filename": filename}, dtype=object),
+        )
 
     def save_masks(_image, masks, _flows, filename, **_kwargs) -> None:
         Image.fromarray(masks.astype(np.uint8)).save(
@@ -55,9 +58,35 @@ def test_annotation_constructs_cellpose_with_gpu_enabled(
         return_value=(True, "CUDA available."),
     )
 
-    annotate_mean_fluorescence_tiff(image_path)
+    # A segmentation made by hand in the Cellpose GUI must survive.
+    manual = tmp_path / "mean_seg.npy"
+    manual.write_bytes(b"hand-edited")
 
+    seg_path, mask_path = annotate_mean_fluorescence_tiff(image_path)
     assert model_init == {"gpu": True, "pretrained_model": "cpsam"}
+    assert (seg_path.name, mask_path.name) == (
+        "mean_cpsam_seg.npy",
+        "mean_cpsam_cp_masks.png",
+    )
+
+    # Issue #598: another model's results are saved beside, not over, them.
+    v2_seg, v2_mask = annotate_mean_fluorescence_tiff(image_path, model_name="cpsam_v2")
+    assert (v2_seg.name, v2_mask.name) == (
+        "mean_cpsam_v2_seg.npy",
+        "mean_cpsam_v2_cp_masks.png",
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "mean.tif",
+        "mean_cpsam_cp_masks.png",
+        "mean_cpsam_seg.npy",
+        "mean_cpsam_v2_cp_masks.png",
+        "mean_cpsam_v2_seg.npy",
+        "mean_seg.npy",
+    ]
+    assert manual.read_bytes() == b"hand-edited"
+    saved = np.load(v2_seg, allow_pickle=True).item()
+    assert saved["filename"] == str(image_path.resolve())
+    assert saved["model_name"] == "cpsam_v2"
 
 
 def test_multiframe_tiff_averages_every_second_of_first_300_frames(
@@ -86,3 +115,18 @@ def test_load_annotation_image_accepts_a_png_snapshot(tmp_path: Path) -> None:
     image = load_annotation_image(image_path)
 
     np.testing.assert_array_equal(image, pixels)
+
+
+def test_adjusted_annotation_image() -> None:
+    """Issue #611: the window applies to the image's 8-bit display version;
+    without one, Cellpose gets the original image."""
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.cellpose_annotation import adjusted_annotation_image
+
+    image = np.array([[0.0, 500.0], [1000.0, 2000.0]], dtype=np.float32)
+    assert adjusted_annotation_image(image, None) is image
+    assert adjusted_annotation_image(image, DisplayRange()) is image
+    adjusted = adjusted_annotation_image(image, DisplayRange(0, 128))
+    assert adjusted.dtype == np.uint8
+    # 500 of 2000 is level 64 of 255; the window 0-128 doubles it.
+    np.testing.assert_array_equal(adjusted, [[0, 127], [255, 255]])

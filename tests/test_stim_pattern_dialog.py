@@ -168,7 +168,7 @@ def test_dialog_specific_neuron_constant_writes_only_that_column(qtbot: QtBot) -
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2")
-    dialog.radio_constant.setChecked(True)
+    dialog.radio_simultaneous.setChecked(True)
     dialog.spin_magnitude.setValue(0.7)
     dialog.spin_repeats.setValue(3)
     dialog.btn_apply.click()
@@ -195,7 +195,7 @@ def test_dialog_specific_multiple_neurons_and_range(qtbot: QtBot) -> None:
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("1, 4, 6-8")
-    dialog.radio_constant.setChecked(True)
+    dialog.radio_simultaneous.setChecked(True)
     dialog.spin_magnitude.setValue(0.5)
     dialog.spin_repeats.setValue(2)
     dialog.btn_apply.click()
@@ -232,7 +232,7 @@ def test_dialog_specific_neuron_does_not_erase_other_neurons_same_window(
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("1")
-    dialog.radio_constant.setChecked(True)
+    dialog.radio_simultaneous.setChecked(True)
     dialog.spin_magnitude.setValue(0.7)
     dialog.spin_repeats.setValue(1)
     dialog.spin_start_time_ms.setValue(0)
@@ -258,7 +258,7 @@ def test_dialog_specific_invalid_index_shows_warning_and_no_change(
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2, 99")
-    dialog.radio_constant.setChecked(True)
+    dialog.radio_simultaneous.setChecked(True)
     dialog.btn_apply.click()
 
     assert qmessagebox_calls[-1]["name"] == "warning"
@@ -540,3 +540,92 @@ def test_dialog_opened_after_switching_starts_from_the_project_state(
     assert dialog.spin_pulse_ms.value() == 42.0
     assert dialog.radio_scope_specific.isChecked()
     assert dialog.spin_ipi_ms.value() == 18.0
+
+
+def test_dialog_uses_the_same_pattern_names_in_both_scopes(qtbot: QtBot) -> None:
+    """Issue #613: the same patterns have the same names whichever scope is
+    chosen; only Für Elise, on fixed neurons, is for all neurons alone."""
+    editor, _ = _make_editor(qtbot)
+    dialog = _open_dialog(editor)
+
+    def shown() -> list[str]:
+        return [b.text() for b in dialog._pattern_buttons if b.isVisibleTo(dialog)]
+
+    dialog.radio_scope_all.setChecked(True)
+    assert shown() == [
+        "Sequential",
+        "Simultaneous",
+        "Linear gradient",
+        "Ramp",
+        "Für Elise",
+    ]
+    dialog.radio_fuer_elise.setChecked(True)
+    dialog.radio_scope_specific.setChecked(True)
+    assert shown() == ["Sequential", "Simultaneous", "Linear gradient", "Ramp"]
+    assert dialog.radio_simultaneous.isChecked()  # Für Elise is not offered
+
+
+def test_dialog_labels_say_what_each_value_means(qtbot: QtBot) -> None:
+    editor, _ = _make_editor(qtbot)
+    dialog = _open_dialog(editor)
+    dialog.radio_scope_all.setChecked(True)
+
+    dialog.radio_sequential.setChecked(True)
+    assert dialog.lbl_repeats.text() == "Sequence repetitions:"
+    assert dialog.lbl_pulse_repetitions.text() == "Pulses per neuron:"
+    assert dialog.lbl_pulse_repetitions.isVisibleTo(dialog)
+
+    dialog.radio_simultaneous.setChecked(True)
+    assert dialog.lbl_repeats.text() == "Number of pulses:"
+    assert not dialog.lbl_pulse_repetitions.isVisibleTo(dialog)
+
+    dialog.radio_linear.setChecked(True)
+    assert dialog.lbl_value1.text() == "First pulse magnitude:"
+    assert dialog.lbl_value2.text() == "Last pulse magnitude:"
+
+    dialog.radio_ramp.setChecked(True)
+    assert dialog.lbl_pulse_ms.text() == "Ramp duration (ms):"
+    assert dialog.lbl_value1.text() == "Start magnitude:"
+    assert dialog.lbl_repeats.text() == "Number of ramps:"
+
+    dialog.radio_fuer_elise.setChecked(True)
+    assert dialog.lbl_pulse_repetitions.text() == "Pulses per note:"
+
+
+def test_dialog_sequential_repeats_each_neurons_pulse(qtbot: QtBot) -> None:
+    """Issue #613 (comment): pulses per neuron, as for Für Elise's notes."""
+    editor, project = _make_editor(qtbot, length_samples=3000)
+    dialog = _open_dialog(editor)
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("2, 5")
+    dialog.radio_sequential.setChecked(True)
+    dialog.spin_pulse_ms.setValue(10.0)
+    dialog.spin_ipi_ms.setValue(5.0)
+    dialog.spin_repeats.setValue(1)
+    dialog.spin_pulse_repetitions.setValue(3)
+    dialog.btn_apply.click()
+
+    values = project.stim_arrays["a"].values
+    onsets = {
+        neuron: np.flatnonzero(np.diff(np.r_[0.0, values[:, neuron]]) > 0).tolist()
+        for neuron in (2, 5)
+    }
+    assert onsets == {2: [0, 15, 30], 5: [45, 60, 75]}
+
+
+def test_dialog_linear_gradient_for_all_neurons(qtbot: QtBot) -> None:
+    editor, project = _make_editor(qtbot, length_samples=2000)
+    dialog = _open_dialog(editor)
+    dialog.radio_scope_all.setChecked(True)
+    dialog.radio_linear.setChecked(True)
+    dialog.spin_pulse_ms.setValue(10.0)
+    dialog.spin_ipi_ms.setValue(10.0)
+    dialog.spin_value1.setValue(1.0)
+    dialog.spin_value2.setValue(3.0)
+    dialog.spin_repeats.setValue(3)
+    dialog.btn_apply.click()
+
+    values = project.stim_arrays["a"].values
+    np.testing.assert_allclose(
+        values[[0, 20, 40], :], [[1.0] * 10, [2.0] * 10, [3.0] * 10]
+    )

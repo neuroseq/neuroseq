@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 from pathlib import Path
 
 import numpy as np
 import tifffile
 from PIL import Image
 
+from neuroseq.brightness_contrast import DisplayRange
+from neuroseq.brightness_contrast import apply_display_range
+from neuroseq.brightness_contrast import to_8bit
 from neuroseq.gpu import torch_gpu_status
 
 MAX_SOURCE_FRAMES = 300
@@ -50,16 +55,29 @@ def load_annotation_image(image_path: str | Path) -> np.ndarray:
     return np.mean(frames, axis=0)
 
 
+def adjusted_annotation_image(
+    image: np.ndarray, display_range: DisplayRange | None
+) -> np.ndarray:
+    """The image Cellpose segments: unchanged, or with a brightness/contrast
+    window applied to its 8-bit display version (issue #611)."""
+    if display_range is None or display_range.is_identity:
+        return image
+    return apply_display_range(to_8bit(image), display_range)
+
+
 def annotate_mean_fluorescence_tiff(
     image_path: str | Path,
     *,
     model_name: str = "cpsam",
+    display_range: DisplayRange | None = None,
 ) -> tuple[Path, Path]:
     """Annotate a TIFF or PNG image and save Cellpose GUI and mask outputs
     beside it.
 
-    Returns the standard ``*_seg.npy`` file and the ``*_cp_masks.png`` mask.
-    Cellpose is imported lazily so NeuroSeq can still show a useful GUI error if
+    Returns the ``*_<model>_seg.npy`` file and the ``*_<model>_cp_masks.png``
+    mask. The model name in the file names keeps the results of different
+    models apart (issue #598), and an ``*_seg.npy`` made in the Cellpose GUI is
+    never overwritten. Cellpose is imported lazily so NeuroSeq can still show a useful GUI error if
     the optional dependency is unavailable.
     """
     gpu_available, gpu_message = torch_gpu_status()
@@ -72,27 +90,45 @@ def annotate_mean_fluorescence_tiff(
     from cellpose import models
 
     path = Path(image_path).resolve()
-    image_array = load_annotation_image(path)
+    image_array = adjusted_annotation_image(load_annotation_image(path), display_range)
 
     # GPU availability was verified above. Passing True is intentional: never
     # silently downgrade this interactive annotation workflow to the CPU.
     model = models.CellposeModel(gpu=True, pretrained_model=model_name)
     masks, flows, _styles = model.eval(image_array)
 
-    # Save the editable Cellpose GUI payload as well as an ordinary labelled mask.
-    io.masks_flows_to_seg(image_array, masks, flows, str(path))
-    io.save_masks(
-        image_array,
-        masks,
-        flows,
-        str(path),
-        png=True,
-        tif=False,
-        suffix="_cp_masks",
-    )
-
-    segmentation_path = path.with_name(f"{path.stem}_seg.npy")
-    mask_path = path.with_name(f"{path.stem}_cp_masks.png")
-    if not segmentation_path.exists():
-        raise RuntimeError(f"Cellpose did not create {segmentation_path.name}")
+    segmentation_path = path.with_name(f"{path.stem}_{model_name}_seg.npy")
+    mask_path = path.with_name(f"{path.stem}_{model_name}_cp_masks.png")
+    # Cellpose names its outputs after the image, so let it write them in a
+    # scratch folder next to the image and move them to their final names.
+    with tempfile.TemporaryDirectory(dir=path.parent) as scratch:
+        scratch_image = Path(scratch) / path.name
+        # Save the editable Cellpose GUI payload as well as an ordinary
+        # labelled mask.
+        io.masks_flows_to_seg(image_array, masks, flows, str(scratch_image))
+        io.save_masks(
+            image_array,
+            masks,
+            flows,
+            str(scratch_image),
+            png=True,
+            tif=False,
+            suffix="_cp_masks",
+        )
+        scratch_segmentation = Path(scratch) / f"{path.stem}_seg.npy"
+        if not scratch_segmentation.exists():
+            raise RuntimeError(f"Cellpose did not create {segmentation_path.name}")
+        # The Cellpose GUI finds the image through the stored file name.
+        segmentation = np.load(scratch_segmentation, allow_pickle=True).item()
+        segmentation["filename"] = str(path)
+        segmentation["model_name"] = model_name
+        if display_range is not None and not display_range.is_identity:
+            segmentation["display_range"] = (
+                display_range.minimum,
+                display_range.maximum,
+            )
+        np.save(segmentation_path, segmentation, allow_pickle=True)
+        scratch_mask = Path(scratch) / f"{path.stem}_cp_masks.png"
+        if scratch_mask.exists():
+            os.replace(scratch_mask, mask_path)
     return segmentation_path, mask_path

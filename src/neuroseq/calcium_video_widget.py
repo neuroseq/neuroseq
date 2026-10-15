@@ -13,16 +13,21 @@ from PIL import Image
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_scanimage import compact_index
+from neuroseq.save_imaging_dialog import SaveImagingDialog
 from neuroseq.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
 NO_STIM_ARRAY = "None"
 HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
+# Frames and percentiles that set the grey scale of saved imaging data.
+EXPORT_SCALE_SAMPLE_FRAMES = 50
+EXPORT_SCALE_PERCENTILES = (0.1, 99.9)
 
 
 class CalciumVideoWidget(FPLWidget):
@@ -30,6 +35,8 @@ class CalciumVideoWidget(FPLWidget):
 
     import_requested = QtCore.Signal()
     remove_requested = QtCore.Signal()
+    # Interleaved channels in the movie and the one shown (0 = all).
+    channels_changed = QtCore.Signal(int, int)
 
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         self._pages: list[tuple[tifffile.TiffFile, int, int]] = []
@@ -39,8 +46,17 @@ class CalciumVideoWidget(FPLWidget):
         super().__init__(parent=parent)
         self._paths: list[Path] = []
         self._fps: float | None = None
+        # Frame rate of each channel and every page of the movie, before a
+        # channel is picked; _fps and _frame_refs are what is played.
+        self._channel_fps: float | None = None
+        self._all_frame_refs: list[tuple[str, int, int]] = []
+        self._channels = 1
+        self._shown_channel = 1
+        # The last "Save imaging data" choice of original or marked frames.
+        self._save_original = False
         self._cellpose_data: CellposeImportResult | None = None
         self._centroids: dict[int, tuple[float, float]] = {}
+        self._id_label_graphics: list[fpl.TextGraphic] = []
         self._stim_arrays: dict[str, StimArray] = {}
         self._current_frame_index: int | None = None
         self.current_frame_index: int | None = None
@@ -66,6 +82,29 @@ class CalciumVideoWidget(FPLWidget):
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
+        self.ids_checkbox = QtWidgets.QCheckBox("Show ids", self)
+        self.ids_checkbox.setToolTip("Show each cell's neuron id on the video")
+        self.ids_checkbox.setChecked(True)
+        self.ids_checkbox.toggled.connect(self._update_id_labels)
+        self.channels_spin = QtWidgets.QSpinBox(self)
+        self.channels_spin.setRange(1, 8)
+        self.channels_spin.setToolTip(
+            "Number of channels interleaved frame by frame in the movie"
+        )
+        self.channel_combo = QtWidgets.QComboBox(self)
+        self.channel_combo.setToolTip(
+            "Show one channel, or every frame as stored in the file"
+        )
+        self.channels_spin.valueChanged.connect(self._on_channel_controls_changed)
+        self.channel_combo.activated.connect(self._on_channel_controls_changed)
+        self._fill_channel_combo()
+        self.channel_controls = QtWidgets.QWidget(self)
+        channel_layout = QtWidgets.QHBoxLayout(self.channel_controls)
+        channel_layout.setContentsMargins(0, 0, 0, 0)
+        channel_layout.addWidget(QtWidgets.QLabel("Channels:"))
+        channel_layout.addWidget(self.channels_spin)
+        channel_layout.addWidget(QtWidgets.QLabel("Show:"))
+        channel_layout.addWidget(self.channel_combo)
         self.video_actions_widget = QtWidgets.QWidget(self)
         actions = QtWidgets.QHBoxLayout(self.video_actions_widget)
         actions.setContentsMargins(4, 4, 4, 4)
@@ -75,6 +114,8 @@ class CalciumVideoWidget(FPLWidget):
         # bottom bar) and switching between them doesn't shift anything.
         actions.addWidget(QtWidgets.QLabel("Stim source:"))
         actions.addWidget(self.stim_combo)
+        actions.addWidget(self.channel_controls)
+        actions.addWidget(self.ids_checkbox)
         actions.addStretch(1)
         actions.addWidget(self.save_button)
         actions.addWidget(self.remove_button)
@@ -128,6 +169,7 @@ class CalciumVideoWidget(FPLWidget):
                 capture.release()
         self._cv_captures = []
         self._frame_refs = []
+        self._all_frame_refs = []
 
     def set_video_paths(
         self,
@@ -137,13 +179,25 @@ class CalciumVideoWidget(FPLWidget):
         warn_if_missing_cellpose: bool = True,
         scanimage_index: dict | None = None,
         channel: int | None = None,
+        channels: int = 1,
+        shown_channel: int = 1,
     ) -> None:
+        """Load a movie. ``fps`` is the frame rate of each channel; a movie
+        with ``channels`` interleaved channels shows ``shown_channel``
+        (counted from 1, 0 for every frame)."""
         self._close_pages()
         self.clear_data()
         self._scanimage_index = None
         self._frame_times = None
         self._paths = list(paths)
         self._fps = float(fps) if fps is not None and fps > 0 else None
+        self._channel_fps = self._fps
+        self._channels = max(1, int(channels))
+        self._shown_channel = (
+            min(max(0, int(shown_channel)), self._channels) if self._channels > 1 else 1
+        )
+        self._sync_channel_controls()
+        self.channel_controls.setVisible(True)
         self._current_frame_index = None
         self.current_frame_index = None
         self.current_frame = None
@@ -199,7 +253,8 @@ class CalciumVideoWidget(FPLWidget):
                         pages.append((tif, index, 0))
                         frame_refs.append(("tiff", len(pages) - 1, 0))
             self._pages = pages
-            self._frame_refs = frame_refs
+            self._all_frame_refs = frame_refs
+            self._apply_channels()
         except Exception:
             for tif, _, _ in pages:
                 with contextlib.suppress(Exception):
@@ -251,8 +306,71 @@ class CalciumVideoWidget(FPLWidget):
         self._set_crosses(set())
         self._draw_current_frame()
 
+    def _apply_channels(self) -> None:
+        if self._channels > 1 and self._shown_channel > 0:
+            self._frame_refs = self._all_frame_refs[
+                self._shown_channel - 1 :: self._channels
+            ]
+            self._fps = self._channel_fps
+        else:
+            # Every page in file order: the channels share each frame period.
+            self._frame_refs = list(self._all_frame_refs)
+            self._fps = (
+                self._channel_fps * self._channels
+                if self._channel_fps is not None
+                else None
+            )
+
+    def set_channels(self, channels: int, shown_channel: int) -> None:
+        """Choose how many channels the movie interleaves and which to show
+        (counted from 1, 0 for every frame)."""
+        channels = max(1, int(channels))
+        shown_channel = min(max(0, int(shown_channel)), channels) if channels > 1 else 1
+        if (channels, shown_channel) == (self._channels, self._shown_channel):
+            return
+        self._channels = channels
+        self._shown_channel = shown_channel
+        self._sync_channel_controls()
+        if self._scanimage_index is None and self._all_frame_refs:
+            time_ms = self._current_time_ms()
+            self._apply_channels()
+            self.set_time_ms(time_ms)
+
+    def _current_time_ms(self) -> int:
+        if self._current_frame_index is None or not self._fps:
+            return 0
+        return round(self._current_frame_index * 1000.0 / self._fps)
+
+    def _fill_channel_combo(self) -> None:
+        self.channel_combo.clear()
+        if self._channels > 1:
+            for channel in range(1, self._channels + 1):
+                self.channel_combo.addItem(f"Channel {channel}", channel)
+        self.channel_combo.addItem("All frames", 0)
+
+    def _sync_channel_controls(self) -> None:
+        self.channels_spin.blockSignals(True)
+        self.channels_spin.setValue(self._channels)
+        self.channels_spin.blockSignals(False)
+        self._fill_channel_combo()
+        self.channel_combo.setCurrentIndex(
+            self.channel_combo.findData(
+                self._shown_channel if self._channels > 1 else 0
+            )
+        )
+        self.channel_combo.setEnabled(self._channels > 1)
+
+    def _on_channel_controls_changed(self, *_args: object) -> None:
+        channels = self.channels_spin.value()
+        # A new channel count starts with its first channel.
+        shown = 1 if channels != self._channels else self.channel_combo.currentData()
+        self.set_channels(channels, shown)
+        self.channels_changed.emit(self._channels, self._shown_channel)
+
     def set_scanimage_index(self, index: dict, channel: int | None = None) -> None:
         self._scanimage_index = compact_index(index)
+        # ScanImage recordings choose their channel from their own metadata.
+        self.channel_controls.setVisible(False)
         self.set_recorded_channel(channel or index["channels"][0])
 
     def set_recorded_channel(self, channel: int) -> None:
@@ -279,7 +397,43 @@ class CalciumVideoWidget(FPLWidget):
             if cellpose_data is not None
             else {}
         )
+        self._update_id_labels()
         self._refresh_current_frame()
+
+    def _update_id_labels(self, *_args: object) -> None:
+        """Label each mapped cell with its neuron id, as in the Spatial
+        Footprints panel (issue #596)."""
+        for graphic in self._id_label_graphics:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(graphic)
+        self._id_label_graphics = []
+        if (
+            not self.ids_checkbox.isChecked()
+            or self._frame_graphic is None
+            or self._cellpose_data is None
+            # A downsampled live preview does not line up with the cells.
+            or self._frame_graphic.data.value.shape[:2]
+            != self._cellpose_data.segmentation_array.shape
+        ):
+            return
+        for cell_id, (x, y) in self._centroids.items():
+            neuron_id = cellpose_to_stim_id(cell_id, self._cellpose_data)
+            if neuron_id is None:
+                continue
+            self._id_label_graphics.append(
+                self.subplot.add_text(
+                    str(neuron_id),
+                    font_size=14,
+                    face_color=(1.0, 1.0, 0.4, 1.0),
+                    outline_color=(0.0, 0.0, 0.0, 1.0),
+                    outline_thickness=0.3,
+                    offset=(x, y, 150.0),
+                    screen_space=True,
+                    # Beside the centre, where the stimulation cross is drawn.
+                    anchor="top-left",
+                )
+            )
+        self.figure.renderer.request_draw()
 
     def set_stim_arrays(self, stim_arrays: dict[str, StimArray]) -> None:
         current = self.stim_combo.currentText()
@@ -350,12 +504,20 @@ class CalciumVideoWidget(FPLWidget):
         return frame
 
     @staticmethod
-    def _to_rgb(frame: np.ndarray) -> np.ndarray:
+    def _to_rgb(
+        frame: np.ndarray, value_range: tuple[float, float] | None = None
+    ) -> np.ndarray:
+        """Grey RGB of a frame, scaled to ``value_range`` or else to the
+        frame's own minimum and maximum."""
         frame = np.asarray(frame)
         if frame.ndim != 2:
             frame = frame.squeeze()
         values = frame.astype(np.float32, copy=False)
-        lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
+        lo, hi = (
+            value_range
+            if value_range is not None
+            else (float(np.nanmin(values)), float(np.nanmax(values)))
+        )
         if hi <= lo:
             gray = np.zeros(values.shape, dtype=np.uint8)
         else:
@@ -474,23 +636,26 @@ class CalciumVideoWidget(FPLWidget):
                 ).astype(np.uint8)
         self._frame_graphic.data = frame
 
-    def set_time_ms(self, time_ms: int) -> None:
+    def frame_index_at(self, time_ms: float) -> int | None:
+        """Index of the movie frame shown at ``time_ms``; None without a movie."""
         if self._live or not self._frame_refs or self._fps is None:
-            return
-        index = max(
-            0, min(len(self._frame_refs) - 1, int(float(time_ms) / 1000.0 * self._fps))
-        )
+            return None
         if self._frame_times is not None:
-            index = max(
-                0,
-                min(
-                    len(self._frame_refs) - 1,
-                    int(
-                        np.searchsorted(self._frame_times, time_ms / 1000, side="right")
-                    )
-                    - 1,
-                ),
+            index = (
+                int(np.searchsorted(self._frame_times, time_ms / 1000, side="right"))
+                - 1
             )
+        else:
+            index = int(float(time_ms) / 1000.0 * self._fps)
+        return max(0, min(len(self._frame_refs) - 1, index))
+
+    def frame_count(self) -> int:
+        return len(self._frame_refs)
+
+    def set_time_ms(self, time_ms: int) -> None:
+        index = self.frame_index_at(time_ms)
+        if index is None:
+            return
         frame = self._to_rgb(self._read_frame(index))
         self._current_frame_index = index
         self.current_frame_index = index
@@ -526,6 +691,7 @@ class CalciumVideoWidget(FPLWidget):
             self.subplot.camera.maintain_aspect = True
             self.show_images_top_down()
             self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
+            self._update_id_labels()
         else:
             self._frame_graphic.data = frame
         self._update_frame_graphic()
@@ -542,15 +708,32 @@ class CalciumVideoWidget(FPLWidget):
         self.set_time_ms(round(time_s * 1000))
 
     def _on_save_labeled_video_clicked(self) -> None:
+        if self._live or not self._frame_refs or self._fps is None:
+            return
+        current = self._current_frame_index or 0
+        options = SaveImagingDialog(
+            len(self._frame_refs),
+            current + 1,
+            original=self._save_original,
+            parent=self,
+        )
+        if options.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self._save_original = options.original
+        first, last = options.frame_range
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save imaging data",
             "imaging.tif",
-            "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
+            "TIFF files (*.tif *.tiff)"
+            if options.original
+            else "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
             try:
-                self.export_labeled_video(Path(path))
+                self.export_labeled_video(
+                    Path(path), first=first, last=last, original=options.original
+                )
             except Exception as exc:
                 self.logger.exception("Could not save labeled imaging data")
                 QtWidgets.QMessageBox.critical(
@@ -559,23 +742,80 @@ class CalciumVideoWidget(FPLWidget):
                     f"The imaging data could not be saved:\n{exc}",
                 )
 
-    def export_labeled_video(self, path: Path) -> None:
+    def export_labeled_video(
+        self,
+        path: Path,
+        *,
+        first: int = 0,
+        last: int | None = None,
+        original: bool = False,
+    ) -> None:
+        """Save frames ``first`` to ``last`` (counted from 0, both included,
+        all by default) of the shown channel. ``original`` keeps the recorded
+        pixel values as a TIFF stack; otherwise the frames are saved as
+        displayed, with the stimulated cells marked."""
         if self._live or not self._frame_refs or self._fps is None:
             return
+        last = len(self._frame_refs) - 1 if last is None else last
+        indices = range(max(0, first), min(len(self._frame_refs) - 1, last) + 1)
+        if not indices:
+            raise ValueError("No frames in the chosen range")
+        if original:
+            self._export_original_tiff(path, indices)
+            return
+        value_range = self._export_value_range(indices)
         if path.suffix.lower() == ".gif":
-            self._export_gif_streaming(path)
+            self._export_gif_streaming(path, indices, value_range)
             return
         with tifffile.TiffWriter(path) as writer:
-            for index in range(len(self._frame_refs)):
-                writer.write(self._labeled_frame(index), photometric="rgb")
+            for index in indices:
+                writer.write(self._labeled_frame(index, value_range), photometric="rgb")
 
-    def _export_gif_streaming(self, path: Path) -> None:
+    def _export_value_range(self, indices: range) -> tuple[float, float]:
+        """One grey scale for every saved frame. Scaling each frame to its own
+        minimum and maximum made the background flicker in the saved movie,
+        as noise and hot pixels change those from frame to frame (issue
+        #618). Robust percentiles of up to 50 frames spread over the range
+        set the scale instead."""
+        step = max(1, len(indices) // EXPORT_SCALE_SAMPLE_FRAMES)
+        sample = np.stack(
+            [
+                np.asarray(self._read_frame(index), dtype=np.float32)
+                for index in indices[::step][:EXPORT_SCALE_SAMPLE_FRAMES]
+            ]
+        )
+        lo, hi = np.nanpercentile(sample, EXPORT_SCALE_PERCENTILES)
+        if hi <= lo:
+            lo, hi = float(np.nanmin(sample)), float(np.nanmax(sample))
+        return float(lo), float(hi)
+
+    def _export_original_tiff(self, path: Path, indices: range) -> None:
+        """Write the recorded frames as one stack, like Fiji's substack."""
+        sample = np.asarray(self._read_frame(indices[0]))
+        frames = (np.asarray(self._read_frame(index)) for index in indices)
+        # ImageJ hyperstacks (frame interval, Fiji's frame axis) support only
+        # these sample types.
+        imagej = sample.dtype in (np.uint8, np.uint16, np.float32)
+        tifffile.imwrite(
+            path,
+            data=frames,
+            shape=(len(indices), *sample.shape),
+            dtype=sample.dtype,
+            imagej=imagej,
+            metadata={"axes": "TYX", "finterval": 1.0 / self._fps}
+            if imagej and self._fps
+            else None,
+        )
+
+    def _export_gif_streaming(
+        self, path: Path, indices: range, value_range: tuple[float, float]
+    ) -> None:
         """Write a GIF one frame at a time to avoid buffering the movie."""
         from PIL import GifImagePlugin
 
         duration_ms = max(1, round(1000.0 / self._fps)) if self._fps else 1
         with path.open("wb") as file:
-            for index in range(len(self._frame_refs)):
+            for index in indices:
                 if self._frame_times is not None and index + 1 < len(self._frame_times):
                     duration_ms = max(
                         1,
@@ -585,16 +825,16 @@ class CalciumVideoWidget(FPLWidget):
                         ),
                     )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
-                    Image.fromarray(self._labeled_frame(index), mode="RGB")
+                    Image.fromarray(self._labeled_frame(index, value_range), mode="RGB")
                 )
                 params = {
                     "duration": duration_ms,
                     "disposal": 2,
                     # Keep a local palette per frame; this avoids collecting
                     # all frames just to calculate one global palette.
-                    "include_color_table": index > 0,
+                    "include_color_table": index > indices[0],
                 }
-                if index == 0:
+                if index == indices[0]:
                     for header in GifImagePlugin._get_global_header(  # type: ignore[attr-defined]
                         frame, {"duration": duration_ms, "loop": 0}
                     ):
@@ -604,29 +844,41 @@ class CalciumVideoWidget(FPLWidget):
                 )
             file.write(b";")
 
-    def _labeled_frame(self, index: int) -> np.ndarray:
+    def _labeled_frame(
+        self, index: int, value_range: tuple[float, float] | None = None
+    ) -> np.ndarray:
         assert self._fps is not None
         time_ms = round(index * 1000.0 / self._fps)
-        frame = self._to_rgb(self._read_frame(index))
+        frame = self._to_rgb(self._read_frame(index), value_range)
         if self._scanimage_index is not None:
             return frame
+        height, width = frame.shape[:2]
+        # An "x" like the one in the Imaging tab, scaled with the image so it
+        # stays visible in a full-size recording (issue #618).
+        arm = max(2, round(min(height, width) / 64))
+        thickness = max(1, round(arm / 3))
+        steps = np.arange(-arm, arm + 1)
+        widths = np.arange(thickness) - (thickness - 1) // 2
         for cell_id in self._stimulated_cellpose_ids_at(time_ms):
             point = self._centroids.get(cell_id)
             if point is None:
                 continue
             x, y = round(point[0]), round(point[1])
-            if not (0 <= y < frame.shape[0] and 0 <= x < frame.shape[1]):
+            if not (0 <= y < height and 0 <= x < width):
                 continue
-            for dx, dy in ((0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)):
-                xx, yy = x + dx, y + dy
-                if 0 <= yy < frame.shape[0] and 0 <= xx < frame.shape[1]:
-                    frame[yy, xx] = (255, 0, 0)
+            for direction in (1, -1):
+                for offset in widths:
+                    xx = x + steps + offset
+                    yy = y + direction * steps
+                    inside = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+                    frame[yy[inside], xx[inside]] = (255, 0, 0)
         return frame
 
     def clear_data(self) -> None:
         super().clear_data()
         self._frame_graphic = None
         self._cross_graphic = None
+        self._id_label_graphics = []
         self.image_graphic = None
         self.cross_graphic = None
         self._stim_warning_shown = False

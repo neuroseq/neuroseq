@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from PIL import Image
 from pytestqt.qtbot import QtBot
+from qtpy import QtWidgets
 
 from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
@@ -325,8 +327,11 @@ def test_show_aoi_checkbox_does_not_leak_into_other_strategies_or_result(
     _select_mapping_strategy(dialog, "Custom")
     dialog.show_aoi_in_custom_checkbox.setChecked(True)
 
+    # Linear draws its own adjustable shapes, controlled by Show shapes.
     _select_mapping_strategy(dialog, "Linear")
+    dialog.show_shapes_checkbox.setChecked(False)
     assert not view._aoi_visible
+    dialog.show_shapes_checkbox.setChecked(True)
 
     _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
     assert view._aoi_visible
@@ -360,7 +365,9 @@ def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, moc
 
     dialog._annotate_mean_tiff()
 
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=None
+    )
     assert dialog.image_path == image_path
     assert dialog.segmentation_path == segmentation_path
     assert dialog.image_path_label.text() == image_path.name
@@ -398,7 +405,9 @@ def test_annotate_mean_tiff_uses_selected_cellpose_model(
 
     dialog._annotate_mean_tiff()
 
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam_v2")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam_v2", display_range=None
+    )
 
 
 def test_annotate_mean_tiff_accepts_a_png_snapshot(
@@ -436,7 +445,9 @@ def test_annotate_mean_tiff_accepts_a_png_snapshot(
     dialog._annotate_mean_tiff()
 
     tiff_frame_count.assert_not_called()
-    annotate.assert_called_once_with(str(image_path), model_name="cpsam")
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=None
+    )
     assert dialog.image_path == image_path
     assert dialog.segmentation_path == segmentation_path
 
@@ -470,3 +481,104 @@ def test_annotate_multiframe_tiff_explains_averaging(
     ]
     assert any("first 300" in message for message in messages)
     assert any("150 frames total" in message for message in messages)
+
+
+def test_linear_mapping_has_adjustable_shapes_that_leave_it_unchanged(
+    tmp_path, qtbot: QtBot, qmessagebox_calls
+) -> None:
+    """Issue #606: Linear shows the shapes and lets them be moved, while the
+    mapping stays linear; the shapes are kept with the result."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    view = dialog.overlay_widget.overlay_view
+    _select_mapping_strategy(dialog, "Linear")
+    assert dialog.aoi_group.isVisibleTo(dialog)
+    assert dialog.show_shapes_checkbox.isVisibleTo(dialog)
+    assert not any(radio.isVisibleTo(dialog) for radio in dialog._aoi_role_radios)
+    assert view._aoi_visible
+    assert view.aoi_editable
+    linear = dialog._generate_stimulus_mapping("Linear")
+
+    moved = dialog._current_aoi_config()
+    assert moved is not None
+    moved.square.x, moved.square.y = 1.0, 2.0
+    dialog._on_overlay_aoi_geometry_changed(moved)  # as after a drag
+    current = dialog._current_aoi_config()
+    assert current is not None
+    assert (current.square.x, current.square.y) == pytest.approx((1.0, 2.0), abs=0.01)
+    dialog.circle_diameter_spin.setValue(50)  # % of the image's shorter side
+    assert view._aoi_config is not None
+    assert view._aoi_config.circle.diameter == pytest.approx(3.0, abs=0.01)
+    assert dialog._generate_stimulus_mapping("Linear") == linear
+
+    dialog._import_data()
+    imported = dialog.get_imported_data()
+    assert imported is not None
+    assert imported.mapping_strategy == "Linear"
+    assert imported.stimulus_to_cellpose_mapping is None
+    assert imported.aoi_config is not None
+    assert imported.aoi_config.square.x == pytest.approx(1.0, abs=0.01)
+    dialog.close()
+
+
+@pytest.mark.parametrize("accept", [True, False])
+def test_brightness_is_adjusted_before_segmentation(
+    tmp_path, qtbot: QtBot, mocker, accept: bool
+) -> None:
+    """Issue #611: with "Adjust brightness first", the chosen window is
+    passed on to the segmentation; cancelling segments nothing."""
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    image_path = tmp_path / "mean_fluorescence.png"
+    Image.fromarray(np.arange(36, dtype=np.uint8).reshape(6, 6)).save(image_path)
+    segmentation_path = tmp_path / "mean_fluorescence_cpsam_seg.npy"
+    np.save(segmentation_path, np.zeros((6, 6), dtype=np.int32))
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.getopenfilename",
+        return_value=(str(image_path), ""),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, tmp_path / "masks.png"),
+    )
+    chosen = DisplayRange(40, 200)
+
+    def _exec(brightness: SegmentationBrightnessDialog) -> int:
+        assert brightness.controls.histogram_view is not None
+        brightness.controls.set_display_range(chosen)
+        return (
+            QtWidgets.QDialog.DialogCode.Accepted
+            if accept
+            else QtWidgets.QDialog.DialogCode.Rejected
+        )
+
+    mocker.patch.object(SegmentationBrightnessDialog, "exec", _exec)
+    dialog.adjust_brightness_checkbox.setChecked(True)
+    dialog._annotate_mean_tiff()
+
+    if accept:
+        annotate.assert_called_once_with(
+            str(image_path), model_name="cpsam", display_range=chosen
+        )
+    else:
+        annotate.assert_not_called()
+
+
+def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
+    from neuroseq.brightness_contrast import DisplayRange
+    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+
+    image = np.linspace(0, 4000, 64, dtype=np.float32).reshape(8, 8)
+    dialog = SegmentationBrightnessDialog(image)
+    qtbot.addWidget(dialog)
+    assert dialog.display_range.is_identity
+    before = dialog.preview.pixmap().toImage()
+    dialog.controls.set_display_range(DisplayRange(100, 150))
+    assert dialog.display_range == DisplayRange(100, 150)
+    assert dialog.preview.pixmap().toImage() != before

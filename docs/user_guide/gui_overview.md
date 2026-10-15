@@ -19,6 +19,23 @@ All data import and export actions are grouped under two sub-menus:
 
 Each import or export action that supports multiple third-party software packages opens a small pre-dialog first so you can choose the source/target software (e.g. Igor2, SysCon2).
 
+### Dropping files
+
+Files can also be dragged from the file explorer onto the NeuroSeq window.
+Each opens its usual import dialog with the file already loaded, so the
+imported data can be named and checked first:
+
+| File                           | Dropped on                | Import                                     |
+| ------------------------------ | ------------------------- | ------------------------------------------ |
+| `.nseq`                        | anywhere                  | opens the project in a new tab             |
+| `.seq`                         | anywhere                  | SysCon2 sequence as an input array         |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | the input array editor    | patch-clamp input wave                     |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | anywhere else             | patch-clamp traces                         |
+| TIFF or PNG                    | the Cell segmentation tab | asks for the Cellpose model, then segments |
+| TIFF                           | the traces                | calcium trace extraction (Suite2p or ROI)  |
+| TIFF, GIF or movie             | the Imaging tab           | adds it as imaging data                    |
+| TIFF, PNG, GIF or movie        | anywhere else             | asks which of the three imaging imports    |
+
 ## General Layout
 
 ![GUI layout](../images/layout.png)
@@ -94,6 +111,19 @@ The data-selection toolbar has dedicated **Trace normalization** and
 the per-widget normalization dialogs — median normalization, clip/unclip
 range, and per-neuron scaling all live in those dialogs rather than in the
 Settings menu.
+
+## Cell spatial footprints
+
+The **Cell segmentation** tab shows the imported Cellpose cells, labelled with
+their neuron ids. With the mouse:
+
+- **Left click** a cell to select it; the trace, input array and spike plots
+  then show only the selected neurons. Click it again to deselect it.
+- **Right drag** around cells to select several at once (lasso).
+- **Double-click** empty space to clear the selection.
+- **Right click** a cell to scroll the traces to its neuron. The vertical zoom
+  stays the same and all other traces stay visible. A neuron whose trace is
+  hidden by the current selection is not scrolled to.
 
 ## Synaptic data widget
 

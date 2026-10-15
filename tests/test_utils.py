@@ -236,3 +236,19 @@ def test_parse_number_accepts_common_formats(text: str, expected: float) -> None
 def test_parse_number_rejects_garbage(text: str) -> None:
     with pytest.raises(ValueError, match="Could not parse"):
         parse_number(text)
+
+
+def test_wait_cursor_is_restored_after_an_error(qtbot) -> None:
+    """An error in a decorated function left the wait cursor on for good."""
+    from qtpy import QtWidgets
+
+    from neuroseq.utils import with_wait_cursor
+
+    @with_wait_cursor
+    def _fails() -> None:
+        assert QtWidgets.QApplication.overrideCursor() is not None
+        raise KeyError("Simulation :: P")
+
+    with pytest.raises(KeyError):
+        _fails()
+    assert QtWidgets.QApplication.overrideCursor() is None
