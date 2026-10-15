@@ -30,3 +30,10 @@ def test_measurement_rejects_trace_that_ends_before_probe() -> None:
     )
     with pytest.raises(ValueError, match="ends at .* before the probe"):
         measure_epsp(trace, 2, [0.02], baseline_ms=5.0, response_ms=10.0)
+
+
+def test_measure_spike_count_handles_simulated_volt_traces_labelled_mv() -> None:
+    values = np.full((1, 20), -0.07, dtype=np.float32)
+    values[0, 5:8] = 0.02
+    trace = TraceData("trace", values, np.array([4]), "mV", 0.001)
+    assert measure_spike_count(trace, 4, 0.004, 5.0, -20.0) == 1
