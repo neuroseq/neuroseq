@@ -41,7 +41,10 @@ Open one of:
     neuron layout (e.g. a grid of square AOIs) does not match Cellpose's
     discovery order.
 - **Areas of Interest** — optional roles drawn on top of the segmentation
-  (square/circle AOIs). Cells that fall inside an AOI inherit its role.
+  (square/circle AOIs). Cells that fall inside an AOI inherit its role. The
+  **Linear** strategy shows the same shapes, which can be moved and resized
+  there too, but they do not change its mapping; they are kept with the
+  imported segmentation.
 
 After import, the cell footprints are available in the cell overlay widget
 and are bundled into the project file. They are required for the

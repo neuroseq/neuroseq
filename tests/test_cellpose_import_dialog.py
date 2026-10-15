@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 from PIL import Image
 from pytestqt.qtbot import QtBot
 
@@ -325,8 +326,11 @@ def test_show_aoi_checkbox_does_not_leak_into_other_strategies_or_result(
     _select_mapping_strategy(dialog, "Custom")
     dialog.show_aoi_in_custom_checkbox.setChecked(True)
 
+    # Linear draws its own adjustable shapes, controlled by Show shapes.
     _select_mapping_strategy(dialog, "Linear")
+    dialog.show_shapes_checkbox.setChecked(False)
     assert not view._aoi_visible
+    dialog.show_shapes_checkbox.setChecked(True)
 
     _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
     assert view._aoi_visible
@@ -470,3 +474,40 @@ def test_annotate_multiframe_tiff_explains_averaging(
     ]
     assert any("first 300" in message for message in messages)
     assert any("150 frames total" in message for message in messages)
+
+
+def test_linear_mapping_has_adjustable_shapes_that_leave_it_unchanged(
+    tmp_path, qtbot: QtBot, qmessagebox_calls
+) -> None:
+    """Issue #606: Linear shows the shapes and lets them be moved, while the
+    mapping stays linear; the shapes are kept with the result."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    view = dialog.overlay_widget.overlay_view
+    _select_mapping_strategy(dialog, "Linear")
+    assert dialog.aoi_group.isVisibleTo(dialog)
+    assert dialog.show_shapes_checkbox.isVisibleTo(dialog)
+    assert not any(radio.isVisibleTo(dialog) for radio in dialog._aoi_role_radios)
+    assert view._aoi_visible
+    assert view.aoi_editable
+    linear = dialog._generate_stimulus_mapping("Linear")
+
+    moved = dialog._current_aoi_config()
+    assert moved is not None
+    moved.square.x, moved.square.y = 1.0, 2.0
+    dialog._on_overlay_aoi_geometry_changed(moved)  # as after a drag
+    current = dialog._current_aoi_config()
+    assert current is not None
+    assert (current.square.x, current.square.y) == pytest.approx((1.0, 2.0), abs=0.01)
+    dialog.circle_diameter_spin.setValue(50)  # % of the image's shorter side
+    assert view._aoi_config is not None
+    assert view._aoi_config.circle.diameter == pytest.approx(3.0, abs=0.01)
+    assert dialog._generate_stimulus_mapping("Linear") == linear
+
+    dialog._import_data()
+    imported = dialog.get_imported_data()
+    assert imported is not None
+    assert imported.mapping_strategy == "Linear"
+    assert imported.stimulus_to_cellpose_mapping is None
+    assert imported.aoi_config is not None
+    assert imported.aoi_config.square.x == pytest.approx(1.0, abs=0.01)
+    dialog.close()

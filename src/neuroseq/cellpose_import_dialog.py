@@ -328,6 +328,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.square_role_buttons.addButton(square_pref_radio)
         self.square_role_buttons.addButton(square_excl_radio)
         square_pref_radio.setChecked(True)
+        self._aoi_role_radios = [square_pref_radio, square_excl_radio]
         square_header = QtWidgets.QHBoxLayout()
         square_header.addWidget(self.square_enabled_cb)
         square_header.addWidget(square_pref_radio)
@@ -354,6 +355,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.circle_role_buttons.addButton(circle_pref_radio)
         self.circle_role_buttons.addButton(circle_excl_radio)
         circle_excl_radio.setChecked(True)
+        self._aoi_role_radios += [circle_pref_radio, circle_excl_radio]
         circle_header = QtWidgets.QHBoxLayout()
         circle_header.addWidget(self.circle_enabled_cb)
         circle_header.addWidget(circle_pref_radio)
@@ -793,8 +795,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.linear_offset_spin.setVisible(not is_any_custom)
         self.linear_offset_label.setVisible(not is_any_custom)
-        self.aoi_group.setVisible(is_aoi)
-        self.show_shapes_checkbox.setVisible(is_aoi)
+        # Linear keeps adjustable shapes as well; they don't change its
+        # mapping and have no preferential/exclusion role there (issue #606).
+        shapes_editable = is_aoi or mapping_strategy == "Linear"
+        self.aoi_group.setVisible(shapes_editable)
+        self.show_shapes_checkbox.setVisible(shapes_editable)
+        for radio in self._aoi_role_radios:
+            radio.setVisible(is_aoi)
         if hasattr(self, "guidance_label"):
             self.guidance_label.setVisible(is_any_custom)
         if not is_aoi:
@@ -1172,6 +1179,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _regenerate_aoi_mapping(self, *_args) -> None:
         if self._suppress_aoi_signals:
             return
+        if self._get_mapping_strategy() == "Linear":
+            # The shapes are only drawn; the linear mapping ignores them.
+            self._update_aoi_overlay_visibility()
+            return
         if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
             return
 
@@ -1195,6 +1206,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
     def _update_aoi_overlay_visibility(self, *_args) -> None:
         strategy = self._get_mapping_strategy()
         is_aoi = strategy == CUSTOM_AOI_STRATEGY
+        if strategy == "Linear":
+            self._ensure_aoi_defaults()
+            self.overlay_widget.set_aoi_editable(True)
+            self.overlay_widget.set_aoi_overlay(
+                self._current_aoi_config(), show=self.show_shapes_checkbox.isChecked()
+            )
+            return
         # Under plain Custom the shapes are only a reference for the click
         # order: drawn on request, and never draggable (a drag there would
         # change nothing, since the mapping doesn't use them).
@@ -1210,6 +1228,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
 
     def _on_overlay_aoi_geometry_changed(self, config: AreasOfInterestConfig) -> None:
+        if self._get_mapping_strategy() == "Linear":
+            self._set_aoi_controls(config)
+            return
         if self._get_mapping_strategy() != CUSTOM_AOI_STRATEGY:
             return
         self._set_aoi_controls(config)
@@ -1589,7 +1610,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             stored_aoi_config = (
                 clone_aoi_config(self._current_aoi_config())
-                if mapping_strategy == CUSTOM_AOI_STRATEGY
+                if mapping_strategy in ("Linear", CUSTOM_AOI_STRATEGY)
                 else None
             )
 
@@ -1668,6 +1689,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             aoi_config = clone_aoi_config(
                 getattr(self.existing_data, "aoi_config", None)
             )
+            if mapping_strategy == "Linear" and aoi_config is not None:
+                self._set_aoi_controls(aoi_config)
             if mapping_strategy == CUSTOM_AOI_STRATEGY:
                 if aoi_config is None and self.importer.image_data is not None:
                     aoi_config = default_aoi_config(self.importer.image_data.shape[:2])
