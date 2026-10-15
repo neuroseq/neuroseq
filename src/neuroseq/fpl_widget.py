@@ -151,6 +151,18 @@ class FPLWidget(QtWidgets.QWidget):
             if widget is not None:
                 widget.hide()
 
+    def show_images_top_down(self) -> None:
+        """Draw image row 0 at the top, as Fiji and the raw files do.
+
+        fastplotlib flips the y-axis only for images present when
+        `Figure.show()` runs, but this figure is shown empty in `__init__`.
+        Flipping the camera instead of the data keeps world y equal to the
+        image row, so masks, frames and AOIs share the raw files' coordinates.
+        """
+        camera = self.subplot.camera
+        if camera.local.scale_y > 0:
+            camera.local.scale_y *= -1
+
     def apply_theme(self, theme: str) -> None:
         """Switch this widget's canvas between light and dark themes."""
         self._theme = theme_module.normalize_theme(theme)

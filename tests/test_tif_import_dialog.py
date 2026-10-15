@@ -617,7 +617,7 @@ def test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image():
     assert imported.segmentation_array.shape == result.masks.shape
     np.testing.assert_array_equal(
         imported.segmentation_array,
-        np.flipud(result.masks.astype(np.int32) - 1),
+        result.masks.astype(np.int32) - 1,
     )
     assert -1 in np.unique(imported.segmentation_array)
     assert imported.overlay_image.shape == imported.segmentation_array.shape + (3,)
@@ -739,7 +739,7 @@ def test_pipeline_progress_dialog_details_toggle(qtbot):
     [
         (
             np.array([[-1, 0], [1, -1]], dtype=np.int32),
-            np.array([[2, 0], [0, 1]], dtype=np.int32),
+            np.array([[0, 1], [2, 0]], dtype=np.int32),
         ),
         (
             np.array([[-1, -1], [-1, -1]], dtype=np.int32),

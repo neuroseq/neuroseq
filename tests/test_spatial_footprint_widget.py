@@ -12,8 +12,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.aoi_shapes import square_world_corners
-from neuroseq.aoi_shapes import user_to_world_point
+from neuroseq.aoi_shapes import square_corners
 from neuroseq.cell_overlay_widget import STRIPED_CELL_ALPHA
 from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
@@ -463,7 +462,7 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
 def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
     """The display-toggle checkboxes are the last thing in the Cell
     segmentation tab, in a bar the same size as the Video tab's bottom
-    action bar (Save video.../Remove imaging data) - matching shapes for
+    action bar (Save imaging data.../Remove imaging data) - matching shapes for
     both tabs keeps switching between them from bouncing the panel around."""
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
@@ -1620,7 +1619,7 @@ def test_overlay_view_ignores_aoi_drag_when_not_editable(
     overlay_view._aoi_config = config
     overlay_view._aoi_visible = True
     overlay_view.aoi_editable = False
-    corner = square_world_corners(config.square, overlay_view.overlay_image.shape[0])[0]
+    corner = square_corners(config.square)[0]
     monkeypatch.setattr(
         overlay_view.subplot,
         "map_screen_to_world",
@@ -1654,8 +1653,8 @@ def test_overlay_view_body_drag_requires_shift(
     overlay_view._aoi_visible = True
     overlay_view.aoi_editable = True
     square = config.square
-    body_user = (square.x + square.side / 2, square.y + square.side / 2)
-    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
+    # AOI coordinates are world coordinates (show_images_top_down).
+    body_world = (square.x + square.side / 2, square.y + square.side / 2)
     monkeypatch.setattr(
         overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
     )
@@ -1696,8 +1695,8 @@ def test_aoi_click_without_movement_does_not_add_undo_entry(
     overlay_view._aoi_visible = True
     overlay_view.aoi_editable = True
     square = config.square
-    body_user = (square.x + square.side / 2, square.y + square.side / 2)
-    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
+    # AOI coordinates are world coordinates (show_images_top_down).
+    body_world = (square.x + square.side / 2, square.y + square.side / 2)
     monkeypatch.setattr(
         overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
     )
@@ -1717,16 +1716,14 @@ def test_aoi_body_drag_can_be_undone_and_redone(
     overlay_view = OverlayView()
     qtbot.addWidget(overlay_view)
     overlay_view.overlay_image = np.zeros((20, 20, 3), dtype=np.uint8)
-    image_height = overlay_view.overlay_image.shape[0]
     original = _wide_square_aoi_config()
     original_snapshot = clone_aoi_config(original)
     overlay_view._aoi_config = original
     overlay_view._aoi_visible = True
     overlay_view.aoi_editable = True
     square = original.square
-    body_user = (square.x + square.side / 2, square.y + square.side / 2)
-    body_world = user_to_world_point(*body_user, image_height)
-    moved_world = user_to_world_point(body_user[0] + 2.0, body_user[1], image_height)
+    body_world = (square.x + square.side / 2, square.y + square.side / 2)
+    moved_world = (body_world[0] + 2.0, body_world[1])
 
     monkeypatch.setattr(
         overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
@@ -1771,11 +1768,8 @@ def test_aoi_undo_redo_history_resets_on_new_image(
     overlay_view._aoi_visible = True
     overlay_view.aoi_editable = True
     square = original.square
-    body_user = (square.x + square.side / 2, square.y + square.side / 2)
-    body_world = user_to_world_point(*body_user, overlay_view.overlay_image.shape[0])
-    moved_world = user_to_world_point(
-        body_user[0] + 2.0, body_user[1], overlay_view.overlay_image.shape[0]
-    )
+    body_world = (square.x + square.side / 2, square.y + square.side / 2)
+    moved_world = (body_world[0] + 2.0, body_world[1])
     monkeypatch.setattr(
         overlay_view.subplot, "map_screen_to_world", lambda ev: body_world
     )
@@ -1889,7 +1883,7 @@ def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
 
     assert [widget.tabs.tabText(i) for i in range(widget.tabs.count())] == [
         "Cell segmentation",
-        "Video",
+        "Imaging",
     ]
     assert widget.calcium_video_widget.video_actions_widget.height() == 44
     assert widget.calcium_video_widget.remove_button.text() == "Remove imaging data"

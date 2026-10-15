@@ -272,7 +272,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         ]
         self.calcium_video_widget = CalciumVideoWidget(parent=self.tabs)
         self.tabs.addTab(cell_tab, "Cell segmentation")
-        self.tabs.addTab(self.calcium_video_widget, "Video")
+        self.tabs.addTab(self.calcium_video_widget, "Imaging")
         # checkbox_container now lives inside cell_tab's own layout (added
         # above), so self.tabs (a _StableSizeTabWidget) is root_layout's only
         # child and already reports a size hint that's stable across tabs -

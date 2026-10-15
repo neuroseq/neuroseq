@@ -3075,20 +3075,12 @@ def _build_mapped_segments_for_timing(
 def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, float]]:
     """Return per-cell centroids in **SysCon coordinates** (top-left origin).
 
-    The Cellpose importer applies ``np.flipud`` to the segmentation on load
-    so the in-app overlay matches Fiji's bottom-left display convention
-    (``importer_cellpose.py::_align_orientation_segmentation``). SysCon's
-    `.seq` format uses image-array / top-left convention (``CenterY``
-    measured from the top of the field), so we undo that vertical flip
-    here: the exported ``center_y`` for a cell is its row index in the
-    *original* (pre-``flipud``) image. Without this inversion the cells
-    appear vertically mirrored when the generated ``.seq`` is loaded into
-    SysCon.
+    The segmentation is stored in the raw image's orientation, which is also
+    SysCon's: ``CenterY`` is the row index measured from the top of the field.
     """
     if segmentation.ndim != 2:
         raise ValueError("Cellpose segmentation must be a 2D array")
 
-    height = int(segmentation.shape[0])
     centroids: dict[int, tuple[float, float]] = {}
     unique_ids = np.unique(segmentation)
     for cell_id in unique_ids:
@@ -3098,8 +3090,7 @@ def _compute_cell_centroids(segmentation: np.ndarray) -> dict[int, tuple[float, 
         y_coords, x_coords = np.where(segmentation == cell_int)
         if x_coords.size == 0:
             continue
-        flipped_y = float(height - 1) - float(np.mean(y_coords))
-        centroids[cell_int] = (float(np.mean(x_coords)), flipped_y)
+        centroids[cell_int] = (float(np.mean(x_coords)), float(np.mean(y_coords)))
     return centroids
 
 
@@ -3121,7 +3112,6 @@ def _compute_cell_stimulation_spots(
             for cell_id, centroid in _compute_cell_centroids(segmentation).items()
         }
 
-    height = int(segmentation.shape[0])
     result: dict[int, list[tuple[float, float]]] = {}
     for cell_id in np.unique(segmentation):
         cell_int = int(cell_id)
@@ -3130,6 +3120,11 @@ def _compute_cell_stimulation_spots(
         rows, cols = np.where(segmentation == cell_int)
         if cols.size == 0:
             continue
+        # argmin/argmax below keep the first of equally good pixels. Scan the
+        # bottom row first, as exports did while segmentations were stored
+        # upside down (#601), so the chosen spots and .seq files are unchanged.
+        scan_order = np.lexsort((cols, -rows))
+        rows, cols = rows[scan_order], cols[scan_order]
 
         coordinates = np.column_stack((cols.astype(float), rows.astype(float)))
         centroid = coordinates.mean(axis=0)
@@ -3162,7 +3157,7 @@ def _compute_cell_stimulation_spots(
             )
 
         result[cell_int] = [
-            (float(coordinates[index, 0]), float(height - 1) - coordinates[index, 1])
+            (float(coordinates[index, 0]), float(coordinates[index, 1]))
             for index in selected
         ]
     return result

@@ -20,6 +20,22 @@ from neuroseq.importer_cellpose import SquareAOI
 from neuroseq.stim import StimArray
 from neuroseq.stim_timing import ensure_2d_stim_values
 
+# Cellpose images and masks were stored upside down before issue #601, to suit
+# a display quirk. Results saved since are marked with their orientation.
+CELLPOSE_ORIENTATION = "top_down"
+
+
+def _from_flipped_storage(result: CellposeImportResult) -> CellposeImportResult:
+    """Return a Cellpose result saved before #601 in its raw orientation."""
+
+    def unflip(array: np.ndarray | None) -> np.ndarray | None:
+        return None if array is None else np.ascontiguousarray(np.flipud(array))
+
+    result.segmentation_array = unflip(result.segmentation_array)  # type: ignore[assignment]
+    result.overlay_image = unflip(result.overlay_image)  # type: ignore[assignment]
+    result.background_image = unflip(result.background_image)
+    return result
+
 
 def _to_seconds(value: float | int) -> float:
     return float(value)
@@ -180,6 +196,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         )
                     return {
                         "!CellposeImportResult": True,
+                        "orientation": CELLPOSE_ORIENTATION,
                         "image_path": str(obj.image_path),
                         "segmentation_array": segmentation_path,
                         "overlay_image": overlay_path,
@@ -342,7 +359,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     with _zf.open(background_image_path) as fp:
                         loaded_background_image = np.load(fp)
 
-                return CellposeImportResult(
+                result = CellposeImportResult(
                     image_path=Path(image_path),
                     segmentation_array=loaded_segmentation,
                     overlay_image=loaded_overlay,
@@ -375,6 +392,9 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                         )
                     ),
                 )
+                if rest.get("orientation") != CELLPOSE_ORIENTATION:
+                    result = _from_flipped_storage(result)
+                return result
             case {
                 "!CellposeImportResult": True,
                 "image_path": image_path,
@@ -396,25 +416,28 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     with _zf.open(original_cellpose_ids) as fp:
                         loaded_original_ids = np.load(fp)
 
-                return CellposeImportResult(
-                    image_path=Path(image_path),
-                    segmentation_array=loaded_segmentation,
-                    overlay_image=loaded_overlay,
-                    trace_data=trace_data,
-                    spike_data=spike_data,
-                    original_cellpose_ids=loaded_original_ids,
-                    stimulus_to_cellpose_mapping=(
-                        None
-                        if stimulus_to_cellpose_mapping is None
-                        else {
-                            int(k): int(v)
-                            for k, v in stimulus_to_cellpose_mapping.items()
-                        }
-                    ),
-                    mapping_strategy=mapping_strategy,
-                    linear_offset=(
-                        None if linear_offset is None else int(linear_offset)
-                    ),
+                # Formats this old predate #601's orientation marker.
+                return _from_flipped_storage(
+                    CellposeImportResult(
+                        image_path=Path(image_path),
+                        segmentation_array=loaded_segmentation,
+                        overlay_image=loaded_overlay,
+                        trace_data=trace_data,
+                        spike_data=spike_data,
+                        original_cellpose_ids=loaded_original_ids,
+                        stimulus_to_cellpose_mapping=(
+                            None
+                            if stimulus_to_cellpose_mapping is None
+                            else {
+                                int(k): int(v)
+                                for k, v in stimulus_to_cellpose_mapping.items()
+                            }
+                        ),
+                        mapping_strategy=mapping_strategy,
+                        linear_offset=(
+                            None if linear_offset is None else int(linear_offset)
+                        ),
+                    )
                 )
             case {
                 "!CellposeImportResult": True,
@@ -435,21 +458,23 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     with _zf.open(original_cellpose_ids) as fp:
                         loaded_original_ids = np.load(fp)
 
-                return CellposeImportResult(
-                    image_path=Path(image_path),
-                    segmentation_array=loaded_segmentation,
-                    overlay_image=loaded_overlay,
-                    trace_data=trace_data,
-                    spike_data=spike_data,
-                    original_cellpose_ids=loaded_original_ids,
-                    stimulus_to_cellpose_mapping=(
-                        None
-                        if stimulus_to_cellpose_mapping is None
-                        else {
-                            int(k): int(v)
-                            for k, v in stimulus_to_cellpose_mapping.items()
-                        }
-                    ),
+                return _from_flipped_storage(
+                    CellposeImportResult(
+                        image_path=Path(image_path),
+                        segmentation_array=loaded_segmentation,
+                        overlay_image=loaded_overlay,
+                        trace_data=trace_data,
+                        spike_data=spike_data,
+                        original_cellpose_ids=loaded_original_ids,
+                        stimulus_to_cellpose_mapping=(
+                            None
+                            if stimulus_to_cellpose_mapping is None
+                            else {
+                                int(k): int(v)
+                                for k, v in stimulus_to_cellpose_mapping.items()
+                            }
+                        ),
+                    )
                 )
             case {
                 "!Experiment": True,

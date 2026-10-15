@@ -1,3 +1,10 @@
+"""Geometry of AOI shapes.
+
+AOI coordinates are image pixel coordinates with a top-left origin (x = column,
+y = row). Image views flip their camera (`FPLWidget.show_images_top_down`), so
+world coordinates equal these and need no conversion.
+"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -9,22 +16,8 @@ if TYPE_CHECKING:
     from neuroseq.importer_cellpose import SquareAOI
 
 
-def user_to_world_point(
-    user_x: float, user_y: float, image_height: int
-) -> tuple[float, float]:
-    """Convert top-left-origin user coordinates into bottom-left world coordinates."""
-    return float(user_x), float(image_height - user_y)
-
-
-def world_to_user_point(
-    world_x: float, world_y: float, image_height: int
-) -> tuple[float, float]:
-    """Convert bottom-left-origin world coordinates into top-left user coordinates."""
-    return float(world_x), float(image_height - world_y)
-
-
-def square_user_corners(square: SquareAOI) -> list[tuple[float, float]]:
-    """Return square corners in user coordinates ordered TL, TR, BR, BL."""
+def square_corners(square: SquareAOI) -> list[tuple[float, float]]:
+    """Return square corners ordered TL, TR, BR, BL."""
     x0 = float(square.x)
     y0 = float(square.y)
     x1 = x0 + float(square.side)
@@ -32,60 +25,41 @@ def square_user_corners(square: SquareAOI) -> list[tuple[float, float]]:
     return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
 
 
-def square_world_polyline(
-    square: SquareAOI, image_height: int, *, z: float = 220.0
-) -> np.ndarray:
-    """Return a closed square polyline in world coordinates."""
-    corners = square_world_corners(square, image_height, z=z)
+def square_corner_points(square: SquareAOI, *, z: float = 220.0) -> np.ndarray:
+    """Return square corners (TL, TR, BR, BL) as 3D points."""
+    return np.asarray([(x, y, z) for x, y in square_corners(square)], dtype=np.float32)
+
+
+def square_polyline(square: SquareAOI, *, z: float = 220.0) -> np.ndarray:
+    """Return a closed square polyline."""
+    corners = square_corner_points(square, z=z)
     return np.vstack([corners, corners[:1]])
 
 
-def square_world_corners(
-    square: SquareAOI, image_height: int, *, z: float = 220.0
+def circle_polyline(
+    circle: CircleAOI, *, z: float = 220.0, n_points: int = 72
 ) -> np.ndarray:
-    """Return square corners in world coordinates ordered TL, TR, BR, BL."""
-    corners = [
-        (*user_to_world_point(x, y, image_height), z)
-        for x, y in square_user_corners(square)
-    ]
-    return np.asarray(corners, dtype=np.float32)
-
-
-def circle_world_polyline(
-    circle: CircleAOI,
-    image_height: int,
-    *,
-    z: float = 220.0,
-    n_points: int = 72,
-) -> np.ndarray:
-    """Return a closed circle polyline in world coordinates."""
+    """Return a closed circle polyline."""
     radius = float(circle.diameter) / 2.0
     theta = np.linspace(0.0, 2.0 * np.pi, num=n_points, endpoint=False)
-    user_x = float(circle.cx) + radius * np.cos(theta)
-    user_y = float(circle.cy) + radius * np.sin(theta)
-    world_y = image_height - user_y
     points = np.column_stack(
         [
-            user_x.astype(np.float32),
-            world_y.astype(np.float32),
+            (float(circle.cx) + radius * np.cos(theta)).astype(np.float32),
+            (float(circle.cy) + radius * np.sin(theta)).astype(np.float32),
             np.full(n_points, z, dtype=np.float32),
         ]
     )
     return np.vstack([points, points[:1]])
 
 
-def circle_world_handles(
-    circle: CircleAOI, image_height: int, *, z: float = 220.0
-) -> np.ndarray:
-    """Return the cardinal handle points for a circle in world coordinates."""
+def circle_handles(circle: CircleAOI, *, z: float = 220.0) -> np.ndarray:
+    """Return the cardinal handle points of a circle as 3D points."""
     radius = float(circle.diameter) / 2.0
+    cx, cy = float(circle.cx), float(circle.cy)
     handle_points = [
-        (float(circle.cx) - radius, float(circle.cy)),
-        (float(circle.cx), float(circle.cy) - radius),
-        (float(circle.cx) + radius, float(circle.cy)),
-        (float(circle.cx), float(circle.cy) + radius),
+        (cx - radius, cy),
+        (cx, cy - radius),
+        (cx + radius, cy),
+        (cx, cy + radius),
     ]
-    return np.asarray(
-        [(*user_to_world_point(x, y, image_height), z) for x, y in handle_points],
-        dtype=np.float32,
-    )
+    return np.asarray([(x, y, z) for x, y in handle_points], dtype=np.float32)

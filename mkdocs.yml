@@ -28,6 +28,7 @@ nav:
   - Getting Started:
       - Installation: getting_started/installation.md
       - Quickstart: getting_started/quickstart.md
+      - Windows desktop shortcut: getting_started/windows_shortcut.md
   - User Guide:
       - GUI Overview: user_guide/gui_overview.md
       - Simulations: user_guide/simulations.md
@@ -38,6 +39,7 @@ nav:
       - Connecting simulations and experiments: user_guide/simulations_and_experiments.md
       - Importing Igor2 Waves: user_guide/importing_igor2_waves.md
       - Importing Imaging Data: user_guide/importing_imaging_data.md
+      - ScanImage Acquisition: user_guide/scanimage_acquisition.md
       - Export stimuli for patch clamp recordings: user_guide/export_patch_clamp_stimuli.md
       - Multiphoton Holographic Stimulation: user_guide/multiphoton_holographic_stimulation.md
       - In-App LLM Assistant (Experimental): user_guide/chat_assistant.md

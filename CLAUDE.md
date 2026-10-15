@@ -61,8 +61,8 @@ The thesis processes raw TIFFs externally before this PR existed; that workflow 
 # Install and run (uv recommended)
 uv run neuroseq
 
-# Run tests
-uv run pytest
+# Run tests (serial full suite ~6 min; -n auto parallelises it to ~40 s)
+uv run pytest -n auto
 
 # Run specific test file
 uv run pytest tests/test_gui.py
