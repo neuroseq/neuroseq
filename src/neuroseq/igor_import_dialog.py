@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 class IgorImportDialog(QtWidgets.QDialog):
-    """Dialog for importing single-wave Igor stim traces into NeuroSeq."""
+    """Dialog for importing patch-clamp input waveforms into NeuroSeq."""
 
     def __init__(
         self,
@@ -88,7 +88,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         layout.addLayout(format_layout)
 
         self.intro = QtWidgets.QLabel(
-            "Import Igor2/Sutter input waves from .ibw, .pxp, or the simple "
+            "Import patch-clamp input waveforms from .ibw, .pxp, or the simple "
             "NeuroSeq-compatible .csv format. Packed experiments can contain many "
             "waves; import as many as you need from the same file, then click Close "
             "when done. Imported waves are placed on NeuroSeq's 1 ms timeline using "
@@ -100,7 +100,7 @@ class IgorImportDialog(QtWidgets.QDialog):
 
         file_group = QtWidgets.QGroupBox("File Selection")
         file_layout = QtWidgets.QHBoxLayout(file_group)
-        self.file_label = QtWidgets.QLabel("No Igor wave selected")
+        self.file_label = QtWidgets.QLabel("No input waveform selected")
         self.file_label.setStyleSheet("QLabel { color: gray; }")
         browse_button = QtWidgets.QPushButton("Browse…")
         browse_button.clicked.connect(self._browse_file)
@@ -108,7 +108,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         file_layout.addWidget(browse_button)
         layout.addWidget(file_group)
 
-        self.wave_picker_group = QtWidgets.QGroupBox("Wave Selection")
+        self.wave_picker_group = QtWidgets.QGroupBox("Input Waveform Selection")
         wave_picker_layout = QtWidgets.QVBoxLayout(self.wave_picker_group)
         self.pxp_wave_list = QtWidgets.QListWidget()
         self.pxp_wave_list.setSelectionMode(
@@ -119,7 +119,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.wave_picker_group.setVisible(False)
         layout.addWidget(self.wave_picker_group)
 
-        preview_group = QtWidgets.QGroupBox("Wave Preview")
+        preview_group = QtWidgets.QGroupBox("Input Waveform Preview")
         preview_layout = QtWidgets.QVBoxLayout(preview_group)
         self.multi_sweep_info = QtWidgets.QLabel("")
         self.multi_sweep_info.setWordWrap(True)
@@ -133,7 +133,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(120)
         self.preview_text.setPlaceholderText(
-            "Preview appears here after selecting an Igor wave."
+            "Preview appears here after selecting an input waveform."
         )
         preview_layout.addWidget(self.preview_text)
         self.wave_plot = MatplotlibWidget()
@@ -156,7 +156,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         preview_layout.addWidget(self.wave_plot)
         layout.addWidget(preview_group)
 
-        source_group = QtWidgets.QGroupBox("Source Wave Settings")
+        source_group = QtWidgets.QGroupBox("Source Input Settings")
         source_layout = QtWidgets.QFormLayout(source_group)
         self.source_dt_spin = QtWidgets.QDoubleSpinBox()
         self.source_dt_spin.setDecimals(12)
@@ -376,7 +376,7 @@ class IgorImportDialog(QtWidgets.QDialog):
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "Select CSV or text input" if self.csv_only else "Select Igor wave",
+            "Select CSV or text input" if self.csv_only else "Select patch-clamp input",
             "",
             "CSV / Text files (*.csv *.txt)"
             if self.csv_only
@@ -403,14 +403,14 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.logger.exception("Failed to load Igor wave %s", filename)
             self.loaded_wave = None
             self.file_path = ""
-            self.file_label.setText("No Igor wave selected")
+            self.file_label.setText("No input waveform selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
             self._update_preview()
             self._update_import_button_state()
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Could not load Igor wave:\n{exc}",
+                f"Could not load input waveform:\n{exc}",
             )
             return
 
@@ -448,7 +448,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.loaded_wave = None
             self.loaded_pxp_waves = {}
             self.file_path = ""
-            self.file_label.setText("No Igor wave selected")
+            self.file_label.setText("No input waveform selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
             self.pxp_wave_list.clear()
             self.wave_picker_group.setVisible(False)
@@ -457,7 +457,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Could not load Igor packed experiment:\n{exc}",
+                f"Could not load input waveform collection:\n{exc}",
             )
             return
 
@@ -504,7 +504,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             target_dt=target_dt,
         )
         lines = [
-            f"Wave name={wave.name}",
+            f"Input name={wave.name}",
             f"Source format={wave.source_format}",
             f"Source samples={int(wave.values.size)}",
             (
@@ -515,12 +515,12 @@ class IgorImportDialog(QtWidgets.QDialog):
             f"Import source dt={source_dt:.9f} s",
             f"Imported sample interval={target_dt:.9f} s",
             f"Imported samples on target grid={imported_samples}",
-            f"Wave units={wave.units or '(none)'}",
+            f"Input units={wave.units or '(none)'}",
             f"Axis units={wave.axis_units or '(none)'}",
             f"Value range={float(np.min(wave.values)):.6g} .. {float(np.max(wave.values)):.6g}",
         ]
         if wave.note:
-            lines.extend(["", f"Wave note={wave.note}"])
+            lines.extend(["", f"Input note={wave.note}"])
         return "\n".join(lines)
 
     def _update_multi_sweep_info(self) -> None:
@@ -590,11 +590,11 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.preview_text.setPlainText("")
             if not self.project.stim_arrays:
                 self.info_label.setText(
-                    "Select an Igor wave to preview it. Only the new-input import mode is "
+                    "Select an input waveform to preview it. Only the new-input import mode is "
                     "currently available because the project has no input arrays yet."
                 )
             else:
-                self.info_label.setText("Select an Igor wave to preview it.")
+                self.info_label.setText("Select an input waveform to preview it.")
             return
 
         self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
@@ -603,7 +603,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         info_lines: list[str] = []
         if abs(source_dt - target_dt) > 1e-9:
             info_lines.append(
-                "This wave will be resampled to the selected NeuroSeq input grid using zero-order hold. "
+                "This input waveform will be resampled to the selected NeuroSeq input grid using zero-order hold. "
                 "Fast sub-ms changes may be lost."
             )
         elif self.match_source_grid_checkbox.isChecked():
@@ -611,7 +611,9 @@ class IgorImportDialog(QtWidgets.QDialog):
                 "This import will preserve the source/file timestep by adjusting the NeuroSeq input grid."
             )
         else:
-            info_lines.append("This wave already matches NeuroSeq's 1 ms timeline.")
+            info_lines.append(
+                "This input waveform already matches NeuroSeq's 1 ms timeline."
+            )
         if self.loaded_wave.source_dt is None:
             info_lines.append(
                 "The source file does not store the sample interval. Review the source sample interval before importing."
@@ -717,7 +719,7 @@ class IgorImportDialog(QtWidgets.QDialog):
                     and prepared_wave.samples_per_sweep is not None
                 ):
                     info_lines.append(
-                        f"Source wave contained {prepared_wave.n_sweeps} sweeps × "
+                        f"Source input waveform contained {prepared_wave.n_sweeps} sweeps × "
                         f"{prepared_wave.samples_per_sweep} samples, concatenated on import."
                     )
                 if prepared_wave.resampled:
@@ -767,7 +769,7 @@ class IgorImportDialog(QtWidgets.QDialog):
                 ]
                 if report.n_sweeps > 1 and report.samples_per_sweep is not None:
                     info_lines.append(
-                        f"Source wave contained {report.n_sweeps} sweeps × "
+                        f"Source input waveform contained {report.n_sweeps} sweeps × "
                         f"{report.samples_per_sweep} samples, concatenated on import."
                     )
                 if report.truncated_samples > 0:
@@ -821,7 +823,7 @@ class IgorImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Failed to import Igor wave:\n{exc}",
+                f"Failed to import patch-clamp input:\n{exc}",
             )
 
     def done(self, result: int) -> None:

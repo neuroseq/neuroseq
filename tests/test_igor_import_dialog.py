@@ -23,6 +23,9 @@ def test_input_format_selector(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
     qtbot.addWidget(dialog)
     dialog.show()
     assert dialog.windowTitle() == "Import patch clamp input"
+    assert "patch-clamp input waveforms" in dialog.intro.text()
+    assert "Igor" not in dialog.intro.text()
+    assert dialog.file_label.text() == "No input waveform selected"
     labels = "\n".join(label.text() for label in dialog.findChildren(QtWidgets.QLabel))
     assert "CURRENT is the input" in labels
     assert "VOLTAGE is the input" in labels
@@ -161,10 +164,10 @@ def test_igor_import_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
     assert "3 sweeps" in text
     assert "4 source samples" in text
     assert "12 total source samples" in text
-    # Lives inside the Wave Preview group, not floating at the top of the dialog.
+    # Lives inside the Input Waveform Preview group, not floating at the top of the dialog.
     parent_group = label.parent()
     assert isinstance(parent_group, QtWidgets.QGroupBox)
-    assert parent_group.title() == "Wave Preview"
+    assert parent_group.title() == "Input Waveform Preview"
 
 
 def test_igor_import_dialog_imports_into_existing_stim_array(
@@ -368,7 +371,7 @@ def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
     assert dialog.loaded_wave is wave_a
     assert dialog.new_name_edit.text() == "WaveA"
     assert dialog.new_units_edit.text() == "pA"
-    assert "Wave name=WaveA" in dialog.preview_text.toPlainText()
+    assert "Input name=WaveA" in dialog.preview_text.toPlainText()
     assert dialog.import_button.isEnabled()
 
 
@@ -426,7 +429,7 @@ def test_igor_import_dialog_pxp_multi_wave_requires_selection(
     assert dialog.loaded_wave is wave_b
     assert dialog.new_name_edit.text() == "WaveB"
     assert dialog.new_units_edit.text() == "mV"
-    assert "Wave name=WaveB" in dialog.preview_text.toPlainText()
+    assert "Input name=WaveB" in dialog.preview_text.toPlainText()
     assert dialog.import_button.isEnabled()
 
 
@@ -480,7 +483,7 @@ def test_igor_import_dialog_loading_csv_after_pxp_clears_wave_picker(
     assert dialog.pxp_wave_list.count() == 0
     assert dialog.loaded_wave is not None
     assert dialog.loaded_wave.name == "csv_wave"
-    assert "Wave name=csv_wave" in dialog.preview_text.toPlainText()
+    assert "Input name=csv_wave" in dialog.preview_text.toPlainText()
     assert dialog.import_button.isEnabled()
 
 
