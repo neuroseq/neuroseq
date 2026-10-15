@@ -1377,6 +1377,40 @@ def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
     gui.close()
 
 
+def test_closing_a_tab_shows_the_next_projects_own_data(
+    qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Issues #612/#621: after closing a tab, the window showed the closed
+    project's imaging, cells, traces and input arrays on top of the project
+    that took its place."""
+    import tifffile
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    _add_detach_panel_test_data(gui)
+    movie = tmp_path / "movie.tif"
+    tifffile.imwrite(movie, np.zeros((3, 4, 4), dtype=np.uint16))
+    gui.project.add_calcium_video([movie], 10.0)
+    gui._refresh_calcium_video_widgets()
+    closed = gui.project
+    gui._open_project_in_new_tab(Project())
+    blank = gui.project
+    gui._open_project_in_new_tab(Project())
+
+    gui.tab_bar.setCurrentIndex(0)
+    gui._remove_tab(0)
+
+    assert gui.tabs[gui._active_tab_index] is blank
+    assert gui.tab_bar.currentIndex() == gui._active_tab_index == 0
+    assert gui.calcium_video_widget._paths == []
+    assert gui.spatial_footprint_widget._cellpose_data is None
+    assert gui.trace_widget.data is None
+    assert gui.cmb_trace.count() == 0
+    assert blank.calcium_videos == [] and blank.cellpose_data is None
+    assert closed not in gui.tabs
+    gui.close()
+
+
 def test_switching_project_tabs_restores_each_tabs_own_spatial_footprint_selection(
     qtbot: QtBot,
 ) -> None:

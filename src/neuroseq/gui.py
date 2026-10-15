@@ -736,8 +736,19 @@ class Gui(QtWidgets.QMainWindow):
             # nothing to look at - open the Getting Started example instead.
             self.update_project(getting_started_project(), reset_controller=True)
             return
+        # Show the tab that takes the closed one's place. Removing it from
+        # self.tabs first shifts the later projects down, so the stale
+        # active index would already point at another project, and the tab
+        # bar's change signal would then look like no change at all: the
+        # widgets kept showing the closed project's data on top of another
+        # project (issues #612, #621). Nothing is saved back to the closed
+        # project either.
+        self._active_tab_index = -1
         del self.tabs[index]
+        self.tab_bar.blockSignals(True)
         self.tab_bar.removeTab(index)
+        self.tab_bar.blockSignals(False)
+        self._activate_tab_index(self.tab_bar.currentIndex(), reset_controller=True)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
