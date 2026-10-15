@@ -1941,3 +1941,54 @@ def test_show_targets_checkbox_sits_left_of_brightness_button(qtbot: QtBot) -> N
     assert order.index(widget.show_targets_checkbox) + 1 == order.index(
         widget.brightness_contrast_button
     )
+
+
+def _camera(view) -> tuple[float, float, float, float]:
+    state = view.subplot.camera.get_state()
+    return (*map(float, state["position"][:2]), state["width"], state["height"])
+
+
+def test_switching_tabs_keeps_zoom_and_pan(qtbot: QtBot) -> None:
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    segmentation = -1 * np.ones((8, 12), dtype=np.int32)
+    segmentation[1:3, 1:3] = 0
+    widget.set_data(
+        CellposeImportResult(
+            image_path=Path("cellpose.png"),
+            segmentation_array=segmentation,
+            overlay_image=np.zeros((8, 12, 3), dtype=np.uint8),
+            trace_data=None,
+            spike_data=None,
+            original_cellpose_ids=np.array([0], dtype=np.int32),
+        )
+    )
+    overlay = widget.overlay_widget.overlay_view
+    video = widget.calcium_video_widget
+    video.current_frame = np.zeros((8, 12, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    assert widget.tabs.currentIndex() == 0
+
+    # Zoomed into the cell at the top left of the segmentation...
+    overlay.subplot.camera.set_state(
+        {"position": (5.0, 3.0, 0.0), "width": 6.0, "height": 4.0}
+    )
+    widget.tabs.setCurrentIndex(1)
+    # ... the Imaging tab shows the same pixels.
+    assert _camera(video) == (5.0, 3.0, 6.0, 4.0)
+
+    # A half-resolution live preview: the same part of the field of view.
+    video.current_frame = np.zeros((4, 6, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    video.subplot.camera.set_state(
+        {"position": (2.0, 1.0, 0.0), "width": 3.0, "height": 2.0}
+    )
+    widget.tabs.setCurrentIndex(0)
+    assert _camera(overlay) == (4.5, 2.5, 6.0, 4.0)
+
+    # A different aspect ratio is a different field of view: left alone.
+    video.current_frame = np.zeros((8, 8, 3), dtype=np.uint8)
+    video._draw_current_frame()
+    before = _camera(video)
+    widget.tabs.setCurrentIndex(1)
+    assert _camera(video) == before

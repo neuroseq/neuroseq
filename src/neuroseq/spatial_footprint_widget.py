@@ -14,6 +14,7 @@ from neuroseq.brightness_contrast import apply_display_range
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
+from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 
@@ -26,6 +27,42 @@ HOVERED_CELL_BRIGHTNESS_BOOST = 1.8
 ACTIVE_STIM_BRIGHTNESS_BOOST = 1.8
 # CellPoseImporter.generate_overlay's default blend of cell color over the FOV.
 OVERLAY_CELL_OPACITY = 0.5
+
+
+def carry_image_view(
+    source: FPLWidget,
+    source_shape: tuple[int, int],
+    target: FPLWidget,
+    target_shape: tuple[int, int],
+) -> None:
+    """Show the part of `target`'s image that `source` shows of its own.
+
+    The images cover the same field of view, possibly at different
+    resolutions (live previews are downsampled), so the view is scaled by the
+    resolution ratio. Images with a different aspect ratio are left alone.
+    """
+    (source_rows, source_cols), (target_rows, target_cols) = (
+        source_shape,
+        target_shape,
+    )
+    scale_x = target_cols / source_cols
+    scale_y = target_rows / source_rows
+    # Downsampling rounds up, e.g. 511 columns -> 256, so allow ~1%.
+    if abs(scale_x - scale_y) > 0.01 * max(scale_x, scale_y):
+        return
+    state = source.subplot.camera.get_state()
+    x, y = state["position"][:2]
+    z = target.subplot.camera.get_state()["position"][2]
+    # Pixel centres sit at integers, so an image spans -0.5 .. size - 0.5.
+    target.subplot.camera.set_state(
+        {
+            "position": ((x + 0.5) * scale_x - 0.5, (y + 0.5) * scale_y - 0.5, z),
+            "width": state["width"] * scale_x,
+            "height": state["height"] * scale_y,
+            "zoom": state["zoom"],
+        }
+    )
+    target.figure.renderer.request_draw()
 
 
 class _PanelLayout(QtWidgets.QVBoxLayout):
@@ -278,6 +315,10 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         # child and already reports a size hint that's stable across tabs -
         # no need for SpatialFootprintWidget to override its own.
         root_layout.addWidget(self.tabs)
+        # Both tabs show the same field of view: switching tabs keeps the
+        # zoom and pan of the tab being left.
+        self._view_tab = self.tabs.currentIndex()
+        self.tabs.currentChanged.connect(self._carry_view_to_tab)
         self._on_state_data_changed()
 
     def apply_theme(self, theme: str) -> None:
@@ -296,6 +337,26 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
     @property
     def _selected_cellpose_ids(self) -> set[int]:
         return self._state.selected_cellpose_ids
+
+    def _tab_image_view(self, index: int) -> tuple[FPLWidget, tuple[int, int]] | None:
+        """The canvas of tab `index` and the (rows, cols) of its image."""
+        if self.tabs.widget(index) is self.calcium_video_widget:
+            video = self.calcium_video_widget
+            graphic = video._frame_graphic
+            if graphic is None or video.figure is None:
+                return None
+            return video, graphic.data.value.shape[:2]
+        overlay = self.overlay_widget.overlay_view
+        if overlay.overlay_image is None or overlay.figure is None:
+            return None
+        return overlay, overlay.overlay_image.shape[:2]
+
+    def _carry_view_to_tab(self, index: int) -> None:
+        previous, self._view_tab = self._view_tab, index
+        source = self._tab_image_view(previous)
+        target = self._tab_image_view(index)
+        if previous != index and source is not None and target is not None:
+            carry_image_view(*source, *target)
 
     def set_data(self, cellpose_data: CellposeImportResult | None) -> None:
         self._state.set_data(cellpose_data)
