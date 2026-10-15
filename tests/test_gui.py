@@ -2028,7 +2028,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
         (
             action
             for action in gui.menu_file.actions()
-            if action.menu() is not None and action.text() == "&Input data"
+            if action.menu() is not None and action.text() == "&Import data"
         ),
         None,
     )

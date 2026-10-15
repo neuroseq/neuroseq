@@ -3463,7 +3463,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.content-save-edit",
         )
 
-        import_data_menu = menu.addMenu("&Input data")
+        import_data_menu = menu.addMenu("&Import data")
         assert import_data_menu is not None
 
         import_stimulus_menu = import_data_menu.addMenu("&Input")
