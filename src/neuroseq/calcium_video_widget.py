@@ -13,6 +13,7 @@ from PIL import Image
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
@@ -49,6 +50,7 @@ class CalciumVideoWidget(FPLWidget):
         self._shown_channel = 1
         self._cellpose_data: CellposeImportResult | None = None
         self._centroids: dict[int, tuple[float, float]] = {}
+        self._id_label_graphics: list[fpl.TextGraphic] = []
         self._stim_arrays: dict[str, StimArray] = {}
         self._current_frame_index: int | None = None
         self.current_frame_index: int | None = None
@@ -74,6 +76,10 @@ class CalciumVideoWidget(FPLWidget):
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
+        self.ids_checkbox = QtWidgets.QCheckBox("Show ids", self)
+        self.ids_checkbox.setToolTip("Show each cell's neuron id on the video")
+        self.ids_checkbox.setChecked(True)
+        self.ids_checkbox.toggled.connect(self._update_id_labels)
         self.channels_spin = QtWidgets.QSpinBox(self)
         self.channels_spin.setRange(1, 8)
         self.channels_spin.setToolTip(
@@ -103,6 +109,7 @@ class CalciumVideoWidget(FPLWidget):
         actions.addWidget(QtWidgets.QLabel("Stim source:"))
         actions.addWidget(self.stim_combo)
         actions.addWidget(self.channel_controls)
+        actions.addWidget(self.ids_checkbox)
         actions.addStretch(1)
         actions.addWidget(self.save_button)
         actions.addWidget(self.remove_button)
@@ -384,7 +391,43 @@ class CalciumVideoWidget(FPLWidget):
             if cellpose_data is not None
             else {}
         )
+        self._update_id_labels()
         self._refresh_current_frame()
+
+    def _update_id_labels(self, *_args: object) -> None:
+        """Label each mapped cell with its neuron id, as in the Spatial
+        Footprints panel (issue #596)."""
+        for graphic in self._id_label_graphics:
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(graphic)
+        self._id_label_graphics = []
+        if (
+            not self.ids_checkbox.isChecked()
+            or self._frame_graphic is None
+            or self._cellpose_data is None
+            # A downsampled live preview does not line up with the cells.
+            or self._frame_graphic.data.value.shape[:2]
+            != self._cellpose_data.segmentation_array.shape
+        ):
+            return
+        for cell_id, (x, y) in self._centroids.items():
+            neuron_id = cellpose_to_stim_id(cell_id, self._cellpose_data)
+            if neuron_id is None:
+                continue
+            self._id_label_graphics.append(
+                self.subplot.add_text(
+                    str(neuron_id),
+                    font_size=14,
+                    face_color=(1.0, 1.0, 0.4, 1.0),
+                    outline_color=(0.0, 0.0, 0.0, 1.0),
+                    outline_thickness=0.3,
+                    offset=(x, y, 150.0),
+                    screen_space=True,
+                    # Beside the centre, where the stimulation cross is drawn.
+                    anchor="top-left",
+                )
+            )
+        self.figure.renderer.request_draw()
 
     def set_stim_arrays(self, stim_arrays: dict[str, StimArray]) -> None:
         current = self.stim_combo.currentText()
@@ -634,6 +677,7 @@ class CalciumVideoWidget(FPLWidget):
             self.subplot.camera.maintain_aspect = True
             self.show_images_top_down()
             self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
+            self._update_id_labels()
         else:
             self._frame_graphic.data = frame
         self._update_frame_graphic()
@@ -735,6 +779,7 @@ class CalciumVideoWidget(FPLWidget):
         super().clear_data()
         self._frame_graphic = None
         self._cross_graphic = None
+        self._id_label_graphics = []
         self.image_graphic = None
         self.cross_graphic = None
         self._stim_warning_shown = False

@@ -102,3 +102,35 @@ def test_gui_keeps_the_channel_choice_per_video(
     assert Project(archive).calcium_video_channels == (2, 1)
     gui._close_confirmed = True
     gui.close()
+
+
+def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) -> None:
+    """Issue #596: the video shows each mapped cell's neuron id."""
+    from neuroseq.importer_cellpose import CellposeImportResult
+
+    segmentation = -np.ones((4, 4), dtype=np.int32)
+    segmentation[0:2, 0:2] = 0
+    segmentation[2:4, 2:4] = 1
+    segmentation[0, 3] = 2  # not mapped to a neuron
+    cellpose = CellposeImportResult(
+        image_path=tmp_path / "cells.png",
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((4, 4, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
+        stimulus_to_cellpose_mapping={7: 0, 3: 1},
+    )
+    path = tmp_path / "movie.tif"
+    tifffile.imwrite(path, np.zeros((2, 4, 4), dtype=np.uint16))
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_cellpose_data(cellpose)
+    widget.set_video_paths([path], 10.0, warn_if_missing_cellpose=False)
+
+    labels = {g.text: tuple(g.offset[:2]) for g in widget._id_label_graphics}
+    assert labels == {"7": (0.5, 0.5), "3": (2.5, 2.5)}
+    widget.ids_checkbox.setChecked(False)
+    assert widget._id_label_graphics == []
+    widget.ids_checkbox.setChecked(True)
+    assert len(widget._id_label_graphics) == 2
