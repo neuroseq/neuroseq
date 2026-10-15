@@ -1085,11 +1085,17 @@ def test_switching_project_ignores_the_previous_projects_data_names(
     previous project's simulation monitors, which this project lacks."""
     gui = Gui()
     qtbot.addWidget(gui)
+    # As while update_project() runs: the selectors are not refilled yet,
+    # and their own change handlers have not run.
     for combo in (gui.cmb_trace, gui.cmb_spike, gui.cmb_synapse):
+        combo.blockSignals(True)
         combo.addItem("Simulation :: P")
         combo.setCurrentText("Simulation :: P")
+        combo.blockSignals(False)
+    gui.cmb_data.blockSignals(True)
     gui.cmb_data.addItem("Simulation :: P [spike]")
     gui.cmb_data.setCurrentText("Simulation :: P [spike]")
+    gui.cmb_data.blockSignals(False)
     gui._last_sim_timeline_secs = None
 
     gui._rewindow_simulation_views()  # raised KeyError: 'Simulation :: P'

@@ -147,9 +147,11 @@ def with_wait_cursor(func: Callable) -> Callable:
     @functools.wraps(func)
     def with_wait_cursor_wrapper(*args: Any, **kwargs: Any):
         QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        return_value = func(*args, **kwargs)
-        QtWidgets.QApplication.restoreOverrideCursor()
-        return return_value
+        try:
+            return func(*args, **kwargs)
+        finally:
+            # Also after an error, or the wait cursor stays for good.
+            QtWidgets.QApplication.restoreOverrideCursor()
 
     return with_wait_cursor_wrapper
 
