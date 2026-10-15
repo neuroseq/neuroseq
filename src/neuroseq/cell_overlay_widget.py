@@ -6,6 +6,7 @@ import math
 from collections.abc import Callable
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import Any
 from typing import Protocol
 from typing import TypedDict
 
@@ -16,12 +17,11 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from scipy import ndimage
 
-from neuroseq.aoi_shapes import circle_world_handles
-from neuroseq.aoi_shapes import circle_world_polyline
-from neuroseq.aoi_shapes import square_user_corners
-from neuroseq.aoi_shapes import square_world_corners
-from neuroseq.aoi_shapes import square_world_polyline
-from neuroseq.aoi_shapes import world_to_user_point
+from neuroseq.aoi_shapes import circle_handles
+from neuroseq.aoi_shapes import circle_polyline
+from neuroseq.aoi_shapes import square_corner_points
+from neuroseq.aoi_shapes import square_corners
+from neuroseq.aoi_shapes import square_polyline
 from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.importer_cellpose import AOIRole
 from neuroseq.importer_cellpose import AreasOfInterestConfig
@@ -55,6 +55,7 @@ class TextGraphic(Protocol):
     outline_color: Color
     outline_thickness: float
     visible: bool
+    world_object: Any  # the pygfx object; its local transform is used
 
 
 class VisibleGraphic(Protocol):
@@ -151,6 +152,14 @@ def stim_id_to_cellpose_id(
     return mapping.get(stim_id)
 
 
+def _pixel_at(world_x: float, world_y: float) -> tuple[int, int]:
+    """Return the (column, row) of the image pixel under a world position.
+
+    Pixel centres sit at integer world coordinates, so round to the nearest.
+    """
+    return int(np.floor(world_x + 0.5)), int(np.floor(world_y + 0.5))
+
+
 def compute_cell_centroids(
     segmentation: np.ndarray,
 ) -> dict[int, tuple[float, float]]:
@@ -186,6 +195,9 @@ class OverlayView(FullScreenFPLWidget):
         self._label_centers: dict[int, tuple[float, float]] = {}
         self._label_graphics: dict[int, LabelGraphics] = {}
         self._label_segmentation_id: int | None = None
+        self._target_cellpose_ids: frozenset[int] = frozenset()
+        self._show_targets = False
+        self._target_cross_graphic: ScatterGraphic | None = None
         self._segmentation_shape: tuple[int, int] | None = None
         self.base_camera_state: CameraState | None = None
         self.zoom_factor = 1
@@ -261,6 +273,7 @@ class OverlayView(FullScreenFPLWidget):
         self.subplot.grids = False
         self.subplot.toolbar = False
         self.subplot.camera.maintain_aspect = True
+        self.show_images_top_down()
 
     def add_overlay_data(
         self,
@@ -392,6 +405,58 @@ class OverlayView(FullScreenFPLWidget):
         self._lasso_line = None
         self._clear_label_graphics()
         self._clear_aoi_graphics()
+        # Same reasoning as _lasso_line above: subplot.clear() already
+        # dropped it from the render tree.
+        self._target_cross_graphic = None
+
+    def set_target_overlay(
+        self,
+        cellpose_ids: Iterable[int] | None,
+        *,
+        show: bool,
+    ) -> None:
+        """Mark each given cellpose id with a red "x" cross at its label
+        center, the same visual idiom CalciumVideoWidget already uses for
+        currently-stimulated cells - see its _set_crosses()."""
+        self._target_cellpose_ids = frozenset(cellpose_ids or ())
+        self._show_targets = show
+        positions = [
+            self._label_centers[cell_id]
+            for cell_id in self._target_cellpose_ids
+            if cell_id in self._label_centers
+        ]
+        if not show or not positions:
+            if self._target_cross_graphic is not None:
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(self._target_cross_graphic)
+                self._target_cross_graphic = None
+            return
+        data = np.column_stack(
+            (
+                np.asarray(positions, dtype=np.float32),
+                np.full(len(positions), 210.0, dtype=np.float32),
+            )
+        )
+        if self._target_cross_graphic is not None:
+            cross_data = self._target_cross_graphic.data
+            cross_data_value = getattr(cross_data, "value", cross_data)
+            cross_count = np.asarray(cross_data_value).shape[0]
+            if cross_count != len(data):
+                with contextlib.suppress(Exception):
+                    self.subplot.remove_graphic(self._target_cross_graphic)
+                self._target_cross_graphic = None
+        if self._target_cross_graphic is None:
+            self._target_cross_graphic = self.subplot.add_scatter(
+                data,
+                colors=(1.0, 0.0, 0.0, 1.0),
+                sizes=16,
+                size_space="screen",
+                markers="x",
+                edge_width=1.0,
+            )
+        else:
+            self._target_cross_graphic.data = data
+            self._target_cross_graphic.visible = True
 
     def set_aoi_shapes(
         self,
@@ -405,9 +470,8 @@ class OverlayView(FullScreenFPLWidget):
             self.figure.renderer.request_draw()
             return
 
-        image_height = self.overlay_image.shape[0]
-        self._update_square_graphics(self._aoi_config.square, image_height)
-        self._update_circle_graphics(self._aoi_config.circle, image_height)
+        self._update_square_graphics(self._aoi_config.square)
+        self._update_circle_graphics(self._aoi_config.circle)
         self.figure.renderer.request_draw()
 
     def _clear_aoi_graphics(self) -> None:
@@ -442,21 +506,21 @@ class OverlayView(FullScreenFPLWidget):
             return (0.95, 0.3, 0.3, 0.9)
         return (0.3, 0.85, 0.3, 0.9)
 
-    def _update_square_graphics(self, square: SquareAOI, image_height: int) -> None:
+    def _update_square_graphics(self, square: SquareAOI) -> None:
         if self._square_line is None:
             self._square_line = self.subplot.add_line(
-                square_world_polyline(square, image_height),
+                square_polyline(square),
                 colors=self._shape_color(square.role),
                 thickness=2.0,
                 size_space="model",
             )
         else:
-            self._square_line.data = square_world_polyline(square, image_height)
+            self._square_line.data = square_polyline(square)
             self._square_line.colors = self._shape_color(square.role)
             self._square_line.thickness = 2.0
         self._square_line.visible = square.enabled
 
-        corner_points = square_world_corners(square, image_height)
+        corner_points = square_corner_points(square)
         while len(self._square_handles) < 4:
             handle = self.subplot.add_scatter(
                 np.asarray([[0.0, 0.0, 220.0]], dtype=np.float32),
@@ -472,21 +536,21 @@ class OverlayView(FullScreenFPLWidget):
             handle.colors = self._shape_color(square.role)
             handle.visible = square.enabled
 
-    def _update_circle_graphics(self, circle: CircleAOI, image_height: int) -> None:
+    def _update_circle_graphics(self, circle: CircleAOI) -> None:
         if self._circle_line is None:
             self._circle_line = self.subplot.add_line(
-                circle_world_polyline(circle, image_height),
+                circle_polyline(circle),
                 colors=self._shape_color(circle.role),
                 thickness=2.0,
                 size_space="model",
             )
         else:
-            self._circle_line.data = circle_world_polyline(circle, image_height)
+            self._circle_line.data = circle_polyline(circle)
             self._circle_line.colors = self._shape_color(circle.role)
             self._circle_line.thickness = 2.0
         self._circle_line.visible = circle.enabled
 
-        handle_points = circle_world_handles(circle, image_height)
+        handle_points = circle_handles(circle)
         while len(self._circle_handles) < 4:
             handle = self.subplot.add_scatter(
                 np.asarray([[0.0, 0.0, 220.0]], dtype=np.float32),
@@ -568,6 +632,10 @@ class OverlayView(FullScreenFPLWidget):
             ]
             for graphic in all_graphics:
                 graphic.visible = False
+            for text in (cellpose, stim, stim_dash):
+                # World-space text is mirrored by the top-down camera
+                # (show_images_top_down); mirror it back so glyphs stay upright.
+                text.world_object.local.scale_y = -1
 
             self._label_graphics[cell_id] = {
                 "stim": stim,
@@ -754,9 +822,11 @@ class OverlayView(FullScreenFPLWidget):
                 stim_dash = graphics["stim_dash"]
                 stim_dash.text = "-" * max(1, len(stim_text))
                 stim_dash.font_size = stim_font_size
+                # World y points down the screen (show_images_top_down), so
+                # subtract to raise the dash.
                 stim_dash.offset = (
                     stim_offset[0],
-                    stim_offset[1] + (stim_font_size * 0.15),
+                    stim_offset[1] - (stim_font_size * 0.15),
                     stim_offset[2],
                 )
                 stim_dash.face_color = (0.0, 0.0, 0.0, 1.0)
@@ -791,7 +861,10 @@ class OverlayView(FullScreenFPLWidget):
         self.base_camera_state = {
             "width": float(width),
             "height": float(height),
-            "position": (float(width) / 2.0, float(height) / 2.0, camera_z),
+            # Pixel centres sit at integer coordinates, so the image spans
+            # -0.5 .. size - 0.5; centre on that, as auto_scale does for the
+            # Imaging tab, so both tabs frame the image identically.
+            "position": ((width - 1) / 2.0, (height - 1) / 2.0, camera_z),
             "maintain_aspect": True,
         }
         self._apply_zoom(self.zoom_factor, force=True)
@@ -1044,7 +1117,7 @@ class OverlayView(FullScreenFPLWidget):
     def _segmentation_id_at(self, world_x: float, world_y: float) -> int | None:
         if self.segmentation is None:
             return None
-        x, y = int(world_x), int(world_y)
+        x, y = _pixel_at(world_x, world_y)
         if (
             x < 0
             or y < 0
@@ -1059,27 +1132,23 @@ class OverlayView(FullScreenFPLWidget):
         if self._aoi_config is None or self.overlay_image is None:
             return None
 
-        image_height = self.overlay_image.shape[0]
         tolerance = self._world_tolerance()
-        square_corners = square_world_corners(self._aoi_config.square, image_height)
         if self._aoi_config.square.enabled:
-            for idx, point in enumerate(square_corners):
+            for idx, point in enumerate(square_corners(self._aoi_config.square)):
                 if np.hypot(world_x - point[0], world_y - point[1]) <= tolerance:
                     return ("square", f"corner_{idx}")
 
-        circle_handles = circle_world_handles(self._aoi_config.circle, image_height)
         if self._aoi_config.circle.enabled:
-            for idx, point in enumerate(circle_handles):
+            for idx, point in enumerate(circle_handles(self._aoi_config.circle)):
                 if np.hypot(world_x - point[0], world_y - point[1]) <= tolerance:
                     return ("circle", f"handle_{idx}")
 
-        user_x, user_y = world_to_user_point(world_x, world_y, image_height)
         if self._aoi_config.circle.enabled and self._point_in_circle_body(
-            self._aoi_config.circle, user_x, user_y
+            self._aoi_config.circle, world_x, world_y
         ):
             return ("circle", "body")
         if self._aoi_config.square.enabled and self._point_in_square_body(
-            self._aoi_config.square, user_x, user_y
+            self._aoi_config.square, world_x, world_y
         ):
             return ("square", "body")
 
@@ -1090,18 +1159,18 @@ class OverlayView(FullScreenFPLWidget):
         camera_width = float(camera_state.get("width", 1.0))
         return max(2.0, (camera_width / max(1, self.width())) * 10.0)
 
-    def _point_in_square_body(self, square: SquareAOI, ux: float, uy: float) -> bool:
+    def _point_in_square_body(self, square: SquareAOI, x: float, y: float) -> bool:
         return (
             square.enabled
-            and square.x <= ux <= square.x + square.side
-            and square.y <= uy <= square.y + square.side
+            and square.x <= x <= square.x + square.side
+            and square.y <= y <= square.y + square.side
         )
 
-    def _point_in_circle_body(self, circle: CircleAOI, ux: float, uy: float) -> bool:
+    def _point_in_circle_body(self, circle: CircleAOI, x: float, y: float) -> bool:
         if not circle.enabled:
             return False
         radius = circle.diameter / 2.0
-        return (ux - circle.cx) ** 2 + (uy - circle.cy) ** 2 <= radius * radius
+        return (x - circle.cx) ** 2 + (y - circle.cy) ** 2 <= radius * radius
 
     def _apply_drag(self, world_x: float, world_y: float) -> None:
         if (
@@ -1112,18 +1181,16 @@ class OverlayView(FullScreenFPLWidget):
             return
 
         original = self._drag_state.original_config
-        delta_world_x = world_x - self._drag_state.anchor_world[0]
-        delta_world_y = world_y - self._drag_state.anchor_world[1]
-        delta_user_x = delta_world_x
-        delta_user_y = -delta_world_y
+        delta_x = world_x - self._drag_state.anchor_world[0]
+        delta_y = world_y - self._drag_state.anchor_world[1]
         image_height, image_width = self.overlay_image.shape[:2]
 
         if self._drag_state.shape == "square":
             updated_square = self._drag_square(
                 original.square,
                 self._drag_state.part,
-                delta_user_x,
-                delta_user_y,
+                delta_x,
+                delta_y,
                 world_x,
                 world_y,
                 image_width,
@@ -1134,8 +1201,8 @@ class OverlayView(FullScreenFPLWidget):
             updated_circle = self._drag_circle(
                 original.circle,
                 self._drag_state.part,
-                delta_user_x,
-                delta_user_y,
+                delta_x,
+                delta_y,
                 world_x,
                 world_y,
                 image_width,
@@ -1153,8 +1220,8 @@ class OverlayView(FullScreenFPLWidget):
         self,
         original: SquareAOI,
         part: str,
-        delta_user_x: float,
-        delta_user_y: float,
+        delta_x: float,
+        delta_y: float,
         world_x: float,
         world_y: float,
         image_width: int,
@@ -1162,21 +1229,17 @@ class OverlayView(FullScreenFPLWidget):
     ) -> SquareAOI:
         if part == "body":
             side = max(4.0, float(original.side))
-            x = min(
-                max(0.0, float(original.x) + delta_user_x), max(0.0, image_width - side)
-            )
+            x = min(max(0.0, float(original.x) + delta_x), max(0.0, image_width - side))
             y = min(
-                max(0.0, float(original.y) + delta_user_y),
+                max(0.0, float(original.y) + delta_y),
                 max(0.0, image_height - side),
             )
             return SquareAOI(original.enabled, original.role, x, y, side)
 
         handle_index = int(part.rsplit("_", 1)[1])
-        corners = square_user_corners(original)
-        opposite_corner = corners[(handle_index + 2) % 4]
-        handle_user = world_to_user_point(world_x, world_y, image_height)
-        dx = handle_user[0] - opposite_corner[0]
-        dy = handle_user[1] - opposite_corner[1]
+        opposite_corner = square_corners(original)[(handle_index + 2) % 4]
+        dx = world_x - opposite_corner[0]
+        dy = world_y - opposite_corner[1]
         side = max(4.0, abs(dx), abs(dy))
         sign_x = 1.0 if dx >= 0 else -1.0
         sign_y = 1.0 if dy >= 0 else -1.0
@@ -1192,8 +1255,8 @@ class OverlayView(FullScreenFPLWidget):
         self,
         original: CircleAOI,
         part: str,
-        delta_user_x: float,
-        delta_user_y: float,
+        delta_x: float,
+        delta_y: float,
         world_x: float,
         world_y: float,
         image_width: int,
@@ -1202,17 +1265,16 @@ class OverlayView(FullScreenFPLWidget):
         if part == "body":
             radius = max(2.0, float(original.diameter) / 2.0)
             cx = min(
-                max(radius, float(original.cx) + delta_user_x),
+                max(radius, float(original.cx) + delta_x),
                 max(radius, image_width - radius),
             )
             cy = min(
-                max(radius, float(original.cy) + delta_user_y),
+                max(radius, float(original.cy) + delta_y),
                 max(radius, image_height - radius),
             )
             return CircleAOI(original.enabled, original.role, cx, cy, radius * 2.0)
 
-        handle_user = world_to_user_point(world_x, world_y, image_height)
-        radius = math.dist((float(original.cx), float(original.cy)), handle_user)
+        radius = math.dist((float(original.cx), float(original.cy)), (world_x, world_y))
         radius = max(2.0, radius)
         radius = min(
             radius,
@@ -1272,8 +1334,7 @@ class OverlayView(FullScreenFPLWidget):
             self.text.visible = False
             return
 
-        x = int(mouse_pos[0])
-        y = int(mouse_pos[1])
+        x, y = _pixel_at(mouse_pos[0], mouse_pos[1])
         if (
             x < 0
             or y < 0
@@ -1540,6 +1601,14 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
         self._aoi_config = clone_aoi_config(config)
         self._show_aoi = show
         self.overlay_view.set_aoi_shapes(self._aoi_config, self._show_aoi)
+
+    def set_target_overlay(
+        self,
+        cellpose_ids: Iterable[int] | None,
+        *,
+        show: bool,
+    ) -> None:
+        self.overlay_view.set_target_overlay(cellpose_ids, show=show)
 
     def set_empty_message(self, message: str) -> None:
         self.overlay_image = None

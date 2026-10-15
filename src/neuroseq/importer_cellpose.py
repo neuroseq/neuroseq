@@ -10,7 +10,6 @@ import brian2.numpy_ as np
 from PIL import Image
 from PIL import ImageSequence
 
-from neuroseq.aoi_shapes import world_to_user_point
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.utils import neuron_indices_to_colors
@@ -144,24 +143,26 @@ def default_aoi_config(image_shape: tuple[int, int]) -> AreasOfInterestConfig:
     )
 
 
-def point_in_square(ux: float, uy: float, sq: SquareAOI) -> bool:
-    """Return whether a user-space point lies inside the square."""
-    return sq.x <= ux <= sq.x + sq.side and sq.y <= uy <= sq.y + sq.side
+def point_in_square(x: float, y: float, sq: SquareAOI) -> bool:
+    """Return whether an image-coordinate point lies inside the square."""
+    return sq.x <= x <= sq.x + sq.side and sq.y <= y <= sq.y + sq.side
 
 
-def point_in_circle(ux: float, uy: float, c: CircleAOI) -> bool:
-    """Return whether a user-space point lies inside the circle."""
+def point_in_circle(x: float, y: float, c: CircleAOI) -> bool:
+    """Return whether an image-coordinate point lies inside the circle."""
     radius = c.diameter / 2.0
-    return (ux - c.cx) ** 2 + (uy - c.cy) ** 2 <= radius * radius
+    return (x - c.cx) ** 2 + (y - c.cy) ** 2 <= radius * radius
 
 
 def generate_aoi_stimulus_mapping(
     original_ids: np.ndarray | None,
     label_centers: dict[int, tuple[float, float]],
     config: AreasOfInterestConfig,
-    image_height: int,
 ) -> dict[int, int]:
-    """Map cellpose IDs to stimulus IDs using AOI role tiers."""
+    """Map cellpose IDs to stimulus IDs using AOI role tiers.
+
+    `label_centers` are (column, row) image coordinates, like the AOIs.
+    """
     if original_ids is None:
         return {}
 
@@ -176,14 +177,9 @@ def generate_aoi_stimulus_mapping(
     neutral: list[int] = []
     exclusion: list[int] = []
 
-    for cellpose_id, world_x, world_y in cells:
-        user_x, user_y = world_to_user_point(world_x, world_y, image_height)
-        in_square = config.square.enabled and point_in_square(
-            user_x, user_y, config.square
-        )
-        in_circle = config.circle.enabled and point_in_circle(
-            user_x, user_y, config.circle
-        )
+    for cellpose_id, x, y in cells:
+        in_square = config.square.enabled and point_in_square(x, y, config.square)
+        in_circle = config.circle.enabled and point_in_circle(x, y, config.circle)
 
         is_exclusion = (
             config.square.enabled
@@ -371,7 +367,6 @@ class CellPoseImporter:
         self._neuron_colors: np.ndarray | None = None
         self._original_cellpose_ids: np.ndarray | None = None
         self._csv_background_zero = False
-        self._segmentation_flipped_for_image = False
 
     def load_image_file(
         self,
@@ -387,12 +382,7 @@ class CellPoseImporter:
                 else:
                     self.image_data = self._pil_to_rgb_array(pil_image)
 
-            self.image_data = np.flipud(self.image_data)
-            self.logger.info(
-                "Loaded image data: %s (flipped vertically)",
-                self.image_data.shape,
-            )
-            self._align_orientation_segmentation()
+            self.logger.info("Loaded image data: %s", self.image_data.shape)
         except Exception as exc:
             self.logger.exception("Error loading image file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
@@ -492,20 +482,9 @@ class CellPoseImporter:
                     path.suffix.lower(),
                     self.segmentation_data.shape,
                 )
-            self._align_orientation_segmentation()
         except Exception as exc:
             self.logger.exception("Error loading segmentation file")
             raise ValueError(f"Could not load {filename}: {exc}") from exc
-
-    def _align_orientation_segmentation(self) -> None:
-        # Establish the same orientation that Fiji uses.
-        if self.segmentation_data is None:
-            return
-        if self._segmentation_flipped_for_image:
-            return
-        self.segmentation_data = np.flipud(self.segmentation_data)
-        self._segmentation_flipped_for_image = True
-        self.logger.info("Flipped segmentation vertically to match image orientation.")
 
     def set_trace_data(self, trace_data: TraceData) -> None:
         self._validate_trace_data(trace_data)
@@ -666,7 +645,6 @@ class CellPoseImporter:
             if result.overlay_image is None
             else np.array(result.overlay_image, copy=True)
         )
-        self._segmentation_flipped_for_image = self.segmentation_data is not None
 
         # Attempt to reload the original image; fall back to the stored raw
         # background, then the (colored) overlay, if unavailable.

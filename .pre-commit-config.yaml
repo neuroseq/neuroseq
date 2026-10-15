@@ -49,11 +49,12 @@ repos:
             --warn-redundant-casts,
             --no-namespace-packages,
           ]
-        exclude: ^external_simulation_example/
+        # Fixture generators under tests/data run against older NeuroSeq code.
+        exclude: ^(external_simulation_example|tests/data)/
 
   - repo: https://github.com/rhysd/actionlint
     rev: v1.7.9
     hooks:
       - id: actionlint
 
-exclude: ".*/neuroseq/example_models/.*$"
+exclude: '(.*/neuroseq/example_models/.*$|^notebooks/ts_00-single_neuron\.ipynb$)'

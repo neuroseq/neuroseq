@@ -22,6 +22,7 @@ from neuroseq.exporter_syscon2 import find_slm_gap_violations
 from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
 from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
 from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
@@ -179,11 +180,13 @@ def test_export_seq_uses_fixed_laser_and_ttl_out_timeline_layout() -> None:
     ttl_out_2_pulses = [obj for obj in pulses if _timeline_index(obj) == 5]
 
     assert len(laser_pulses) == 1
-    assert len(ttl_out_1_pulses) == 1
+    # Initial acquisition-trigger pulse at tick 0 plus one pulse per laser pulse.
+    assert len(ttl_out_1_pulses) == 2
     assert len(ttl_out_2_pulses) == 0
     # TTL pulse comes from the adjusted raw segment position (tick 20 shifted by
     # one preblank window to tick 52 → 52 × 520.8125µs = 27082.25µs).
-    assert ttl_out_1_pulses[0].start_time_us == pytest.approx(27082.25)
+    assert ttl_out_1_pulses[0].start_time_us == 0  # initial trigger pulse
+    assert ttl_out_1_pulses[1].start_time_us == pytest.approx(27082.25)
 
 
 def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
@@ -236,8 +239,7 @@ def test_export_seq_creates_ten_spots_inside_each_cellpose_roi() -> None:
             if key.endswith("_CenterY")
         )
         coordinates.append((center_x, center_y))
-        row = int(segmentation.shape[0] - 1 - center_y)
-        assert segmentation[row, int(center_x)] == 0
+        assert segmentation[int(center_y), int(center_x)] == 0
     assert len(set(coordinates)) == 10
 
 
@@ -251,8 +253,7 @@ def test_edge_balanced_spots_keep_clear_of_roi_border() -> None:
     )[0]
 
     def edge_clearance(point: tuple[float, float]) -> float:
-        x, flipped_y = point
-        y = segmentation.shape[0] - 1 - flipped_y
+        x, y = point
         return min(x - 2, 21 - x, y - 2, 21 - y)
 
     assert min(map(edge_clearance, legacy)) == 0
@@ -352,7 +353,49 @@ def test_export_seq_routes_ttl_pulses_to_selected_1030_laser_timeline() -> None:
     assert len(laser_pulses) == 1
     assert len(lower_laser_timeline) == 0
     assert len(other_laser_timeline) == 0
-    assert len(ttl_out_1_pulses) == 1
+    assert len(ttl_out_1_pulses) == 2
+
+
+def test_export_seq_starts_with_ttl_out_1_trigger_pulse() -> None:
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1.0
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=_DT_S
+    )
+
+    seq_text, report = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+    )
+
+    sequence = parse_syscon2_seq_text(seq_text)
+    ttl_out_1 = sorted(
+        (
+            obj
+            for obj in sequence.objects
+            if obj.object_type == "TTLPulse"
+            and _timeline_index(obj) == report.ttl_out1_timeline_index
+        ),
+        key=lambda obj: obj.start_time_us,
+    )
+    start_pulse, first_pulse = ttl_out_1[0], ttl_out_1[1]
+    assert start_pulse.start_time_us == 0
+    assert (start_pulse.repeats + 1) * _TTL_QUANTUM_US >= 9_000
+    # The trigger pulse ends before the next TTL Out 1 pulse begins.
+    assert (
+        start_pulse.start_time_us + (start_pulse.repeats + 1) * _TTL_QUANTUM_US
+        <= first_pulse.start_time_us
+    )
+    # An exported file is recognised as a Holo4D layout when re-imported.
+    from neuroseq.importer_syscon2 import _looks_like_holo4d_timeline_layout
+
+    assert _looks_like_holo4d_timeline_layout(sequence, tick_resolution_us=500)
 
 
 def test_export_seq_requires_syscon2_tick_rate() -> None:
@@ -611,12 +654,14 @@ def test_export_seq_spiralling_shifts_laser_pulse_one_tick_earlier() -> None:
         for obj in seq_on.objects
         if obj.object_type == "TTLPulse"
         and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+        and obj.start_time_us > 0  # skip the initial trigger pulse
     ]
     ttl_out_1_off = [
         obj
         for obj in seq_off.objects
         if obj.object_type == "TTLPulse"
         and _timeline_index(obj) == report_on.ttl_out1_timeline_index
+        and obj.start_time_us > 0  # skip the initial trigger pulse
     ]
     assert len(ttl_out_1_on) == 1
     assert len(ttl_out_1_off) == 1
@@ -847,8 +892,8 @@ def test_export_seq_writes_lut_inverted_intensity_when_power_requested() -> None
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "50"
-    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "50"
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "0.5"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "0.5"
     assert report.power_saturation_warnings == []
     assert report.target_power_mw == 25.0
     assert report.power_lut_description == ""
@@ -886,8 +931,8 @@ def test_export_seq_clamps_and_warns_when_target_power_exceeds_lut_max() -> None
         and _timeline_index(obj) == report.laser_timeline_index
     ]
 
-    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "100"
-    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "100"
+    assert shapes[0].properties["TimelineInfo0_Intensity_0"] == "1"
+    assert laser_pulses[0].properties["TimelineInfo0_Intensity_0"] == "1"
     assert len(report.power_saturation_warnings) >= 1
     assert any("LUT max" in warning for warning in report.power_saturation_warnings)
 
@@ -921,10 +966,10 @@ def test_export_seq_uses_window_intensity_as_multiplier_when_non_binary() -> Non
     laser_pulses = [obj for obj in sequence.objects if obj.object_type == "TTLPulse"]
 
     assert float(shapes[0].properties["TimelineInfo0_Intensity_0"]) == pytest.approx(
-        40.0
+        0.4
     )
     assert any(
-        float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(40.0)
+        float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(0.4)
         for pulse in laser_pulses
         if "TimelineInfo0_Intensity_0" in pulse.properties
     )
@@ -960,9 +1005,9 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
     assert report.exported_segments == 1
     assert report.skipped_segments_unmapped == 1
     assert report.entity_lanes == 1
-    assert report.generated_objects == 3
+    assert report.generated_objects == 4
     assert len(entities) == 1
-    assert len(pulses) == 2
+    assert len(pulses) == 3
 
     assert _timeline_index(entities[0]) == 0
 
@@ -1195,6 +1240,76 @@ def test_find_initial_slm_load_violation_detects_too_early_first_stimulus() -> N
     assert violation is not None
     assert violation.first_active_idx == 0
     assert violation.required_start_idx == 32
+
+
+def test_resample_stim_values_to_dt_downsamples_via_nearest_neighbor() -> None:
+    # old_dt=0.001s, new_dt=0.002s (exactly double): each new tick lands exactly on an
+    # even-indexed old sample (0*0.001, 2*0.001, 4*0.001, ...), so the expected mapping is
+    # unambiguous -- no rounding-parity edge cases to worry about.
+    values = np.zeros((10, 1), dtype=np.float32)
+    values[2:6, 0] = 1.0  # active at old indices 2, 3, 4, 5
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=0.001
+    )
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.002)
+
+    assert n_new == 5
+    assert new_values.shape == (5, 1)
+    # new sample i maps to old index 2*i -> old[0,2,4,6,8] -> [0, 1, 1, 0, 0]
+    assert list(new_values[:, 0]) == [0.0, 1.0, 1.0, 0.0, 0.0]
+
+
+def test_resample_stim_values_to_dt_preserves_total_duration_when_upsampling() -> None:
+    values = np.zeros((5, 1), dtype=np.float32)
+    values[2, 0] = 1.0
+    stim_array = StimArray(
+        name="stim", stim_type=StimType.Excitation, values=values, units="1", dt=0.002
+    )
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.001)
+
+    # duration = 5 * 0.002s = 0.01s -> round(0.01 / 0.001) = 10 new samples
+    assert n_new == 10
+    assert new_values.shape == (10, 1)
+    # the original pulse at old index 2 (t=0.004s) should still be "on" somewhere near
+    # the corresponding new index (t=0.004s / 0.001s = 4).
+    assert new_values[4, 0] == 1.0
+
+
+def test_resample_stim_values_to_dt_rejects_non_2d_input() -> None:
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.zeros((10, 1), dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    stim_array.values = np.zeros(
+        10, dtype=np.float32
+    )  # set after construction: 1D, invalid
+
+    with pytest.raises(ValueError, match="2D"):
+        resample_stim_values_to_dt(stim_array, new_dt=0.002)
+
+
+def test_resample_stim_values_to_dt_handles_zero_timepoints() -> None:
+    """Regression: n_old=0 used to force n_new=max(1, round(0/new_dt))=1, then
+    index the empty array with np.clip(idx, 0, -1) -> IndexError, before the
+    caller's own "invalid input" sanity check ever got a chance to run."""
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=np.zeros((10, 2), dtype=np.float32),
+        units="1",
+        dt=0.001,
+    )
+    stim_array.values = np.zeros((0, 2), dtype=np.float32)  # set after construction
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.002)
+
+    assert n_new == 0
+    assert new_values.shape == (0, 2)
 
 
 def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None:
@@ -1839,17 +1954,10 @@ def test_check_syscon2_input_sanity_computes_pulse_overrun_fix_values(
 
 
 def test_compute_cell_centroids_uses_top_left_origin() -> None:
-    """SysCon ``.seq`` uses top-left origin; the cellpose importer applies
-    ``np.flipud`` on load (Fiji convention), so the exporter must undo that
-    flip when producing centroids — otherwise SysCon renders cells mirrored
-    along the Y axis. See ``_compute_cell_centroids`` docstring."""
-    # 4×3 image, single cell occupying the *top-left* corner of the original
-    # (pre-flipud) image — i.e. row 0, cols 0-1. After importer_cellpose
-    # applies np.flipud, the cell sits at the *bottom-left* of the stored
-    # segmentation. The exporter must report its centroid using the original
-    # top-left frame: x ≈ 0.5, y = 0.
+    """SysCon ``.seq`` uses a top-left origin, like the stored segmentation
+    (#601): a cell in the top row has y = 0."""
     segmentation = np.full((4, 3), -1, dtype=np.int32)
-    segmentation[3, 0:2] = 0  # post-flipud position of the top-row cell
+    segmentation[0, 0:2] = 0
 
     centroids = _compute_cell_centroids(segmentation)
 
@@ -1860,11 +1968,9 @@ def test_compute_cell_centroids_uses_top_left_origin() -> None:
 
 
 def test_compute_cell_centroids_bottom_cell_maps_to_high_y() -> None:
-    """The mirror case: a cell at the bottom of the original image (row H-1)
-    has been ``flipud``-mapped to row 0 of the stored array. The exporter
-    must report y = H - 1 for it."""
+    """A cell in the bottom row (H - 1) has y = H - 1."""
     segmentation = np.full((4, 3), -1, dtype=np.int32)
-    segmentation[0, 0:2] = 0  # post-flipud position of the bottom-row cell
+    segmentation[3, 0:2] = 0
 
     centroids = _compute_cell_centroids(segmentation)
 
@@ -1882,3 +1988,214 @@ def test_compute_cell_centroids_x_axis_is_unchanged() -> None:
 
     x, _ = centroids[0]
     assert x == pytest.approx(4.5)
+
+
+def test_roundtrip_revisiting_point_target_preserves_neuron_channel():
+    values = np.zeros((256, 2), dtype=np.float32)
+    values[33:36, 0] = 1
+    values[129:132, 1] = 1
+    values[225:228, 0] = 1
+    stim = StimArray("repeat", StimType.Excitation, values, "1", _DT_S)
+    text, _ = generate_syscon2_sequence_text(
+        stim,
+        _cellpose_result_many(n_neurons=2, mapping={0: 0, 1: 1}),
+        template_text=_template_header(),
+        spiralling=False,
+    )
+    imported, report = sequence_to_stim_values(
+        parse_syscon2_seq_text(text),
+        dt_seconds=_DT_S,
+        n_neurons=2,
+    )
+    assert report.dropped_objects == 0
+    assert report.merged_objects >= 1
+    np.testing.assert_array_equal(imported, values[: imported.shape[0]])
+
+
+@pytest.mark.parametrize("wavelength", [940, 1030, 1100])
+def test_lut_export_writes_normalized_power_fraction(wavelength):
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[33:36, 0] = 1
+    stim = StimArray("power", StimType.Excitation, values, "1", _DT_S)
+    text, _ = generate_syscon2_sequence_text(
+        stim,
+        _cellpose_result(mapping={0: 0}),
+        template_text=_template_header(),
+        target_power_mw=5,
+        power_lut=_linear_power_lut(85),
+        active_laser_wavelength_nm=wavelength,
+        spiralling=False,
+    )
+    objects = parse_syscon2_seq_text(text).objects
+    intensities = [
+        float(obj.properties["TimelineInfo0_Intensity_0"])
+        for obj in objects
+        if "TimelineInfo0_Intensity_0" in obj.properties
+    ]
+    nonzero = [value for value in intensities if value > 0]
+    assert len(nonzero) >= 2  # both Shape and laser TTL
+    assert all(value * 85 == pytest.approx(5, abs=0.0001) for value in nonzero)
+
+
+def test_multi_spot_roundtrip_keeps_rows_and_timings() -> None:
+    n_neurons = 6
+    values = np.zeros((300, n_neurons), dtype=np.float32)
+    starts = {1: [100, 107, 114], 4: [100, 107, 114], 5: [200, 207]}
+    for neuron, burst_starts in starts.items():
+        for start_idx in burst_starts:
+            values[start_idx : start_idx + 2, neuron] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    # Each ROI is a 3x3 block so that several spots per ROI can be placed.
+    segmentation = np.full((3, n_neurons * 10), -1, dtype=np.int32)
+    for neuron in range(n_neurons):
+        segmentation[:, neuron * 10 : neuron * 10 + 3] = neuron
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy_spots.png"),
+        segmentation_array=segmentation,
+        overlay_image=np.zeros((3, n_neurons * 10, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(n_neurons, dtype=np.int32),
+        stimulus_to_cellpose_mapping=None,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        cellpose,
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        stimulation_spots_per_roi=3,
+    )
+    sequence = parse_syscon2_seq_text(seq_text)
+    assert len([o for o in sequence.objects if o.object_type == "Shape"]) > 3
+    imported, _ = sequence_to_stim_values(
+        sequence,
+        dt_seconds=_DT_S,
+        n_neurons=n_neurons,
+        tick_resolution_us=500,
+    )
+    assert imported.shape[1] == n_neurons
+    assert np.flatnonzero(imported.any(axis=0)).tolist() == [1, 4, 5]
+    for neuron in (1, 4, 5):
+        got = imported[:, neuron] > 0
+        assert (
+            np.flatnonzero(got).tolist() == np.flatnonzero(values[:, neuron]).tolist()
+        )
+
+
+def _export_and_reimport(values: np.ndarray, *, exact: bool) -> np.ndarray:
+    n_neurons = values.shape[1]
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result_many(n_neurons=n_neurons),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        exact_slm_timing=exact,
+    )
+    imported, _ = sequence_to_stim_values(
+        parse_syscon2_seq_text(seq_text),
+        dt_seconds=_DT_S,
+        n_neurons=n_neurons,
+        tick_resolution_us=500,
+    )
+    return imported
+
+
+def _starts(column: np.ndarray) -> list[int]:
+    return np.flatnonzero(np.diff((column > 0).astype(int), prepend=0) == 1).tolist()
+
+
+def test_exact_slm_timing_keeps_timings_when_gaps_leave_room() -> None:
+    values = np.zeros((900, 4), dtype=np.float32)
+    values[100:292, 0] = 1.0
+    values[330:522, 1] = 1.0
+    values[600:792, 2] = 1.0
+    imported = _export_and_reimport(values, exact=True)
+    for neuron in range(3):
+        assert _starts(imported[:, neuron]) == _starts(values[:, neuron])
+        assert imported[:, neuron].sum() == values[:, neuron].sum()
+
+
+def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None:
+    values = np.zeros((1200, 3), dtype=np.float32)
+    values[0:192, 0] = 1.0  # needs the initial load window: delayed by 32
+    values[200:392, 1] = 1.0  # 8-tick gap: needs a delay, but less than a window
+    values[900:1092, 2] = 1.0
+    imported = _export_and_reimport(values, exact=True)
+    assert _starts(imported[:, 0]) == [32]
+    delay_1 = _starts(imported[:, 1])[0] - 200
+    assert 0 < delay_1 < 32 * 2 + 1
+    assert _starts(imported[:, 2]) == [900]
+
+
+def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
+    from neuroseq.importer_syscon2 import original_stim_sidecar_path
+    from neuroseq.importer_syscon2 import parse_syscon2_seq_file
+    from neuroseq.importer_syscon2 import write_original_stim_sidecar
+
+    n_neurons = 5
+    values = np.zeros((900, n_neurons), dtype=np.float32)
+    values[0:193, 0] = 1.0  # needs delays on export
+    values[227:419, 1] = 0.5
+    values[454:646, 3] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+    seq_text, _ = generate_syscon2_sequence_text(
+        stim_array,
+        _cellpose_result_many(n_neurons=n_neurons),
+        template_text=_template_header(),
+        tick_resolution_us=500,
+        active_threshold=0.0,
+        binary_intensity=1.0,
+        active_laser_wavelength_nm=1100,
+        spiralling=False,
+        exact_slm_timing=True,
+    )
+    seq_path = tmp_path / "script.seq"
+    seq_path.write_text(seq_text, encoding="utf-8")
+
+    plain = parse_syscon2_seq_file(seq_path)
+    assert plain.original_values is None
+    drifted, _ = sequence_to_stim_values(
+        plain, dt_seconds=_DT_S, n_neurons=n_neurons, tick_resolution_us=500
+    )
+    assert _starts(drifted[:, 1]) != [227]
+
+    write_original_stim_sidecar(
+        original_stim_sidecar_path(seq_path), values, _DT_S, seq_text
+    )
+    restored_seq = parse_syscon2_seq_file(seq_path)
+    restored, result = sequence_to_stim_values(
+        restored_seq, dt_seconds=_DT_S, n_neurons=n_neurons, tick_resolution_us=500
+    )
+    assert np.array_equal(restored, values)
+    assert result.grouped_objects == n_neurons
+
+    # A sidecar that does not belong to the file is ignored.
+    seq_path.write_text(seq_text + "\n", encoding="utf-8")
+    assert parse_syscon2_seq_file(seq_path).original_values is None

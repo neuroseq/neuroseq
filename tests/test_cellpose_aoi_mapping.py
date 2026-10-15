@@ -9,7 +9,6 @@ from PIL import Image
 from pytestqt.qtbot import QtBot
 
 from neuroseq import io
-from neuroseq.aoi_shapes import user_to_world_point
 from neuroseq.cellpose_import_dialog import AOI_PERCENT_MODE
 from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
@@ -32,12 +31,6 @@ def _save_and_reload_json(data: dict, tmp_path: Path) -> dict:
         io.append_to_zip(data, "data", zf)
     with zipfile.ZipFile(tmp_file, "r", zipfile.ZIP_DEFLATED) as zf:
         return io.load_from_zip("data", zf)
-
-
-def _world_center(
-    user_x: float, user_y: float, image_height: int
-) -> tuple[float, float]:
-    return user_to_world_point(user_x, user_y, image_height)
 
 
 def _make_dialog(tmp_path: Path, qtbot: QtBot) -> CellposeImportDialog:
@@ -99,18 +92,16 @@ def test_aoi_mapping_preferential_only() -> None:
         square=SquareAOI(True, AOIRole.PREFERENTIAL, x=0, y=0, side=50),
         circle=CircleAOI(False, AOIRole.EXCLUSION, cx=0, cy=0, diameter=10),
     )
-    image_height = 100
     label_centers = {
-        1: _world_center(10, 10, image_height),
-        2: _world_center(60, 60, image_height),
-        3: _world_center(40, 40, image_height),
-        4: _world_center(90, 90, image_height),
+        1: (10.0, 10.0),
+        2: (60.0, 60.0),
+        3: (40.0, 40.0),
+        4: (90.0, 90.0),
     }
     mapping = generate_aoi_stimulus_mapping(
         np.array([1, 2, 3, 4], dtype=np.int32),
         label_centers,
         config,
-        image_height,
     )
     assert mapping == {0: 1, 1: 3, 2: 2, 3: 4}
 
@@ -120,18 +111,16 @@ def test_aoi_mapping_exclusion_only() -> None:
         square=SquareAOI(False, AOIRole.PREFERENTIAL, x=0, y=0, side=10),
         circle=CircleAOI(True, AOIRole.EXCLUSION, cx=50, cy=50, diameter=30),
     )
-    image_height = 100
     label_centers = {
-        1: _world_center(45, 50, image_height),
-        2: _world_center(55, 50, image_height),
-        3: _world_center(10, 10, image_height),
-        4: _world_center(90, 90, image_height),
+        1: (45.0, 50.0),
+        2: (55.0, 50.0),
+        3: (10.0, 10.0),
+        4: (90.0, 90.0),
     }
     mapping = generate_aoi_stimulus_mapping(
         np.array([1, 2, 3, 4], dtype=np.int32),
         label_centers,
         config,
-        image_height,
     )
     assert mapping == {0: 3, 1: 4, 2: 1, 3: 2}
 
@@ -141,16 +130,14 @@ def test_aoi_mapping_overlap_exclusion_wins() -> None:
         square=SquareAOI(True, AOIRole.PREFERENTIAL, x=20, y=20, side=40),
         circle=CircleAOI(True, AOIRole.EXCLUSION, cx=50, cy=50, diameter=20),
     )
-    image_height = 100
     label_centers = {
-        1: _world_center(25, 25, image_height),
-        2: _world_center(50, 50, image_height),
+        1: (25.0, 25.0),
+        2: (50.0, 50.0),
     }
     mapping = generate_aoi_stimulus_mapping(
         np.array([1, 2], dtype=np.int32),
         label_centers,
         config,
-        image_height,
     )
     assert mapping == {0: 1, 1: 2}
 
@@ -160,16 +147,14 @@ def test_aoi_mapping_disabled_shape_ignored() -> None:
         square=SquareAOI(True, AOIRole.PREFERENTIAL, x=0, y=0, side=40),
         circle=CircleAOI(False, AOIRole.EXCLUSION, cx=70, cy=70, diameter=20),
     )
-    image_height = 100
     label_centers = {
-        1: _world_center(10, 10, image_height),
-        2: _world_center(70, 70, image_height),
+        1: (10.0, 10.0),
+        2: (70.0, 70.0),
     }
     mapping = generate_aoi_stimulus_mapping(
         np.array([1, 2], dtype=np.int32),
         label_centers,
         config,
-        image_height,
     )
     assert mapping == {0: 1, 1: 2}
 
@@ -179,17 +164,15 @@ def test_aoi_mapping_sorted_by_cellpose_id_within_tier() -> None:
         square=SquareAOI(True, AOIRole.PREFERENTIAL, x=0, y=0, side=40),
         circle=CircleAOI(False, AOIRole.EXCLUSION, cx=0, cy=0, diameter=10),
     )
-    image_height = 100
     label_centers = {
-        5: _world_center(10, 10, image_height),
-        2: _world_center(20, 20, image_height),
-        8: _world_center(30, 30, image_height),
+        5: (10.0, 10.0),
+        2: (20.0, 20.0),
+        8: (30.0, 30.0),
     }
     mapping = generate_aoi_stimulus_mapping(
         np.array([5, 2, 8], dtype=np.int32),
         label_centers,
         config,
-        image_height,
     )
     assert mapping == {0: 2, 1: 5, 2: 8}
 

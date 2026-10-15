@@ -19,6 +19,7 @@ from neuroseq.importer_igor2 import create_trace_data_from_igor_wave
 from neuroseq.importer_igor2 import import_igor_wave_into_stim_array
 from neuroseq.importer_igor2 import import_igor_wave_into_trace_data
 from neuroseq.importer_igor2 import is_pxp_file
+from neuroseq.importer_igor2 import load_csv_trace_table
 from neuroseq.importer_igor2 import load_igor_csv_file
 from neuroseq.importer_igor2 import load_igor_ibw_file
 from neuroseq.importer_igor2 import load_igor_pxp_file
@@ -72,6 +73,54 @@ def test_load_igor_csv_file_parses_simple_wave(tmp_path: Path) -> None:
     assert wave.source_dt is None
     assert wave.units is None
     np.testing.assert_allclose(wave.values, np.array([1.0, 2.5, -3.0]))
+
+
+@pytest.mark.parametrize("delimiter", [",", " ", "   ", "\t"])
+@pytest.mark.parametrize("header", ["", "cell_a,cell_b\n"])
+def test_csv_trace_table_columns(tmp_path: Path, header: str, delimiter: str) -> None:
+    path = tmp_path / "recording.csv"
+    path.write_text(
+        (header + "1,10\n2,20\n3,30\n").replace(",", delimiter), encoding="utf-8"
+    )
+    waves = load_csv_trace_table(path)
+    assert [wave.name for wave in waves] == (
+        ["cell_a", "cell_b"] if header else ["recording_1", "recording_2"]
+    )
+    np.testing.assert_array_equal(waves[0].values, [1, 2, 3])
+    np.testing.assert_array_equal(waves[1].values, [10, 20, 30])
+
+
+@pytest.mark.parametrize("padding", ["", "             ", "\t\t", " \t "])
+def test_csv_trace_table_space_separated_voltage_samples(
+    tmp_path: Path, padding: str
+) -> None:
+    path = tmp_path / "voltage.csv"
+    samples = "-65.737501 -66.487499 -66.343747 -66.837497 -66.725001 -68.60625 -69.231249 -68.850003 -67.225002 -68.000004 -69.212496 -67.924999 -68.081252"
+    path.write_text(samples + padding + "\n" + samples + "\n", encoding="utf-8")
+    waves = load_csv_trace_table(path)
+    assert len(waves) == 13
+    for wave, sample in zip(waves, samples.split(), strict=True):
+        np.testing.assert_allclose(wave.values, [float(sample), float(sample)])
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [
+        "",
+        "a,b\n",
+        "a,a\n1,2\n",
+        "a,\n1,2\n",
+        "a,b\n1\n",
+        "a,b\n1,no\n",
+        "a,b\n1,nan\n",
+        "a,b\n1,inf\n",
+    ],
+)
+def test_csv_trace_table_rejects_invalid_data(tmp_path: Path, contents: str) -> None:
+    path = tmp_path / "invalid.csv"
+    path.write_text(contents, encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_csv_trace_table(path)
 
 
 def test_parse_binary_wave_accepts_two_d_and_concatenates() -> None:

@@ -7,6 +7,7 @@ from qtpy.QtWidgets import QHBoxLayout
 from qtpy.QtWidgets import QLabel
 from qtpy.QtWidgets import QPushButton
 
+from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import validate_stim_dt_seconds
@@ -75,7 +76,21 @@ class EditStimDialog(QDialog):
         self.txt_dt = QtWidgets.QLineEdit(self)
         self.txt_dt.setText(f"{self.dt}")
         self.txt_dt.textChanged.connect(self.txt_dt_text_changed)
-        self.layout.addWidget(self.txt_dt, 4, 1)
+        timestep_row = QHBoxLayout()
+        timestep_row.addWidget(self.txt_dt)
+        self.cmb_dt_presets = QtWidgets.QComboBox(self)
+        self.cmb_dt_presets.addItem("Custom timestep", None)
+        for label, seconds in (
+            ("SysCon2 — 520.8125 µs", _SYSCON2_TTL_PULSE_QUANTUM_S),
+            ("1 ms", 0.001),
+            ("0.1 ms", 0.0001),
+            ("50 µs", 0.00005),
+            ("30 Hz imaging", 1 / 30),
+        ):
+            self.cmb_dt_presets.addItem(label, seconds)
+        self.cmb_dt_presets.activated.connect(self._apply_dt_preset)
+        timestep_row.addWidget(self.cmb_dt_presets)
+        self.layout.addLayout(timestep_row, 4, 1)
 
         self.lbl_error = QLabel("")
         self.lbl_error.setStyleSheet("color: red")
@@ -93,6 +108,11 @@ class EditStimDialog(QDialog):
 
         self.txt_name_text_changed(self.name)
         self.txt_dt_text_changed(self.txt_dt.text())
+
+    def _apply_dt_preset(self, index: int) -> None:
+        seconds = self.cmb_dt_presets.itemData(index)
+        if seconds is not None:
+            self.txt_dt.setText(str(seconds))
 
     def _update_validation_state(self) -> None:
         error = self._name_error or self._dt_error
@@ -128,4 +148,6 @@ class EditStimDialog(QDialog):
             self._dt_error = ""
         except (TypeError, ValueError):
             self._dt_error = "Input timestep must be a positive finite number."
+        preset = self.cmb_dt_presets.findData(self.dt) if not self._dt_error else -1
+        self.cmb_dt_presets.setCurrentIndex(max(0, preset))
         self._update_validation_state()

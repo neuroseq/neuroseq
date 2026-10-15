@@ -75,7 +75,6 @@ def test_load_uint16_tiff_stack(tmp_path):
     expected_arrays = [importer._frame_to_rgb_float(frame) for frame in frames]
     expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
     expected_rgb = importer._scale_float_image_to_uint8(expected_float)
-    expected_rgb = np.flipud(expected_rgb)
 
     np.testing.assert_array_equal(importer.image_data, expected_rgb)
     assert len(np.unique(importer.image_data)) > 1
@@ -100,7 +99,7 @@ def test_load_segmentation_npy(tmp_path):
 
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.dtype == np.int32
-    expected = np.flipud(segmentation - 1)
+    expected = segmentation - 1
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
 
@@ -151,7 +150,6 @@ def test_load_suite2p_segmentation(tmp_path):
         [[0, 0, -1, -1], [0, 0, -1, -1], [-1, -1, 1, 1], [-1, -1, 1, 1]],
         dtype=np.int32,
     )
-    expected = np.flipud(expected)
 
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
@@ -179,7 +177,7 @@ def test_load_csv_masks_segmentation(tmp_path):
     assert importer.segmentation_data is not None
     assert importer.segmentation_data.shape == (5, 5)
     assert importer.segmentation_data.dtype == np.int32
-    expected = np.flipud(segmentation - 1)
+    expected = segmentation - 1
     np.testing.assert_array_equal(importer.segmentation_data, expected)
 
     expected_unique = np.array(
@@ -222,7 +220,7 @@ def test_cellpose_patchclamp_visual_integration(tmp_path):
     assert cellpose_result.segmentation_array.shape == (50, 50)
 
     # Verify overlay image is properly generated (should be blend of image and segmentation colors)
-    expected_segmentation = np.flipud(segmentation - 1)
+    expected_segmentation = segmentation - 1
     np.testing.assert_array_equal(
         cellpose_result.segmentation_array, expected_segmentation
     )
@@ -512,11 +510,8 @@ def test_restore_from_result_preserves_colors_without_custom_mapping(tmp_path):
 
     assert restored.overlay_image is not None
     assert restored.segmentation_data is not None
-    expected_segmentation = np.flipud(
-        segmentation - 1
-    )  # the cellpose Seg IDs build from top-left towards bottom-right
-    # creating a grid (at least in our implementation of grid drawing uses coordinates based on bottom-left to top-right)
-    # so we flip vertically, but horizontal remains the same. These tests in general need to adapt to that.
+    # Segmentations keep Cellpose's top-left orientation (#601).
+    expected_segmentation = segmentation - 1
     np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
 
     restored_legend = restored.get_legend_data()
@@ -631,7 +626,7 @@ def test_restore_from_result_preserves_custom_mapping(tmp_path):
 
     assert cloned_result.mapping_strategy == "Custom"
     assert cloned_result.stimulus_to_cellpose_mapping == custom_mapping
-    expected_segmentation = np.flipud(segmentation - 1)
+    expected_segmentation = segmentation - 1
     np.testing.assert_array_equal(restored.segmentation_data, expected_segmentation)
     # background_image is a defensive copy, not the same array object
     assert cloned_result.background_image is not original_result.background_image

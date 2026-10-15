@@ -1033,6 +1033,149 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     assert focused_ranges == [(0, 1)]
 
 
+def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> None:
+    """Regression: a fix that resamples a stim array to a new dt (SysCon2's
+    "Check Input Sanity" dialog) replaces stim_array.values with a
+    differently-shaped array while the *same* modifier stays selected, then
+    calls select_stim() to refresh. Since current_stim_modifier was already
+    that modifier, the refresh used to be skipped entirely, leaving
+    stim_widget showing a stale (now wrong-shaped) texture - the next write
+    into it crashed with a numpy broadcast error."""
+    modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((2266, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    set_data_calls: list[np.ndarray] = []
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: set_data_calls.append(stim_array.values),
+        set_background_data=lambda stim_array: None,
+        # Still showing the old, pre-resample shape.
+        data_values=np.zeros((1180, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": modifier},
+        current_stim_modifier=modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
+
+    assert len(set_data_calls) == 1
+    assert set_data_calls[0].shape == (2266, 10)
+
+
+def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> None:
+    """Regression: ReversibleAction (stim_array_modifier.py) records absolute
+    sample-index slices against the array's shape at the time of the edit.
+    After an in-place resample, the modifier's pre-resample undo stack still
+    references the OLD shape - undoing one would misapply old-shaped data
+    into the new, differently-shaped array. select_stim() must drop that
+    history, not just refresh the widget, for the same "same modifier,
+    shape changed under it" case."""
+    modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((2266, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+        action_stack=["some_pre_resample_action"],
+        current_index=0,
+    )
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+        data_values=np.zeros((1180, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": modifier},
+        current_stim_modifier=modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
+
+    assert modifier.action_stack == []
+    assert modifier.current_index == -1
+
+
+def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
+    """The undo-history clear above must be specific to the in-place-resample
+    case - an ordinary switch to a genuinely different (and differently
+    shaped) stim must leave that stim's own undo history untouched."""
+    old_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "a",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((100, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+    )
+    new_modifier = SimpleNamespace(
+        stim_array=StimArray(
+            "b",
+            neuroseq.stim.StimType.Excitation,
+            np.zeros((50, 10), dtype=np.float32),
+            "mV",
+            0.001,
+        ),
+        action_stack=["an_existing_action"],
+        current_index=0,
+    )
+    fake_stim_widget = SimpleNamespace(
+        set_data=lambda stim_array: None,
+        set_background_data=lambda stim_array: None,
+        data_values=np.zeros((100, 10), dtype=np.float32),
+    )
+    fake_editor = SimpleNamespace(
+        logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
+        stims_dict={"a": old_modifier, "b": new_modifier},
+        current_stim_modifier=old_modifier,
+        draw_stim_length=4,
+        draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
+        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_widget=fake_stim_widget,
+        controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
+        set_mode=lambda mode: None,
+        set_draw_mode=lambda mode: None,
+        _stim_values_updated=lambda: None,
+        _current_stim_dt_seconds=lambda: 0.001,
+        current_stim_changed=SimpleNamespace(emit=lambda stim_array: None),
+    )
+
+    StimEditor.select_stim(fake_editor, "b")  # type: ignore[arg-type]
+
+    assert new_modifier.action_stack == ["an_existing_action"]
+    assert new_modifier.current_index == 0
+
+
 def test_create_stim_array_defaults_to_selected_stim_dt(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
@@ -1597,3 +1740,35 @@ def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> Non
     assert stim_editor._stdp_window_dialog is None
     stim_editor.close()
     stim_editor.close()
+
+
+def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker):
+    project = Project()
+    values = np.zeros((100, 2), dtype=np.float32)
+    values[10:15, 0] = 1
+    project.add_stim_array(
+        StimArray("target", neuroseq.stim.StimType.Excitation, values, "1", 0.001)
+    )
+    combo = QtWidgets.QComboBox()
+    toolbar = QtWidgets.QToolBar()
+    editor = StimEditor(ConstrainedPanZoomController(), combo, toolbar)
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    question = mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        return_value=QtWidgets.QMessageBox.StandardButton.No,
+    )
+    assert not editor.prepare_syscon_timestep()
+    assert project.stim_arrays["target"].values is values
+    question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
+    assert editor.prepare_syscon_timestep()
+    stim = project.stim_arrays["target"]
+    assert stim.dt == 0.0005208125
+    assert project.dt == stim.dt
+    assert editor.stim_widget.data_values.shape == stim.values.shape
+    assert editor.current_stim_modifier.stim_array is stim
+    assert project.dirty
+    question.reset_mock()
+    assert editor.prepare_syscon_timestep()
+    question.assert_not_called()

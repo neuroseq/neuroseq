@@ -38,10 +38,13 @@ class IgorImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        csv_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
+        self.csv_only = csv_only
         self.loaded_wave: IgorWave | None = None
         self.file_path: str = ""
         self.selected_stim_name: str = ""
@@ -54,6 +57,8 @@ class IgorImportDialog(QtWidgets.QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Igor2 Wave")
+        if self.csv_only:
+            self.setWindowTitle("Import CSV / Text patch clamp input")
         self.setModal(True)
         self.resize(860, 700)
 
@@ -77,6 +82,12 @@ class IgorImportDialog(QtWidgets.QDialog):
             "zero-order-hold resampling when needed."
         )
         intro.setWordWrap(True)
+        if self.csv_only:
+            intro.setText(
+                "Import a CSV or text input waveform with one numeric sample per row and "
+                "an optional name/header on the first row. Set the source sampling "
+                "rate in Hz before importing. Choose the input units below."
+            )
         layout.addWidget(intro)
 
         file_group = QtWidgets.QGroupBox("File Selection")
@@ -140,7 +151,7 @@ class IgorImportDialog(QtWidgets.QDialog):
         source_group = QtWidgets.QGroupBox("Source Wave Settings")
         source_layout = QtWidgets.QFormLayout(source_group)
         self.source_dt_spin = QtWidgets.QDoubleSpinBox()
-        self.source_dt_spin.setDecimals(9)
+        self.source_dt_spin.setDecimals(12)
         self.source_dt_spin.setRange(0.000001, 3600.0)
         self.source_dt_spin.setSingleStep(0.0001)
         self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
@@ -151,6 +162,18 @@ class IgorImportDialog(QtWidgets.QDialog):
         )
         self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
         source_layout.addRow("Source sample interval:", self.source_dt_spin)
+        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        self.sampling_rate_spin.setDecimals(6)
+        self.sampling_rate_spin.setRange(0.001, 1000000.0)
+        self.sampling_rate_spin.setValue(1000.0)
+        self.sampling_rate_spin.setSuffix(" Hz")
+        self.sampling_rate_spin.valueChanged.connect(
+            lambda rate: self.source_dt_spin.setValue(1.0 / rate)
+        )
+        self.sampling_rate_label = QtWidgets.QLabel("Source sampling rate:")
+        source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
+        self.sampling_rate_label.setVisible(self.csv_only)
+        self.sampling_rate_spin.setVisible(self.csv_only)
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(
             "Adjust NeuroSeq input grid to source/file grid"
         )
@@ -251,6 +274,8 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.target_dt_label.setText(f"{target_dt:.3f} s (fixed NeuroSeq grid)")
 
     def _on_timing_settings_changed(self) -> None:
+        with QtCore.QSignalBlocker(self.sampling_rate_spin):
+            self.sampling_rate_spin.setValue(1.0 / self.source_dt_spin.value())
         self._update_target_dt_label()
         self._update_preview()
         self._update_import_button_state()
@@ -324,9 +349,11 @@ class IgorImportDialog(QtWidgets.QDialog):
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "Select Igor wave",
+            "Select CSV or text input" if self.csv_only else "Select Igor wave",
             "",
-            "Igor files (*.ibw *.pxp *.csv);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV file (*.csv);;All files (*)",
+            "CSV / Text files (*.csv *.txt)"
+            if self.csv_only
+            else "Wave files (*.ibw *.pxp *.csv *.txt);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV / Text files (*.csv *.txt);;All files (*)",
         )
         if filename:
             self._load_file(filename)
@@ -368,6 +395,9 @@ class IgorImportDialog(QtWidgets.QDialog):
             self.new_units_edit.setText(self._auto_units)
 
         self.loaded_wave = wave
+        is_csv = wave.source_format == "csv"
+        self.sampling_rate_label.setVisible(is_csv)
+        self.sampling_rate_spin.setVisible(is_csv)
         self.file_path = filename
         self.file_label.setText(filename)
         self.file_label.setStyleSheet("QLabel { color: black; }")

@@ -20,6 +20,7 @@ from neuroseq.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.dynamic_input_blocks import run_to_sample
 from neuroseq.dynamic_input_measurement import EPSPMeasurement
 from neuroseq.dynamic_input_measurement import NoEpspDetected
+from neuroseq.dynamic_input_measurement import measure_calcium_response
 from neuroseq.dynamic_input_measurement import measure_epsp
 from neuroseq.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input_routine import SimulationHost
@@ -33,6 +34,7 @@ from neuroseq.stdp_window import classify_window
 from neuroseq.stdp_window import delta_t_sweep
 from neuroseq.stdp_window import interleave_by_magnitude
 from neuroseq.stdp_window import percent_change
+from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt
@@ -301,6 +303,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
     # visits Δt interleaved by magnitude to stay near baseline.
     RESET_MODE = "Reset to baseline each Δt (independent points)"
     CONTINUOUS_MODE = "Continuous sweep (interleaved, no reset)"
+    SIMULATION_TARGET = "Brian2 simulation"
+    SYSCON2_TARGET = "SysCon2 (calcium imaging)"
+    CALCIUM_READOUT = "Calcium response (dF/F) change (%)"
+    CALCIUM_BASELINE_MS = 100.0
 
     def __init__(
         self,
@@ -332,6 +338,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._array_cursor: RoutineArrayCursor | None = None
         self._append_start_sample = 0
         self._point_span_end_sample = 0
+        # SysCon2 target state (see RheobaseDialog): range of the block in flight and the
+        # trace used for the previous probe, to catch a forgotten re-import.
+        self._block_range = (0, 0)
+        self._last_measured_dataset: str | None = None
+        self._data_before_block: dict[str, object] = {}
+        self._host_connected = False
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -355,6 +367,9 @@ class StdpWindowDialog(_SelfRaisingDialog):
             info_row.addWidget(QtWidgets.QLabel(title, self))
             info_row.addWidget(value)
             info_row.addSpacing(8)
+        self.btn_syscon_dt = QtWidgets.QPushButton("Use SysCon2 dt", self)
+        self.btn_syscon_dt.clicked.connect(self._fix_syscon_dt)
+        info_row.addWidget(self.btn_syscon_dt)
         info_row.addStretch()
         layout.addLayout(info_row)
 
@@ -442,6 +457,15 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.spn_response_ms.setValue(50.0)
         self.spn_response_ms.setSuffix(" ms")
 
+        self.cmb_target = QtWidgets.QComboBox(self)
+        self.cmb_target.addItems([self.SIMULATION_TARGET, self.SYSCON2_TARGET])
+        self.cmb_target.setToolTip(
+            "Brian2: simulate the protocol. SysCon2: deliver each block to the cells "
+            "through SysCon2 and measure the calcium response of the postsynaptic cell "
+            "in data you import (continuous sweep only - cells cannot be reset)."
+        )
+        self.cmb_target.currentTextChanged.connect(self._update_target_controls)
+        form.addRow("Stimulation target:", self.cmb_target)
         form.addRow("Readout:", self.cmb_readout)
         form.addRow("Sweep mode:", self.cmb_sweep_mode)
         self.lbl_trace = QtWidgets.QLabel("Trace to analyze:", self)
@@ -562,6 +586,19 @@ class StdpWindowDialog(_SelfRaisingDialog):
             "Trim the input array back to the simulation head so the routine does "
             "not run a long empty tail."
         )
+        self.btn_data_imported = cast(
+            QtWidgets.QPushButton,
+            buttons.addButton(
+                "Block done / data imported",
+                QtWidgets.QDialogButtonBox.ButtonRole.ActionRole,
+            ),
+        )
+        self.btn_data_imported.setToolTip(
+            "SysCon2 target: click after you ran the sent block. For probe blocks, also "
+            "acquire, import the calcium data and select the new trace first."
+        )
+        self.btn_data_imported.setEnabled(False)
+        self.btn_data_imported.clicked.connect(self._on_data_imported_clicked)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_start.clicked.connect(self.start)
@@ -575,6 +612,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.apply_theme(self._theme)
         self.refresh()
         self._update_readout_controls()
+        self._update_target_controls()
         self._update_estimate()
 
     def _set_parameters_hidden(self, hidden: bool) -> None:
@@ -648,6 +686,12 @@ class StdpWindowDialog(_SelfRaisingDialog):
             preferred_trace = self._preferred_trace_name(trace_names, selected)
             if preferred_trace:
                 self.cmb_trace.setCurrentText(preferred_trace)
+        syscon2_available = self.editor.stimulation_host is not None
+        syscon2_item = cast(QtGui.QStandardItemModel, self.cmb_target.model()).item(1)
+        if syscon2_item is not None:
+            syscon2_item.setEnabled(syscon2_available)
+        if not syscon2_available and self._target_is_syscon2():
+            self.cmb_target.setCurrentIndex(0)
         selected_synapse = self.cmb_synapse.currentText()
         self.cmb_synapse.clear()
         if self.project is not None:
@@ -666,7 +710,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self.lbl_stim_name.setText(stim.name)
             self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
-            self.lbl_stim_dt.setText(f"{stim.dt * 1000.0:g} ms")
+            self.lbl_stim_dt.setText(f"{format_milliseconds(stim.dt * 1000.0)} ms")
             self.lbl_stim_neurons.setText(str(n_neurons))
         else:
             self.lbl_units.setText("")
@@ -683,6 +727,13 @@ class StdpWindowDialog(_SelfRaisingDialog):
     ) -> str:
         if not trace_names:
             return ""
+        if self._target_is_syscon2():
+            # Imported calcium traces: keep the user's pick, else offer the newest.
+            return (
+                previously_selected
+                if previously_selected in trace_names
+                else trace_names[-1]
+            )
         if self._is_simulation_voltage_trace(previously_selected):
             return previously_selected
         for trace_name in trace_names:
@@ -707,11 +758,38 @@ class StdpWindowDialog(_SelfRaisingDialog):
     def _readout(self) -> str:
         return self.cmb_readout.currentText()
 
+    def _target_is_syscon2(self) -> bool:
+        return self.cmb_target.currentText() == self.SYSCON2_TARGET
+
     def _weight_mode(self) -> bool:
-        return self._readout() == self.WEIGHT_READOUT
+        return not self._target_is_syscon2() and self._readout() == self.WEIGHT_READOUT
 
     def _reset_mode(self) -> bool:
-        return self.cmb_sweep_mode.currentText() == self.RESET_MODE
+        # Cells in a dish cannot be rewound to a checkpoint: SysCon2 is always continuous.
+        return (
+            not self._target_is_syscon2()
+            and self.cmb_sweep_mode.currentText() == self.RESET_MODE
+        )
+
+    def _update_target_controls(self, _text: str = "") -> None:
+        syscon2 = self._target_is_syscon2()
+        self.btn_syscon_dt.setVisible(syscon2)
+        self.btn_syscon_dt.setEnabled(not self._running)
+        self.cmb_readout.setEnabled(not syscon2)
+        self.cmb_sweep_mode.setEnabled(not syscon2)
+        self.btn_data_imported.setVisible(syscon2)
+        if syscon2:
+            self._connect_host()
+        self._update_readout_controls()
+
+    def _connect_host(self) -> None:
+        host = self.editor.stimulation_host
+        if host is None or self._host_connected:
+            return
+        host.block_sent.connect(self._on_block_sent)
+        host.block_failed.connect(self._on_block_failed)
+        host.block_completed.connect(self._on_block_completed)
+        self._host_connected = True
 
     def _on_readout_changed(self, _index: int) -> None:
         self._update_readout_controls()
@@ -756,6 +834,9 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return
         stim = self._require_stim()
         project = self._require_project()
+        if self._target_is_syscon2():
+            self._start_syscon2(choice, stim)
+            return
         prepare_seconds = 0.0
         if choice == "clear":
             self.editor.zero_current_stim_array()
@@ -844,6 +925,54 @@ class StdpWindowDialog(_SelfRaisingDialog):
             return
         self._begin_sweep(clear_log=True)
 
+    def _fix_syscon_dt(self) -> bool:
+        if self._running:
+            return False
+        if not self.editor.prepare_syscon_timestep(self):
+            return False
+        self.refresh()
+        return True
+
+    def _start_syscon2(self, choice: str, stim: StimArray) -> None:
+        """Begin a sweep whose blocks are delivered through SysCon2."""
+        host = self.editor.stimulation_host
+        if not self._fix_syscon_dt():
+            return
+        if host is None or host.phase != "idle":
+            self._append_log("SysCon2 is not ready (a block is still in flight).")
+            return
+        if self.spn_amplitude.value() > 1.0:
+            self._append_log(
+                "For SysCon2 the pulse amplitude must lie within 0-1 "
+                "(fraction of the export target power)."
+            )
+            return
+        if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
+            self._append_log("Pre- and postsynaptic neuron IDs must differ.")
+            return
+        if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
+            self._append_log("Δt maximum must be greater than Δt minimum.")
+            return
+        if not self.cmb_trace.currentText():
+            self._append_log("Import a calcium trace and select it first.")
+            return
+        if choice == "clear":
+            self.editor.zero_current_stim_array()
+            self.editor.reset_stim_array()
+            self._append_start_sample = 0
+        else:
+            self._append_start_sample = (
+                self.editor.current_stim_array_last_stimulus_sample()
+            )
+        self._last_measured_dataset = None
+        self._append_log(
+            "SysCon2 target: continuous sweep, amplitudes are fractions (0-1) of the "
+            "export target power. Every block is sent separately; run it, and for the "
+            "baseline/probe blocks acquire and import the calcium data whose time axis "
+            "starts with that block. Make the post-pulse window span a few imaging frames."
+        )
+        self._begin_sweep(clear_log=True)
+
     def _begin_sweep(self, *, clear_log: bool) -> None:
         delta_ts = self._current_delta_t_values()
         if not delta_ts:
@@ -856,8 +985,16 @@ class StdpWindowDialog(_SelfRaisingDialog):
             dt_points=self.spn_dt_points.value(),
             include_zero=self.chk_include_zero.isChecked(),
             pairings_per_point=self.spn_pairings_per_point.value(),
-            readout=self.cmb_readout.currentText(),
-            sweep_mode=self.cmb_sweep_mode.currentText(),
+            readout=(
+                self.CALCIUM_READOUT
+                if self._target_is_syscon2()
+                else self.cmb_readout.currentText()
+            ),
+            sweep_mode=(
+                self.CONTINUOUS_MODE
+                if self._target_is_syscon2()
+                else self.cmb_sweep_mode.currentText()
+            ),
             presynaptic_id=self.spn_presynaptic.value(),
             postsynaptic_id=self.spn_postsynaptic.value(),
             amplitude=self.spn_amplitude.value(),
@@ -955,7 +1092,9 @@ class StdpWindowDialog(_SelfRaisingDialog):
         return self.project
 
     def append_block(self, block: np.ndarray) -> int:
-        return self._place_block(block)
+        start = self._place_block(block)
+        self._block_range = (start, start + block.shape[0])
+        return start
 
     def _restore_baseline(self) -> None:
         """Reset mode: rewind the network to the baseline checkpoint and
@@ -1008,7 +1147,59 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self._backend.request_simulation(seconds)
 
     def request_simulation(self, seconds: float) -> None:
-        self.simulation_requested.emit(seconds)
+        if not self._target_is_syscon2():
+            self.simulation_requested.emit(seconds)
+            return
+        host = self.editor.stimulation_host
+        if host is None or self.project is None:
+            self._finish("SysCon2 is not available.")
+            return
+        self._data_before_block = {
+            name: self.project.get_data(name, TraceData)
+            for name in self.project.get_data_names(TraceData)
+        }
+        start, stop = self._block_range
+        self._append_log("Exporting block and sending it to SysCon2...")
+        # A failure is reported through host.block_failed -> _on_block_failed.
+        host.send_block(
+            self.project,
+            self._require_stim(),
+            start,
+            stop,
+            "stdp_window",
+            preserve_amplitude=True,
+        )
+
+    def _on_block_sent(self, _result: object) -> None:
+        if not (self._running and self._target_is_syscon2()):
+            return
+        self.refresh()
+        if self._phase == "pair":
+            self._append_log(
+                "Pairing block sent to SysCon2. Run it, then click "
+                "'Block done / data imported' (no data needed for pairings)."
+            )
+        else:
+            self._append_log(
+                "Probe block sent to SysCon2. Run it and acquire, import the calcium "
+                "data, select the new trace, then click 'Block done / data imported'."
+            )
+        self.btn_data_imported.setEnabled(True)
+
+    def _on_block_failed(self, message: str) -> None:
+        if self._running and self._target_is_syscon2():
+            self._finish(f"SysCon2 failed: {message}")
+
+    def _on_block_completed(self) -> None:
+        if self._running and self._target_is_syscon2():
+            self._backend.simulation_finished()
+
+    def _on_data_imported_clicked(self) -> None:
+        host = self.editor.stimulation_host
+        if host is None:
+            return
+        self.btn_data_imported.setEnabled(False)
+        host.acquisition_imported()
 
     def simulation_finished(self) -> None:
         if not self._running or self.project is None:
@@ -1062,25 +1253,14 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._backend.begin_probe_phase()
             return
 
-        self.refresh()
-        trace_name = self.cmb_trace.currentText()
-        if not self._is_simulation_voltage_trace(trace_name):
-            self._finish(
-                "The routine could not find a simulation voltage trace for the "
-                "postsynaptic neuron after simulation."
-            )
+        measured = (
+            self._measure_calcium()
+            if self._target_is_syscon2()
+            else self._measure_simulated()
+        )
+        if measured is None:
             return
-        trace = self.project.get_data(trace_name, TraceData)
-        if trace is None:
-            self._finish("The selected trace is unavailable after simulation.")
-            return
-        try:
-            measurement: EPSPMeasurement | None = self._measure_epsps(trace)
-        except NoEpspDetected:
-            measurement = None
-        except ValueError as exc:
-            self._finish(f"EPSP measurement failed: {exc}")
-            return
+        measurement = measured[0]
 
         if self._phase == "baseline_probe":
             if measurement is None or measurement.amplitude <= 0.0:
@@ -1097,6 +1277,88 @@ class StdpWindowDialog(_SelfRaisingDialog):
 
         if self._phase == "probe":
             self._backend.handle_probe_measurement(measurement)
+
+    def _measure_simulated(self) -> tuple[EPSPMeasurement | None] | None:
+        """EPSP measurement from the simulated voltage trace; ``None`` once finished."""
+        assert self.project is not None
+        self.refresh()
+        trace_name = self.cmb_trace.currentText()
+        if not self._is_simulation_voltage_trace(trace_name):
+            self._finish(
+                "The routine could not find a simulation voltage trace for the "
+                "postsynaptic neuron after simulation."
+            )
+            return None
+        trace = self.project.get_data(trace_name, TraceData)
+        if trace is None:
+            self._finish("The selected trace is unavailable after simulation.")
+            return None
+        try:
+            return (self._measure_epsps(trace),)
+        except NoEpspDetected:
+            return (None,)
+        except ValueError as exc:
+            self._finish(f"EPSP measurement failed: {exc}")
+            return None
+
+    def _measure_calcium(self) -> tuple[EPSPMeasurement | None] | None:
+        """Calcium response from the imported trace; ``None`` to wait/finish."""
+        assert self.project is not None
+        self.refresh()
+        self._select_newest_if_stale(self.cmb_trace)
+        name = self.cmb_trace.currentText()
+        if not name or not self._is_fresh_dataset(name):
+            self._append_log(
+                "Import the new recording, select its trace, and click again."
+                if name
+                else "Select the imported calcium trace first."
+            )
+            self._reawait_acquisition()
+            return None
+        trace = self.project.get_data(name, TraceData)
+        if trace is None:
+            self._finish(f"Trace '{name}' is unavailable.")
+            return None
+        block_start_seconds = self._block_range[0] * float(self._require_stim().dt)
+        relative_pulse_times = [
+            t - block_start_seconds for t in self._probe_pulse_times
+        ]
+        try:
+            measurement = measure_calcium_response(
+                trace,
+                self.spn_postsynaptic.value(),
+                relative_pulse_times,
+                baseline_ms=self.CALCIUM_BASELINE_MS,
+                response_ms=self.spn_response_ms.value(),
+            )
+        except ValueError as exc:
+            self._finish(f"Calcium measurement failed: {exc}")
+            return None
+        self._last_measured_dataset = name
+        return (measurement,)
+
+    def _is_fresh_dataset(self, name: str) -> bool:
+        if self.project is None or not name or name.startswith("Simulation :: "):
+            return False
+        data = self.project.get_data(name, TraceData)
+        return data is not None and data is not self._data_before_block.get(name)
+
+    def _select_newest_if_stale(self, combo: QtWidgets.QComboBox) -> None:
+        """Offer a recording imported after this block, including same-name replacements."""
+        if self._is_fresh_dataset(combo.currentText()):
+            return
+        for index in reversed(range(combo.count())):
+            if self._is_fresh_dataset(combo.itemText(index)):
+                combo.setCurrentIndex(index)
+                return
+
+    def _reawait_acquisition(self) -> None:
+        """Stay on the current probe: ask the user to fix the import and click again."""
+        host = self.editor.stimulation_host
+        if host is not None:
+            host.phase = "awaiting_acquisition"
+        self._backend.awaiting_simulation = True
+        self.btn_data_imported.setEnabled(True)
 
     def _measure_epsps(self, trace: TraceData) -> EPSPMeasurement:
         return measure_epsp(
@@ -1285,6 +1547,10 @@ class StdpWindowDialog(_SelfRaisingDialog):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
+        host = self.editor.stimulation_host
+        if host is not None:
+            host.cancel()
+        self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
         self._append_log(message)
 
@@ -1301,6 +1567,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         self.showNormal()
         self.editor.reset_stim_array()
         self._array_cursor = None
+        self.btn_data_imported.setEnabled(False)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)

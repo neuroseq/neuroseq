@@ -18,6 +18,36 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
+@pytest.mark.parametrize("suffix", [".csv", ".txt", ".TXT"])
+@pytest.mark.parametrize("rate", [500.0, 2000.0])
+@pytest.mark.parametrize("header", ["", "injected_current\n"])
+def test_csv_input_sampling_rate(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    rate: float,
+    header: str,
+    suffix: str,
+) -> None:
+    path = tmp_path / f"current{suffix}"
+    path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
+    project = Project()
+    dialog = IgorImportDialog(project, csv_only=True)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog.sampling_rate_spin.setValue(rate)
+
+    assert dialog.source_dt_spin.value() == pytest.approx(1.0 / rate)
+    dialog._import_file()
+
+    name = "injected_current" if header else "current"
+    stim = project.stim_arrays[name]
+    assert stim.dt == 0.001
+    expected = [1, 3] if rate == 2000.0 else [1, 1, 2, 2, 3, 3, 4, 4]
+    np.testing.assert_allclose(stim.values[:, 0], expected)
+    assert qmessagebox_calls[-1]["name"] == "information"
+
+
 def test_igor_import_dialog_creates_new_stim_array(
     tmp_path: Path,
     qtbot: QtBot,

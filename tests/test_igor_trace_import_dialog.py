@@ -61,6 +61,83 @@ def test_trace_dialog_creates_new_trace_in_new_experiment(
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
 
 
+@pytest.mark.parametrize("rate", [500.0, 2000.0])
+@pytest.mark.parametrize("header", ["", "recorded_voltage\n"])
+def test_csv_output_sampling_rate(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    rate: float,
+    header: str,
+) -> None:
+    path = tmp_path / "voltage.csv"
+    path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
+    project = Project()
+    dialog = IgorTraceImportDialog(project, csv_only=True)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog.new_experiment_name_edit.setText("CSV recording")
+    dialog.sampling_rate_spin.setValue(rate)
+    assert dialog.source_dt_spin.value() == pytest.approx(1.0 / rate)
+    dialog._import_file()
+
+    name = "recorded_voltage" if header else "voltage"
+    trace = _find_trace_data(project, "CSV recording", name)
+    assert trace.dt == 0.001
+    expected = [1, 3] if rate == 2000.0 else [1, 1, 2, 2, 3, 3, 4, 4]
+    np.testing.assert_allclose(trace.traces[0], expected)
+    assert qmessagebox_calls[-1]["name"] == "information"
+
+
+@pytest.mark.parametrize("suffix", [".csv", ".txt"])
+@pytest.mark.parametrize("header", ["", "cell_a,cell_b\n"])
+def test_csv_table_imports_all_columns(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    header: str,
+    suffix: str,
+) -> None:
+    path = tmp_path / f"recording{suffix}"
+    path.write_text(header + "1,10\n2,20\n3,30\n4,40\n", encoding="utf-8")
+    project = Project()
+    dialog = IgorTraceImportDialog(project, csv_only=True)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog.new_experiment_name_edit.setText("Table")
+    dialog.new_neuron_id_spin.setValue(5)
+    dialog.sampling_rate_spin.setValue(2000)
+    assert not dialog.import_existing_radio.isEnabled()
+    dialog._import_file()
+    names = ["cell_a", "cell_b"] if header else ["recording_1", "recording_2"]
+    for index, name in enumerate(names):
+        trace = _find_trace_data(project, "Table", name)
+        assert trace.dt == 0.001
+        np.testing.assert_array_equal(trace.indices, [5 + index])
+        np.testing.assert_allclose(trace.traces[0], np.array([1, 3]) * (10**index))
+    assert len(project.experiments["Table"].data) == 2
+    assert qmessagebox_calls[-1]["name"] == "information"
+
+
+def test_csv_table_name_collision_does_not_partially_import(
+    tmp_path: Path,
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    project = Project()
+    existing = TraceData("cell_b", np.ones((1, 2)), np.array([0]), "mV", 0.001)
+    project.add_experiment(Experiment("Table", 0.002, [], [existing]))
+    path = tmp_path / "recording.csv"
+    path.write_text("cell_a,cell_b\n1,10\n2,20\n", encoding="utf-8")
+    dialog = IgorTraceImportDialog(project, csv_only=True)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog.new_experiment_combo.setCurrentText("Table")
+    dialog._import_file()
+    assert project.experiments["Table"].data == [existing]
+    assert qmessagebox_calls[-1]["name"] == "critical"
+
+
 def test_trace_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
     dialog = IgorTraceImportDialog(Project())
     qtbot.addWidget(dialog)

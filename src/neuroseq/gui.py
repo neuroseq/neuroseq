@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+import base64
 import contextlib
+import dataclasses
 import gc
+import hashlib
 import inspect
+import json
 import logging
 import pathlib
 import threading
 from collections.abc import Callable
 from collections.abc import Sequence
+from datetime import UTC
+from datetime import datetime
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -55,6 +61,9 @@ from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.main_scroll import WorkspaceZoom
+from neuroseq.main_scroll import ZoomControl
+from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
@@ -62,6 +71,8 @@ from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
+from neuroseq.scanimage_connection import ScanImageConnection
+from neuroseq.scanimage_controls import ScanImageControls
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
@@ -70,6 +81,7 @@ from neuroseq.stim_editor import StimEditor
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
+from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget
@@ -392,6 +404,28 @@ class Gui(QtWidgets.QMainWindow):
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        self.scanimage_connection = ScanImageConnection(self)
+        # Modeless, so the live image stays visible in the Video tab. Keeping
+        # the controls out of that tab keeps it aligned with Cell segmentation.
+        self.scanimage_dialog = QtWidgets.QDialog(self)
+        self.scanimage_dialog.setWindowTitle("Image acquisition")
+        self.scanimage_controls = ScanImageControls(
+            self.scanimage_connection, self.settings, self.scanimage_dialog
+        )
+        QtWidgets.QVBoxLayout(self.scanimage_dialog).addWidget(self.scanimage_controls)
+        self.scanimage_controls.live_changed.connect(self._set_scanimage_live)
+        self.scanimage_controls.channel_changed.connect(self._set_scanimage_channel)
+        self.scanimage_connection.frame_received.connect(
+            self.calcium_video_widget.show_live_frame
+        )
+        self.scanimage_controls.record_requested.connect(
+            self._start_scanimage_recording
+        )
+        self.scanimage_connection.status_changed.connect(self._scanimage_status)
+        self.scanimage_connection.recording_ready.connect(
+            self._scanimage_recording_ready
+        )
+        self._scanimage_run_projects: dict[str, Project] = {}
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         self.tab_bar = QtWidgets.QTabBar()
@@ -420,7 +454,18 @@ class Gui(QtWidgets.QMainWindow):
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
         split_left_right.addWidget(self.chat_widget)
-        split_left_right.setSizes([1000, 1000, 1000])
+        self.syscon2_panel = SysCon2Panel(parent=self)
+        self.syscon2_panel.setVisible(False)
+        # Mark, with a cross in the Spatial Footprints panel, every neuron
+        # targeted by the preview whose import SysCon2 most recently confirmed -
+        # see SysCon2Panel.targets_changed's docstring for why this can't be
+        # a live hardware readout.
+        self.syscon2_panel.targets_changed.connect(
+            self._spatial_footprint_state.set_targeted_stim_ids
+        )
+        self.syscon2_panel.set_current_stim_provider(self._current_stim_array)
+        split_left_right.addWidget(self.syscon2_panel)
+        split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
         self.split_stim_right = QtWidgets.QSplitter(QtCore.Qt.Orientation.Vertical)
@@ -453,6 +498,7 @@ class Gui(QtWidgets.QMainWindow):
             self.trace_controller.focus_time_range
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
+        self.stim_editor.stimulation_host = self.syscon2_panel.stimulation_host
         self.stim_editor.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )
@@ -524,8 +570,19 @@ class Gui(QtWidgets.QMainWindow):
         outer_layout = QtWidgets.QVBoxLayout(outer_widget)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
-        outer_layout.addWidget(self.tab_bar)
-        outer_layout.addWidget(central_widget)
+        # Zoom controls sit at the top right, beside the project tabs.
+        self.zoom_control = ZoomControl()
+        tab_row = QtWidgets.QHBoxLayout()
+        tab_row.setContentsMargins(0, 0, 4, 0)
+        tab_row.addWidget(self.tab_bar, stretch=1)
+        tab_row.addWidget(self.zoom_control)
+        outer_layout.addLayout(tab_row)
+        # Scroll the whole workspace on small screens; nested widgets keep wheel
+        # priority until they hit their end (see main_scroll.py).
+        self._main_scroll = make_main_scroll_area(central_widget, 1500, 950)
+        outer_layout.addWidget(self._main_scroll)
+        self._workspace_zoom = WorkspaceZoom(central_widget, 1500, 950)
+        self.zoom_control.zoom_changed.connect(self._workspace_zoom.apply)
         self.setCentralWidget(outer_widget)
         self._create_actions()
         self.showMaximized()
@@ -734,7 +791,13 @@ class Gui(QtWidgets.QMainWindow):
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
 
     def _update_combo_box(
@@ -1280,7 +1343,10 @@ class Gui(QtWidgets.QMainWindow):
         self,
         project: Project,
         reset_controller: bool = False,
+        *,
+        preserve_dynamic_input: bool = False,
     ) -> None:
+        preserve_dynamic_input = preserve_dynamic_input and project is self.project
         self.project = project
         self._update_window_title()
         if hasattr(self, "tab_bar"):
@@ -1299,6 +1365,8 @@ class Gui(QtWidgets.QMainWindow):
             self.spike_controller.reset()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
+        self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1310,13 +1378,21 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.project.cellpose_data = self.last_cellpose_import
 
-        self.stim_editor.set_project(self.project)
+        self.stim_editor.set_project(
+            self.project, keep_undo_history=preserve_dynamic_input
+        )
         # A replaced project must not inherit the previous run's Design dynamic
         # input state (plots, log, EPSP history); drop the cached dialog so it
         # is rebuilt fresh on next open.
-        self.stim_editor.discard_dynamic_input_dialogs()
+        if preserve_dynamic_input:
+            for dialog in self.stim_editor._dynamic_input_dialogs():
+                dialog.refresh()
+        else:
+            self.stim_editor.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
+        self.syscon2_panel.set_project(self.project)
+        self._refresh_video_selector()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
         if hasattr(self, "spatial_footprint_widget"):
@@ -1328,7 +1404,13 @@ class Gui(QtWidgets.QMainWindow):
             self.calcium_video_widget.set_cellpose_data(self.project.cellpose_data)
             self.calcium_video_widget.set_stim_arrays(self.project.stim_arrays)
             self.calcium_video_widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
         # Restore this project's own remembered playback position now that
         # its data is loaded (rather than leaving whatever the previously
@@ -1676,7 +1758,7 @@ class Gui(QtWidgets.QMainWindow):
                 )
             else:
                 self.project.add_experiment(experiment)
-            self.update_project(self.project)
+            self.update_project(self.project, preserve_dynamic_input=True)
             self._select_experiment_data(experiment.name)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
@@ -2285,21 +2367,21 @@ class Gui(QtWidgets.QMainWindow):
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.spatial_footprint_widget)
             if dialog.imported_tif_paths:
-                self.project.set_calcium_video(
-                    dialog.imported_tif_paths, dialog.imported_fps
+                self.project.add_calcium_video(
+                    dialog.imported_tif_paths,
+                    dialog.imported_fps,
+                    name=dialog.experiment_name,
                 )
-                self.calcium_video_widget.set_video_paths(
-                    dialog.imported_tif_paths, dialog.imported_fps
-                )
+                self._refresh_calcium_video_widgets()
                 if hasattr(self, "_auto_show_widget"):
                     self._auto_show_widget(self.calcium_video_widget)
 
     def _on_calcium_video_import_requested(self) -> None:
         paths, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
-            "Select raw calcium video file(s)",
+            "Select raw calcium imaging file(s)",
             "",
-            "Video files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
+            "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
             "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
             "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
         )
@@ -2311,21 +2393,204 @@ class Gui(QtWidgets.QMainWindow):
         if not ok:
             return
         tif_paths = [pathlib.Path(path) for path in paths]
-        self.project.set_calcium_video(tif_paths, fps)
+        self.project.add_calcium_video(tif_paths, fps)
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
 
     def _on_calcium_video_remove_requested(self) -> None:
-        self.project.set_calcium_video([], None)
+        self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
     def _refresh_calcium_video_widgets(self) -> None:
+        self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_cellpose_data(self.project.cellpose_data)
             widget.set_stim_arrays(self.project.stim_arrays)
             widget.set_video_paths(
-                self.project.calcium_video_paths, self.project.calcium_video_fps
+                self.project.calcium_video_paths,
+                self.project.calcium_video_fps,
+                scanimage_index=self.project.calcium_scanimage_index,
+                channel=self._recorded_scanimage_channel(
+                    self.project.calcium_scanimage_index,
+                    self.scanimage_controls.channel_spin.value(),
+                ),
             )
+
+    def _start_scanimage_recording(self, arguments: dict) -> None:
+        if self.scanimage_connection.run_id is not None:
+            self.scanimage_controls.show_message(
+                "An acquisition is already being finalized."
+            )
+            return
+        project = self.project
+        record = dict(arguments)
+        record.update(
+            status="requested",
+            requested_at=datetime.now(UTC).isoformat(),
+            synchronization="unverified",
+        )
+        stim = self._current_stim_array()
+        if stim is not None:
+            values = np.ascontiguousarray(stim.values)
+            record["stimulus_snapshot"] = {
+                "name": stim.name,
+                "dt": stim.dt,
+                "shape": list(values.shape),
+                "dtype": values.dtype.str,
+                "sha256": hashlib.sha256(values.tobytes()).hexdigest(),
+                "data": base64.b64encode(values.tobytes()).decode(),
+            }
+        settings = self.syscon2_panel.export_settings
+        if settings is not None:
+            record["syscon_export_settings"] = json.loads(
+                json.dumps(dataclasses.asdict(settings), default=str)
+            )
+        if self.scanimage_connection.command(
+            "record", {**arguments, "manifest": record}
+        ):
+            project.imaging_acquisitions.append(record)
+            project.mark_dirty()
+            self._scanimage_run_projects[arguments["run_id"]] = project
+            self.scanimage_controls.live_check.setChecked(True)
+
+    def _scanimage_status(self, status: dict) -> None:
+        run = status.get("run", {})
+        project = self._scanimage_run_projects.get(run.get("id"))
+        if project is None:
+            return
+        record = next(
+            r for r in project.imaging_acquisitions if r["run_id"] == run["id"]
+        )
+        previous = record.get("status")
+        record["status"] = run.get("state", "unknown")
+        if "error" in run:
+            record["error"] = run["error"]
+        elif record["status"] in {"recording", "completed", "aborted"}:
+            record.pop("error", None)
+        for source, target in (
+            ("matlab_version", "matlab_version"),
+            ("scanimage_version", "scanimage_version"),
+            ("settings", "scanimage_settings"),
+            ("files", "files"),
+        ):
+            if source in status:
+                record[target] = status[source]
+        if record["status"] != previous:
+            project.mark_dirty()
+
+    def _open_image_acquisition_dialog(self) -> None:
+        self.scanimage_dialog.show()
+        self.scanimage_dialog.raise_()
+        self.scanimage_dialog.activateWindow()
+
+    def _refresh_video_selector(self) -> None:
+        if not hasattr(self, "cmb_video"):
+            return
+        self.cmb_video.blockSignals(True)
+        self.cmb_video.clear()
+        for video in self.project.calcium_videos:
+            label = video["name"]
+            run_id = video.get("run_id")
+            record = next(
+                (r for r in self.project.imaging_acquisitions if r["run_id"] == run_id),
+                None,
+            )
+            if record is not None and record.get("status") != "completed":
+                label = f"{label} · {record.get('status')}"
+            self.cmb_video.addItem(label, video["id"])
+        if not self.project.calcium_videos:
+            self.cmb_video.addItem("No imaging data", None)
+        self.cmb_video.setEnabled(bool(self.project.calcium_videos))
+        self.cmb_video.setCurrentIndex(
+            max(0, self.cmb_video.findData(self.project.selected_calcium_video_id))
+        )
+        self.cmb_video.blockSignals(False)
+
+    def _on_video_selected(self, index: int) -> None:
+        video_id = self.cmb_video.itemData(index)
+        if video_id is None or video_id == self.project.selected_calcium_video_id:
+            return
+        video = next(v for v in self.project.calcium_videos if v["id"] == video_id)
+        missing = [path for path in video["paths"] if not pathlib.Path(path).is_file()]
+        if missing:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Imaging files missing",
+                "These files of the selected imaging data were not found:\n"
+                + "\n".join(missing),
+            )
+            self._refresh_video_selector()
+            return
+        self.project.select_calcium_video(video_id)
+        self.scanimage_controls.live_check.setChecked(False)
+        self._refresh_calcium_video_widgets()
+        self._auto_show_widget(self.calcium_video_widget)
+
+    def _set_scanimage_live(self, live: bool) -> None:
+        self.calcium_video_widget.set_live(live)
+        if live:
+            self._auto_show_widget(self.calcium_video_widget)
+        if not live:
+            self._set_scanimage_channel(self.scanimage_controls.channel_spin.value())
+
+    def _set_scanimage_channel(self, channel: int) -> None:
+        index = self.project.calcium_scanimage_index
+        if index is not None and not self.scanimage_controls.live_check.isChecked():
+            channel = self._recorded_scanimage_channel(index, channel)
+        for widget in self.findChildren(CalciumVideoWidget):
+            widget.set_recorded_channel(channel)
+
+    def _recorded_scanimage_channel(self, index: dict | None, channel: int) -> int:
+        if index is not None and channel not in index["channels"]:
+            selected = index["channels"][0]
+            self.scanimage_controls.show_message(
+                f"Channel {channel} was not saved in this recording; showing channel {selected}."
+            )
+            self.scanimage_controls.channel_spin.blockSignals(True)
+            self.scanimage_controls.channel_spin.setValue(selected)
+            self.scanimage_controls.channel_spin.blockSignals(False)
+            self.scanimage_connection.channel = selected
+            return selected
+        return channel
+
+    def _scanimage_recording_ready(self, result: dict) -> None:
+        project = self._scanimage_run_projects.pop(result["run_id"], None)
+        if project is None:
+            return
+        record = next(
+            r for r in project.imaging_acquisitions if r["run_id"] == result["run_id"]
+        )
+        record.update(
+            status=result["status"],
+            recording=result,
+            finished_at=datetime.now(UTC).isoformat(),
+        )
+        record.pop("error", None)
+        name = record["name"]
+        if name in project.experiments:
+            name = f"{name} ({result['run_id'][:8]})"
+        project.experiments[name] = Experiment(
+            name=name, duration=result["duration_s"], timepoints=[], data=[]
+        )
+        record["experiment_name"] = name
+        project.add_calcium_video(
+            [pathlib.Path(p) for p in result["paths"]],
+            result["fps"],
+            name=name,
+            run_id=result["run_id"],
+        )
+        self.scanimage_controls.show_message(
+            f"Recording {name} added to the imaging data."
+        )
+        project.mark_dirty()
+        project.update_limits()
+        self.scanimage_controls.live_check.setChecked(False)
+        if project is self.project:
+            self._refresh_calcium_video_widgets()
+            self._update_combo_boxes()
+            self.update_limits()
+        # Movie availability does not imply extracted traces are ready. Do not
+        # call SysCon2StimulationHost.acquisition_imported here.
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -2380,18 +2645,26 @@ class Gui(QtWidgets.QMainWindow):
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_wave_clicked(self) -> None:
-        dialog = IgorImportDialog(self.project, parent=self)
+    def btn_import_igor2_wave_clicked(self, *, csv_only: bool = False) -> None:
+        dialog = (
+            IgorImportDialog(self.project, parent=self, csv_only=True)
+            if csv_only
+            else IgorImportDialog(self.project, parent=self)
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_trace_clicked(self) -> None:
+    def btn_import_igor2_trace_clicked(self, *, csv_only: bool = False) -> None:
         from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 
-        dialog = IgorTraceImportDialog(self.project, parent=self)
+        dialog = (
+            IgorTraceImportDialog(self.project, parent=self, csv_only=True)
+            if csv_only
+            else IgorTraceImportDialog(self.project, parent=self)
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
@@ -2551,6 +2824,12 @@ class Gui(QtWidgets.QMainWindow):
             parent=self,
             current_stim_name=(None if modifier is None else modifier.stim_array.name),
         )
+        dialog.reserved_names = self.syscon2_panel._remote_sequence_names
+        dialog.sequence_generated.connect(
+            lambda seq, png, targets: self.syscon2_panel.show_generated_preview(
+                seq, png, targets, dialog.export_settings()
+            )
+        )
         dialog.exec()
 
     # Import stimulus wrappers
@@ -2582,7 +2861,7 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2"],
+            ["Igor2", "CSV / Text (.csv, .txt)"],
             0,
             False,
         )
@@ -2590,6 +2869,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         if software == "Igor2":
             self.btn_import_igor2_wave_clicked()
+        elif software == "CSV / Text (.csv, .txt)":
+            self.btn_import_igor2_wave_clicked(csv_only=True)
 
     def btn_import_trace_patchclamp_clicked(self) -> None:
         """Pre-dialog: choose software, then import recorded patch-clamp traces.
@@ -2610,7 +2891,7 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2", "NumPy (.npy)"],
+            ["Igor2", "NumPy (.npy)", "CSV / Text (.csv, .txt)"],
             0,
             False,
         )
@@ -2620,6 +2901,8 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_igor2_trace_clicked()
         elif software == "NumPy (.npy)":
             self.btn_import_patchclamp_data_clicked()
+        elif software == "CSV / Text (.csv, .txt)":
+            self.btn_import_igor2_trace_clicked(csv_only=True)
 
     # Export wrappers
 
@@ -3075,7 +3358,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.content-save-edit",
         )
 
-        import_data_menu = menu.addMenu("&Import data")
+        import_data_menu = menu.addMenu("&Input data")
         assert import_data_menu is not None
 
         import_stimulus_menu = import_data_menu.addMenu("&Input")
@@ -3095,7 +3378,7 @@ class Gui(QtWidgets.QMainWindow):
             icon="mdi6.waveform",
         )
 
-        import_trace_menu = import_data_menu.addMenu("&Trace")
+        import_trace_menu = import_data_menu.addMenu("&Output")
         assert import_trace_menu is not None
         add_action(
             "&Calcium Imaging (raw .tif)",
@@ -3283,6 +3566,7 @@ class Gui(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
+            ("&Stimulation setup", self.syscon2_panel, "mdi6.laser-pointer", False),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(
@@ -3367,6 +3651,20 @@ class Gui(QtWidgets.QMainWindow):
             self.stim_editor.open_dynamic_input_designer
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
+        toolbar.addSeparator()
+        self.btn_image_acquisition = QtWidgets.QPushButton("Image acquisition")
+        self.btn_image_acquisition.setToolTip(
+            "Connect to ScanImage to preview and record imaging"
+        )
+        icons.set_widget_icon(self.btn_image_acquisition, "mdi6.microscope")
+        self.btn_image_acquisition.clicked.connect(self._open_image_acquisition_dialog)
+        toolbar.addWidget(self.btn_image_acquisition)
+        self.cmb_video = QtWidgets.QComboBox()
+        self.cmb_video.setMinimumWidth(160)
+        self.cmb_video.setToolTip("Imaging data shown in the Imaging tab")
+        self.cmb_video.activated.connect(self._on_video_selected)
+        toolbar.addWidget(self.cmb_video)
+        self._refresh_video_selector()
 
     def _set_widget_visible(self, widget: QtWidgets.QWidget, toggled: bool) -> None:
         if toggled:
@@ -3608,6 +3906,11 @@ class Gui(QtWidgets.QMainWindow):
         widget.calcium_video_widget.set_video_paths(
             self.project.calcium_video_paths,
             self.project.calcium_video_fps,
+            scanimage_index=self.project.calcium_scanimage_index,
+            channel=self._recorded_scanimage_channel(
+                self.project.calcium_scanimage_index,
+                self.scanimage_controls.channel_spin.value(),
+            ),
             warn_if_missing_cellpose=False,
         )
         return widget
@@ -4228,6 +4531,8 @@ class Gui(QtWidgets.QMainWindow):
             self._external_sim_thread, 2000, "External simulation worker"
         )
         self._stop_worker_thread(self._io_thread, 10000, "IO worker")
+        self.syscon2_panel.shutdown()
+        self.scanimage_connection.shutdown()
         # Stop timers and queued widget updates before tearing down owned widgets.
         self.time_slider.close()
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

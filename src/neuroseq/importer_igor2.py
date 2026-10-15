@@ -427,8 +427,18 @@ def load_igor_csv_file(path: str | Path) -> IgorWave:
     if not wave_name:
         raise ValueError("The first non-empty row must contain the Igor wave name")
 
+    try:
+        float(wave_name)
+    except ValueError:
+        sample_rows = rows[1:]
+        first_sample_line = 2
+    else:
+        wave_name = path.stem
+        sample_rows = rows
+        first_sample_line = 1
+
     values: list[float] = []
-    for line_number, row in enumerate(rows[1:], start=2):
+    for line_number, row in enumerate(sample_rows, start=first_sample_line):
         if len(row) > 1 and any(cell.strip() for cell in row[1:]):
             raise ValueError(
                 f"CSV row {line_number} contains multiple columns; expected one value per row"
@@ -454,10 +464,64 @@ def load_igor_csv_file(path: str | Path) -> IgorWave:
     )
 
 
+def load_csv_trace_table(path: str | Path) -> list[IgorWave]:
+    """Load comma-, tab-, or space-separated output columns as traces."""
+    path = Path(path)
+    with path.open("r", encoding="utf-8-sig", newline="") as fp:
+        lines = [line.strip() for line in fp if line.strip()]
+    if not lines:
+        raise ValueError("File is empty")
+    # Use a sample row so spaces in a single-column header remain intact.
+    sample_line = lines[-1]
+    if "," in sample_line:
+        rows = list(csv.reader(lines))
+    elif "\t" in sample_line:
+        rows = list(csv.reader(lines, delimiter="\t"))
+    elif len(sample_line.split()) > 1:
+        rows = [line.split() for line in lines]
+    else:
+        rows = list(csv.reader(lines))
+    column_count = len(rows[0])
+    if any(len(row) != column_count for row in rows):
+        raise ValueError("Every CSV row must have the same number of columns")
+    try:
+        [float(cell) for cell in rows[0]]
+    except ValueError:
+        names = [cell.strip() for cell in rows.pop(0)]
+    else:
+        names = (
+            [path.stem]
+            if column_count == 1
+            else [f"{path.stem}_{index + 1}" for index in range(column_count)]
+        )
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("CSV column names must be non-empty and unique")
+    if not rows:
+        raise ValueError("No numeric samples found in CSV file")
+    try:
+        values = np.asarray(rows, dtype=np.float32)
+    except ValueError as exc:
+        raise ValueError("CSV samples must all be numeric") from exc
+    if not np.all(np.isfinite(values)):
+        raise ValueError("CSV samples must all be finite")
+    return [
+        IgorWave(
+            name=name,
+            values=values[:, index],
+            source_dt=None,
+            units=None,
+            axis_units=None,
+            source_format="csv",
+            note=None,
+        )
+        for index, name in enumerate(names)
+    ]
+
+
 def load_igor_wave_file(path: str | Path) -> IgorWave:
     path = Path(path)
     suffix = path.suffix.lower()
-    if suffix == ".csv":
+    if suffix in {".csv", ".txt"}:
         return load_igor_csv_file(path)
     if suffix == ".ibw":
         return load_igor_ibw_file(path)

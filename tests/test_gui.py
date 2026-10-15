@@ -189,6 +189,30 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
 
 
 @pytest.mark.parametrize(
+    ("method_name", "inner_name"),
+    [
+        ("btn_import_stimulus_patchclamp_clicked", "btn_import_igor2_wave_clicked"),
+        ("btn_import_trace_patchclamp_clicked", "btn_import_igor2_trace_clicked"),
+    ],
+)
+def test_gui_patchclamp_csv_option(
+    monkeypatch: MonkeyPatch, method_name: str, inner_name: str
+) -> None:
+    def choose_csv(*args, **kwargs):
+        option = "CSV / Text (.csv, .txt)"
+        assert option in args[3]
+        return option, True
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", choose_csv)
+    called = []
+    fake_gui: Any = SimpleNamespace(
+        **{inner_name: lambda **kwargs: called.append(kwargs)}
+    )
+    getattr(Gui, method_name)(fake_gui)
+    assert called == [{"csv_only": True}]
+
+
+@pytest.mark.parametrize(
     ("method_name", "software", "inner_name"),
     [
         (
@@ -292,6 +316,19 @@ def test_gui_click_exit(qtbot: QtBot) -> None:
 
 def _find_action(menu: QtWidgets.QMenu, text: str) -> QtWidgets.QAction:
     return next(a for a in menu.actions() if a.text().replace("&", "") == text)
+
+
+def test_syscon2_panel_targets_drive_spatial_footprint_crosses(qtbot: QtBot) -> None:
+    """Feature (#582): whichever sequence SysCon2Panel last sent to SysCon2
+    should mark its targeted neurons with a cross in the Spatial Footprints
+    panel - wired via the shared SpatialFootprintState, not a direct
+    reference between the two widgets."""
+    gui = Gui()
+    qtbot.addWidget(gui)
+
+    gui.syscon2_panel.targets_changed.emit(frozenset({2, 5}))
+
+    assert gui._spatial_footprint_state.targeted_stim_ids == frozenset({2, 5})
 
 
 def test_gui_open_fiji_and_cellpose_buttons(
@@ -1819,7 +1856,7 @@ def test_timeseries_panels_and_slider_share_one_width(qtbot: QtBot) -> None:
     assert len(lefts) == 1, f"panels have differing left edges: {lefts}"
     # ...and they are genuinely narrower than the window, i.e. the right-hand
     # column is beside them rather than below.
-    assert next(iter(widths)) < gui.width()
+    assert next(iter(widths)) < gui._main_scroll.widget().width()
     gui.close()
 
 
@@ -1880,7 +1917,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
         (
             action
             for action in gui.menu_file.actions()
-            if action.menu() is not None and action.text() == "&Import data"
+            if action.menu() is not None and action.text() == "&Input data"
         ),
         None,
     )
@@ -1888,6 +1925,8 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
     import_data_menu = import_data_action.menu()
     assert import_data_menu is not None
     import_data_action_texts = [action.text() for action in import_data_menu.actions()]
+    assert "&Output" in import_data_action_texts
+    assert "&Trace" not in import_data_action_texts
     assert "Import cell &segmentation" not in import_data_action_texts
     assert "Cell &segmentation" not in import_data_action_texts
 
@@ -4670,4 +4709,80 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
     gui.open_stimulation_generator_dialog()
 
     assert opened == ["second_stim"]
+    gui.close()
+
+
+def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypatch):
+    from neuroseq.rheobase_dialog import RheobaseDialog
+    from neuroseq.syscon2_export_service import SysconExportSettings
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    project = default_project()
+    gui.update_project(project)
+    # Use a second array to detect an accidental reset to the first one on import.
+    original = next(iter(project.stim_arrays.values()))
+    selected = StimArray(
+        "probe_array",
+        original.stim_type,
+        np.zeros_like(original.values),
+        original.units,
+        original.dt,
+    )
+    project.add_stim_array(selected)
+    gui.stim_editor.set_project(project, stim_to_select=selected.name)
+    dialog = RheobaseDialog(gui.stim_editor)
+    gui.stim_editor._rheobase_dialog = dialog
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    dialog._running = True
+    dialog._awaiting_simulation = True
+    host = gui.syscon2_panel.stimulation_host
+    host.phase = "awaiting_acquisition"
+    settings = SysconExportSettings(config_text="config")
+    gui.syscon2_panel._export_settings = settings
+    monkeypatch.setattr(
+        neuroseq.gui, "ImportExperimentDialog", MockImportExperimentDialog
+    )
+    recording = Experiment("new_recording", 1.0, [], [SpikeData("spikes", [0], [0.2])])
+
+    gui._append_experimental_data(recording)
+
+    assert "new_recording" in project.experiments
+    assert gui.stim_editor._rheobase_dialog is dialog
+    assert dialog._running and dialog._awaiting_simulation
+    assert host.phase == "awaiting_acquisition"
+    assert gui.syscon2_panel.export_settings is settings
+    assert gui.stim_editor.current_stim_modifier.stim_array is selected
+    assert dialog.cmb_spikes.findText("new_recording :: spikes") >= 0
+    gui.update_project(default_project())
+    assert gui.stim_editor._rheobase_dialog is None
+    assert gui.syscon2_panel.export_settings is None
+    gui._close_confirmed = True
+    gui.close()
+
+
+def test_main_menu_export_updates_setup_preview_without_import(
+    qtbot, monkeypatch, tmp_path
+):
+    from qtpy import QtGui
+
+    import neuroseq.gui as gui_module
+
+    gui = Gui()
+    qtbot.addWidget(gui)
+    path = tmp_path / "overview.png"
+    image = QtGui.QPixmap(100, 50)
+    image.fill()
+    image.save(str(path))
+
+    class ExportDialog(gui_module.StimulationGeneratorDialog):
+        def exec(self):
+            self.sequence_generated.emit("offline.seq", str(path), frozenset({1}))
+            return 0
+
+    monkeypatch.setattr(gui_module, "StimulationGeneratorDialog", ExportDialog)
+    gui.open_stimulation_generator_dialog()
+    assert not gui.syscon2_panel.preview_label.pixmap().isNull()
+    assert "not imported" in gui.syscon2_panel.preview_status_label.text()
+    assert gui.syscon2_panel.export_settings is not None
     gui.close()

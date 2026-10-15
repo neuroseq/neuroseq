@@ -6,6 +6,34 @@ Open the dialog from `File → Import data → Import stimulus → Import patch 
 
 ## Supported input formats
 
+CSV recordings can also be imported through `File → Input data → Output → Patch Clamp`
+by choosing `CSV / Text (.csv, .txt)`. Both extensions use the same importer.
+Each column is a separate trace and each row is a sample.
+Comma, tab, and whitespace separators are detected automatically.
+An optional header row names the traces; without it, names use the filename and
+column number. Set the shared **Source sampling rate** in Hz, experiment, and
+recorded signal units. Tables import all columns as new traces with consecutive
+neuron IDs starting at the selected neuron ID. All columns are treated as signals,
+so remove any time column before import. Column names must be non-empty and unique;
+all rows must contain the same number of finite numeric samples.
+
+For example, this imports traces named `cell_a` and `cell_b`:
+
+```csv
+cell_a,cell_b
+-65,-62
+-64,-61
+-63,-60
+```
+
+For CSV patch-clamp input, choose `File → Input data → Input → Patch Clamp`,
+then `CSV / Text (.csv, .txt)`. Both extensions accept a single column with one numeric sample per row; an
+optional first row can contain the waveform name. Without a header, the file
+name supplies the waveform name. Set **Source sampling rate** in Hz and choose
+the input units before importing. The preview and imported duration use this
+sampling rate. By default, the waveform is resampled onto the 1 ms input grid;
+enable **Adjust NeuroSeq input grid to source/file grid** to preserve its timestep.
+
 - `.ibw`: a single Igor Binary Wave
 - `.pxp`: an Igor Packed Experiment containing one or more waves
 - `.csv`: NeuroSeq's simple Igor-style CSV import format
@@ -41,7 +69,8 @@ After selecting a wave, the preview shows:
 - value range
 - optional Igor note text
 
-The source sample interval can always be edited before import.
+For CSV files, set the source sampling rate in Hz before import. For Igor binary
+files, the source sample interval is read from the file.
 
 By default, NeuroSeq imports stimulation data onto its 1 ms timeline and uses zero-order-hold resampling when the source `dt` differs from `0.001 s`.
 

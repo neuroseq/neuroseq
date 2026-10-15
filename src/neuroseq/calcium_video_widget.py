@@ -17,6 +17,7 @@ from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importer_scanimage import compact_index
 from neuroseq.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
@@ -54,11 +55,14 @@ class CalciumVideoWidget(FPLWidget):
         self._video_warning_shown = False
         self._stim_warning_shown = False
         self._hovered_cellpose_id: int | None = None
+        self._live = False
+        self._scanimage_index: dict | None = None
+        self._frame_times: np.ndarray | None = None
 
         self.stim_combo = QtWidgets.QComboBox(self)
         self.stim_combo.setMinimumWidth(180)
         self.stim_combo.currentIndexChanged.connect(self._on_stim_source_changed)
-        self.save_button = QtWidgets.QPushButton("Save video…", self)
+        self.save_button = QtWidgets.QPushButton("Save imaging data…", self)
         self.save_button.clicked.connect(self._on_save_labeled_video_clicked)
         self.remove_button = QtWidgets.QPushButton("Remove imaging data", self)
         self.remove_button.clicked.connect(self.remove_requested.emit)
@@ -79,7 +83,7 @@ class CalciumVideoWidget(FPLWidget):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
-        self.import_button = QtWidgets.QPushButton("Import Video", self)
+        self.import_button = QtWidgets.QPushButton("Import Imaging Data", self)
         self.import_button.clicked.connect(self.import_requested.emit)
 
         layout = self.layout()
@@ -87,7 +91,9 @@ class CalciumVideoWidget(FPLWidget):
         self.empty_state_widget = QtWidgets.QWidget(self)
         empty_layout = QtWidgets.QVBoxLayout(self.empty_state_widget)
         empty_layout.addStretch(1)
-        label = QtWidgets.QLabel("No calcium video loaded.", self.empty_state_widget)
+        label = QtWidgets.QLabel(
+            "No calcium imaging data loaded.", self.empty_state_widget
+        )
         label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(label)
         empty_layout.addWidget(
@@ -104,8 +110,8 @@ class CalciumVideoWidget(FPLWidget):
 
     def _set_canvas_visible(self, visible: bool) -> None:
         self.widget.setVisible(visible)
-        self.save_button.setEnabled(visible)
-        self.remove_button.setEnabled(visible)
+        self.save_button.setEnabled(visible and not self._live)
+        self.remove_button.setEnabled(visible and not self._live)
         self.video_actions_widget.setVisible(visible)
 
     def _close_pages(self) -> None:
@@ -129,9 +135,13 @@ class CalciumVideoWidget(FPLWidget):
         fps: float | None,
         *,
         warn_if_missing_cellpose: bool = True,
+        scanimage_index: dict | None = None,
+        channel: int | None = None,
     ) -> None:
         self._close_pages()
         self.clear_data()
+        self._scanimage_index = None
+        self._frame_times = None
         self._paths = list(paths)
         self._fps = float(fps) if fps is not None and fps > 0 else None
         self._current_frame_index = None
@@ -145,7 +155,8 @@ class CalciumVideoWidget(FPLWidget):
         try:
             pages: list[tuple[tifffile.TiffFile, int, int]] = []
             frame_refs: list[tuple[str, int, int]] = []
-            for path in self._paths:
+            self._scanimage_page_refs = {}
+            for file_index, path in enumerate(self._paths):
                 if path.suffix.lower() == ".gif":
                     image = Image.open(path)
                     frame_count = int(getattr(image, "n_frames", 1))
@@ -162,7 +173,7 @@ class CalciumVideoWidget(FPLWidget):
                     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
                     if not capture.isOpened() or frame_count <= 0:
                         capture.release()
-                        raise ValueError("Video contains no readable frames")
+                        raise ValueError("Imaging file contains no readable frames")
                     capture_index = len(self._cv_captures)
                     self._cv_captures.append(capture)
                     frame_refs.extend(
@@ -180,6 +191,11 @@ class CalciumVideoWidget(FPLWidget):
                             pages.append((tif, index, sub))
                             frame_refs.append(("tiff", len(pages) - 1, sub))
                     else:
+                        self._scanimage_page_refs[(file_index, index)] = (
+                            "tiff",
+                            len(pages),
+                            0,
+                        )
                         pages.append((tif, index, 0))
                         frame_refs.append(("tiff", len(pages) - 1, 0))
             self._pages = pages
@@ -206,10 +222,53 @@ class CalciumVideoWidget(FPLWidget):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Cell segmentation unavailable",
-                "The video will play normally, but stimulation crosses require "
+                "The imaging data will play normally, but stimulation crosses require "
                 "uploaded Cellpose segmentation masks.",
             )
             self._video_warning_shown = True
+        if scanimage_index is not None:
+            self.set_scanimage_index(scanimage_index, channel)
+        self.set_time_ms(0)
+
+    def set_live(self, live: bool) -> None:
+        self._live = live
+        if not live:
+            self._set_canvas_visible(bool(self._frame_refs))
+            self.empty_state_widget.setVisible(not self._frame_refs)
+            self.set_time_ms(0)
+        else:
+            self.save_button.setEnabled(False)
+            self.remove_button.setEnabled(False)
+
+    def show_live_frame(self, frame: dict) -> None:
+        if not self._live:
+            return
+        self.empty_state_widget.hide()
+        self.widget.show()
+        self.current_frame = self._to_rgb(frame["pixels"])
+        # Arrival time is not stimulation time. Never draw planned stimulation
+        # crosses on live frames without a measured synchronization mapping.
+        self._set_crosses(set())
+        self._draw_current_frame()
+
+    def set_scanimage_index(self, index: dict, channel: int | None = None) -> None:
+        self._scanimage_index = compact_index(index)
+        self.set_recorded_channel(channel or index["channels"][0])
+
+    def set_recorded_channel(self, channel: int) -> None:
+        if self._scanimage_index is None:
+            return
+        frames = self._scanimage_index["frames"]
+        channels = self._scanimage_index["channels"]
+        if channel not in channels:
+            channel = channels[0]
+        self.recorded_channel = channel
+        selected = [i for i, c in enumerate(frames["channel"]) if c == channel]
+        self._frame_refs = [
+            self._scanimage_page_refs[(frames["file"][i], frames["page"][i])]
+            for i in selected
+        ]
+        self._frame_times = np.asarray([frames["time_s"][i] for i in selected])
         self.set_time_ms(0)
 
     def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
@@ -248,7 +307,7 @@ class CalciumVideoWidget(FPLWidget):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Stimulation data unavailable",
-                    "The selected stimulation source is empty. The video will "
+                    "The selected stimulation source is empty. The imaging data will "
                     "continue to play without stimulation crosses.",
                 )
                 self._stim_warning_shown = True
@@ -279,7 +338,7 @@ class CalciumVideoWidget(FPLWidget):
             capture.set(cv2.CAP_PROP_POS_FRAMES, sub_index)
             ok, frame_data = capture.read()
             if not ok:
-                raise ValueError("Could not read video frame")
+                raise ValueError("Could not read imaging frame")
             frame = np.asarray(cv2.cvtColor(frame_data, cv2.COLOR_BGR2GRAY))
         else:
             tif, page_index, _ = self._pages[source_index]
@@ -288,10 +347,7 @@ class CalciumVideoWidget(FPLWidget):
                 frame = frame[sub_index]
         while frame.ndim > 2:
             frame = frame[0]
-        # CellposeImportDialog flips the reference image and masks vertically
-        # when loading them. Match that in-app coordinate convention so
-        # centroids and stimulation overlays land on the raw movie cells.
-        return np.flipud(frame)
+        return frame
 
     @staticmethod
     def _to_rgb(frame: np.ndarray) -> np.ndarray:
@@ -419,54 +475,92 @@ class CalciumVideoWidget(FPLWidget):
         self._frame_graphic.data = frame
 
     def set_time_ms(self, time_ms: int) -> None:
-        if not self._frame_refs or self._fps is None:
+        if self._live or not self._frame_refs or self._fps is None:
             return
         index = max(
             0, min(len(self._frame_refs) - 1, int(float(time_ms) / 1000.0 * self._fps))
         )
+        if self._frame_times is not None:
+            index = max(
+                0,
+                min(
+                    len(self._frame_refs) - 1,
+                    int(
+                        np.searchsorted(self._frame_times, time_ms / 1000, side="right")
+                    )
+                    - 1,
+                ),
+            )
         frame = self._to_rgb(self._read_frame(index))
         self._current_frame_index = index
         self.current_frame_index = index
         self.current_frame = frame
+        self._draw_current_frame()
+        # ScanImage recordings have no assumed alignment with the stimulus.
+        stimulated_ids = (
+            self._stimulated_cellpose_ids_at(int(time_ms))
+            if self._scanimage_index is None
+            else set()
+        )
+        self._set_crosses(stimulated_ids)
+        self.figure.renderer.request_draw()
+
+    def _draw_current_frame(self) -> None:
+        frame = self.current_frame
+        if frame is None:
+            return
+        if (
+            self._frame_graphic is not None
+            and self._frame_graphic.data.value.shape != frame.shape
+        ):
+            # Live previews are downsampled, so they rarely match the recorded
+            # movie; fastplotlib images cannot change shape in place.
+            with contextlib.suppress(Exception):
+                self.subplot.remove_graphic(self._frame_graphic)
+            self._frame_graphic = None
         if self._frame_graphic is None:
             self._frame_graphic = self.subplot.add_image(frame, interpolation="nearest")
             self.image_graphic = self._frame_graphic
             self.subplot.axes.visible = False
             self.subplot.grids = False
             self.subplot.camera.maintain_aspect = True
+            self.show_images_top_down()
             self.subplot.auto_scale(zoom=1.0, maintain_aspect=True)
         else:
             self._frame_graphic.data = frame
         self._update_frame_graphic()
-        stimulated_ids = self._stimulated_cellpose_ids_at(int(time_ms))
-        self._set_crosses(stimulated_ids)
         self.figure.renderer.request_draw()
 
     def _refresh_current_frame(self) -> None:
         if self._current_frame_index is None or self._fps is None:
             return
-        self.set_time_ms(round(self._current_frame_index * 1000.0 / self._fps))
+        time_s = (
+            self._frame_times[self._current_frame_index]
+            if self._frame_times is not None
+            else self._current_frame_index / self._fps
+        )
+        self.set_time_ms(round(time_s * 1000))
 
     def _on_save_labeled_video_clicked(self) -> None:
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self,
-            "Save video",
-            "video.tif",
+            "Save imaging data",
+            "imaging.tif",
             "TIFF files (*.tif *.tiff);;GIF files (*.gif)",
         )
         if path:
             try:
                 self.export_labeled_video(Path(path))
             except Exception as exc:
-                self.logger.exception("Could not save labeled video")
+                self.logger.exception("Could not save labeled imaging data")
                 QtWidgets.QMessageBox.critical(
                     self,
-                    "Could not save video",
-                    f"The video could not be saved:\n{exc}",
+                    "Could not save imaging data",
+                    f"The imaging data could not be saved:\n{exc}",
                 )
 
     def export_labeled_video(self, path: Path) -> None:
-        if not self._frame_refs or self._fps is None:
+        if self._live or not self._frame_refs or self._fps is None:
             return
         if path.suffix.lower() == ".gif":
             self._export_gif_streaming(path)
@@ -482,6 +576,14 @@ class CalciumVideoWidget(FPLWidget):
         duration_ms = max(1, round(1000.0 / self._fps)) if self._fps else 1
         with path.open("wb") as file:
             for index in range(len(self._frame_refs)):
+                if self._frame_times is not None and index + 1 < len(self._frame_times):
+                    duration_ms = max(
+                        1,
+                        round(
+                            1000
+                            * (self._frame_times[index + 1] - self._frame_times[index])
+                        ),
+                    )
                 frame = GifImagePlugin._normalize_mode(  # type: ignore[attr-defined]
                     Image.fromarray(self._labeled_frame(index), mode="RGB")
                 )
@@ -506,6 +608,8 @@ class CalciumVideoWidget(FPLWidget):
         assert self._fps is not None
         time_ms = round(index * 1000.0 / self._fps)
         frame = self._to_rgb(self._read_frame(index))
+        if self._scanimage_index is not None:
+            return frame
         for cell_id in self._stimulated_cellpose_ids_at(time_ms):
             point = self._centroids.get(cell_id)
             if point is None:

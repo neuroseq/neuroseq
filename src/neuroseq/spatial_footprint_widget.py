@@ -167,6 +167,16 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.show_shapes_checkbox.setEnabled(False)
         self.show_shapes_checkbox.toggled.connect(self._on_display_toggle_changed)
         checkbox_layout.addWidget(self.show_shapes_checkbox)
+        self.show_targets_checkbox = QtWidgets.QCheckBox("Show targets")
+        self.show_targets_checkbox.setChecked(True)
+        self.show_targets_checkbox.setToolTip(
+            "Mark, with a red cross, every neuron targeted by the sequence "
+            "whose import was confirmed by the stimulation setup. Not live illumination."
+        )
+        self.show_targets_checkbox.toggled.connect(
+            self._update_target_overlay_visibility
+        )
+        checkbox_layout.addWidget(self.show_targets_checkbox)
         self.brightness_contrast_button = QtWidgets.QPushButton("Brightness/Contrast…")
         self.brightness_contrast_button.setToolTip(
             "Adjust the display brightness/contrast of the FOV image "
@@ -256,10 +266,13 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._state.display_range_changed.connect(
                 self._on_state_display_range_changed
             ),
+            self._state.targeted_stim_ids_changed.connect(
+                self._update_target_overlay_visibility
+            ),
         ]
         self.calcium_video_widget = CalciumVideoWidget(parent=self.tabs)
         self.tabs.addTab(cell_tab, "Cell segmentation")
-        self.tabs.addTab(self.calcium_video_widget, "Video")
+        self.tabs.addTab(self.calcium_video_widget, "Imaging")
         # checkbox_container now lives inside cell_tab's own layout (added
         # above), so self.tabs (a _StableSizeTabWidget) is root_layout's only
         # child and already reports a size hint that's stable across tabs -
@@ -297,6 +310,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             self._update_checkbox_visibility()
             self.show_shapes_checkbox.setEnabled(False)
             self.overlay_widget.set_aoi_overlay(None, show=False)
+            self._update_target_overlay_visibility()
             return
 
         if self._brightness_contrast_dialog is not None:
@@ -317,6 +331,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             bool(aoi_config is not None and aoi_config.show_shapes)
         )
         self._update_aoi_overlay_visibility()
+        self._update_target_overlay_visibility()
 
     def _update_checkbox_visibility(self) -> None:
         # No tabs.currentIndex() check needed: checkbox_container lives
@@ -350,6 +365,12 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.overlay_widget.set_aoi_overlay(
             aoi_config,
             show=bool(aoi_config is not None and self.show_shapes_checkbox.isChecked()),
+        )
+
+    def _update_target_overlay_visibility(self) -> None:
+        self.overlay_widget.set_target_overlay(
+            self._state.targeted_cellpose_ids,
+            show=self.show_targets_checkbox.isChecked(),
         )
 
     def _on_state_selection_changed(self) -> None:
