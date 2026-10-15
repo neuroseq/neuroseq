@@ -1354,14 +1354,22 @@ class OverlayView(FullScreenFPLWidget):
             self.text.visible = False
             return
 
-        neuron_index = self.segmentation[y, x]
-        if neuron_index < 0:
-            self.text.visible = False
-            return
+        # Pixel coordinates as in Fiji: x to the right, y down from the top
+        # left of the raw image (issue #596).
+        coordinates = f"x {x}, y {y}"
+        cell_text = self._cell_hover_text(int(self.segmentation[y, x]))
+        self.text.visible = True
+        self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
+        self.text.text = (
+            f"{cell_text}\n{coordinates}" if cell_text is not None else coordinates
+        )
 
+    def _cell_hover_text(self, neuron_index: int) -> str | None:
+        """The ids of the cell under the cursor, or None if none are shown."""
+        if neuron_index < 0:
+            return None
         if not self.show_cellpose_ids and not self.show_stimulus_ids:
-            self.text.visible = False
-            return
+            return None
 
         reverse_mapping = {v: k for k, v in self.stim_to_cellpose.items()}
         stim_id = reverse_mapping.get(neuron_index)
@@ -1382,20 +1390,14 @@ class OverlayView(FullScreenFPLWidget):
         )
 
         if overwritten:
-            hover_text = f"Overwritten | ({cellpose_id})"
-        elif cellpose_visible and stim_visible:
-            hover_text = f"{stim_id}:{cellpose_id}"
-        elif stim_visible:
-            hover_text = f"{stim_id}"
-        elif cellpose_visible:
-            hover_text = f"{cellpose_id}"
-        else:
-            self.text.visible = False
-            return
-
-        self.text.visible = True
-        self.text.offset = (mouse_pos[0], mouse_pos[1], 200)
-        self.text.text = hover_text
+            return f"Overwritten | ({cellpose_id})"
+        if cellpose_visible and stim_visible:
+            return f"{stim_id}:{cellpose_id}"
+        if stim_visible:
+            return f"{stim_id}"
+        if cellpose_visible:
+            return f"{cellpose_id}"
+        return None
 
 
 class CellOverlayWidget(QtWidgets.QGroupBox):

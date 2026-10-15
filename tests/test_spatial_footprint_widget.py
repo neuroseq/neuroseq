@@ -2006,3 +2006,25 @@ def test_right_click_on_a_cell_requests_its_neuron(qtbot: QtBot) -> None:
         widget.overlay_widget.neuron_right_clicked.emit(2)
     assert blocker.args == [0]
     assert widget._selected_cellpose_ids == set()  # nothing selected or hidden
+
+
+def test_hover_shows_the_cursor_pixel_coordinates(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Issue #596: the hover text gives the cursor's pixel position (x right,
+    y down from the top left, as in Fiji), on cells and on the background."""
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
+    view = widget.overlay_widget.overlay_view
+    position = [np.array([1.0, 1.0, 0.0])]
+    monkeypatch.setattr(view.subplot, "map_screen_to_world", lambda ev: position[0])
+
+    view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
+    assert view.text is not None
+    assert view.text.visible
+    assert view.text.text == "0\nx 1, y 1"  # cell 2, neuron 0
+
+    position[0] = np.array([0.0, 2.0, 0.0])
+    view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
+    assert view.text.text == "x 0, y 2"  # background
