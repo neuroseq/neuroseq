@@ -276,8 +276,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self.spike_detect_checkbox.setChecked(False)
         self.spike_detect_checkbox.setToolTip(
             "If enabled, detected spikes are stored as SpikeData in the same "
-            "experiment. Uses the same default parameters as the NumPy (.npy) "
-            "patch-clamp importer."
+            "experiment using the default peak-detection parameters."
         )
         spike_layout.addWidget(self.spike_detect_checkbox)
         layout.addWidget(self.spike_group)
@@ -939,24 +938,6 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
                 target_dt=target_dt,
             )
 
-            if not stim_dt_matches(target_dt, self.project.dt):
-                affected = self.project.remappable_data_description(target_dt)
-                if affected:
-                    answer = QtWidgets.QMessageBox.question(
-                        self,
-                        "Change project sample interval",
-                        f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
-                        "will change the project sample interval from "
-                        f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
-                        f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
-                        f"{affected} using zero-order hold. Continue?",
-                        QtWidgets.QMessageBox.StandardButton.Yes
-                        | QtWidgets.QMessageBox.StandardButton.No,
-                    )
-                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-                        return
-                self.project.remap_all_data_to_dt(target_dt)
-
             created_new_experiment = False
             if self.create_new_radio.isChecked():
                 experiment_name = self._resolve_new_target_experiment_name()
@@ -1119,21 +1100,6 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             )
             for index, wave in enumerate(prepared_waves)
         ]
-        if not stim_dt_matches(target_dt, self.project.dt):
-            affected = self.project.remappable_data_description(target_dt)
-            if affected:
-                answer = QtWidgets.QMessageBox.question(
-                    self,
-                    "Change project sample interval",
-                    f"Importing will change the project sample interval to "
-                    f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
-                    f"{affected} using zero-order hold. Continue?",
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No,
-                )
-                if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-                    return
-            self.project.remap_all_data_to_dt(target_dt)
         for index, trace in enumerate(traces):
             self._commit_new_trace_data(experiment_name, trace)
             if self.spike_detect_checkbox.isChecked():

@@ -65,7 +65,6 @@ from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.patchclamp_import_dialog import PatchClampImportDialog
 from neuroseq.project import Project
 from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
@@ -2897,44 +2896,6 @@ class Gui(QtWidgets.QMainWindow):
                 "saved yet - use Save Project As to keep it.",
             )
 
-    def btn_import_patchclamp_data_clicked(self) -> None:
-        dialog = PatchClampImportDialog(
-            cellpose_import=self.last_cellpose_import,
-            project=self.project,
-            parent=self,
-        )
-        try:
-            if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-                if not dialog.imported_data:
-                    return
-                try:
-                    if dialog.cellpose_import is not None:
-                        # keep GUI/project copies in sync with any updated stimulus mapping
-                        self.last_cellpose_import = clone_cellpose_result(
-                            dialog.cellpose_import
-                        )
-                        if self.project is not None:
-                            self.project.cellpose_data = self.last_cellpose_import
-                    self._append_experimental_data(
-                        Experiment(
-                            dialog.experiment_name,
-                            dialog.experiment_duration,
-                            [],
-                            dialog.imported_data,
-                        )
-                    )
-                except Exception as exc:
-                    QtWidgets.QMessageBox.critical(
-                        self,
-                        "Patch clamp import error",
-                        f"Could not import patch clamp data: {exc}",
-                    )
-                    self.logger.exception(exc)
-                    return
-        finally:
-            dialog.close()
-            dialog.deleteLater()
-
     def connect_external_simulation_function_with_brian2(self) -> None:
         self._load_external_simulation_function(
             "./external_simulation_example/run_brian2_externally.py"
@@ -3026,8 +2987,6 @@ class Gui(QtWidgets.QMainWindow):
         Convention:
           Current Clamp (CC) -> recorded signal is voltage (mV)
           Voltage Clamp (VC) -> recorded signal is current (pA)
-        Igor2 routes to the Igor trace importer; NumPy routes to the existing
-        PatchClampImportDialog.
         """
         software, ok = QtWidgets.QInputDialog.getItem(
             self,
@@ -3039,7 +2998,7 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2", "NumPy (.npy)", "CSV / Text (.csv, .txt)"],
+            ["Igor2", "CSV / Text (.csv, .txt)"],
             0,
             False,
         )
@@ -3047,8 +3006,6 @@ class Gui(QtWidgets.QMainWindow):
             return
         if software == "Igor2":
             self.btn_import_igor2_trace_clicked()
-        elif software == "NumPy (.npy)":
-            self.btn_import_patchclamp_data_clicked()
         elif software == "CSV / Text (.csv, .txt)":
             self.btn_import_igor2_trace_clicked(csv_only=True)
 

@@ -148,11 +148,6 @@ def _make_spike_export_gui(
             "btn_import_igor2_trace_clicked",
         ),
         (
-            "btn_import_trace_patchclamp_clicked",
-            "NumPy (.npy)",
-            "btn_import_patchclamp_data_clicked",
-        ),
-        (
             "btn_export_patch_clamp_stim_clicked",
             "Igor2 - single array (.ibw / .csv)",
             "btn_export_igor2_single_wave_clicked",
@@ -200,7 +195,7 @@ def test_gui_patchclamp_csv_option(
 ) -> None:
     def choose_csv(*args, **kwargs):
         option = "CSV / Text (.csv, .txt)"
-        assert option in args[3]
+        assert args[3] == ["Igor2", option]
         return option, True
 
     monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", choose_csv)
@@ -229,11 +224,6 @@ def test_gui_patchclamp_csv_option(
             "btn_import_trace_patchclamp_clicked",
             "Igor2",
             "btn_import_igor2_trace_clicked",
-        ),
-        (
-            "btn_import_trace_patchclamp_clicked",
-            "NumPy (.npy)",
-            "btn_import_patchclamp_data_clicked",
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
@@ -286,7 +276,6 @@ def test_patchclamp_pre_dialogs_include_cc_vc_convention(
     fake_gui: Any = SimpleNamespace(
         btn_import_igor2_wave_clicked=lambda: None,
         btn_import_igor2_trace_clicked=lambda: None,
-        btn_import_patchclamp_data_clicked=lambda: None,
     )
 
     Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)

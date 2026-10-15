@@ -387,7 +387,7 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
         )
         if item is not None and "WaveA" in item.text()
     )
-    assert wave_a_item.text().startswith("✓ ")
+    assert wave_a_item.text().startswith("âœ“ ")
     assert not (wave_a_item.flags() & QtCore.Qt.ItemFlag.ItemIsSelectable)
 
     dialog.new_experiment_combo.setCurrentText("Experiment A")
@@ -589,85 +589,61 @@ def test_trace_dialog_spike_detection_off_adds_no_spikedata(
     assert _find_spike_data(project, "Experiment A") == []
 
 
-def test_trace_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
+@pytest.mark.parametrize("multiple_columns", [False, True])
+@pytest.mark.parametrize("match_source", [False, True])
+def test_trace_import_preserves_independent_dataset_timing(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
-    qmessagebox_calls: list[dict[str, str]],
+    multiple_columns: bool,
+    match_source: bool,
 ) -> None:
-    """When importing a trace at a non-default dt and the project already has a
-    stim array, a remap confirmation must be shown and all data remapped on Yes."""
-    csv_path = tmp_path / "wave.csv"
-    csv_path.write_text("new_trace\n1.0\n2.0\n", encoding="utf-8")
-
     from neuroseq.stim import StimArray
     from neuroseq.stim import StimType
 
+    path = tmp_path / "wave.csv"
+    path.write_text(
+        "first,second\n1,10\n2,20\n" if multiple_columns else "first\n1\n2\n",
+        encoding="utf-8",
+    )
     project = Project()
+    stim_values = np.arange(10, dtype=np.float32).reshape(10, 1)
     project.add_stim_array(
-        StimArray(
-            "stim1", StimType.External, np.zeros((10, 1), dtype=np.float32), "pA", 0.001
-        )
+        StimArray("stim1", StimType.External, stim_values.copy(), "pA", 0.0005208125)
+    )
+    original_project_dt = project.dt
+    existing_trace = TraceData(
+        "calcium",
+        np.array([[1, 2, 3]], dtype=np.float32),
+        np.array([0], dtype=np.uint32),
+        "units",
+        1 / 30,
+    )
+    project.add_experiment(
+        Experiment(name="Existing", duration=0.1, timepoints=[], data=[existing_trace])
     )
 
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
-    )
+    def unexpected_question(*args, **kwargs):
+        pytest.fail("Importing independent traces must not prompt to remap data")
 
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", unexpected_question)
     dialog = IgorTraceImportDialog(project)
     qtbot.addWidget(dialog)
-    dialog._load_file(str(csv_path))
-    dialog.new_experiment_name_edit.setText("Experiment A")
-    dialog.match_source_grid_checkbox.setChecked(True)
+    dialog._load_file(str(path))
+    dialog.new_experiment_name_edit.setText("Imported")
+    dialog.match_source_grid_checkbox.setChecked(match_source)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
-    assert project.dt == pytest.approx(0.0005)
-    assert project.stim_arrays["stim1"].dt == pytest.approx(0.0005)
-    assert project.stim_arrays["stim1"].values.shape[0] == 20
-    trace_data = _find_trace_data(project, "Experiment A", "new_trace")
-    assert trace_data.dt == pytest.approx(0.0005)
-
-
-def test_trace_dialog_aborts_import_on_remap_decline(
-    tmp_path: Path,
-    qtbot: QtBot,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Declining the remap confirmation must leave the project untouched."""
-    csv_path = tmp_path / "wave.csv"
-    csv_path.write_text("new_trace\n1.0\n2.0\n", encoding="utf-8")
-
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
-
-    project = Project()
-    project.add_stim_array(
-        StimArray(
-            "stim1", StimType.External, np.zeros((10, 1), dtype=np.float32), "pA", 0.001
-        )
-    )
-
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
-    )
-
-    dialog = IgorTraceImportDialog(project)
-    qtbot.addWidget(dialog)
-    dialog._load_file(str(csv_path))
-    dialog.new_experiment_name_edit.setText("Experiment A")
-    dialog.match_source_grid_checkbox.setChecked(True)
-    dialog.source_dt_spin.setValue(0.0005)
-    dialog._import_file()
-
-    assert project.dt == pytest.approx(0.001)
-    assert "Experiment A" not in project.experiments
-    assert project.stim_arrays["stim1"].dt == pytest.approx(0.001)
-    assert project.stim_arrays["stim1"].values.shape[0] == 10
+    assert project.dt == original_project_dt
+    assert project.stim_arrays["stim1"].dt == pytest.approx(0.0005208125)
+    np.testing.assert_array_equal(project.stim_arrays["stim1"].values, stim_values)
+    assert existing_trace.dt == pytest.approx(1 / 30)
+    np.testing.assert_array_equal(existing_trace.traces, [[1, 2, 3]])
+    names = ["first", "second"] if multiple_columns else ["first"]
+    for name in names:
+        trace = _find_trace_data(project, "Imported", name)
+        assert trace.dt == pytest.approx(0.0005 if match_source else 0.001)
 
 
 def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) -> None:
