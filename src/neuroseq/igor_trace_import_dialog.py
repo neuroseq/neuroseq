@@ -21,6 +21,7 @@ from neuroseq.importer_igor2 import create_trace_data_from_igor_wave
 from neuroseq.importer_igor2 import estimate_resampled_sample_count
 from neuroseq.importer_igor2 import import_igor_wave_into_trace_data
 from neuroseq.importer_igor2 import is_pxp_file
+from neuroseq.importer_igor2 import load_csv_trace_table
 from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import load_igor_wave_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
@@ -49,11 +50,15 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        csv_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
+        self.csv_only = csv_only
         self.loaded_wave: IgorWave | None = None
+        self.csv_waves: list[IgorWave] = []
         self.file_path: str = ""
         self.selected_experiment_name: str = ""
         self.selected_trace_name: str = ""
@@ -66,6 +71,8 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
 
     def _setup_ui(self) -> None:
         self.setWindowTitle("Import Igor2 Patch-Clamp Trace")
+        if self.csv_only:
+            self.setWindowTitle("Import CSV / Text patch clamp output")
         self.setModal(True)
         self.resize(860, 780)
 
@@ -89,6 +96,12 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             "then click Close when done."
         )
         intro.setWordWrap(True)
+        if self.csv_only:
+            intro.setText(
+                "Import CSV or text output with one trace per column and one sample per row. "
+                "An optional first row names the traces. Set the shared source sampling "
+                "rate in Hz before importing. Choose the recorded signal units below."
+            )
         layout.addWidget(intro)
 
         self.file_group = QtWidgets.QGroupBox("File Selection")
@@ -152,7 +165,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self.source_group = QtWidgets.QGroupBox("Source Wave Settings")
         source_layout = QtWidgets.QFormLayout(self.source_group)
         self.source_dt_spin = QtWidgets.QDoubleSpinBox()
-        self.source_dt_spin.setDecimals(9)
+        self.source_dt_spin.setDecimals(12)
         self.source_dt_spin.setRange(0.000001, 3600.0)
         self.source_dt_spin.setSingleStep(0.0001)
         self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
@@ -163,6 +176,18 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         )
         self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
         source_layout.addRow("Source sample interval:", self.source_dt_spin)
+        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        self.sampling_rate_spin.setDecimals(6)
+        self.sampling_rate_spin.setRange(0.001, 1000000.0)
+        self.sampling_rate_spin.setValue(1000.0)
+        self.sampling_rate_spin.setSuffix(" Hz")
+        self.sampling_rate_spin.valueChanged.connect(
+            lambda rate: self.source_dt_spin.setValue(1.0 / rate)
+        )
+        self.sampling_rate_label = QtWidgets.QLabel("Source sampling rate:")
+        source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
+        self.sampling_rate_label.setVisible(self.csv_only)
+        self.sampling_rate_spin.setVisible(self.csv_only)
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(
             "Adjust NeuroSeq trace grid to source/file grid"
         )
@@ -294,6 +319,8 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             self.target_dt_label.setText(f"{target_dt:.3f} s (fixed NeuroSeq grid)")
 
     def _on_timing_settings_changed(self) -> None:
+        with QtCore.QSignalBlocker(self.sampling_rate_spin):
+            self.sampling_rate_spin.setValue(1.0 / self.source_dt_spin.value())
         self._update_target_dt_label()
         self._update_preview()
         self._update_import_button_state()
@@ -429,14 +456,19 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "Select Igor wave",
+            "Select CSV or text output" if self.csv_only else "Select Igor wave",
             "",
-            "Igor files (*.ibw *.pxp *.csv);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV file (*.csv);;All files (*)",
+            "CSV / Text files (*.csv *.txt)"
+            if self.csv_only
+            else "Wave files (*.ibw *.pxp *.csv *.txt);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV / Text files (*.csv *.txt);;All files (*)",
         )
         if filename:
             self._load_file(filename)
 
     def _load_file(self, filename: str) -> None:
+        self.csv_waves = []
+        self.new_trace_name_edit.setReadOnly(False)
+        self.import_existing_radio.setEnabled(bool(self._experiments_with_trace_data()))
         self.loaded_pxp_waves = {}
         self.pxp_wave_list.clear()
         self.wave_picker_group.setVisible(False)
@@ -444,7 +476,11 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             self._load_pxp_file(filename)
             return
         try:
-            wave = load_igor_wave_file(filename)
+            if Path(filename).suffix.lower() in {".csv", ".txt"}:
+                self.csv_waves = load_csv_trace_table(filename)
+                wave = self.csv_waves[0]
+            else:
+                wave = load_igor_wave_file(filename)
         except Exception as exc:
             self.logger.exception("Failed to load Igor wave %s", filename)
             self.loaded_wave = None
@@ -473,6 +509,14 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             self.new_units_edit.setText(self._auto_units)
 
         self.loaded_wave = wave
+        if len(self.csv_waves) > 1:
+            self.create_new_radio.setChecked(True)
+            self.import_existing_radio.setEnabled(False)
+            self.new_trace_name_edit.setText(", ".join(w.name for w in self.csv_waves))
+            self.new_trace_name_edit.setReadOnly(True)
+        is_csv = wave.source_format == "csv"
+        self.sampling_rate_label.setVisible(is_csv)
+        self.sampling_rate_spin.setVisible(is_csv)
         self.file_path = filename
         self.file_label.setText(filename)
         self.file_label.setStyleSheet("QLabel { color: black; }")
@@ -642,6 +686,13 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             return
 
         self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
+        if len(self.csv_waves) > 1:
+            self.preview_text.appendPlainText(
+                f"CSV table: {len(self.csv_waves)} traces; columns: "
+                + ", ".join(w.name for w in self.csv_waves)
+                + ". All columns will be imported with consecutive neuron IDs "
+                "starting at the selected neuron ID. Plot shows the first column."
+            )
         source_dt = float(self.source_dt_spin.value())
         target_dt = self._target_dt_seconds()
         info_lines: list[str] = []
@@ -852,6 +903,9 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             return
 
         try:
+            if len(self.csv_waves) > 1:
+                self._import_csv_table()
+                return
             target_dt = self._target_dt_seconds()
             prepared_wave = prepare_igor_wave_for_neuroseq(
                 self.loaded_wave,
@@ -1009,6 +1063,67 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
                 "Import Error",
                 f"Failed to import Igor trace wave:\n{exc}",
             )
+
+    def _import_csv_table(self) -> None:
+        experiment_name = self._resolve_new_target_experiment_name()
+        existing = self.project.experiments.get(experiment_name)
+        existing_names = (
+            {data.name for data in existing.data if isinstance(data, TraceData)}
+            if existing is not None
+            else set()
+        )
+        if existing_names.intersection(wave.name for wave in self.csv_waves):
+            raise ValueError("A CSV trace name already exists in the target experiment")
+        target_dt = self._target_dt_seconds()
+        prepared_waves = [
+            prepare_igor_wave_for_neuroseq(
+                wave,
+                source_dt_override=float(self.source_dt_spin.value()),
+                target_dt=target_dt,
+            )
+            for wave in self.csv_waves
+        ]
+        first_id = int(self.new_neuron_id_spin.value())
+        traces = [
+            create_trace_data_from_igor_wave(
+                wave,
+                trace_name=wave.name,
+                neuron_id=first_id + index,
+                units=self.new_units_edit.text().strip(),
+            )
+            for index, wave in enumerate(prepared_waves)
+        ]
+        if not stim_dt_matches(target_dt, self.project.dt):
+            affected = self.project.remappable_data_description(target_dt)
+            if affected:
+                answer = QtWidgets.QMessageBox.question(
+                    self,
+                    "Change project sample interval",
+                    f"Importing will change the project sample interval to "
+                    f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
+                    f"{affected} using zero-order hold. Continue?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+            self.project.remap_all_data_to_dt(target_dt)
+        for index, trace in enumerate(traces):
+            self._commit_new_trace_data(experiment_name, trace)
+            if self.spike_detect_checkbox.isChecked():
+                self._run_spike_detection(
+                    prepared_waves[index],
+                    experiment_name=experiment_name,
+                    neuron_id=first_id + index,
+                )
+        self.selected_experiment_name = experiment_name
+        self.selected_trace_name = traces[0].name
+        QtWidgets.QMessageBox.information(
+            self,
+            "Import Complete",
+            f"Imported {len(traces)} CSV column traces into '{experiment_name}'.",
+        )
+        self.accept()
 
     def done(self, result: int) -> None:
         self._cleanup_wave_plot()

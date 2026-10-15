@@ -2409,18 +2409,26 @@ class Gui(QtWidgets.QMainWindow):
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_wave_clicked(self) -> None:
-        dialog = IgorImportDialog(self.project, parent=self)
+    def btn_import_igor2_wave_clicked(self, *, csv_only: bool = False) -> None:
+        dialog = (
+            IgorImportDialog(self.project, parent=self, csv_only=True)
+            if csv_only
+            else IgorImportDialog(self.project, parent=self)
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
             if dialog.selected_stim_name:
                 self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
-    def btn_import_igor2_trace_clicked(self) -> None:
+    def btn_import_igor2_trace_clicked(self, *, csv_only: bool = False) -> None:
         from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 
-        dialog = IgorTraceImportDialog(self.project, parent=self)
+        dialog = (
+            IgorTraceImportDialog(self.project, parent=self, csv_only=True)
+            if csv_only
+            else IgorTraceImportDialog(self.project, parent=self)
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self.project.mark_dirty()
             self.update_project(self.project)
@@ -2617,7 +2625,7 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2"],
+            ["Igor2", "CSV / Text (.csv, .txt)"],
             0,
             False,
         )
@@ -2625,6 +2633,8 @@ class Gui(QtWidgets.QMainWindow):
             return
         if software == "Igor2":
             self.btn_import_igor2_wave_clicked()
+        elif software == "CSV / Text (.csv, .txt)":
+            self.btn_import_igor2_wave_clicked(csv_only=True)
 
     def btn_import_trace_patchclamp_clicked(self) -> None:
         """Pre-dialog: choose software, then import recorded patch-clamp traces.
@@ -2645,7 +2655,7 @@ class Gui(QtWidgets.QMainWindow):
                 "\n"
                 "Import from:"
             ),
-            ["Igor2", "NumPy (.npy)"],
+            ["Igor2", "NumPy (.npy)", "CSV / Text (.csv, .txt)"],
             0,
             False,
         )
@@ -2655,6 +2665,8 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_igor2_trace_clicked()
         elif software == "NumPy (.npy)":
             self.btn_import_patchclamp_data_clicked()
+        elif software == "CSV / Text (.csv, .txt)":
+            self.btn_import_igor2_trace_clicked(csv_only=True)
 
     # Export wrappers
 

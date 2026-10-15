@@ -189,6 +189,30 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
 
 
 @pytest.mark.parametrize(
+    ("method_name", "inner_name"),
+    [
+        ("btn_import_stimulus_patchclamp_clicked", "btn_import_igor2_wave_clicked"),
+        ("btn_import_trace_patchclamp_clicked", "btn_import_igor2_trace_clicked"),
+    ],
+)
+def test_gui_patchclamp_csv_option(
+    monkeypatch: MonkeyPatch, method_name: str, inner_name: str
+) -> None:
+    def choose_csv(*args, **kwargs):
+        option = "CSV / Text (.csv, .txt)"
+        assert option in args[3]
+        return option, True
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", choose_csv)
+    called = []
+    fake_gui: Any = SimpleNamespace(
+        **{inner_name: lambda **kwargs: called.append(kwargs)}
+    )
+    getattr(Gui, method_name)(fake_gui)
+    assert called == [{"csv_only": True}]
+
+
+@pytest.mark.parametrize(
     ("method_name", "software", "inner_name"),
     [
         (
