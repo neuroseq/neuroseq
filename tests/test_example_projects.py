@@ -134,6 +134,25 @@ def test_getting_started_project_bundles_a_cell_segmentation() -> None:
     assert project.max_neurons == n_neurons
 
 
+def test_adex_example_has_adapting_spike_train() -> None:
+    project = example_projects.single_adex_neuron()
+
+    assert (
+        "Adaptive Exponential Integrate-and-Fire Neuron"
+        in example_projects.example_projects["Single Neuron"]
+    )
+    assert list(project.stim_arrays) == ["I_external"]
+    assert project.stim_arrays["I_external"].units == "pA"
+    assert "w += b_adex" in project.b2_model.neurongroups["neuron"]["reset"]
+
+    project.run_simulation(1.0)
+    spike_times = np.asarray(project.b2_model.network["spikes"].t / b2.second)
+    intervals = np.diff(spike_times)
+
+    assert len(spike_times) >= 4
+    assert intervals[-1] > intervals[0]
+
+
 def test_hh_stdp_example_is_two_neuron_and_potentiates() -> None:
     project = example_projects.hh_neuron_with_plasticity()
     model = project.b2_model

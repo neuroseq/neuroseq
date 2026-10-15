@@ -26,7 +26,16 @@ def _trace_row_mv(trace: TraceData, neuron_id: int) -> tuple[np.ndarray, float]:
     matches = np.flatnonzero(trace.indices == neuron_id)
     if matches.size == 0:
         raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
-    return _to_mv(trace.traces[int(matches[0])], trace.units), 1000.0 * trace.dt
+    values = np.asarray(trace.traces[int(matches[0])], dtype=float)
+    if str(trace.units).strip().lower() == "mv":
+        # Simulated voltage traces are stored in SI volts but labelled "mV"
+        # (the trace widget applies the same convention), so a "mV" trace
+        # whose magnitudes are below 2 is really in volts.
+        finite = np.abs(values[np.isfinite(values)])
+        if finite.size and float(np.percentile(finite, 95)) < 2.0:
+            values = values * 1000.0
+        return values, 1000.0 * trace.dt
+    return _to_mv(values, trace.units), 1000.0 * trace.dt
 
 
 def measure_spike_count(

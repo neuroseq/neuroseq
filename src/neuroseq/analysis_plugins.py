@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,6 +21,19 @@ class AnalysisPlugin:
     render: Callable[
         [object, TraceData | SpikeData | SynapseData, slice | None, slice | None], None
     ]
+    open_dialog: (
+        Callable[
+            [
+                object,
+                object,
+                TraceData | SpikeData | SynapseData,
+                slice | None,
+                slice | None,
+            ],
+            None,
+        ]
+        | None
+    ) = None
 
     def __str__(self) -> str:
         return self.label
@@ -41,9 +55,13 @@ def _load_plugin_module(plugin_file: Path) -> ModuleType | None:
         )
         return None
     module = importlib.util.module_from_spec(spec)
+    # Match normal import semantics. Decorators such as ``@dataclass`` resolve
+    # annotations through ``sys.modules`` while the module is executing.
+    sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
     except Exception as exc:
+        sys.modules.pop(spec.name, None)
         logger.exception(f"Failed to load analysis plugin {plugin_file}: {exc}")
         return None
     return module
@@ -73,6 +91,13 @@ def discover_analysis_plugins() -> list[AnalysisPlugin]:
         plugin_id = getattr(module, "PLUGIN_ID", plugin_file.stem)
         plugin_label = getattr(module, "PLUGIN_NAME", plugin_file.stem)
         plugin_icon = getattr(module, "PLUGIN_ICON", "mdi6.puzzle")
+        open_dialog = getattr(module, "open_analysis_dialog", None)
+        if open_dialog is not None and not callable(open_dialog):
+            logger.warning(
+                f"Ignoring non-callable open_analysis_dialog in analysis plugin "
+                f"{plugin_file}"
+            )
+            open_dialog = None
 
         plugins.append(
             AnalysisPlugin(
@@ -80,6 +105,7 @@ def discover_analysis_plugins() -> list[AnalysisPlugin]:
                 label=str(plugin_label),
                 icon=str(plugin_icon),
                 render=render,
+                open_dialog=open_dialog,
             )
         )
 

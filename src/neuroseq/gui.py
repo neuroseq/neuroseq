@@ -786,6 +786,15 @@ class Gui(QtWidgets.QMainWindow):
         neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ):
+        if isinstance(analysis_type, AnalysisPlugin) and analysis_type.open_dialog:
+            analysis_type.open_dialog(
+                self,
+                self.project,
+                data,
+                neuron_slice if isinstance(neuron_slice, slice) else None,
+                time_slice,
+            )
+            return
         if new_window:
             analysis_window = CustomAnalysisWindow(parent=self)
             analysis_window.analysis_widget.set_data(
