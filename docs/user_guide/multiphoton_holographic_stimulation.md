@@ -243,5 +243,5 @@ without claiming measured completion. **Stop** also cancels any queued Run.
 The preview is collapsed by default; click **Show preview** to expand it.
 
 The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
-starting with the wrong timestep. **Edit Input Array** also provides exact presets
-for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.
+starting with the wrong timestep. The **Create input array** and **Edit input
+array** dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

@@ -1151,6 +1151,7 @@ class StimEditor(QtWidgets.QWidget):
             stim_array,
             existing_names=list(self.project.stim_arrays.keys()),
             parent=self,
+            title="Create input array",
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             n_timestamps = seconds_to_samples_ceil(

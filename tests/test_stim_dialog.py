@@ -22,6 +22,7 @@ def test_edit_stim_dialog(qtbot: QtBot):
     qtbot.waitUntil(lambda: dialog.isVisible())
 
     # Check initial values
+    assert dialog.windowTitle() == "Edit input array"
     assert dialog.txt_name.text() == "s1"
     assert dialog.stim_type == StimType.Inhibition
     assert dialog.n_neurons == 2

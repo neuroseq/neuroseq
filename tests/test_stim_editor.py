@@ -828,7 +828,7 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     monkeypatch: MonkeyPatch, qtbot: QtBot
 ) -> None:
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
             self.n_neurons = stim_array.values.shape[1]
@@ -1183,8 +1183,9 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
     captured = {}
 
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             captured["dt"] = stim_array.dt
+            captured["title"] = title
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
             self.n_neurons = stim_array.values.shape[1]
@@ -1217,6 +1218,7 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
     stim_editor.create_stim_array()
 
     assert captured["dt"] == approx(0.002)
+    assert captured["title"] == "Create input array"
     stim_editor.close()
 
 
@@ -1342,7 +1344,7 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
     captured = {}
 
     class MockEditStimDialog:
-        def __init__(self, stim_array, existing_names, parent=None):
+        def __init__(self, stim_array, existing_names, parent=None, title=None):
             captured["dt"] = stim_array.dt
             self.name = stim_array.name
             self.stim_type = stim_array.stim_type
