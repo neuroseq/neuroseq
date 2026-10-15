@@ -668,3 +668,29 @@ def test_trace_dialog_aborts_import_on_remap_decline(
     assert "Experiment A" not in project.experiments
     assert project.stim_arrays["stim1"].dt == pytest.approx(0.001)
     assert project.stim_arrays["stim1"].values.shape[0] == 10
+
+
+def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) -> None:
+    """Issue #619: the experiment name is filled in, so a wave can be imported
+    without typing one."""
+    first = tmp_path / "first.csv"
+    first.write_text("sweep_A\n1.0\n2.0\n", encoding="utf-8")
+    second = tmp_path / "second.csv"
+    second.write_text("sweep_B\n1.0\n2.0\n", encoding="utf-8")
+    project = Project()
+    project.add_experiment(
+        Experiment(name="sweep_B", duration=0.002, timepoints=[], data=[])
+    )
+    dialog = IgorTraceImportDialog(project)
+    qtbot.addWidget(dialog)
+
+    dialog._load_file(str(first))
+    assert dialog.new_experiment_name_edit.text() == "sweep_A"
+    assert dialog.import_button.isEnabled()
+    # An existing experiment's name is not suggested again.
+    dialog._load_file(str(second))
+    assert dialog.new_experiment_name_edit.text() == "sweep_B 2"
+    # A name the user typed is kept when another wave is loaded.
+    dialog.new_experiment_name_edit.setText("My cell")
+    dialog._load_file(str(first))
+    assert dialog.new_experiment_name_edit.text() == "My cell"

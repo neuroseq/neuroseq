@@ -64,6 +64,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self.selected_trace_name: str = ""
         self._auto_trace_name = ""
         self._auto_units = ""
+        self._auto_experiment_name = ""
         self.loaded_pxp_waves: dict[str, IgorWave] = {}
         self._imported_pxp_keys: set[str] = set()
         self._had_successful_import: bool = False
@@ -450,8 +451,25 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             current_units = self.new_units_edit.text().strip()
             if not current_units or current_units == previous_auto_units:
                 self.new_units_edit.setText(self._auto_units)
+            self._set_auto_experiment_name(
+                self.loaded_wave.name if self.loaded_wave else ""
+            )
         self._update_preview()
         self._update_import_button_state()
+
+    def _set_auto_experiment_name(self, base: str) -> None:
+        """Suggest a new experiment named after the wave (issue #619), unless
+        the user typed a name of their own."""
+        name = base
+        number = 2
+        while name and name in self.project.experiments:
+            name = f"{base} {number}"
+            number += 1
+        previous_auto_name = self._auto_experiment_name
+        self._auto_experiment_name = name
+        current_name = self.new_experiment_name_edit.text().strip()
+        if not current_name or current_name == previous_auto_name:
+            self.new_experiment_name_edit.setText(name)
 
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
@@ -509,6 +527,9 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
             self.new_units_edit.setText(self._auto_units)
 
         self.loaded_wave = wave
+        self._set_auto_experiment_name(
+            Path(filename).stem if len(self.csv_waves) > 1 else wave.name
+        )
         if len(self.csv_waves) > 1:
             self.create_new_radio.setChecked(True)
             self.import_existing_radio.setEnabled(False)
