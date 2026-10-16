@@ -138,21 +138,6 @@ def _make_spike_export_gui(
             "SysCon2",
             "btn_import_syscon2_seq_clicked",
         ),
-        (
-            "btn_export_patch_clamp_stim_clicked",
-            "Igor2 - single array (.ibw / .csv)",
-            "btn_export_igor2_single_wave_clicked",
-        ),
-        (
-            "btn_export_patch_clamp_stim_clicked",
-            "Igor2 - all arrays (.pxp)",
-            "btn_export_igor2_pxp_stim_clicked",
-        ),
-        (
-            "btn_export_light_stimulus_clicked",
-            "SysCon2",
-            "open_stimulation_generator_dialog",
-        ),
     ],
 )
 def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
@@ -181,21 +166,6 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
             "btn_import_stimulus_light_clicked",
             "SysCon2",
             "btn_import_syscon2_seq_clicked",
-        ),
-        (
-            "btn_export_patch_clamp_stim_clicked",
-            "Igor2 - single array (.ibw / .csv)",
-            "btn_export_igor2_single_wave_clicked",
-        ),
-        (
-            "btn_export_patch_clamp_stim_clicked",
-            "Igor2 - all arrays (.pxp)",
-            "btn_export_igor2_pxp_stim_clicked",
-        ),
-        (
-            "btn_export_light_stimulus_clicked",
-            "SysCon2",
-            "open_stimulation_generator_dialog",
         ),
     ],
 )
@@ -3164,91 +3134,37 @@ def test_gui_export_igor2_pxp_stim_requires_selection(
     assert "nothing selected" in qmessagebox_calls[0]["title"].lower()
 
 
-def test_gui_export_light_stimulus_igor2_pxp_routes_to_pxp_export(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Selecting 'Igor2 - all arrays (.pxp)' must dispatch to the pxp handler."""
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args, **kwargs: ("Igor2 - all arrays (.pxp)", True),
+@pytest.mark.parametrize(
+    ("handler", "mode"),
+    [
+        ("btn_export_patch_clamp_stim_clicked", "patch-clamp"),
+        ("btn_export_light_stimulus_clicked", "light"),
+    ],
+)
+def test_gui_stimulus_export_delegates_format_selection(monkeypatch, handler, mode):
+    from unittest.mock import Mock
+
+    entry_point = Mock()
+    monkeypatch.setattr(neuroseq.gui, "show_stimulus_export_dialog", entry_point)
+    project = Project()
+    panel = SimpleNamespace(
+        _remote_sequence_names=Mock(), show_generated_preview=Mock()
+    )
+    window = SimpleNamespace(
+        project=project,
+        cmb_stim=SimpleNamespace(currentText=lambda: "selected"),
+        syscon2_panel=panel,
     )
 
-    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
+    getattr(Gui, handler)(window)
 
-    fake_gui: Any = SimpleNamespace(
-        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
-            "pxp", called["pxp"] + 1
-        ),
-        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
-            "ibw", called["ibw"] + 1
-        ),
-        open_stimulation_generator_dialog=lambda: called.__setitem__(
-            "syscon", called["syscon"] + 1
-        ),
-    )
-
-    Gui.btn_export_light_stimulus_clicked(fake_gui)
-
-    assert called == {"pxp": 1, "ibw": 0, "syscon": 0}
-
-
-def test_gui_export_light_stimulus_syscon2_routes_to_generator(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Selecting SysCon2 still opens the stimulation generator dialog."""
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args, **kwargs: ("SysCon2", True),
-    )
-
-    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
-
-    fake_gui: Any = SimpleNamespace(
-        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
-            "pxp", called["pxp"] + 1
-        ),
-        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
-            "ibw", called["ibw"] + 1
-        ),
-        open_stimulation_generator_dialog=lambda: called.__setitem__(
-            "syscon", called["syscon"] + 1
-        ),
-    )
-
-    Gui.btn_export_light_stimulus_clicked(fake_gui)
-
-    assert called == {"pxp": 0, "ibw": 0, "syscon": 1}
-
-
-def test_gui_export_light_stimulus_igor2_ibw_routes_to_single_wave_export(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    """Selecting 'Igor2 - single neuron' routes to the single-wave export flow."""
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args, **kwargs: ("Igor2 - single neuron (.ibw / .csv)", True),
-    )
-
-    called: dict[str, int] = {"pxp": 0, "ibw": 0, "syscon": 0}
-
-    fake_gui: Any = SimpleNamespace(
-        btn_export_igor2_pxp_stim_clicked=lambda: called.__setitem__(
-            "pxp", called["pxp"] + 1
-        ),
-        btn_export_igor2_single_wave_clicked=lambda: called.__setitem__(
-            "ibw", called["ibw"] + 1
-        ),
-        open_stimulation_generator_dialog=lambda: called.__setitem__(
-            "syscon", called["syscon"] + 1
-        ),
-    )
-
-    Gui.btn_export_light_stimulus_clicked(fake_gui)
-
-    assert called == {"pxp": 0, "ibw": 1, "syscon": 0}
+    kwargs = dict(parent=window, current_stim_name="selected")
+    if mode == "light":
+        kwargs.update(
+            reserved_names=panel._remote_sequence_names,
+            on_generated=panel.show_generated_preview,
+        )
+    entry_point.assert_called_once_with(project, mode, **kwargs)
 
 
 def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(

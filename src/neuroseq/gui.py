@@ -25,9 +25,9 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
+from neuroseq import elise_workflows
 from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
-from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
@@ -2806,44 +2806,22 @@ class Gui(QtWidgets.QMainWindow):
     # Export wrappers
 
     def btn_export_patch_clamp_stim_clicked(self) -> None:
-        """Pre-dialog: choose software, then export patch-clamp stimulus CSV."""
-        software, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Export patch clamp input",
-            "Export for:",
-            ["Igor2 - single array (.ibw / .csv)", "Igor2 - all arrays (.pxp)"],
-            0,
-            False,
+        show_stimulus_export_dialog(
+            self.project,
+            "patch-clamp",
+            parent=self,
+            current_stim_name=self.cmb_stim.currentText(),
         )
-        if not ok:
-            return
-        if software.startswith("Igor2 - single"):
-            self.btn_export_igor2_single_wave_clicked()
-        elif software.startswith("Igor2 - all"):
-            self.btn_export_igor2_pxp_stim_clicked()
 
     def btn_export_light_stimulus_clicked(self) -> None:
-        """Pre-dialog: choose software, then open the corresponding export flow."""
-        software, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Export light input",
-            "Export for:",
-            [
-                "SysCon2",
-                "Igor2 - all arrays (.pxp)",
-                "Igor2 - single neuron (.ibw / .csv)",
-            ],
-            0,
-            False,
+        show_stimulus_export_dialog(
+            self.project,
+            "light",
+            parent=self,
+            current_stim_name=self.cmb_stim.currentText(),
+            reserved_names=self.syscon2_panel._remote_sequence_names,
+            on_generated=self.syscon2_panel.show_generated_preview,
         )
-        if not ok:
-            return
-        if software == "SysCon2":
-            self.open_stimulation_generator_dialog()
-        elif software.startswith("Igor2 - all"):
-            self.btn_export_igor2_pxp_stim_clicked()
-        elif software.startswith("Igor2 - single"):
-            self.btn_export_igor2_single_wave_clicked()
 
     def btn_export_traces_clicked(self) -> None:
         """Export the currently displayed trace data as a publication-quality figure.
@@ -4016,179 +3994,15 @@ class Gui(QtWidgets.QMainWindow):
     def _elise_replay_inputs(
         self,
     ) -> tuple[TraceData, np.ndarray, float] | None:
-        """Return (firing_rate_r, opsin_exc_values, opsin_dt_s) if available."""
-        if self.project.external_simulate_path != "neuroseq:elise":
-            return None
-        trace = None
-        for experiment in self.project.experiments.values():
-            for datum in experiment.data:
-                if isinstance(datum, TraceData) and datum.name == "firing_rate_r":
-                    trace = datum
-        if trace is None or np.asarray(trace.traces).size == 0:
-            return None
-        stim = self.project.stim_arrays.get("opsin_exc")
-        if stim is None:
-            return None
-        return trace, np.asarray(stim.values), float(stim.dt)
+        return elise_workflows.replay_inputs(self.project)
 
     def _analyse_elise_replay(self) -> None:
-        import neuroseq.resources.analysis_plugins.elise_target_mse as plugin_mod
-        from neuroseq.example_models.elise import build_target_rate_pattern
-        from neuroseq.replay_metrics import compute_performance_against_target
-        from neuroseq.replay_metrics import save_replay_metrics_csv
-
-        inputs = self._elise_replay_inputs()
-        if inputs is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "ELiSe replay analysis",
-                "This action requires an ELiSe project with a completed "
-                "simulation (needs the 'firing_rate_r' trace and an "
-                "'opsin_exc' input).",
-            )
-            return
-        trace, opsin_exc, stim_dt_s = inputs
-        params_dict = self.project.external_simulate_params or {}
-
-        def _param(key: str, default: float) -> float:
-            entry = params_dict.get(key)
-            if isinstance(entry, dict) and "value" in entry:
-                try:
-                    return float(entry["value"])
-                except (TypeError, ValueError):
-                    return default
-            return default
-
-        target_rate, cycle_stim_samples = build_target_rate_pattern(
-            opsin_exc,
-            E_l=_param("E_l", -70.0),
-            a=_param("a", 0.3),
-            b=_param("b", -58.0),
-        )
-
-        trace_dt_s = float(trace.dt)
-        if trace_dt_s <= 0:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                "Firing-rate trace has non-positive dt; cannot align target.",
-            )
-            return
-        upsample = int(round(stim_dt_s / trace_dt_s))
-        if upsample < 1 or abs(stim_dt_s - upsample * trace_dt_s) > 1e-9:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                f"Input dt ({stim_dt_s * 1000:.4g} ms) is not an integer "
-                f"multiple of trace dt ({trace_dt_s * 1000:.4g} ms); "
-                "cannot align target.",
-            )
-            return
-        target_rate_resampled = np.repeat(target_rate, upsample, axis=1)
-        num_vis = target_rate_resampled.shape[0]
-
-        n_total_neurons = int(np.asarray(trace.traces).shape[0])
-        if num_vis > n_total_neurons:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                f"Opsin input has {num_vis} pitches but the trace only "
-                f"covers {n_total_neurons} neurons.",
-            )
-            return
-
-        # Ask the user where to save the per-cycle CSV before running.
-        default_stem = "elise_replay_mse"
-        if self.project.filepath is not None:
-            default_stem = pathlib.Path(self.project.filepath).stem + "_replay_mse"
-        csv_filename, _ = getsavefilename(
-            self,
-            "Save replay MSE analysis as CSV",
-            default_stem + ".csv",
-            "CSV files (*.csv)",
-        )
-        if not csv_filename:
-            return
-        csv_path = pathlib.Path(csv_filename)
-        if csv_path.suffix.lower() != ".csv":
-            csv_path = csv_path.with_suffix(".csv")
-
-        output_rates = np.asarray(trace.traces)[:num_vis, :].astype(np.float64)
-        try:
-            mses, corrs, shifts = compute_performance_against_target(
-                output_rates, target_rate_resampled
-            )
-        except ValueError as exc:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                f"Cannot compute replay metrics: {exc}",
-            )
-            return
-
-        try:
-            save_replay_metrics_csv(
-                csv_path,
-                mses,
-                corrs,
-                shifts,
-                cycle_dt_ms=trace_dt_s * 1000.0,
-                cycle_length_samples=int(target_rate_resampled.shape[1]),
-                n_output_neurons=num_vis,
-                source=str(self.project.filepath) if self.project.filepath else None,
-            )
-        except OSError as exc:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                f"Could not write CSV to {csv_path}: {exc}",
-            )
-            return
-
-        analysis_window = CustomAnalysisWindow(parent=self)
-        analysis_widget = analysis_window.analysis_widget
-        setattr(analysis_widget, plugin_mod.TARGET_ATTR, target_rate_resampled)
-        setattr(analysis_widget, plugin_mod.TARGET_DT_ATTR, trace_dt_s)
-
-        plugin = next(
-            (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
-            None,
-        )
-        if plugin is None:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "ELiSe replay analysis",
-                "Could not find the ELiSe target MSE analysis plugin.",
-            )
-            return
-
-        n_samples = int(np.asarray(trace.traces).shape[1])
-        analysis_widget.set_data(
-            trace,
-            plugin,
-            slice(0, num_vis),
-            slice(0, n_samples),
-        )
-        analysis_window.setWindowTitle(
-            self._popup_title(f"ELiSe replay MSE — saved to {csv_path.name}")
-        )
-        analysis_window.show()
+        elise_workflows.analyse_replay(self)
 
     def _elise_protocol_inputs(
         self,
     ) -> tuple[np.ndarray, np.ndarray, float] | None:
-        """Return (opsin_exc, opsin_inh, stim_dt_s) if this is an ELiSe project."""
-        if self.project.external_simulate_path != "neuroseq:elise":
-            return None
-        exc = self.project.stim_arrays.get("opsin_exc")
-        inh = self.project.stim_arrays.get("opsin_inh")
-        if exc is None or inh is None:
-            return None
-        exc_values = np.asarray(exc.values)
-        inh_values = np.asarray(inh.values)
-        if exc_values.size == 0 or exc_values.shape != inh_values.shape:
-            return None
-        return exc_values, inh_values, float(exc.dt)
+        return elise_workflows.protocol_inputs(self.project)
 
     def _run_elise_protocol(self) -> None:
         from neuroseq.elise_protocol_dialog import EliseProtocolDialog
@@ -4272,123 +4086,14 @@ class Gui(QtWidgets.QMainWindow):
         self.progress_dialog.setValue(int(round(clamped * 100)))
 
     def _update_elise_stim_arrays(self, result: dict) -> None:
-        """Replace opsin_exc/opsin_inh with the protocol's full-timeline stims.
-
-        The teaching pattern is present during training cycles and blank during
-        teacher-off validation/replay, so the stim array reflects the true
-        timeline of what was simulated and lines up with the imported traces.
-        """
-        from neuroseq.stim import StimArray
-        from neuroseq.stim import StimType
-
-        exc_full = result.get("stim_exc_full")
-        inh_full = result.get("stim_inh_full")
-        if exc_full is None or inh_full is None:
-            return
-        dt = float(result.get("stim_dt_s") or 0.0)
-        if dt <= 0:
-            return
-        defaults = {
-            "opsin_exc": StimType.Excitation,
-            "opsin_inh": StimType.Inhibition,
-        }
-        for name, values in (("opsin_exc", exc_full), ("opsin_inh", inh_full)):
-            existing = self.project.stim_arrays.get(name)
-            stim_type = existing.stim_type if existing is not None else defaults[name]
-            units = existing.units if existing is not None else "mm**-2 / second"
-            self.project.add_stim_array(
-                StimArray(
-                    name=name,
-                    stim_type=stim_type,
-                    values=np.asarray(values),
-                    units=units,
-                    dt=dt,
-                )
-            )
-        self.stim_editor.set_project(self.project)
+        elise_workflows.update_stim_arrays(self, result)
 
     @QtCore.Slot(object)
     def _on_elise_protocol_finished(self, result: dict) -> None:
-        import neuroseq.resources.analysis_plugins.elise_learning_curves as plugin_mod
-        from neuroseq.replay_metrics import save_learning_curves_csv
-
         self._teardown_elise_protocol()
         self.progress_dialog.setValue(100)
         self.progress_dialog.reset()
-
-        # Rebuild the opsin stim arrays to the full protocol timeline (teaching
-        # pattern during training, blank during teacher-off validation/replay)
-        # so the stim array shows the true timeline of what was simulated, then
-        # import the aligned activity Experiment.
-        self._update_elise_stim_arrays(result)
-        experiment = result.get("experiment")
-        if experiment is not None:
-            self._append_experimental_data(experiment)
-
-        default_stem = "elise_learning_curves"
-        if self.project.filepath is not None:
-            default_stem = pathlib.Path(self.project.filepath).stem + "_learning_curves"
-        csv_filename, _ = getsavefilename(
-            self,
-            "Save ELiSe learning curves as CSV",
-            default_stem + ".csv",
-            "CSV files (*.csv)",
-        )
-        csv_path: pathlib.Path | None = None
-        if csv_filename:
-            csv_path = pathlib.Path(csv_filename)
-            if csv_path.suffix.lower() != ".csv":
-                csv_path = csv_path.with_suffix(".csv")
-            try:
-                save_learning_curves_csv(
-                    csv_path,
-                    result,
-                    source=(
-                        str(self.project.filepath) if self.project.filepath else None
-                    ),
-                )
-            except OSError as exc:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Run ELiSe protocol",
-                    f"Could not write CSV to {csv_path}: {exc}",
-                )
-                csv_path = None
-
-        num_vis = int(result["num_vis"])
-        final_rate = result.get("final_replay_rate")
-        analysis_window = CustomAnalysisWindow(parent=self)
-        analysis_widget = analysis_window.analysis_widget
-        setattr(analysis_widget, plugin_mod.CURVES_ATTR, result)
-        plugin = next(
-            (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
-            None,
-        )
-        if plugin is None:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Run ELiSe protocol",
-                "Could not find the ELiSe learning-curves analysis plugin.",
-            )
-            return
-        # The plugin reads the curves off the widget; set_data still needs a
-        # data object, so hand it the final replay trace.
-        final_arr = np.asarray(final_rate, dtype=np.float64)
-        data = TraceData(
-            name="firing_rate_r (final replay)",
-            traces=final_arr,
-            indices=np.arange(final_arr.shape[0], dtype=np.uint32),
-            units="1",
-            dt=float(result["trace_dt_s"]),
-        )
-        analysis_widget.set_data(
-            data, plugin, slice(0, num_vis), slice(0, final_arr.shape[1])
-        )
-        title = "ELiSe learning curves"
-        if csv_path is not None:
-            title += f" — saved to {csv_path.name}"
-        analysis_window.setWindowTitle(self._popup_title(title))
-        analysis_window.show()
+        elise_workflows.finish_protocol(self, result)
 
     @QtCore.Slot()
     def _on_elise_protocol_cancelled(self) -> None:

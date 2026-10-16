@@ -318,7 +318,9 @@ def _synthetic_result(experiment=None) -> dict:
 def test_on_protocol_finished_opens_window_and_imports_experiment(
     qtbot: QtBot, monkeypatch, mocker
 ) -> None:
-    monkeypatch.setattr("neuroseq.gui.getsavefilename", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(
+        "neuroseq.elise_workflows.getsavefilename", lambda *a, **k: ("", "")
+    )
     gui = Gui()
     qtbot.addWidget(gui)
     try:
@@ -401,7 +403,9 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
     monkeypatch.setattr(
         "neuroseq.elise_protocol_dialog.EliseProtocolDialog", _FakeDialog
     )
-    monkeypatch.setattr("neuroseq.gui.getsavefilename", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(
+        "neuroseq.elise_workflows.getsavefilename", lambda *a, **k: ("", "")
+    )
 
     gui = Gui()
     qtbot.addWidget(gui)

@@ -22,10 +22,32 @@ from neuroseq.project import Project
 
 logger = logging.getLogger(__name__)
 
+ExportFormat = Literal["igor-single", "igor-pxp", "syscon2"]
+
+_FORMAT_CHOICES: dict[str, tuple[str, dict[str, ExportFormat]]] = {
+    "patch-clamp": (
+        "Export patch clamp input",
+        {
+            "Igor2 - single array (.ibw / .csv)": "igor-single",
+            "Igor2 - all arrays (.pxp)": "igor-pxp",
+        },
+    ),
+    "light": (
+        "Export light input",
+        {
+            "SysCon2": "syscon2",
+            "Igor2 - all arrays (.pxp)": "igor-pxp",
+            "Igor2 - single neuron (.ibw / .csv)": "igor-single",
+        },
+    ),
+}
+
 
 def show_stimulus_export_dialog(
     project: Project,
-    export_format: Literal["igor-single", "igor-pxp", "syscon2"],
+    export_format: Literal[
+        "igor-single", "igor-pxp", "syscon2", "patch-clamp", "light"
+    ],
     *,
     parent: QtWidgets.QWidget | None = None,
     current_stim_name: str | None = None,
@@ -34,6 +56,15 @@ def show_stimulus_export_dialog(
     | None = None,
 ) -> None:
     """Run the selected stimulus export workflow, including file writing and feedback."""
+    if export_format in _FORMAT_CHOICES:
+        title, choices = _FORMAT_CHOICES[export_format]
+        selected, accepted = QtWidgets.QInputDialog.getItem(
+            parent, title, "Export for:", list(choices), 0, False
+        )
+        if not accepted:
+            return
+        export_format = choices[selected]
+
     if export_format == "igor-single":
         _export_single_wave(project, current_stim_name, parent)
     elif export_format == "igor-pxp":
