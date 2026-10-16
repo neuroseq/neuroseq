@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from neuroseq import syscon2_export_service as service
+from neuroseq.export import syscon2_export_service as service
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 

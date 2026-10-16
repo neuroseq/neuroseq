@@ -9,7 +9,7 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.rheobase_dialog import RheobaseDialog
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType

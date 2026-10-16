@@ -21,12 +21,12 @@ from itertools import count
 
 from qtpy import QtCore
 
+from neuroseq.export.syscon2_export_service import SysconExportError
+from neuroseq.export.syscon2_export_service import SysconExportResult
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import export_stim_array
 from neuroseq.stim import StimArray
 from neuroseq.syscon2_client import SysCon2Client
-from neuroseq.syscon2_export_service import SysconExportError
-from neuroseq.syscon2_export_service import SysconExportResult
-from neuroseq.syscon2_export_service import SysconExportSettings
-from neuroseq.syscon2_export_service import export_stim_array
 
 logger = logging.getLogger(__name__)
 

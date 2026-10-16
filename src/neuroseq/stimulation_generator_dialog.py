@@ -16,33 +16,37 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 from qtpy.compat import getexistingdirectory
 
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
-from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
-from neuroseq.exporter_syscon2 import SlmGapViolation
-from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
-from neuroseq.exporter_syscon2 import SysconExportReport
-from neuroseq.exporter_syscon2 import SysconInputSanityReport
-from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
-from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
-from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
-from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
-from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
-from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
-from neuroseq.exporter_syscon2 import find_slm_gap_violations
-from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
-from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
-from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
+from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.exporter_syscon2 import InitialSlmLoadViolation
+from neuroseq.export.exporter_syscon2 import SimultaneousDurationViolation
+from neuroseq.export.exporter_syscon2 import SlmGapViolation
+from neuroseq.export.exporter_syscon2 import SlmOffOnOverlapViolation
+from neuroseq.export.exporter_syscon2 import SysconExportReport
+from neuroseq.export.exporter_syscon2 import SysconInputSanityReport
+from neuroseq.export.exporter_syscon2 import align_overlapping_pulses_to_shortest
+from neuroseq.export.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.export.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.export.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.export.exporter_syscon2 import find_overlapping_pulse_group_violations
+from neuroseq.export.exporter_syscon2 import find_simultaneous_duration_violations
+from neuroseq.export.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.export.exporter_syscon2 import find_slm_off_on_overlap_violations
+from neuroseq.export.exporter_syscon2 import resample_stim_values_to_dt
+from neuroseq.export.exporter_syscon2 import (
+    shift_stim_values_right_for_initial_slm_load,
+)
+from neuroseq.export.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.export.exporter_syscon2 import (
+    space_out_stim_values_for_slm_off_on_overlap,
+)
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import export_stim_array
+from neuroseq.export.syscon2_export_service import generate_sequence_text
+from neuroseq.export.syscon2_export_service import validate_export_name
 from neuroseq.icon_manager import icons
 from neuroseq.power_lut import PowerLut
 from neuroseq.power_lut import parse_power_lut_text
 from neuroseq.power_lut import resolve_power_lut
-from neuroseq.syscon2_export_service import SysconExportSettings
-from neuroseq.syscon2_export_service import export_stim_array
-from neuroseq.syscon2_export_service import generate_sequence_text
-from neuroseq.syscon2_export_service import validate_export_name
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult

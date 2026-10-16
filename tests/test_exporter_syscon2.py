@@ -6,26 +6,30 @@ import brian2.numpy_ as np
 import pytest
 from PIL import Image
 
-from neuroseq.exporter_syscon2 import PulseOverrunViolation
-from neuroseq.exporter_syscon2 import _compute_cell_centroids
-from neuroseq.exporter_syscon2 import _compute_cell_stimulation_spots
-from neuroseq.exporter_syscon2 import _find_pulse_overrun_violations
-from neuroseq.exporter_syscon2 import _ScheduledEntityWindow
-from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
-from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
-from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
-from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
-from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
-from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
-from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
-from neuroseq.exporter_syscon2 import find_slm_gap_violations
-from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
-from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
-from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
-from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
-from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
+from neuroseq.export.exporter_syscon2 import PulseOverrunViolation
+from neuroseq.export.exporter_syscon2 import _compute_cell_centroids
+from neuroseq.export.exporter_syscon2 import _compute_cell_stimulation_spots
+from neuroseq.export.exporter_syscon2 import _find_pulse_overrun_violations
+from neuroseq.export.exporter_syscon2 import _ScheduledEntityWindow
+from neuroseq.export.exporter_syscon2 import align_overlapping_pulses_to_shortest
+from neuroseq.export.exporter_syscon2 import align_stim_values_left_for_slm
+from neuroseq.export.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.export.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.export.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.export.exporter_syscon2 import find_overlapping_pulse_group_violations
+from neuroseq.export.exporter_syscon2 import find_simultaneous_duration_violations
+from neuroseq.export.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.export.exporter_syscon2 import find_slm_off_on_overlap_violations
+from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.export.exporter_syscon2 import resample_stim_values_to_dt
+from neuroseq.export.exporter_syscon2 import (
+    shift_stim_values_right_for_initial_slm_load,
+)
+from neuroseq.export.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.export.exporter_syscon2 import (
+    space_out_stim_values_for_slm_off_on_overlap,
+)
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importer_syscon2 import sequence_to_stim_values
@@ -1931,11 +1935,11 @@ def test_check_syscon2_input_sanity_computes_pulse_overrun_fix_values(
         neuron_index=0,
     )
     monkeypatch.setattr(
-        "neuroseq.exporter_syscon2._find_pulse_overrun_violations",
+        "neuroseq.export.exporter_syscon2._find_pulse_overrun_violations",
         lambda *a, **kw: [fake_violation],
     )
     monkeypatch.setattr(
-        "neuroseq.exporter_syscon2.generate_syscon2_sequence_text",
+        "neuroseq.export.exporter_syscon2.generate_syscon2_sequence_text",
         lambda *a, **kw: (_ for _ in ()).throw(
             ValueError("laser pulse end exceeds shape boundary")
         ),

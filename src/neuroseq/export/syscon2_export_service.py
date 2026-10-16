@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
 
-from neuroseq.exporter_syscon2 import SysconExportReport
-from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
-from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
-from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.export.exporter_syscon2 import SysconExportReport
+from neuroseq.export.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.importer_syscon2 import original_stim_sidecar_path
 from neuroseq.importer_syscon2 import write_original_stim_sidecar
 from neuroseq.power_lut import resolve_power_lut

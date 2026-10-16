@@ -8,7 +8,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.exporter_igor2 import _write_ibw_v5
+from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.importer_igor2 import IgorPxpLoadReport
 from neuroseq.importer_igor2 import IgorWave

@@ -3332,7 +3332,7 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
         captured["unit_override"] = kwargs.get("unit_override")
         captured["scaling_factor"] = kwargs.get("scaling_factor")
         out.write_bytes(b"")
-        from neuroseq.exporter_igor2 import Igor2PxpExport
+        from neuroseq.export.exporter_igor2 import Igor2PxpExport
 
         return Igor2PxpExport(path=out, wave_names=["exc_n0"])
 
@@ -4754,8 +4754,8 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
 
 
 def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypatch):
+    from neuroseq.export.syscon2_export_service import SysconExportSettings
     from neuroseq.rheobase_dialog import RheobaseDialog
-    from neuroseq.syscon2_export_service import SysconExportSettings
 
     gui = Gui()
     qtbot.addWidget(gui)

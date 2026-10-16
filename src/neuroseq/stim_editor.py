@@ -1170,7 +1170,7 @@ class StimEditor(QtWidgets.QWidget):
 
     def prepare_syscon_timestep(self, parent: QtWidgets.QWidget | None = None) -> bool:
         """Offer to resample project data before a hardware routine starts."""
-        from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+        from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 
         if self.project is None or self.current_stim_modifier is None:
             return False

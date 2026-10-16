@@ -11,7 +11,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.data import TraceData
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importer_syscon2 import SysconSequence
 from neuroseq.importer_syscon2 import get_timed_objects
 from neuroseq.importer_syscon2 import group_timed_objects_by_neuron_target

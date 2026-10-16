@@ -11,7 +11,7 @@ from qtpy import QtWidgets
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.exporter_igor2 import _write_ibw_v5
+from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
 from neuroseq.importer_igor2 import IgorPxpLoadReport
 from neuroseq.importer_igor2 import IgorWave

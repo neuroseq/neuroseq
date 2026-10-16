@@ -7,16 +7,16 @@ import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
+import neuroseq.export.syscon2_export_service as syscon2_export_service_module
 import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
-import neuroseq.syscon2_export_service as syscon2_export_service_module
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.exporter_syscon2 import InitialSlmLoadViolation
-from neuroseq.exporter_syscon2 import OverlappingPulseGroupViolation
-from neuroseq.exporter_syscon2 import SimultaneousDurationViolation
-from neuroseq.exporter_syscon2 import SlmGapViolation
-from neuroseq.exporter_syscon2 import SlmOffOnOverlapViolation
-from neuroseq.exporter_syscon2 import SysconExportReport
-from neuroseq.exporter_syscon2 import SysconInputSanityReport
+from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.exporter_syscon2 import InitialSlmLoadViolation
+from neuroseq.export.exporter_syscon2 import OverlappingPulseGroupViolation
+from neuroseq.export.exporter_syscon2 import SimultaneousDurationViolation
+from neuroseq.export.exporter_syscon2 import SlmGapViolation
+from neuroseq.export.exporter_syscon2 import SlmOffOnOverlapViolation
+from neuroseq.export.exporter_syscon2 import SysconExportReport
+from neuroseq.export.exporter_syscon2 import SysconInputSanityReport
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.power_lut import PowerLut
 from neuroseq.project import Project

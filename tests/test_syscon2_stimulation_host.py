@@ -4,13 +4,13 @@ import brian2.numpy_ as np
 import pytest
 
 import neuroseq.syscon2_stimulation_host as host_module
+from neuroseq.export.syscon2_export_service import SysconExportError
+from neuroseq.export.syscon2_export_service import SysconExportResult
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.syscon2_export_service import SysconExportError
-from neuroseq.syscon2_export_service import SysconExportResult
-from neuroseq.syscon2_export_service import SysconExportSettings
-from neuroseq.syscon2_export_service import slice_stim_array
 from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 
 

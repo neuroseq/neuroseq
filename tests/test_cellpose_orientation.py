@@ -16,7 +16,7 @@ from neuroseq.cell_overlay_widget import _pixel_at
 from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
-from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.io import CELLPOSE_ORIENTATION
 from neuroseq.io import load_from_zip

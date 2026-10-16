@@ -23,19 +23,19 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.export.syscon2_export_service import SysconExportError
+from neuroseq.export.syscon2_export_service import SysconExportResult
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import default_export_directory
+from neuroseq.export.syscon2_export_service import default_target_directory
+from neuroseq.export.syscon2_export_service import export_stim_array
 from neuroseq.stim import StimArray
 from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.stimulation_generator_dialog import next_default_export_name
 from neuroseq.syscon2_client import LightsourceStatus
 from neuroseq.syscon2_client import SysCon2Client
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
-from neuroseq.syscon2_export_service import SysconExportError
-from neuroseq.syscon2_export_service import SysconExportResult
-from neuroseq.syscon2_export_service import SysconExportSettings
-from neuroseq.syscon2_export_service import default_export_directory
-from neuroseq.syscon2_export_service import default_target_directory
-from neuroseq.syscon2_export_service import export_stim_array
 from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 
 if TYPE_CHECKING:

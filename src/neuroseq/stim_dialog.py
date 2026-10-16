@@ -7,7 +7,7 @@ from qtpy.QtWidgets import QHBoxLayout
 from qtpy.QtWidgets import QLabel
 from qtpy.QtWidgets import QPushButton
 
-from neuroseq.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import validate_stim_dt_seconds

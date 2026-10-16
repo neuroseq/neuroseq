@@ -12,14 +12,14 @@ from qtpy import QtWidgets
 
 import neuroseq.syscon2_connection_manager as connection_manager_module
 import neuroseq.syscon2_panel as syscon2_panel_module
+from neuroseq.export.syscon2_export_service import SysconExportError
+from neuroseq.export.syscon2_export_service import SysconExportResult
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import default_export_directory
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
-from neuroseq.syscon2_export_service import SysconExportError
-from neuroseq.syscon2_export_service import SysconExportResult
-from neuroseq.syscon2_export_service import SysconExportSettings
-from neuroseq.syscon2_export_service import default_export_directory
 from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.syscon2_protocol import encode_string
 
@@ -972,7 +972,7 @@ def test_scripts_go_to_a_dated_folder_on_the_syscon_pc(panel: SysCon2Panel) -> N
     """Issue #614: one folder per experiment day instead of all in "neuroseq"."""
     import datetime
 
-    from neuroseq.syscon2_export_service import default_target_directory
+    from neuroseq.export.syscon2_export_service import default_target_directory
 
     assert default_target_directory(datetime.date(2026, 10, 15)) == (
         "neuroseq\\2026-10-15"
