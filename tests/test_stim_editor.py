@@ -178,9 +178,9 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
 
     moved to the top View toolbar (issue #535) -
     Gui._add_stim_design_buttons_to_view_toolbar and the Show all stim
-    arrays action reused directly in Gui._create_actions_view. They stay
-    Static input and Show all remain on the editor's context menu.
-    The main window supplies the dynamic-input action.
+    arrays action reused directly in Gui._create_actions_view.
+    Show all remains on the editor's context menu.
+    The main window supplies the static- and dynamic-input actions.
     """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -198,7 +198,6 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
 
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
     assert [t for t in context_menu_texts if t in design_op_names] == [
-        "Design static input",
         "Show all input arrays",
     ]
     assert stim_editor.action_show_all_stim_arrays.isChecked()

@@ -35,6 +35,7 @@ from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
+from neuroseq.static_input.static_input_controller import StaticInputController
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_editor import DrawMode
@@ -331,7 +332,9 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
     # Patched on the class before the button's clicked signal connects to a
     # bound method of it, so the connection picks up the patched version.
     monkeypatch.setattr(
-        StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
+        StaticInputController,
+        "open_pattern_designer",
+        lambda self: static_calls.append(1),
     )
     monkeypatch.setattr(
         DynamicInputController,
@@ -353,6 +356,19 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
     gui.btn_design_dynamic_input.click()
     assert static_calls == [1]
     assert dynamic_calls == [1]
+    design_actions = [
+        action
+        for action in gui.stim_editor.context_menu.actions()
+        if action.text() in {"Design static input", "Design dynamic input"}
+    ]
+    assert [action.text() for action in design_actions] == [
+        "Design static input",
+        "Design dynamic input",
+    ]
+    for action in design_actions:
+        action.trigger()
+    assert static_calls == [1, 1]
+    assert dynamic_calls == [1, 1]
     gui.close()
 
 
@@ -1110,6 +1126,22 @@ def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> N
     assert window.windowTitle().endswith(" - Section / Project")
     window.close()
     gui.close()
+
+
+def test_closing_the_main_window_closes_static_input_designer(qtbot: QtBot) -> None:
+    gui = Gui()
+    qtbot.addWidget(gui)
+    gui.update_project(default_project())
+    gui.static_input_controller.open_pattern_designer()
+    dialog = gui.static_input_controller._pattern_dialog
+    assert dialog is not None
+    assert dialog.isVisible()
+
+    gui._close_confirmed = True
+    gui.close()
+
+    assert not dialog.isVisible()
+    assert gui.static_input_controller._pattern_dialog is None
 
 
 def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(

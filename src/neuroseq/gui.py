@@ -76,6 +76,7 @@ from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
+from neuroseq.static_input.static_input_controller import StaticInputController
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
@@ -515,6 +516,18 @@ class Gui(QtWidgets.QMainWindow):
             cmb_stim=self.cmb_stim,
             toolbar=self.toolbar_stim_editor,
             parent=self,
+        )
+        self.static_input_controller = StaticInputController(self.stim_editor, self)
+        static_input_action = add_action(
+            "Design static input",
+            self.static_input_controller.open_pattern_designer,
+            self.stim_editor.context_menu,
+            None,
+            self,
+            icon="mdi6.pencil-box-outline",
+        )
+        self.stim_editor.context_menu.insertAction(
+            self.stim_editor.action_show_all_stim_arrays, static_input_action
         )
         self.dynamic_input_controller = DynamicInputController(self.stim_editor, self)
         dynamic_input_action = add_action(
@@ -3310,7 +3323,7 @@ class Gui(QtWidgets.QMainWindow):
         )
         icons.set_widget_icon(self.btn_design_static_input, "mdi6.pencil-box-outline")
         self.btn_design_static_input.clicked.connect(
-            self.stim_editor.open_pattern_designer
+            self.static_input_controller.open_pattern_designer
         )
         toolbar.addWidget(self.btn_design_static_input)
         self.btn_design_dynamic_input = QtWidgets.QPushButton("Design dynamic input")
@@ -4094,9 +4107,8 @@ class Gui(QtWidgets.QMainWindow):
             analysis_window.close()
         for detached_window in self.findChildren(DetachedPanelWindow):
             detached_window.close()
-        # The Design dynamic input routine dialogs (and their own plot/heatmap
-        # popups) are created without a Qt parent - see _show_routine_dialog's
-        # docstring - so findChildren() above never finds them and they would
-        # otherwise survive the main window closing.
+        # Input designers and the dynamic routines' plot/heatmap popups have
+        # no Qt parent, so findChildren() cannot close them with the main window.
+        self.static_input_controller.discard_dialog()
         self.dynamic_input_controller.discard_dynamic_input_dialogs()
         super().closeEvent(event)

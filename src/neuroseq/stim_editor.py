@@ -26,8 +26,6 @@ from neuroseq.stim_array_modifier import TrimReversibleAction
 from neuroseq.stim_dialog import EditStimDialog
 from neuroseq.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stim_loop_dialog import StimLoopDialog
-from neuroseq.stim_pattern_dialog import StimPatternContext
-from neuroseq.stim_pattern_dialog import StimPatternDialog
 from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import samples_to_milliseconds
@@ -56,6 +54,8 @@ class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
     limits_modified = QtCore.Signal()
+    project_changed = QtCore.Signal(object, object)  # outgoing, incoming
+    current_stim_cleared = QtCore.Signal()
     time_range_focus_requested = QtCore.Signal(float, float)
     current_stim_changed = QtCore.Signal(object)  # StimArray | None
     trim_to_mapped_neurons_requested = QtCore.Signal()
@@ -85,7 +85,6 @@ class StimEditor(QtWidgets.QWidget):
         self.stim_type = StimType.Excitation
         self.stims_dict: dict[str, StimArrayModifier] = {}
         self.copy_values = np.zeros((0, 0))
-        self._pattern_dialog: StimPatternDialog | None = None
         #: Set by the main window; routine dialogs offer a SysCon2 target when present.
         self.stimulation_host: SysCon2StimulationHost | None = None
         # Captures the time index the user clicked at, so a Ramp drag can
@@ -152,16 +151,9 @@ class StimEditor(QtWidgets.QWidget):
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
         outgoing_project = self.project
-        project_changed = outgoing_project is not project
-        pattern_dialog = getattr(self, "_pattern_dialog", None)
-        if pattern_dialog is not None and project_changed:
-            # The Design static input dialog is one cached window shared by
-            # every open project; keep each project's own entered values
-            # with it instead of letting them leak across (#587).
-            if outgoing_project is not None:
-                outgoing_project.static_input_state = pattern_dialog.capture_state()
-            pattern_dialog.restore_state(project.static_input_state)
         self.project = project
+        if outgoing_project is not project:
+            self.project_changed.emit(outgoing_project, project)
         self.project.update_limits()
         if self.current_stim_modifier is not None and keep_undo_history:
             for k in self.stims_dict:
@@ -629,9 +621,6 @@ class StimEditor(QtWidgets.QWidget):
             self.set_mode(InteractMode.DRAW)
             self.set_draw_mode(DrawMode.DRAW)
             self._stim_values_updated()
-        pattern_dialog = getattr(self, "_pattern_dialog", None)
-        if pattern_dialog is not None and self.current_stim_modifier is not None:
-            pattern_dialog.set_context(self._current_pattern_context())
 
     @overload
     def _current_draw_stim_values(
@@ -1260,31 +1249,7 @@ class StimEditor(QtWidgets.QWidget):
         ):
             return
         self.zero_current_stim_array()
-        pattern_dialog = getattr(self, "_pattern_dialog", None)
-        if pattern_dialog is not None:
-            pattern_dialog.reset_start_time()
-
-    def _current_pattern_context(self) -> StimPatternContext:
-        if self.current_stim_modifier is None:
-            raise ValueError("No current stim array selected.")
-        stim_array = self.current_stim_modifier.stim_array
-        return StimPatternContext(
-            stim_name=stim_array.name,
-            units=stim_array.units,
-            dt_seconds=float(stim_array.dt),
-            n_neurons=int(stim_array.values.shape[1]),
-        )
-
-    def open_pattern_designer(self) -> None:
-        if self.current_stim_modifier is None or self.project is None:
-            return
-        if self._pattern_dialog is None:
-            self._pattern_dialog = StimPatternDialog(self)
-            self._pattern_dialog.restore_state(self.project.static_input_state)
-        self._pattern_dialog.set_context(self._current_pattern_context())
-        self._pattern_dialog.show()
-        self._pattern_dialog.raise_()
-        self._pattern_dialog.activateWindow()
+        self.current_stim_cleared.emit()
 
     def focus_time_range(self, start_seconds: float, stop_seconds: float) -> None:
         """Keep stimulation and linked data views focused on the same interval."""
@@ -1590,20 +1555,6 @@ class StimEditor(QtWidgets.QWidget):
             None,
             self,
             icon="mdi6.repeat-variant",
-        )
-        # Design static/dynamic input and Show all stim arrays also moved out
-        # of this toolbar (issue #535): the Design buttons become rectangular
-        # icon+text QPushButtons in the top View toolbar
-        # (Gui._add_stim_design_buttons_to_view_toolbar), and Show all stim
-        # arrays - a genuine toggle - joins the other view-toggle QActions
-        # there directly (Gui._create_actions_view).
-        add_action(
-            "Design static input",
-            self.open_pattern_designer,
-            menu,
-            None,
-            self,
-            icon="mdi6.pencil-box-outline",
         )
         self.action_show_all_stim_arrays = add_action(
             "Show all input arrays",

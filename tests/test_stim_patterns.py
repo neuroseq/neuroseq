@@ -3,13 +3,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neuroseq.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.static_input.stim_patterns import generate_per_neuron
+from neuroseq.static_input.stim_patterns import generate_ramp
+from neuroseq.static_input.stim_patterns import generate_sequential
+from neuroseq.static_input.stim_patterns import generate_simultaneous
+from neuroseq.static_input.stim_patterns import parse_neuron_indices
 from neuroseq.stim import DrawStimType
-from neuroseq.stim_patterns import generate_fuer_elise
-from neuroseq.stim_patterns import generate_per_neuron
-from neuroseq.stim_patterns import generate_ramp
-from neuroseq.stim_patterns import generate_sequential
-from neuroseq.stim_patterns import generate_simultaneous
-from neuroseq.stim_patterns import parse_neuron_indices
 
 
 def test_sequential_default_matches_getting_started() -> None:
@@ -420,7 +420,7 @@ def test_generate_sequential_rejects_zero_repeats() -> None:
 
 
 def test_generate_sequential_pulses_per_neuron() -> None:
-    from neuroseq.stim_patterns import generate_sequential
+    from neuroseq.static_input.stim_patterns import generate_sequential
 
     values = generate_sequential(
         n_neurons=2,

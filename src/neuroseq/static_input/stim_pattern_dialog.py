@@ -6,14 +6,14 @@ from typing import TYPE_CHECKING
 from qtpy import QtWidgets
 
 from neuroseq.dialog_helpers import _SelfRaisingDialog
+from neuroseq.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.static_input.stim_patterns import generate_per_neuron
+from neuroseq.static_input.stim_patterns import generate_ramp
+from neuroseq.static_input.stim_patterns import generate_sequential
+from neuroseq.static_input.stim_patterns import generate_simultaneous
+from neuroseq.static_input.stim_patterns import is_finite_number
+from neuroseq.static_input.stim_patterns import parse_neuron_indices
 from neuroseq.stim import DrawStimType
-from neuroseq.stim_patterns import generate_fuer_elise
-from neuroseq.stim_patterns import generate_per_neuron
-from neuroseq.stim_patterns import generate_ramp
-from neuroseq.stim_patterns import generate_sequential
-from neuroseq.stim_patterns import generate_simultaneous
-from neuroseq.stim_patterns import is_finite_number
-from neuroseq.stim_patterns import parse_neuron_indices
 
 if TYPE_CHECKING:
     from neuroseq.stim_editor import StimEditor
