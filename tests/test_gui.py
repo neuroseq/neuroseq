@@ -25,7 +25,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.detached_panel_window import DetachedPanelWindow
-from neuroseq.dynamic_input_controller import DynamicInputController
+from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
@@ -4517,8 +4517,8 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
 
 
 def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypatch):
+    from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
     from neuroseq.export.syscon2_export_service import SysconExportSettings
-    from neuroseq.rheobase_dialog import RheobaseDialog
 
     gui = Gui()
     qtbot.addWidget(gui)

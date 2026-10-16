@@ -3,10 +3,10 @@ from __future__ import annotations
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.dynamic_input_controller import DynamicInputController
-from neuroseq.routine_overview_dialog import ROUTINE_OVERVIEWS
-from neuroseq.routine_overview_dialog import RoutineSelectorDialog
-from neuroseq.routine_overview_dialog import routine_overview
+from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
+from neuroseq.dynamic_input.routine_overview_dialog import ROUTINE_OVERVIEWS
+from neuroseq.dynamic_input.routine_overview_dialog import RoutineSelectorDialog
+from neuroseq.dynamic_input.routine_overview_dialog import routine_overview
 
 
 def test_every_dynamic_routine_has_an_overview() -> None:

@@ -23,9 +23,9 @@ from qtpy import QtWidgets
 from qtpy.QtSvg import QSvgRenderer
 
 from neuroseq import theme as theme_module
-from neuroseq.stdp_synaptic_tuning_dialog import _SelfRaisingDialog
+from neuroseq.dialog_helpers import _SelfRaisingDialog
 
-_RESOURCES_DIR = Path(__file__).resolve().parent / "resources"
+_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 
-from neuroseq.dynamic_input_routine import RoutineBackend
+from neuroseq.dynamic_input.dynamic_input_routine import RoutineBackend
 
 
 class _Host:

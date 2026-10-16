@@ -4,9 +4,9 @@ import numpy as np
 import pytest
 
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input_measurement import NoEpspDetected
-from neuroseq.dynamic_input_measurement import measure_epsp
-from neuroseq.dynamic_input_measurement import measure_spike_count
+from neuroseq.dynamic_input.dynamic_input_measurement import NoEpspDetected
+from neuroseq.dynamic_input.dynamic_input_measurement import measure_epsp
+from neuroseq.dynamic_input.dynamic_input_measurement import measure_spike_count
 
 
 def test_measure_spike_count_uses_requested_neuron_and_window() -> None:

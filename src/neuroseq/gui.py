@@ -44,7 +44,7 @@ from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
-from neuroseq.dynamic_input_controller import DynamicInputController
+from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.example_projects import getting_started_project

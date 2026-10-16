@@ -17,7 +17,7 @@ import neuroseq
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input_controller import DynamicInputController
+from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.project import Project
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType

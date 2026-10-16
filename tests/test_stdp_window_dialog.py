@@ -10,10 +10,10 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import EPSPMeasurement
+from neuroseq.dynamic_input.stdp_window_dialog import StdpWindowDialog
+from neuroseq.dynamic_input.stdp_window_dialog import _NoEpspDetected
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
-from neuroseq.stdp_window_dialog import StdpWindowDialog
-from neuroseq.stdp_window_dialog import _NoEpspDetected
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import seconds_to_samples_nearest
@@ -362,7 +362,7 @@ def test_continue_preserves_existing_stimulus_in_continuous_mode(
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     dialog.cmb_sweep_mode.setCurrentText(dialog.CONTINUOUS_MODE)
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        "neuroseq.dynamic_input.stdp_window_dialog.confirm_start_routine",
         lambda *args, **kwargs: "continue",
     )
     _patch_directional_measurement(monkeypatch, dialog)
@@ -389,7 +389,7 @@ def test_clear_zeroes_existing_input_before_start(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        "neuroseq.dynamic_input.stdp_window_dialog.confirm_start_routine",
         lambda *args, **kwargs: "clear",
     )
     _patch_directional_measurement(monkeypatch, dialog)
@@ -411,7 +411,7 @@ def test_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     _project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        "neuroseq.dynamic_input.stdp_window_dialog.confirm_start_routine",
         lambda *args, **kwargs: "cancel",
     )
 
