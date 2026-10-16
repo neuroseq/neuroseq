@@ -27,7 +27,7 @@ def describe_experiment(experiment: Experiment) -> str:
     return description
 
 
-class ImportExperimentDialog(QtWidgets.QDialog):
+class AddExperimentDataDialog(QtWidgets.QDialog):
     """A dialog that allows the user to import data, either as a new Experiment or appended to an existing one."""
 
     def __init__(

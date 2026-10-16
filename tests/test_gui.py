@@ -4257,7 +4257,7 @@ def test_gui_playback_speed(
     gui.close()
 
 
-class MockImportExperimentDialog:
+class MockAddExperimentDataDialog:
     append_to_experiment = False
 
     def __init__(self, *args, **kwargs) -> None:
@@ -4295,8 +4295,8 @@ def test_gui_simulate_external_model(
     )
     monkeypatch.setattr(
         neuroseq.gui,
-        "ImportExperimentDialog",
-        MockImportExperimentDialog,
+        "AddExperimentDataDialog",
+        MockAddExperimentDataDialog,
     )
     gui.btn_do_external_simulation_clicked()
     qtbot.wait(delay_after_update_model_call_in_ms)
@@ -4538,7 +4538,7 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     settings = SysconExportSettings(config_text="config")
     gui.syscon2_panel._export_settings = settings
     monkeypatch.setattr(
-        neuroseq.gui, "ImportExperimentDialog", MockImportExperimentDialog
+        neuroseq.gui, "AddExperimentDataDialog", MockAddExperimentDataDialog
     )
     recording = Experiment("new_recording", 1.0, [], [SpikeData("spikes", [0], [0.2])])
 

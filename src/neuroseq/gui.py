@@ -27,6 +27,7 @@ from qtpy.compat import getsavefilename
 from neuroseq import __version__
 from neuroseq import elise_workflows
 from neuroseq import theme as theme_module
+from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.cellpose_import_dialog import CellposeImportDialog
@@ -51,7 +52,6 @@ from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
 from neuroseq.import_dialog import Suite2pImportDialog
-from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
@@ -1656,7 +1656,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def _append_experimental_data(self, experiment: Experiment) -> None:
         try:
-            dialog = ImportExperimentDialog(experiment, self.project, parent=self)
+            dialog = AddExperimentDataDialog(experiment, self.project, parent=self)
             if not dialog.exec():
                 return
             if dialog.append_to_experiment:

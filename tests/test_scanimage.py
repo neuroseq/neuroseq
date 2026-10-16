@@ -663,10 +663,10 @@ def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocke
 
 
 def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
+    from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
     from neuroseq.data import Experiment
     from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
     from neuroseq.gui import Gui
-    from neuroseq.import_experiment_dialog import ImportExperimentDialog
 
     gui = Gui()
     qtbot.addWidget(gui)
@@ -683,7 +683,7 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
     )
     manager.table.selectRow(row)
     assert manager.table.item(row, 2).text() == "0"
-    dialog = ImportExperimentDialog(Experiment("Import", 1, [], []), gui.project)
+    dialog = AddExperimentDataDialog(Experiment("Import", 1, [], []), gui.project)
     qtbot.addWidget(dialog)
     dialog.cmb_experiments.setCurrentText("Imaging")
     assert dialog.cmb_offset.count() == 0

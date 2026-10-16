@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from pytestqt.qtbot import QtBot
 
+from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.data import Experiment
-from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.project import Project
 
 
-def test_import_experiment_dialog(
+def test_add_experiment_data_dialog(
     qtbot: QtBot,
     test_experiment: Experiment,
     project_nmda: Project,
@@ -17,7 +17,7 @@ def test_import_experiment_dialog(
     for experiment in test_experiments:
         project_nmda.add_experiment(experiment)
     test_experiment.name = test_experiments[0].name
-    dialog = ImportExperimentDialog(test_experiment, project_nmda)
+    dialog = AddExperimentDataDialog(test_experiment, project_nmda)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())

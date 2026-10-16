@@ -21,7 +21,7 @@ from neuroseq.gui import Gui
 
 
 class _MockImportDialog:
-    """Stub for `ImportExperimentDialog` so the external sim flow doesn't block."""
+    """Stub for `AddExperimentDataDialog` so the external sim flow doesn't block."""
 
     append_to_experiment = False
 
@@ -153,7 +153,7 @@ def test_external_simulation_passes_params_kwarg(
         },
     }
 
-    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
 
     gui._do_external_simulation(2.0)
     _wait_for_external_simulation(qtbot, gui)
@@ -214,7 +214,7 @@ def test_run_with_overshoot_tiles_stim_before_dispatch(
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
     monkeypatch.setattr(
         QtWidgets.QInputDialog,
         "getText",
@@ -378,7 +378,7 @@ def test_external_simulation_passes_progress_when_accepted(
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
 
     # Spy on setValue to observe the progress percentages routed into the
     # dialog. The dialog itself auto-resets to -1 once value reaches 100.
@@ -423,7 +423,7 @@ def test_external_simulation_skips_progress_for_old_simulators(
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "ImportExperimentDialog", _MockImportDialog)
+    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
 
     gui._do_external_simulation(1.0)
     _wait_for_external_simulation(qtbot, gui)
