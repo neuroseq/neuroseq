@@ -72,7 +72,7 @@ def _plot_stdp_window(ax: Axes) -> None:
     ax.set_ylabel("Δ weight")
 
 
-# Keyed by the routine identifiers in StimEditor.DYNAMIC_INPUT_ROUTINES.
+# Keyed by the routine identifiers in DynamicInputController.DYNAMIC_INPUT_ROUTINES.
 ROUTINE_OVERVIEWS: dict[str, RoutineOverview] = {
     "STDP synaptic tuning": RoutineOverview(
         title="STDP synaptic tuning",

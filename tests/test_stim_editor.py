@@ -17,6 +17,7 @@ import neuroseq
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
+from neuroseq.dynamic_input_controller import DynamicInputController
 from neuroseq.project import Project
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
@@ -178,8 +179,8 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
     moved to the top View toolbar (issue #535) -
     Gui._add_stim_design_buttons_to_view_toolbar and the Show all stim
     arrays action reused directly in Gui._create_actions_view. They stay
-    registered on the "Actions" context menu, in the same order, but no
-    longer duplicate onto this left toolbar.
+    Static input and Show all remain on the editor's context menu.
+    The main window supplies the dynamic-input action.
     """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -196,7 +197,10 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
     assert toolbar_texts.isdisjoint(design_op_names)
 
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
-    assert [t for t in context_menu_texts if t in design_op_names] == design_op_names
+    assert [t for t in context_menu_texts if t in design_op_names] == [
+        "Design static input",
+        "Show all input arrays",
+    ]
     assert stim_editor.action_show_all_stim_arrays.isChecked()
     stim_editor.close()
 
@@ -592,18 +596,22 @@ def test_trim_warns_when_cutting_into_simulated_trace(
 
 def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
+    dynamic_input = DynamicInputController(stim_editor)
     for routine, attr in (
-        (StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE, "_stdp_synaptic_tuning_dialog"),
-        (StimEditor.RHEOBASE_ROUTINE, "_rheobase_dialog"),
-        (StimEditor.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
+        (
+            DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE,
+            "_stdp_synaptic_tuning_dialog",
+        ),
+        (DynamicInputController.RHEOBASE_ROUTINE, "_rheobase_dialog"),
+        (DynamicInputController.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
     ):
-        stim_editor.open_dynamic_input_designer()
-        selector = stim_editor._routine_selector_dialog
+        dynamic_input.open_dynamic_input_designer()
+        selector = dynamic_input._routine_selector_dialog
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
         qtbot.waitUntil(lambda s=selector: not s.isVisible())
-        dialog = getattr(stim_editor, attr)
+        dialog = getattr(dynamic_input, attr)
         assert dialog is not None
         assert dialog.btn_reset.text() == "Reset input array"
         dialog.close()
@@ -614,13 +622,16 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
 
 def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
     stim_editor, project = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
+    selector.cmb_routine.setCurrentText(
+        DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE
+    )
     selector._on_continue()
     qtbot.waitUntil(lambda: not selector.isVisible())
-    dialog = stim_editor._stdp_synaptic_tuning_dialog
+    dialog = dynamic_input._stdp_synaptic_tuning_dialog
     assert dialog is not None
 
     # No simulation yet, so the reset button trims the array to a single
@@ -743,7 +754,7 @@ def test_clear_stim_array_confirmation_parents_to_active_window(
     """The confirmation must be parented to whichever window is actually
     active, not to the StimEditor itself: it is also shown from a routine
     dialog's "Clear input array" button, and those dialogs are deliberately
-    created without a Qt parent (see StimEditor._show_routine_dialog's
+    created without a Qt parent (see DynamicInputController._show_routine_dialog's
     docstring) - a box parented to self would hand focus back to the main
     window once closed, leaving the parentless routine dialog behind it."""
     from neuroseq.example_projects import default_project
@@ -1623,9 +1634,10 @@ def _routine_combo_items(selector: Any) -> list[str]:
 
 def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
 
-    selector = stim_editor._routine_selector_dialog
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
     assert selector.isVisible()
     assert selector.windowTitle() == "Design dynamic input"
@@ -1641,39 +1653,43 @@ def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -
     assert selector._axes.lines
 
     # Selecting a routine and clicking Continue opens the matching dialog.
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
+    selector.cmb_routine.setCurrentText(
+        DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE
+    )
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
     selector._on_continue()
-    assert stim_editor._stdp_synaptic_tuning_dialog is not None
-    assert stim_editor._stdp_synaptic_tuning_dialog.isVisible()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is not None
+    assert dynamic_input._stdp_synaptic_tuning_dialog.isVisible()
     stim_editor.close()
 
 
 def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     assert "rheobase" in selector.lbl_goal.text().lower()
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     assert "stdp" in selector.lbl_goal.text().lower()
     stim_editor.close()
 
 
 def test_open_dynamic_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
-    assert stim_editor._rheobase_dialog is None  # only opens on Continue
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
+    assert dynamic_input._rheobase_dialog is None  # only opens on Continue
     selector._on_continue()
 
-    assert stim_editor._rheobase_dialog is not None
-    assert stim_editor._rheobase_dialog.isVisible()
+    assert dynamic_input._rheobase_dialog is not None
+    assert dynamic_input._rheobase_dialog.isVisible()
     stim_editor.close()
 
 
@@ -1683,15 +1699,16 @@ def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
     get treated as a single "raise group" that can't be reordered by
     clicking any individual member - not even this dialog itself."""
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     selector._on_continue()
 
-    assert stim_editor._rheobase_dialog is not None
-    assert stim_editor._rheobase_dialog.parent() is None
+    assert dynamic_input._rheobase_dialog is not None
+    assert dynamic_input._rheobase_dialog.parent() is None
     stim_editor.close()
 
 
@@ -1699,30 +1716,32 @@ def test_open_dynamic_input_designer_opens_stdp_window_when_selected(
     qtbot: QtBot,
 ) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     selector._on_continue()
 
-    assert stim_editor._stdp_window_dialog is not None
-    assert stim_editor._stdp_window_dialog.isVisible()
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_window_dialog is None
+    assert dynamic_input._stdp_window_dialog is not None
+    assert dynamic_input._stdp_window_dialog.isVisible()
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
 
 
 def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None and selector.isVisible()
 
     selector.reject()  # user backs out of the selector
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
 
 
@@ -1730,49 +1749,51 @@ def test_discard_after_routine_selector_was_deleted(qtbot: QtBot) -> None:
     """Issues #595/#610: replacing the project after the selector closed (and
     Qt deleted it) must not touch the deleted dialog."""
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     selector._on_continue()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
-    assert stim_editor._routine_selector_dialog is None
+    assert dynamic_input._routine_selector_dialog is None
 
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._rheobase_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._rheobase_dialog is None
     stim_editor.close()
 
 
 def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
+    dynamic_input = DynamicInputController(stim_editor)
 
     def _open(routine: str) -> None:
-        stim_editor.open_dynamic_input_designer()
-        selector = stim_editor._routine_selector_dialog
+        dynamic_input.open_dynamic_input_designer()
+        selector = dynamic_input._routine_selector_dialog
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
 
-    _open(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
-    assert stim_editor._stdp_synaptic_tuning_dialog is not None
-    _open(StimEditor.RHEOBASE_ROUTINE)
-    assert stim_editor._rheobase_dialog is not None
-    _open(StimEditor.STDP_WINDOW_ROUTINE)
-    assert stim_editor._stdp_window_dialog is not None
+    _open(DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE)
+    assert dynamic_input._stdp_synaptic_tuning_dialog is not None
+    _open(DynamicInputController.RHEOBASE_ROUTINE)
+    assert dynamic_input._rheobase_dialog is not None
+    _open(DynamicInputController.STDP_WINDOW_ROUTINE)
+    assert dynamic_input._stdp_window_dialog is not None
 
     # Replacing the project must not carry the previous designer state over.
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
-    assert stim_editor._routine_selector_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
+    assert dynamic_input._routine_selector_dialog is None
 
     # Discarding again is a no-op and must not raise.
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
     stim_editor.close()
 

@@ -25,6 +25,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.detached_panel_window import DetachedPanelWindow
+from neuroseq.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
@@ -333,7 +334,9 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
         StimEditor, "open_pattern_designer", lambda self: static_calls.append(1)
     )
     monkeypatch.setattr(
-        StimEditor, "open_dynamic_input_designer", lambda self: dynamic_calls.append(1)
+        DynamicInputController,
+        "open_dynamic_input_designer",
+        lambda self: dynamic_calls.append(1),
     )
     gui = Gui()
     qtbot.addWidget(gui)
@@ -1113,7 +1116,7 @@ def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
     qtbot: QtBot,
 ) -> None:
     """The routine dialogs (and their own plot/heatmap popups) are created
-    without a Qt parent - see StimEditor._show_routine_dialog's docstring -
+    without a Qt parent - see DynamicInputController._show_routine_dialog's docstring -
     so closing the main window would otherwise leave them open as orphaned
     windows: findChildren() never finds them, since they were never made
     Qt children of the main window in the first place."""
@@ -1121,12 +1124,12 @@ def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
     qtbot.addWidget(gui)
     gui.update_project(default_project())
 
-    gui.stim_editor.open_dynamic_input_designer()
-    selector = gui.stim_editor._routine_selector_dialog
+    gui.dynamic_input_controller.open_dynamic_input_designer()
+    selector = gui.dynamic_input_controller._routine_selector_dialog
     assert selector is not None
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     selector._on_continue()
-    dialog = gui.stim_editor._rheobase_dialog
+    dialog = gui.dynamic_input_controller._rheobase_dialog
     assert dialog is not None
     assert dialog.isVisible()
 
@@ -1134,7 +1137,7 @@ def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
     gui.close()
 
     assert not dialog.isVisible()
-    assert gui.stim_editor._rheobase_dialog is None
+    assert gui.dynamic_input_controller._rheobase_dialog is None
 
 
 def _make_timed_project(n_timepoints: int, dt: float = 0.01) -> Project:
@@ -4440,7 +4443,7 @@ def test_brian2_busy_notifies_dynamic_input(
     gui._io_worker = object()  # type: ignore[assignment]  # in-flight IO task
     dropped: list[str] = []
     monkeypatch.setattr(
-        gui.stim_editor,
+        gui.dynamic_input_controller,
         "dynamic_input_simulation_failed",
         lambda message: dropped.append(message),
     )
@@ -4533,7 +4536,7 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     project.add_stim_array(selected)
     gui.stim_editor.set_project(project, stim_to_select=selected.name)
     dialog = RheobaseDialog(gui.stim_editor)
-    gui.stim_editor._rheobase_dialog = dialog
+    gui.dynamic_input_controller._rheobase_dialog = dialog
     dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
     dialog._running = True
     dialog._awaiting_simulation = True
@@ -4549,14 +4552,14 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     gui._append_experimental_data(recording)
 
     assert "new_recording" in project.experiments
-    assert gui.stim_editor._rheobase_dialog is dialog
+    assert gui.dynamic_input_controller._rheobase_dialog is dialog
     assert dialog._running and dialog._awaiting_simulation
     assert host.phase == "awaiting_acquisition"
     assert gui.syscon2_panel.export_settings is settings
     assert gui.stim_editor.current_stim_modifier.stim_array is selected
     assert dialog.cmb_spikes.findText("new_recording :: spikes") >= 0
     gui.update_project(default_project())
-    assert gui.stim_editor._rheobase_dialog is None
+    assert gui.dynamic_input_controller._rheobase_dialog is None
     assert gui.syscon2_panel.export_settings is None
     gui._close_confirmed = True
     gui.close()

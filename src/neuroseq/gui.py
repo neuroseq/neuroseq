@@ -44,6 +44,7 @@ from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
+from neuroseq.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.example_projects import getting_started_project
@@ -515,7 +516,19 @@ class Gui(QtWidgets.QMainWindow):
             toolbar=self.toolbar_stim_editor,
             parent=self,
         )
-        self.stim_editor.simulation_requested.connect(
+        self.dynamic_input_controller = DynamicInputController(self.stim_editor, self)
+        dynamic_input_action = add_action(
+            "Design dynamic input",
+            self.dynamic_input_controller.open_dynamic_input_designer,
+            self.stim_editor.context_menu,
+            None,
+            self,
+            icon="mdi6.pencil-box-multiple-outline",
+        )
+        self.stim_editor.context_menu.insertAction(
+            self.stim_editor.action_show_all_stim_arrays, dynamic_input_action
+        )
+        self.dynamic_input_controller.simulation_requested.connect(
             self._do_brian2_simulation_threaded
         )
         self.stim_editor.time_range_focus_requested.connect(
@@ -1232,10 +1245,9 @@ class Gui(QtWidgets.QMainWindow):
         # input state (plots, log, EPSP history); drop the cached dialog so it
         # is rebuilt fresh on next open.
         if preserve_dynamic_input:
-            for dialog in self.stim_editor._dynamic_input_dialogs():
-                dialog.refresh()
+            self.dynamic_input_controller.refresh()
         else:
-            self.stim_editor.discard_dynamic_input_dialogs()
+            self.dynamic_input_controller.discard_dynamic_input_dialogs()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
@@ -2031,7 +2043,7 @@ class Gui(QtWidgets.QMainWindow):
             # was dropped so its closed loop stops instead of stalling forever
             # waiting for a completion callback that will never arrive. This is
             # a no-op when no routine is awaiting a simulation.
-            self.stim_editor.dynamic_input_simulation_failed(
+            self.dynamic_input_controller.dynamic_input_simulation_failed(
                 "another operation is already in progress"
             )
             return
@@ -2107,7 +2119,7 @@ class Gui(QtWidgets.QMainWindow):
             # Let Qt paint the newly refreshed trace before Design dynamic input
             # appends and focuses the next stimulation block.
             QtCore.QTimer.singleShot(
-                0, self.stim_editor.dynamic_input_simulation_finished
+                0, self.dynamic_input_controller.dynamic_input_simulation_finished
             )
 
         self._dispatch_io_task(
@@ -2117,7 +2129,7 @@ class Gui(QtWidgets.QMainWindow):
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
             cancel_callback=_request_brian2_cancel,
-            on_failure=self.stim_editor.dynamic_input_simulation_failed,
+            on_failure=self.dynamic_input_controller.dynamic_input_simulation_failed,
         )
 
     def btn_do_external_simulation_clicked(self) -> None:
@@ -2821,7 +2833,7 @@ class Gui(QtWidgets.QMainWindow):
             widget.apply_theme(theme)
         self.custom_analysis_widget.apply_theme(theme)
         self.spatial_footprint_widget.apply_theme(theme)
-        self.stim_editor.apply_dynamic_input_theme(theme)
+        self.dynamic_input_controller.apply_dynamic_input_theme(theme)
         action = getattr(self, "_theme_actions", {}).get(theme)
         if action is not None and not action.isChecked():
             action.setChecked(True)
@@ -3309,7 +3321,7 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_design_dynamic_input, "mdi6.pencil-box-multiple-outline"
         )
         self.btn_design_dynamic_input.clicked.connect(
-            self.stim_editor.open_dynamic_input_designer
+            self.dynamic_input_controller.open_dynamic_input_designer
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
         toolbar.addSeparator()
@@ -4086,5 +4098,5 @@ class Gui(QtWidgets.QMainWindow):
         # popups) are created without a Qt parent - see _show_routine_dialog's
         # docstring - so findChildren() above never finds them and they would
         # otherwise survive the main window closing.
-        self.stim_editor.discard_dynamic_input_dialogs()
+        self.dynamic_input_controller.discard_dynamic_input_dialogs()
         super().closeEvent(event)
