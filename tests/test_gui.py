@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -50,7 +51,7 @@ delay_after_update_model_call_in_ms = 50
 
 
 def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) -> None:
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=timeout)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=timeout)
 
 
 @pytest.mark.parametrize(
@@ -611,7 +612,7 @@ def test_trim_to_mapped_neurons_confirmed_trims_and_forces_save_as(
     )
 
     gui.btn_trim_to_mapped_neurons_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert gui.project.stim_arrays["stim"].values.shape == (5, 2)
     assert new_filename.exists()
@@ -2090,15 +2091,15 @@ def test_gui_simulate_and_cancel(
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
 
     gui.btn_continue_simulation_clicked()
-    assert gui._io_worker is not None
+    assert gui._background_job.worker is not None
     # cancel simulation on first progress update
     cancel_trigger = _MainThreadCancelTrigger(gui.progress_dialog)
-    gui._io_worker.progress.connect(cancel_trigger.trigger)
+    gui._background_job.worker.progress.connect(cancel_trigger.trigger)
 
     _wait_for_brian2_simulation(qtbot, gui)
 
     assert gui.project.b2_model.cancel_requested is True
-    assert gui._io_worker is None
+    assert gui._background_job.worker is None
     # isHidden() (this widget's own state) is the reliable signal that
     # cancel()/hide() worked - see the comment in
     # test_simulation_progress_is_embedded_in_view_toolbar for why
@@ -2156,7 +2157,7 @@ def test_brian2_simulation_finish_does_not_touch_a_different_tab(
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.2", True))
 
     gui.btn_continue_simulation_clicked()
-    assert gui._io_worker is not None
+    assert gui._background_job.worker is not None
 
     # Switch tabs while the simulation for `simulated_project` is still
     # running on the worker thread - this is exactly what the (now fixed)
@@ -2483,7 +2484,7 @@ def test_gui_open(
         lambda *args: (f"{project_path}", True),
     )
     gui.btn_open_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert gui.project.b2_model.parameters is not None
     assert list(gui.project.b2_model.parameters.keys()) == list(
@@ -2524,7 +2525,7 @@ def test_gui_open_adds_to_recent_projects(
         lambda *args: (f"{project_path}", True),
     )
     gui.btn_open_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert gui.settings.recent_projects[0] == str(project_path.resolve())
     gui.close()
@@ -2546,7 +2547,7 @@ def test_gui_save_adds_to_recent_projects(
         lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert gui.settings.recent_projects[0] == str(filename.resolve())
     gui.close()
@@ -2625,7 +2626,7 @@ def test_gui_save(
         lambda *args: (f"{filename_without_extension}", True),
     )
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
     assert filename.exists()
     assert gui.project.filepath == filename
     assert str(filename) in gui.windowTitle()
@@ -2671,7 +2672,7 @@ def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
     monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", _fail_if_called)
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
     assert gui.project.filepath == filename
     gui.close()
 
@@ -2707,7 +2708,7 @@ def test_gui_save_as_uses_all_options_without_options_dialog(
     )
 
     gui.btn_save_as_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
     assert new_filename.exists()
     assert gui.project.filepath == new_filename
     # the original file must be untouched by the Save As
@@ -2757,7 +2758,7 @@ def test_gui_import(
         MockSaveLoadOptionsDialog,
     )
     gui.btn_import_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
     # b2model is not modified
     assert (
         project_ornstein.b2_model.neurongroups.keys()
@@ -4476,7 +4477,8 @@ def test_brian2_busy_notifies_dynamic_input(
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitUntil(gui.isVisible)
-    gui._io_worker = object()  # type: ignore[assignment]  # in-flight IO task
+    release = threading.Event()
+    gui._dispatch_io_task(lambda report: release.wait(5), "Busy", lambda _: None)
     dropped: list[str] = []
     monkeypatch.setattr(
         gui.dynamic_input_controller,
@@ -4488,7 +4490,8 @@ def test_brian2_busy_notifies_dynamic_input(
 
     # The dropped request is reported to the designer instead of stalling it.
     assert dropped
-    gui._io_worker = None
+    release.set()
+    qtbot.waitUntil(lambda: not gui._background_job.busy)
     gui.close()
 
 

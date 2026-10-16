@@ -40,7 +40,7 @@ def gui(qtbot: QtBot):
         widget.close()
     except RuntimeError:
         return
-    qtbot.waitUntil(lambda: widget._io_thread is None, timeout=10000)
+    qtbot.waitUntil(lambda: widget._background_job.worker_thread is None, timeout=10000)
 
 
 def _patch_save_dialog(monkeypatch: MonkeyPatch, filename: str) -> None:
@@ -62,6 +62,63 @@ def _patch_open_dialog(monkeypatch: MonkeyPatch, filename: str) -> None:
     )
 
 
+@pytest.mark.parametrize("workflow", ["io", "brian2", "external", "elise"])
+def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
+    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, workflow: str
+) -> None:
+    release = threading.Event()
+    assert gui._dispatch_io_task(
+        lambda report: release.wait(5), "Original operation", lambda _: None
+    )
+    original_worker = gui._background_job.worker
+    original_label = gui.progress_dialog.labelText()
+    try:
+        if workflow == "io":
+            assert not gui._dispatch_io_task(
+                lambda report: pytest.fail("overlapping job started"),
+                "Another operation",
+                lambda _: None,
+            )
+        elif workflow == "brian2":
+            gui._do_brian2_simulation_threaded(0.1)
+        elif workflow == "external":
+            gui.project.external_simulate_function = lambda *a, **kw: pytest.fail(
+                "overlapping external simulation started"
+            )
+            gui._do_external_simulation(0.1)
+        else:
+            monkeypatch.setattr(
+                gui, "_elise_protocol_inputs", lambda: (None, None, 0.001)
+            )
+            gui._run_elise_protocol()
+        assert gui._background_job.worker is original_worker
+        assert gui.progress_dialog.labelText() == original_label
+        assert not gui.menu_file.isEnabled()
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: not gui._background_job.busy)
+
+
+def test_close_keeps_window_open_when_worker_cannot_stop(
+    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch
+) -> None:
+    release = threading.Event()
+    assert gui._dispatch_io_task(
+        lambda report: release.wait(5), "Original operation", lambda _: None
+    )
+    gui._close_confirmed = True
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(gui._background_job, "stop", lambda timeout_ms: False)
+            assert not gui.close()
+        assert gui.isVisible()
+        assert gui._background_job.busy
+        assert not gui._close_confirmed
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: not gui._background_job.busy)
+
+
 def test_save_runs_on_worker_thread(
     qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, tmp_path
 ):
@@ -80,7 +137,7 @@ def test_save_runs_on_worker_thread(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert out.exists()
     assert save_thread_ids
@@ -104,7 +161,7 @@ def test_file_menu_disabled_during_save(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is not None, timeout=2000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is not None, timeout=2000)
 
     assert not gui.menu_file.isEnabled()
     assert not gui.toolbar_file.isEnabled()
@@ -112,7 +169,7 @@ def test_file_menu_disabled_during_save(
     assert not gui.tab_bar.isEnabled()
 
     block.set()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert gui.menu_file.isEnabled()
     assert gui.toolbar_file.isEnabled()
@@ -137,7 +194,7 @@ def test_save_failure_surfaces_error_and_keeps_ui_unfrozen(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     assert not out.exists()
     # UI restored to enabled state after the failure.
@@ -178,7 +235,7 @@ def test_load_runs_on_worker_thread(
 
     _patch_open_dialog(monkeypatch, str(src_path))
     gui.btn_open_clicked()
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
 
     # First Project() call is from the file-path-driven load_project →
     # _load_task on the worker thread. (Any subsequent Project() calls

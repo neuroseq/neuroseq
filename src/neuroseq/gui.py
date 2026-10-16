@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import contextlib
 import dataclasses
-import functools
 import gc
 import hashlib
 import inspect
@@ -16,7 +15,6 @@ from collections.abc import Callable
 from collections.abc import Sequence
 from datetime import UTC
 from datetime import datetime
-from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -35,6 +33,10 @@ from neuroseq import __version__
 from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
+from neuroseq.background_jobs import BackgroundIOWorker
+from neuroseq.background_jobs import BackgroundJob
+from neuroseq.background_jobs import EliseProtocolWorker
+from neuroseq.background_jobs import ExternalSimWorker
 from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
@@ -134,39 +136,6 @@ class ResourceMonitorLabel(QLabel):
         super().closeEvent(event)
 
 
-def returns_to_main_thread[F: Callable[..., Any]](run: F) -> F:
-    """Decorate a worker's ``run`` slot: once it returns, move the worker
-    back to the main thread.
-
-    Workers are normally cleaned up with ``thread.finished -> worker.
-    deleteLater``, which queues the deletion on the *worker's* thread - the
-    one that is shutting down. Destroying a PyQt-wrapped QObject there takes
-    the GIL (sip checks for Python reimplementations of
-    ``disconnectNotify``) while Qt already holds one of its signal/slot
-    mutexes. Qt shares those mutexes between unrelated objects (they are
-    picked from a small pool by address), so the main thread - holding the
-    GIL and connecting some unrelated signal - can wait on the same mutex:
-    a lock-order deadlock, intermittent by nature, that froze CI runs until
-    the job timeout. pytest-timeout's thread method cannot fire either,
-    since the main thread holds the GIL. With the worker back on the main
-    thread, ``deleteLater`` runs there instead and the cycle cannot form.
-
-    Signals the worker emitted while running are unaffected (they were
-    queued to the main thread already).
-    """
-
-    @functools.wraps(run)
-    def wrapper(self: QtCore.QObject, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return run(self, *args, **kwargs)
-        finally:
-            app = QtCore.QCoreApplication.instance()
-            if app is not None:
-                self.moveToThread(app.thread())
-
-    return wrapper  # type: ignore[return-value]
-
-
 class DetachedPanelWindow(QtWidgets.QWidget):
     """Top-level window wrapping one detached panel instance."""
 
@@ -198,10 +167,6 @@ class DetachedPanelWindow(QtWidgets.QWidget):
         if self._on_close is not None:
             self._on_close()
         super().closeEvent(event)
-
-
-class SimulationCancelledError(Exception):
-    """Raised from a progress callback when the user clicks Cancel."""
 
 
 class ToolbarProgressWidget(QtWidgets.QWidget):
@@ -300,136 +265,6 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         self.hide()
 
 
-class BackgroundIOWorker(QtCore.QObject):
-    """Runs a blocking IO task on a worker QThread.
-
-    The task is a callable taking a single argument: a
-    ``report(percent: int)`` callback that the worker translates into the
-    ``progress(int)`` signal. Tasks that don't natively report progress can
-    ignore the callback. The task's return value is delivered to the main
-    thread via ``finished(result)``; any exception is stringified and
-    delivered via ``failed(str)``.
-    """
-
-    progress = QtCore.Signal(int)
-    finished = QtCore.Signal(object)
-    failed = QtCore.Signal(str)
-
-    def __init__(self, task: Callable[[Callable[[int], None]], object]) -> None:
-        super().__init__()
-        self._task = task
-
-    @QtCore.Slot()
-    @returns_to_main_thread
-    def run(self) -> None:
-        def _report(percent: int) -> None:
-            with contextlib.suppress(Exception):
-                self.progress.emit(int(percent))
-
-        try:
-            result = self._task(_report)
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-            return
-        self.finished.emit(result)
-
-
-class ExternalSimWorker(QtCore.QObject):
-    """Runs an external simulation on a worker QThread."""
-
-    progress = QtCore.Signal(float)
-    finished = QtCore.Signal(object)
-    cancelled = QtCore.Signal()
-    failed = QtCore.Signal(str)
-
-    def __init__(
-        self,
-        simulate_fn: Callable,
-        stims_dict: dict,
-        simulation_time: float,
-        params: dict,
-        accepts_progress: bool,
-        cancel_event: threading.Event,
-    ) -> None:
-        super().__init__()
-        self._simulate_fn = simulate_fn
-        self._stims_dict = stims_dict
-        self._simulation_time = float(simulation_time)
-        self._params = params
-        self._accepts_progress = accepts_progress
-        self._cancel_event = cancel_event
-
-    @QtCore.Slot()
-    @returns_to_main_thread
-    def run(self) -> None:
-        def _progress_cb(fraction: float) -> None:
-            if self._cancel_event.is_set():
-                raise SimulationCancelledError("user cancelled")
-            with contextlib.suppress(Exception):
-                self.progress.emit(float(fraction))
-
-        try:
-            if self._accepts_progress:
-                experiment = self._simulate_fn(
-                    self._stims_dict,
-                    self._simulation_time,
-                    params=self._params,
-                    progress=_progress_cb,
-                )
-            else:
-                experiment = self._simulate_fn(
-                    self._stims_dict,
-                    self._simulation_time,
-                    params=self._params,
-                )
-        except SimulationCancelledError:
-            self.cancelled.emit()
-            return
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-            return
-        self.finished.emit(experiment)
-
-
-class EliseProtocolWorker(QtCore.QObject):
-    """Runs the ELiSe train/validation/replay protocol on a worker QThread."""
-
-    progress = QtCore.Signal(float)
-    finished = QtCore.Signal(object)
-    cancelled = QtCore.Signal()
-    failed = QtCore.Signal(str)
-
-    def __init__(
-        self,
-        run_fn: Callable,
-        kwargs: dict,
-        cancel_event: threading.Event,
-    ) -> None:
-        super().__init__()
-        self._run_fn = run_fn
-        self._kwargs = kwargs
-        self._cancel_event = cancel_event
-
-    @QtCore.Slot()
-    @returns_to_main_thread
-    def run(self) -> None:
-        def _progress_cb(fraction: float) -> None:
-            if self._cancel_event.is_set():
-                raise SimulationCancelledError("user cancelled")
-            with contextlib.suppress(Exception):
-                self.progress.emit(float(fraction))
-
-        try:
-            result = self._run_fn(progress=_progress_cb, **self._kwargs)
-        except SimulationCancelledError:
-            self.cancelled.emit()
-            return
-        except Exception as exc:
-            self.failed.emit(f"{type(exc).__name__}: {exc}")
-            return
-        self.finished.emit(result)
-
-
 def _external_simulator_accepts_progress(simulate_fn: Callable) -> bool:
     """True if ``simulate_fn`` advertises a ``progress`` keyword argument.
 
@@ -475,6 +310,7 @@ class Gui(QtWidgets.QMainWindow):
         filename: pathlib.Path | str | Project | None = None,
     ) -> None:
         super().__init__()
+        self._background_job = BackgroundJob(self)
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting Gui")
         self.settings = GuiSettings()
@@ -795,15 +631,7 @@ class Gui(QtWidgets.QMainWindow):
         # once (which is what "Detach copy" is for).
         self._plain_detached_windows: dict[QtWidgets.QWidget, DetachedPanelWindow] = {}
         self._llm_settings_dialog: LLMSettingsDialog | None = None
-        self._external_sim_thread: QtCore.QThread | None = None
-        self._external_sim_worker: ExternalSimWorker | None = None
-        self._external_sim_cancel: threading.Event | None = None
         self._external_sim_dispatch_project: Project | None = None
-        self._elise_protocol_thread: QtCore.QThread | None = None
-        self._elise_protocol_worker: EliseProtocolWorker | None = None
-        self._elise_protocol_cancel: threading.Event | None = None
-        self._io_thread: QtCore.QThread | None = None
-        self._io_worker: BackgroundIOWorker | None = None
         self._io_on_success: Callable[[object], None] | None = None
         self._io_on_failure: Callable[[str], None] | None = None
         self._io_failure_title = "File operation failed"
@@ -1125,11 +953,11 @@ class Gui(QtWidgets.QMainWindow):
         options_dialog = SaveLoadOptionsDialog(action="Import")
         if not options_dialog.exec():
             return
-        if self._io_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
-                "A file operation is already in progress.",
+                "Another background operation is already in progress.",
             )
             return
 
@@ -1177,16 +1005,16 @@ class Gui(QtWidgets.QMainWindow):
         included; the options dialog remains available for import workflows.
 
         Returns True if a save task was dispatched, False if the user cancelled
-        at the file dialog (or a file operation is already running).
+        at the file dialog (or a background operation is already running).
         ``on_success`` runs after the save completes successfully; it lets a
         caller (e.g. New) chain an action once the current project is safely
         persisted.
         """
-        if self._io_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
-                "A file operation is already in progress.",
+                "Another background operation is already in progress.",
             )
             return False
 
@@ -1282,11 +1110,11 @@ class Gui(QtWidgets.QMainWindow):
             _place(project)
             return
 
-        if self._io_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
-                "A file operation is already in progress.",
+                "Another background operation is already in progress.",
             )
             return
         filename = pathlib.Path(project)
@@ -1817,9 +1645,9 @@ class Gui(QtWidgets.QMainWindow):
     def _do_external_simulation(self, simulation_time: float) -> None:
         if self.project.external_simulate_function is None:
             return
-        if self._external_sim_worker is not None:
+        if self._background_job.busy:
             self.logger.warning(
-                "External simulation dispatch ignored - a sim is already running."
+                "External simulation dispatch ignored - another background job is running."
             )
             return
 
@@ -1840,64 +1668,29 @@ class Gui(QtWidgets.QMainWindow):
         )
         self._external_sim_dispatch_project = self.project
 
-        self.progress_dialog.setLabelText("Simulating...")
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.setCancelButtonText("Cancel")
-        # Threaded path: make the dialog non-modal so the rest of the
-        # GUI stays interactive while the worker runs. Other entry
-        # points (project load, import) keep the default WindowModal
-        # via _teardown_external_sim restoring it.
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
-        self.progress_dialog.show()
+        cancel_event = threading.Event()
+        self._prepare_background_job("Simulating...", cancellable=True)
 
-        self._external_sim_cancel = threading.Event()
-        self.progress_dialog.canceled.connect(self._external_sim_cancel.set)
-
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        self._set_simulation_actions_enabled(False)
-
-        thread = QtCore.QThread(self)
         worker = ExternalSimWorker(
             simulate_fn=self.project.external_simulate_function,
             stims_dict=stims_dict,
             simulation_time=simulation_time,
             params=params,
             accepts_progress=accepts_progress,
-            cancel_event=self._external_sim_cancel,
+            cancel_event=cancel_event,
         )
-        worker.moveToThread(thread)
-
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._on_external_sim_progress)
-        worker.finished.connect(self._on_external_sim_finished)
-        worker.cancelled.connect(self._on_external_sim_cancelled)
-        worker.failed.connect(self._on_external_sim_failed)
-        for signal in (worker.finished, worker.cancelled, worker.failed):
-            signal.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-
-        self._external_sim_thread = thread
-        self._external_sim_worker = worker
-        self.logger.info(
-            f"Dispatching external simulation: {simulation_time} s "
-            f"(accepts_progress={accepts_progress})"
+        self._background_job.start(
+            worker,
+            on_progress=self._on_external_sim_progress,
+            on_finished=self._on_external_sim_finished,
+            on_failed=self._on_external_sim_failed,
+            on_cancelled=self._on_external_sim_cancelled,
+            cancel=cancel_event.set,
         )
-        thread.start()
 
     def _teardown_external_sim(self) -> None:
-        QtWidgets.QApplication.restoreOverrideCursor()
-        self.progress_dialog.setCancelButton(None)
-        # Restore the default modality used by other long-running paths
-        # (project load, import) that block the main thread.
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        with contextlib.suppress(TypeError, RuntimeError):
-            self.progress_dialog.canceled.disconnect()
-        self._external_sim_worker = None
-        self._external_sim_thread = None
-        self._external_sim_cancel = None
+        self._teardown_background_job()
         self._external_sim_dispatch_project = None
-        self._set_simulation_actions_enabled(True)
 
     @QtCore.Slot(float)
     def _on_external_sim_progress(self, fraction: float) -> None:
@@ -2022,100 +1815,44 @@ class Gui(QtWidgets.QMainWindow):
         """Run a blocking IO task on a worker thread.
 
         Returns ``True`` if the task was dispatched, ``False`` if another
-        IO task is already in flight.
+        background job is already in flight.
 
         If ``cancel_callback`` is given, the progress dialog shows a Cancel
         button wired to it that calls the callback on the GUI thread.
         """
-        if self._io_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
-                "Another file operation is in progress. Please wait for it "
+                "Another background operation is in progress. Please wait for it "
                 "to finish before starting a new one.",
             )
             return False
 
-        self.progress_dialog.setLabelText(label)
-        self.progress_dialog.setRange(0, 100)
-        # Suppress the dialog's "smart" hiding for IO: the load callback
-        # rapidly drives the bar 0 → 100 during the model phase, after
-        # which the rest of the load (experiments, stim arrays, cellpose)
-        # has no native progress. With the defaults (autoClose +
-        # autoReset + minimumDuration=10) the dialog would either flash
-        # briefly and disappear, or never show at all for fast tasks.
-        # We close it ourselves in _teardown_io_task.
-        self.progress_dialog.setAutoClose(False)
-        self.progress_dialog.setAutoReset(False)
-        self.progress_dialog.setMinimumDuration(0)
-        self.progress_dialog.setValue(0)
-        if cancel_callback is not None:
-            self.progress_dialog.setCancelButtonText("Cancel")
-
-            def _on_cancel() -> None:
-                # The dialog hides on cancel, but the worker can keep running
-                # (e.g. uninterruptible Brian2 compilation). Re-show a busy
-                # "Cancelling..." bar until the worker actually finishes.
-                cancel_callback()
-                self.progress_dialog.setLabelText("Cancelling...")
-                self.progress_dialog.setRange(0, 0)
-                self.progress_dialog.setCancelButton(None)
-                self.progress_dialog.show()
-
-            self.progress_dialog.canceled.connect(_on_cancel)
-        else:
-            self.progress_dialog.setCancelButton(None)
-        # Non-modal so the rest of the GUI stays interactive while the
-        # worker thread does the IO. File-related actions are still
-        # gated via _set_io_actions_enabled below.
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
-        self.progress_dialog.show()
-        self.progress_dialog.raise_()
-
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        self._set_io_actions_enabled(False)
+        self._prepare_background_job(
+            label, cancellable=cancel_callback is not None, block_io=True
+        )
         self._io_on_success = on_success
         self._io_failure_title = failure_title
         self._io_failure_prefix = failure_prefix
         self._io_on_failure = on_failure
 
-        thread = QtCore.QThread(self)
-        worker = BackgroundIOWorker(task)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._on_io_progress)
-        worker.finished.connect(self._on_io_finished)
-        worker.failed.connect(self._on_io_failed)
-        for signal in (worker.finished, worker.failed):
-            signal.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-
-        self._io_thread = thread
-        self._io_worker = worker
+        self._background_job.start(
+            BackgroundIOWorker(task),
+            on_progress=self._on_io_progress,
+            on_finished=self._on_io_finished,
+            on_failed=self._on_io_failed,
+            cancel=cancel_callback,
+        )
         self.logger.info(f"Dispatching IO task: {label}")
-        thread.start()
         return True
 
     def _teardown_io_task(self) -> None:
-        QtWidgets.QApplication.restoreOverrideCursor()
-        # Restore the dialog's default behaviour for synchronous users
-        # (project save options dialog, Brian2 sim, etc.).
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.setAutoReset(True)
-        self.progress_dialog.setMinimumDuration(10)
-        with contextlib.suppress(TypeError, RuntimeError):
-            self.progress_dialog.canceled.disconnect()
-        self.progress_dialog.setCancelButton(None)
-        self.progress_dialog.reset()
-        self._io_thread = None
-        self._io_worker = None
+        self._teardown_background_job()
         self._io_on_success = None
         self._io_on_failure = None
         self._io_failure_title = "File operation failed"
         self._io_failure_prefix = "The file operation could not complete:"
-        self._set_io_actions_enabled(True)
 
     @QtCore.Slot(int)
     def _on_io_progress(self, percent: int) -> None:
@@ -2156,7 +1893,7 @@ class Gui(QtWidgets.QMainWindow):
             on_failure(message)
 
     def _do_brian2_simulation_threaded(self, simulation_time: float) -> None:
-        if self._io_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.information(
                 self,
                 "Busy",
@@ -2247,7 +1984,7 @@ class Gui(QtWidgets.QMainWindow):
 
         self._dispatch_io_task(
             _brian2_task,
-            "Compiling Brian2 model...",
+            "Preparing Brian2 simulation…",
             _on_brian2_finished,
             failure_title="Simulation error",
             failure_prefix="Could not run simulation:",
@@ -3904,7 +3641,7 @@ class Gui(QtWidgets.QMainWindow):
             protocol_action.setVisible(is_elise_project)
             protocol_action.setEnabled(
                 self._elise_protocol_inputs() is not None
-                and self._elise_protocol_worker is None
+                and not self._background_job.busy
             )
 
     def _elise_replay_inputs(
@@ -3935,11 +3672,11 @@ class Gui(QtWidgets.QMainWindow):
                 "'opsin_inh' input arrays.",
             )
             return
-        if self._elise_protocol_worker is not None:
+        if self._background_job.busy:
             QtWidgets.QMessageBox.warning(
                 self,
                 "Run ELiSe protocol",
-                "An ELiSe protocol run is already in progress.",
+                "Another background operation is already in progress.",
             )
             return
 
@@ -3955,48 +3692,24 @@ class Gui(QtWidgets.QMainWindow):
             **dialog.get_values(),
         }
 
-        self.progress_dialog.setLabelText("Running ELiSe protocol...")
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.setCancelButtonText("Cancel")
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
-        self.progress_dialog.show()
+        cancel_event = threading.Event()
+        self._prepare_background_job("Running ELiSe protocol...", cancellable=True)
 
-        self._elise_protocol_cancel = threading.Event()
-        self.progress_dialog.canceled.connect(self._elise_protocol_cancel.set)
-        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
-        if getattr(self, "elise_protocol_action", None) is not None:
-            self.elise_protocol_action.setEnabled(False)
-
-        thread = QtCore.QThread(self)
-        worker = EliseProtocolWorker(
-            run_fn=elise_run_protocol,
-            kwargs=kwargs,
-            cancel_event=self._elise_protocol_cancel,
+        self._background_job.start(
+            EliseProtocolWorker(
+                run_fn=elise_run_protocol,
+                kwargs=kwargs,
+                cancel_event=cancel_event,
+            ),
+            on_progress=self._on_elise_protocol_progress,
+            on_finished=self._on_elise_protocol_finished,
+            on_failed=self._on_elise_protocol_failed,
+            on_cancelled=self._on_elise_protocol_cancelled,
+            cancel=cancel_event.set,
         )
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._on_elise_protocol_progress)
-        worker.finished.connect(self._on_elise_protocol_finished)
-        worker.cancelled.connect(self._on_elise_protocol_cancelled)
-        worker.failed.connect(self._on_elise_protocol_failed)
-        for signal in (worker.finished, worker.cancelled, worker.failed):
-            signal.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(thread.deleteLater)
-
-        self._elise_protocol_thread = thread
-        self._elise_protocol_worker = worker
-        thread.start()
 
     def _teardown_elise_protocol(self) -> None:
-        QtWidgets.QApplication.restoreOverrideCursor()
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
-        with contextlib.suppress(TypeError, RuntimeError):
-            self.progress_dialog.canceled.disconnect()
-        self._elise_protocol_worker = None
-        self._elise_protocol_thread = None
-        self._elise_protocol_cancel = None
-        self._refresh_elise_replay_action()
+        self._teardown_background_job()
 
     @QtCore.Slot(float)
     def _on_elise_protocol_progress(self, fraction: float) -> None:
@@ -4034,17 +3747,50 @@ class Gui(QtWidgets.QMainWindow):
             f"Could not run the ELiSe protocol: {message}",
         )
 
-    def _stop_worker_thread(
-        self, thread: QtCore.QThread | None, timeout_ms: int, label: str
+    def _prepare_background_job(
+        self, label: str, cancellable: bool, *, block_io: bool = False
     ) -> None:
-        """Stop a worker thread during shutdown."""
-        if thread is None or not thread.isRunning():
-            return
-        thread.quit()
-        if not thread.wait(timeout_ms):
-            self.logger.warning(
-                f"{label} did not stop in {timeout_ms} ms during shutdown."
-            )
+        self.progress_dialog.setLabelText(label)
+        self.progress_dialog.setRange(0, 100)
+        self.progress_dialog.setAutoClose(False)
+        self.progress_dialog.setAutoReset(False)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        if cancellable:
+            self.progress_dialog.setCancelButtonText("Cancel")
+            self.progress_dialog.canceled.connect(self._cancel_background_job)
+        else:
+            self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.NonModal)
+        self.progress_dialog.show()
+        self.progress_dialog.raise_()
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.CursorShape.WaitCursor)
+        if block_io:
+            self._set_io_actions_enabled(False)
+        else:
+            self._set_simulation_actions_enabled(False)
+        if getattr(self, "elise_protocol_action", None) is not None:
+            self.elise_protocol_action.setEnabled(False)
+
+    def _cancel_background_job(self) -> None:
+        self._background_job.cancel()
+        self.progress_dialog.setLabelText("Cancelling...")
+        self.progress_dialog.setRange(0, 0)
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.show()
+
+    def _teardown_background_job(self) -> None:
+        QtWidgets.QApplication.restoreOverrideCursor()
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
+        self.progress_dialog.setAutoClose(True)
+        self.progress_dialog.setAutoReset(True)
+        self.progress_dialog.setMinimumDuration(10)
+        with contextlib.suppress(TypeError, RuntimeError):
+            self.progress_dialog.canceled.disconnect()
+        self.progress_dialog.setCancelButton(None)
+        self.progress_dialog.reset()
+        self._set_io_actions_enabled(True)
+        self._refresh_elise_replay_action()
 
     @staticmethod
     def _dropped_paths(
@@ -4195,15 +3941,16 @@ class Gui(QtWidgets.QMainWindow):
         if not self._close_confirmed and not self._prompt_save_before_close():
             event.ignore()
             return
-        if (
-            self._external_sim_thread is not None
-            and self._external_sim_cancel is not None
-        ):
-            self._external_sim_cancel.set()
-        self._stop_worker_thread(
-            self._external_sim_thread, 2000, "External simulation worker"
-        )
-        self._stop_worker_thread(self._io_thread, 10000, "IO worker")
+        had_job = self._background_job.busy
+        if not self._background_job.stop(timeout_ms=10000):
+            self.logger.warning(
+                "Background job is still stopping; keeping the window open."
+            )
+            self._close_confirmed = False
+            event.ignore()
+            return
+        if had_job:
+            self._teardown_background_job()
         self.syscon2_panel.shutdown()
         self.scanimage_connection.shutdown()
         # Stop timers and queued widget updates before tearing down owned widgets.

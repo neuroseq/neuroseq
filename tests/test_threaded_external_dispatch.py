@@ -40,8 +40,8 @@ def gui(qtbot: QtBot):
         return
     qtbot.waitUntil(
         lambda: (
-            widget._external_sim_thread is None
-            or not widget._external_sim_thread.isRunning()
+            widget._background_job.worker_thread is None
+            or not widget._background_job.worker_thread.isRunning()
         ),
         timeout=3000,
     )
@@ -60,7 +60,7 @@ def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
     original_experiments = dict(gui.project.experiments)
 
     gui._do_external_simulation(1.0)
-    worker = gui._external_sim_worker
+    worker = gui._background_job.worker
     assert worker is not None
     cancelled: list[bool] = []
     worker.cancelled.connect(lambda: cancelled.append(True))
@@ -69,7 +69,7 @@ def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
     qtbot.waitUntil(
         lambda: (
             bool(cancelled)
-            and gui._external_sim_worker is None
+            and gui._background_job.worker is None
             and QtWidgets.QApplication.overrideCursor() is None
         ),
         timeout=5000,
@@ -77,7 +77,7 @@ def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
     assert gui.project.experiments == original_experiments
     assert gui.continue_simulation_action.isEnabled()
     assert gui._do_external_simulation_action.isEnabled()
-    assert gui._external_sim_worker is None
+    assert gui._background_job.worker is None
     assert QtWidgets.QApplication.overrideCursor() is None
 
 
@@ -88,7 +88,7 @@ def test_simulation_actions_disabled_during_run(qtbot: QtBot, gui: Gui) -> None:
     )
 
     gui._do_external_simulation(1.0)
-    worker = gui._external_sim_worker
+    worker = gui._background_job.worker
     assert worker is not None
     qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
     assert not gui.continue_simulation_action.isEnabled()
@@ -98,7 +98,7 @@ def test_simulation_actions_disabled_during_run(qtbot: QtBot, gui: Gui) -> None:
     worker.finished.connect(lambda *_: finished.append(True))
     block.set()
     qtbot.waitUntil(
-        lambda: bool(finished) and gui._external_sim_thread is None,
+        lambda: bool(finished) and gui._background_job.worker_thread is None,
         timeout=5000,
     )
 
@@ -122,13 +122,13 @@ def test_dispatch_is_idempotent_while_running(qtbot: QtBot, gui: Gui) -> None:
     _wire_fake_external_simulator(gui, _simulate)
 
     gui._do_external_simulation(1.0)
-    original_worker = gui._external_sim_worker
+    original_worker = gui._background_job.worker
     assert original_worker is not None
     qtbot.waitUntil(lambda: call_count == 1, timeout=2000)
 
     gui._do_external_simulation(1.0)
 
-    assert gui._external_sim_worker is original_worker
+    assert gui._background_job.worker is original_worker
     assert call_count == 1
 
     finished: list[bool] = []
@@ -146,13 +146,14 @@ def test_close_event_cancels_inflight_sim(qtbot: QtBot, gui: Gui) -> None:
     _wire_fake_external_simulator(gui, _simulate)
 
     gui._do_external_simulation(1.0)
-    assert gui._external_sim_worker is not None
+    assert gui._background_job.worker is not None
 
     gui.close()
 
     qtbot.waitUntil(
         lambda: (
-            gui._external_sim_thread is None or not gui._external_sim_thread.isRunning()
+            gui._background_job.worker_thread is None
+            or not gui._background_job.worker_thread.isRunning()
         ),
         timeout=3000,
     )
@@ -166,7 +167,7 @@ def test_experiment_appended_to_dispatch_project_not_current(
     original_project = gui.project
 
     gui._do_external_simulation(1.0)
-    worker = gui._external_sim_worker
+    worker = gui._background_job.worker
     assert worker is not None
 
     other_project = Project()
@@ -195,7 +196,7 @@ def test_progress_dialog_cancel_button_text_lifecycle(qtbot: QtBot, gui: Gui) ->
     assert cancel_button is None or not cancel_button.isVisible()
 
     gui._do_external_simulation(1.0)
-    worker = gui._external_sim_worker
+    worker = gui._background_job.worker
     assert worker is not None
     qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
 

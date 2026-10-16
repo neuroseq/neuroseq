@@ -331,7 +331,7 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
         sentinel_exp = object()
         gui._on_elise_protocol_finished(_synthetic_result(experiment=sentinel_exp))
         # Slot tore the worker state down and produced an analysis window.
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
         windows = gui.findChildren(CustomAnalysisWindow)
         assert windows
         widget = windows[-1].analysis_widget
@@ -351,9 +351,8 @@ def test_on_protocol_failed_tears_down(qtbot: QtBot) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
     try:
-        gui._elise_protocol_worker = object()  # type: ignore[assignment]  # pretend a run is active
         gui._on_elise_protocol_failed("boom")
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
     finally:
         gui.close()
 
@@ -364,9 +363,8 @@ def test_on_protocol_cancelled_and_progress(qtbot: QtBot) -> None:
     try:
         gui._on_elise_protocol_progress(0.5)
         assert gui.progress_dialog.value() == 50
-        gui._elise_protocol_worker = object()  # type: ignore[assignment]  # pretend a run is active
         gui._on_elise_protocol_cancelled()
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
     finally:
         gui.close()
 
@@ -441,7 +439,7 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
 
         gui._run_elise_protocol()
         # Worker dispatched on a thread; wait for the finished slot to tear down.
-        qtbot.waitUntil(lambda: gui._elise_protocol_worker is None, timeout=60000)
+        qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=60000)
         assert gui.findChildren(CustomAnalysisWindow)
         # The stim arrays were rebuilt to the recorded full timeline.
         sa = gui.project.stim_arrays.get("opsin_exc")

@@ -5,8 +5,8 @@ import threading
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
+from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.gui import Gui
-from neuroseq.gui import returns_to_main_thread
 
 
 class _Worker(QtCore.QObject):
@@ -75,15 +75,15 @@ def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
         return 1
 
     assert gui._dispatch_io_task(task, "t", lambda _r: None)
-    worker = gui._io_worker
-    thread = gui._io_thread
+    worker = gui._background_job.worker
+    thread = gui._background_job.worker_thread
     assert worker is not None and thread is not None
     worker_thread_at_finish: list[QtCore.QThread] = []
     thread.finished.connect(lambda: worker_thread_at_finish.append(worker.thread()))
     release.set()
 
     qtbot.waitUntil(lambda: bool(worker_thread_at_finish), timeout=5000)
-    qtbot.waitUntil(lambda: gui._io_worker is None, timeout=5000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=5000)
 
     assert worker_thread_at_finish[0] == QtCore.QCoreApplication.instance().thread()
     gui.close()

@@ -5,8 +5,8 @@ import threading
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
+from neuroseq.background_jobs import ExternalSimWorker
 from neuroseq.data import Experiment
-from neuroseq.gui import ExternalSimWorker
 
 
 class _ProgressReceiver(QtCore.QObject):
