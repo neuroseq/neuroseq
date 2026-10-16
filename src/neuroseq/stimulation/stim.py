@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import IntEnum
 
 import brian2.numpy_ as np
 from numpy.typing import NDArray
 
-from neuroseq.pretty_print_enum import PrettyPrintIntEnum
 
-
-class StimType(PrettyPrintIntEnum):
+class StimType(IntEnum):
     Excitation = 1
     Inhibition = 2
     External = 3
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @dataclass
@@ -36,11 +38,14 @@ class StimArray:
         self.values = np.asarray(self.values, dtype=np.float32)
 
 
-class DrawStimType(PrettyPrintIntEnum):
+class DrawStimType(IntEnum):
     Constant = 1
     Linear = 2
     Logarithmic = 3
     Random = 4
+
+    def __str__(self) -> str:
+        return self.name
 
 
 @dataclass

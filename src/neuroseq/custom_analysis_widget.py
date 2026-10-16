@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from enum import Enum
 from types import MethodType
 
 import brian2.numpy_ as np
@@ -17,10 +18,9 @@ from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.pretty_print_enum import PrettyPrintEnum
 
 
-class CustomAnalysisType(PrettyPrintEnum):
+class CustomAnalysisType(Enum):
     Histogram = "mdi6.chart-histogram"
     Histogram2d = "mdi6.data-matrix"
     SpikeCountPerNeuron = "mdi6.chart-bar"
