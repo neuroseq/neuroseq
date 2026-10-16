@@ -25,7 +25,6 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq import __version__
-from neuroseq import elise_workflows
 from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
@@ -67,6 +66,7 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
+from neuroseq.resources.analysis_plugins import _elise_workflows as elise_workflows
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
 from neuroseq.scanimage_connection import ScanImageConnection
@@ -3786,8 +3786,10 @@ class Gui(QtWidgets.QMainWindow):
         return elise_workflows.protocol_inputs(self.project)
 
     def _run_elise_protocol(self) -> None:
-        from neuroseq.elise_protocol_dialog import EliseProtocolDialog
         from neuroseq.example_models.elise import run_protocol as elise_run_protocol
+        from neuroseq.resources.analysis_plugins._elise_protocol_dialog import (
+            EliseProtocolDialog,
+        )
 
         inputs = self._elise_protocol_inputs()
         if inputs is None:

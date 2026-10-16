@@ -29,7 +29,9 @@ from neuroseq.data import TraceData
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import ProgressCallback
-from neuroseq.replay_metrics import compute_performance_against_target
+from neuroseq.resources.analysis_plugins._replay_metrics import (
+    compute_performance_against_target,
+)
 
 FlatParams = dict[str, ParamValue]
 
@@ -928,7 +930,7 @@ class Elise(NN):
         Network state (voltages, rates, weights) carries across every phase —
         there is no reset between cycles, matching the paper. The metric is the
         shift-aligned MSE / Pearson correlation
-        (:func:`neuroseq.replay_metrics.compute_performance_against_target`).
+        (:func:`neuroseq.resources.analysis_plugins._replay_metrics.compute_performance_against_target`).
 
         Parameters
         ----------
@@ -1149,7 +1151,9 @@ class Elise(NN):
         def _train(n_cycles: int) -> None:
             for k in range(n_cycles * T):
                 net(u_inp=_teacher_u(k % T), learn=True)
-                _record(one_exc_stim[(k % T) // upsample], one_inh_stim[(k % T) // upsample])
+                _record(
+                    one_exc_stim[(k % T) // upsample], one_inh_stim[(k % T) // upsample]
+                )
                 _tick()
 
         def _free_run(n_cycles: int, learn: bool) -> np.ndarray:

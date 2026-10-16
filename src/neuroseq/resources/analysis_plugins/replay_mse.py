@@ -22,8 +22,10 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
-from neuroseq.replay_metrics import compute_cycle_mse
-from neuroseq.replay_metrics import compute_cycle_performance
+from neuroseq.resources.analysis_plugins._replay_metrics import compute_cycle_mse
+from neuroseq.resources.analysis_plugins._replay_metrics import (
+    compute_cycle_performance,
+)
 
 __all__ = ["compute_cycle_mse", "compute_cycle_performance"]
 

@@ -9,8 +9,10 @@ from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.example_models.elise import _detect_pattern_cycle
 from neuroseq.example_models.elise import build_target_rate_pattern
 from neuroseq.example_projects import _build_fuer_elise_opsin_stims
-from neuroseq.replay_metrics import compute_performance_against_target
-from neuroseq.replay_metrics import save_replay_metrics_csv
+from neuroseq.resources.analysis_plugins._replay_metrics import (
+    compute_performance_against_target,
+)
+from neuroseq.resources.analysis_plugins._replay_metrics import save_replay_metrics_csv
 
 # ---------- compute_performance_against_target ----------
 
