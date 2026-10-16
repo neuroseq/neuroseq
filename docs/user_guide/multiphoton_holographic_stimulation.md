@@ -186,8 +186,10 @@ neuroseq --generate-cellpose-test-data ./cellpose_1300.tif \
 Use **File → Import stimulus → Import light stimulus → SysCon2** to reconstruct a
 sequence in an existing input array. Browsing and cancelling do not change the
 project. Import applies the file's header as the session's export template only
-after conversion succeeds. If the project sample interval changes to 520.8125 µs,
-existing stimulus and trace data are remapped after confirmation.
+after conversion succeeds. The imported input uses 520.8125 µs samples. If an
+existing target input uses a different interval, only that input is resampled
+after confirmation. Other input arrays and trace datasets keep their own intervals
+and align by time in the plots.
 
 Targets map to consecutive channels starting at **Target neuron offset**, in their
 first-occurrence order for Holo4D sequences. They are not matched to project neuron

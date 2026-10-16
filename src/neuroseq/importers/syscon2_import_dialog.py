@@ -10,7 +10,6 @@ import numpy as np
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.data import TraceData
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.importers.importer_syscon2 import SysconSequence
 from neuroseq.importers.importer_syscon2 import get_timed_objects
@@ -21,6 +20,7 @@ from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stim_timing import remap_stim_values_to_dt
 from neuroseq.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
@@ -375,35 +375,26 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 return
 
         target_dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-        if not stim_dt_matches(target_dt, self.project.dt):
-            affected = self.project.remappable_data_description(target_dt)
-            if affected:
-                answer = QtWidgets.QMessageBox.question(
-                    self,
-                    "Change project sample interval",
-                    f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
-                    "will change the project sample interval from "
-                    f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
-                    f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
-                    f"{affected} using zero-order hold. Continue?",
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No,
-                )
-                if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-                    return
+        if (
+            not create_new
+            and stim_array is not None
+            and not stim_dt_matches(target_dt, stim_array.dt)
+        ):
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "Change input array timestep",
+                f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
+                f"will remap input array '{stim_array.name}' from "
+                f"{format_milliseconds(stim_array.dt * 1000.0)} ms "
+                "using zero-order hold. Timing may shift by up to one sample. Continue?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
 
         try:
-            # Remapping and conversion must succeed without mutating the live project.
-            prepared = copy.copy(self.project)
-            prepared.stim_arrays = {
-                name: copy.copy(stim) for name, stim in self.project.stim_arrays.items()
-            }
-            prepared.experiments = {}
-            for name, experiment in self.project.experiments.items():
-                staged_experiment = copy.copy(experiment)
-                staged_experiment.data = [copy.copy(datum) for datum in experiment.data]
-                prepared.experiments[name] = staged_experiment
-            prepared.remap_all_data_to_dt(target_dt)
+            # Stage the target so failed or cancelled imports leave it untouched.
             if create_new:
                 staged_stim = self._build_new_stim_array(new_name, target_dt)
                 result = import_sequence_into_stim_array(
@@ -412,7 +403,14 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                     tick_resolution_us=self.tick_resolution_spin.value(),
                 )
             else:
-                staged_stim = prepared.stim_arrays[self.target_combo.currentText()]
+                assert stim_array is not None
+                staged_stim = copy.copy(stim_array)
+                staged_stim.values = remap_stim_values_to_dt(
+                    stim_array.values,
+                    old_dt_seconds=stim_array.dt,
+                    new_dt_seconds=target_dt,
+                )
+                staged_stim.dt = target_dt
                 result = import_sequence_into_stim_array(
                     staged_stim,
                     self.sequence,
@@ -447,26 +445,12 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 != QtWidgets.QMessageBox.StandardButton.Yes
             ):
                 return
-            for name, staged in prepared.stim_arrays.items():
-                original = self.project.stim_arrays[name]
-                original.values, original.dt = staged.values, staged.dt
-            for name, staged_experiment in prepared.experiments.items():
-                for original_data, staged_data in zip(
-                    self.project.experiments[name].data,
-                    staged_experiment.data,
-                    strict=True,
-                ):
-                    if isinstance(original_data, TraceData) and isinstance(
-                        staged_data, TraceData
-                    ):
-                        original_data.traces, original_data.dt = (
-                            staged_data.traces,
-                            staged_data.dt,
-                        )
-            self.project.dt = target_dt
             if create_new:
                 self.project.add_stim_array(staged_stim)
                 self.selected_stim_name = new_name
+            else:
+                assert stim_array is not None
+                stim_array.values, stim_array.dt = staged_stim.values, staged_stim.dt
             self.project.syscon2_export_template_text = self._header_template
             self.project.update_limits()
             self.project.mark_dirty()

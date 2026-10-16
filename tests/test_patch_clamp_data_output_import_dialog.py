@@ -625,7 +625,6 @@ def test_trace_import_preserves_independent_dataset_timing(
     project.add_stim_array(
         StimArray("stim1", StimType.External, stim_values.copy(), "pA", 0.0005208125)
     )
-    original_project_dt = project.dt
     existing_trace = TraceData(
         "calcium",
         np.array([[1, 2, 3]], dtype=np.float32),
@@ -649,7 +648,6 @@ def test_trace_import_preserves_independent_dataset_timing(
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
-    assert project.dt == original_project_dt
     assert project.stim_arrays["stim1"].dt == pytest.approx(0.0005208125)
     np.testing.assert_array_equal(project.stim_arrays["stim1"].values, stim_values)
     assert existing_trace.dt == pytest.approx(1 / 30)

@@ -8,6 +8,8 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.data import Experiment
+from neuroseq.data import TraceData
 from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
@@ -787,14 +789,13 @@ def test_patch_clamp_data_input_import_dialog_reimport_same_pxp_wave_is_blocked(
     assert dialog.import_button.isEnabled() is False
 
 
-def test_patch_clamp_data_input_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
+def test_new_input_preserves_existing_stim_and_trace_timing(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    """When a non-default dt is selected and the project has existing data,
-    a confirmation dialog must be shown and all data must be remapped on Yes."""
+    """Importing a new input keeps existing datasets on their original grids."""
     csv_path = tmp_path / "wave.csv"
     csv_path.write_text("new_wave\n1.0\n2.0\n", encoding="utf-8")
 
@@ -809,11 +810,15 @@ def test_patch_clamp_data_input_import_dialog_offers_remap_on_dt_change_and_rema
         )
     )
 
-    monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
-    )
+    trace = TraceData("calcium", np.array([[1, 2, 3]]), np.array([0]), "units", 1 / 30)
+    project.add_experiment(Experiment("exp", 0.1, [], [trace]))
+    original_values = project.stim_arrays["existing"].values
+    original_traces = trace.traces
+
+    def unexpected_question(*args, **kwargs):
+        pytest.fail("Creating an independent input must not prompt to resample data")
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", unexpected_question)
 
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
@@ -822,10 +827,10 @@ def test_patch_clamp_data_input_import_dialog_offers_remap_on_dt_change_and_rema
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
-    assert project.dt == pytest.approx(0.0005)
-    # existing stim remapped: 10 samples at 1 ms → 20 samples at 0.5 ms
-    assert project.stim_arrays["existing"].dt == pytest.approx(0.0005)
-    assert project.stim_arrays["existing"].values.shape[0] == 20
+    assert project.stim_arrays["existing"].dt == pytest.approx(0.001)
+    assert project.stim_arrays["existing"].values is original_values
+    assert trace.dt == pytest.approx(1 / 30)
+    assert trace.traces is original_traces
     assert "new_wave" in project.stim_arrays
     assert project.stim_arrays["new_wave"].dt == pytest.approx(0.0005)
 
@@ -859,11 +864,11 @@ def test_patch_clamp_data_input_import_dialog_aborts_import_on_remap_decline(
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
+    dialog.import_existing_radio.setChecked(True)
     dialog.match_source_grid_checkbox.setChecked(True)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
-    assert project.dt == pytest.approx(0.001)
     assert "new_wave" not in project.stim_arrays
     assert project.stim_arrays["existing"].dt == pytest.approx(0.001)
     assert project.stim_arrays["existing"].values.shape[0] == 10
@@ -887,7 +892,7 @@ def test_patch_clamp_data_input_import_dialog_no_remap_dialog_when_project_is_em
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
-    assert project.dt == pytest.approx(0.0005)
     assert "wave" in project.stim_arrays
+    assert project.stim_arrays["wave"].dt == pytest.approx(0.0005)
     question_calls = [c for c in qmessagebox_calls if c["name"] == "question"]
     assert not question_calls

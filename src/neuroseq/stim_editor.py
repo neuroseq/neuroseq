@@ -1169,7 +1169,7 @@ class StimEditor(QtWidgets.QWidget):
             self.set_project(self.project, stim_to_select=dialog.name)
 
     def prepare_syscon_timestep(self, parent: QtWidgets.QWidget | None = None) -> bool:
-        """Offer to resample project data before a hardware routine starts."""
+        """Offer to resample the selected input before a hardware routine starts."""
         from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 
         if self.project is None or self.current_stim_modifier is None:
@@ -1181,8 +1181,8 @@ class StimEditor(QtWidgets.QWidget):
         answer = QtWidgets.QMessageBox.question(
             parent or self,
             "Use SysCon2 timestep",
-            "SysCon2 requires 0.5208125 ms samples. Resample the project's input arrays "
-            "and traces using zero-order hold? Existing timing may shift by one sample. "
+            f"SysCon2 requires 0.5208125 ms samples. Resample input array '{stim.name}' "
+            "using zero-order hold? Existing timing may shift by one sample. "
             "Input undo history will be cleared.",
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.No,
@@ -1190,7 +1190,13 @@ class StimEditor(QtWidgets.QWidget):
         )
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return False
-        self.project.remap_all_data_to_dt(dt)
+        self.project.update_stim_array_properties(
+            stim.name,
+            n_neurons=int(stim.values.shape[1]),
+            stim_type=stim.stim_type,
+            units=stim.units,
+            dt=dt,
+        )
         self.set_project(self.project, stim_to_select=stim.name)
         return True
 
@@ -1208,21 +1214,14 @@ class StimEditor(QtWidgets.QWidget):
                 self.draw_stim_length, self._current_stim_dt_seconds()
             )
             if not stim_dt_matches(dialog.dt, self.current_stim_modifier.stim_array.dt):
-                _other = self.project.remappable_data_description(dialog.dt)
-                _extra = (
-                    f" All other project data ({_other}) will also be remapped"
-                    " using zero-order hold."
-                    if _other
-                    else ""
-                )
                 continue_with_remap = QtWidgets.QMessageBox.question(
                     self,
-                    "Change project sample interval",
+                    "Change input array timestep",
                     f"Changing the input timestep will remap input array "
                     f"'{old_name}' from "
                     f"{format_milliseconds(self.current_stim_modifier.stim_array.dt * 1000.0)} ms "
-                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms."
-                    f"{_extra} "
+                    f"to {format_milliseconds(dialog.dt * 1000.0)} ms "
+                    "using zero-order hold. "
                     "Timing may shift by up to one sample. Continue?",
                     QtWidgets.QMessageBox.StandardButton.Yes
                     | QtWidgets.QMessageBox.StandardButton.No,
@@ -1233,7 +1232,6 @@ class StimEditor(QtWidgets.QWidget):
                     1,
                     seconds_to_samples_nearest(old_draw_duration_seconds, dialog.dt),
                 )
-                self.project.remap_all_data_to_dt(dialog.dt)
             if dialog.name != old_name:
                 self.project.rename_stim_array(old_name, dialog.name)
             self.project.update_stim_array_properties(

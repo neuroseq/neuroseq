@@ -15,6 +15,8 @@ from qtpy import QtWidgets
 
 import neuroseq
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.data import Experiment
+from neuroseq.data import TraceData
 from neuroseq.project import Project
 from neuroseq.stim import DrawStim
 from neuroseq.stim import DrawStimType
@@ -848,6 +850,14 @@ def test_edit_stim_array_dt_change_requires_confirmation(
             0.001,
         )
     )
+    other_stim = StimArray(
+        "b", neuroseq.stim.StimType.External, np.ones((10, 1)), "pA", 0.0005
+    )
+    project.add_stim_array(other_stim)
+    other_values = other_stim.values
+    trace = TraceData("calcium", np.array([[1, 2, 3]]), np.array([0]), "units", 1 / 30)
+    project.add_experiment(Experiment("exp", 0.1, [], [trace]))
+    original_traces = trace.traces
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -885,6 +895,10 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     assert stim_editor.current_stim_modifier.stim_array.values[1, 0] == approx(0.0)
     assert stim_editor.current_stim_modifier.stim_array.values[2, 0] == approx(0.0)
     assert stim_editor.draw_stim_length == 2
+    assert other_stim.dt == 0.0005
+    assert other_stim.values is other_values
+    assert trace.dt == 1 / 30
+    assert trace.traces is original_traces
     stim_editor.close()
 
 
@@ -1770,11 +1784,19 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     project.add_stim_array(
         StimArray("target", neuroseq.stim.StimType.Excitation, values, "1", 0.001)
     )
+    other_stim = StimArray(
+        "other", neuroseq.stim.StimType.External, np.ones((10, 2)), "1", 0.002
+    )
+    project.add_stim_array(other_stim)
+    other_values = other_stim.values
+    trace = TraceData("calcium", np.array([[1, 2, 3]]), np.array([0]), "units", 1 / 30)
+    project.add_experiment(Experiment("exp", 0.1, [], [trace]))
+    original_traces = trace.traces
     combo = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     editor = StimEditor(ConstrainedPanZoomController(), combo, toolbar)
     qtbot.addWidget(editor)
-    editor.set_project(project)
+    editor.set_project(project, stim_to_select="target")
     question = mocker.patch.object(
         QtWidgets.QMessageBox,
         "question",
@@ -1786,7 +1808,10 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     assert editor.prepare_syscon_timestep()
     stim = project.stim_arrays["target"]
     assert stim.dt == 0.0005208125
-    assert project.dt == stim.dt
+    assert other_stim.dt == 0.002
+    assert other_stim.values is other_values
+    assert trace.dt == 1 / 30
+    assert trace.traces is original_traces
     assert editor.stim_widget.data_values.shape == stim.values.shape
     assert editor.current_stim_modifier.stim_array is stim
     assert project.dirty

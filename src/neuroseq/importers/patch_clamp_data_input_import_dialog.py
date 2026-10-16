@@ -650,25 +650,6 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                 target_dt=target_dt,
             )
 
-            _dt_changed = not stim_dt_matches(target_dt, self.project.dt)
-            if _dt_changed:
-                affected = self.project.remappable_data_description(target_dt)
-                if affected:
-                    answer = QtWidgets.QMessageBox.question(
-                        self,
-                        "Change project sample interval",
-                        f"Importing at {format_milliseconds(target_dt * 1000.0)} ms "
-                        "will change the project sample interval from "
-                        f"{format_milliseconds(self.project.dt * 1000.0)} ms to "
-                        f"{format_milliseconds(target_dt * 1000.0)} ms and remap "
-                        f"{affected} using zero-order hold. Continue?",
-                        QtWidgets.QMessageBox.StandardButton.Yes
-                        | QtWidgets.QMessageBox.StandardButton.No,
-                    )
-                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-                        return
-                self.project.remap_all_data_to_dt(target_dt)
-
             if self.create_new_radio.isChecked():
                 stim_name = self.new_name_edit.text().strip()
                 if not stim_name:
@@ -707,7 +688,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
                     raise ValueError("No target input data entity selected")
-                remapped_target_dt = _dt_changed
+                remapped_target_dt = False
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
                     continue_with_remap = QtWidgets.QMessageBox.question(
                         self,

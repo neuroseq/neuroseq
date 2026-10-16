@@ -1408,7 +1408,6 @@ def test_syscon2_import_dialog_imports_into_project(
     dialog._import_file()
 
     stim_values = project.stim_arrays["stimulus"].values
-    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
     assert math.isclose(
         project.stim_arrays["stimulus"].dt,
         _SYSCON2_TTL_PULSE_QUANTUM_S,
@@ -1421,8 +1420,9 @@ def test_syscon2_import_dialog_imports_into_project(
     assert stim_values[13, 1] == 0.8
 
 
-def test_syscon2_import_dialog_remaps_existing_trace_data(
-    tmp_path: Path, qtbot, monkeypatch
+@pytest.mark.parametrize("create_new", [False, True])
+def test_syscon2_import_preserves_other_stim_and_trace_data(
+    tmp_path: Path, qtbot, monkeypatch, create_new: bool
 ) -> None:
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
@@ -1451,6 +1451,11 @@ def test_syscon2_import_dialog_remaps_existing_trace_data(
         data=[trace_data],
     )
     project.update_limits()
+    original_traces = trace_data.traces
+    other_stim = StimArray("other", StimType.External, np.ones((5, 1)), "1", 0.002)
+    project.add_stim_array(other_stim)
+    original_other_values = other_stim.values
+    original_target_values = project.stim_arrays["stimulus"].values
 
     question_calls = {"count": 0}
 
@@ -1463,17 +1468,25 @@ def test_syscon2_import_dialog_remaps_existing_trace_data(
     dialog = Syscon2ImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(seq_path))
+    if create_new:
+        dialog.create_new_radio.setChecked(True)
+        dialog.new_name_edit.setText("imported")
+    else:
+        dialog.target_combo.setCurrentText("stimulus")
     dialog.tick_resolution_spin.setValue(500)
     dialog._import_file()
 
-    assert question_calls["count"] == 1
-    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
-    assert math.isclose(trace_data.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
-    assert trace_data.traces.shape == (1, 6)
-    np.testing.assert_allclose(
-        trace_data.traces[0],
-        np.array([1.0, 1.0, 2.0, 2.0, 3.0, 3.0], dtype=np.float32),
-    )
+    assert question_calls["count"] == (0 if create_new else 1)
+    assert trace_data.dt == 0.001
+    assert trace_data.traces is original_traces
+    assert other_stim.dt == 0.002
+    assert other_stim.values is original_other_values
+    imported = project.stim_arrays["imported" if create_new else "stimulus"]
+    assert math.isclose(imported.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+    if create_new:
+        assert project.stim_arrays["stimulus"].dt == 0.001
+        assert project.stim_arrays["stimulus"].values is original_target_values
+    np.testing.assert_array_equal(trace_data.traces, [[1.0, 2.0, 3.0]])
 
 
 def test_syscon2_import_dialog_skips_remap_prompt_when_dt_matches(
@@ -1492,7 +1505,6 @@ def test_syscon2_import_dialog_skips_remap_prompt_when_dt_matches(
             dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
         )
     )
-    project.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
 
     question_calls = {"count": 0}
 
@@ -1509,7 +1521,6 @@ def test_syscon2_import_dialog_skips_remap_prompt_when_dt_matches(
     dialog._import_file()
 
     assert question_calls["count"] == 0
-    assert math.isclose(project.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
 
 
 def test_syscon2_import_dialog_aborts_when_user_declines_remap(
@@ -1542,7 +1553,6 @@ def test_syscon2_import_dialog_aborts_when_user_declines_remap(
     dialog.tick_resolution_spin.setValue(500)
     dialog._import_file()
 
-    assert math.isclose(project.dt, 0.001, abs_tol=1e-12)
     np.testing.assert_array_equal(
         project.stim_arrays["stimulus"].values,
         original_values,
@@ -1639,7 +1649,6 @@ def test_syscon2_import_dialog_new_array_rejects_duplicate_name(
     seq_path = tmp_path / "sample.seq"
     seq_path.write_text(_sample_seq_text(), encoding="utf-8")
     project = Project()
-    project.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
     project.add_stim_array(
         StimArray(
             "stimulus",
@@ -1766,7 +1775,6 @@ def test_cancel_after_preview_does_not_mutate_project(tmp_path, qtbot):
     dialog.reject()
     assert project.syscon2_export_template_text == "previous template"
     assert not project.dirty
-    assert project.dt == 0.001
     assert np.all(project.stim_arrays["target"].values == 1)
 
 
@@ -1784,7 +1792,6 @@ def test_conversion_failure_does_not_remap_project(tmp_path, qtbot, mocker):
     )
     dialog._import_file()
     assert project.stim_arrays["target"].values is original
-    assert project.dt == 0.001
     assert project.stim_arrays["target"].dt == 0.001
     assert project.syscon2_export_template_text == "previous template"
     assert not project.dirty
@@ -1807,7 +1814,6 @@ def test_declining_dropped_channels_leaves_project_unchanged(tmp_path, qtbot, mo
     assert "dropped" in question.call_args.args[2]
     assert project.stim_arrays["target"].values is original
     assert not project.dirty
-    assert project.dt == 0.001
 
 
 def _point_sequence(specs):
@@ -1920,23 +1926,14 @@ def test_remap_failure_does_not_mutate_any_live_arrays(tmp_path, qtbot, mocker):
         "question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
-    from neuroseq.stim_timing import remap_stim_values_to_dt
-
-    calls = 0
-
-    def fail_second(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise ValueError("failed second remap")
-        return remap_stim_values_to_dt(*args, **kwargs)
-
-    mocker.patch("neuroseq.project.remap_stim_values_to_dt", side_effect=fail_second)
+    mocker.patch(
+        "neuroseq.importers.syscon2_import_dialog.remap_stim_values_to_dt",
+        side_effect=ValueError("failed target remap"),
+    )
     dialog._import_file()
     assert project.stim_arrays["target"].values is original
     assert project.stim_arrays["target"].dt == 0.001
     assert project.stim_arrays["second"].dt == 0.002
-    assert project.dt == 0.001
     assert not project.dirty
 
 
