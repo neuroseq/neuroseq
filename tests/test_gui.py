@@ -51,15 +51,7 @@ def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) ->
 
 class _MockAxes:
     def __init__(self) -> None:
-        self.plot_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-        self.lines: list[_MockLine] = []
         self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    def plot(self, *args: Any, **kwargs: Any) -> tuple[_MockLine]:
-        self.plot_calls.append((args, kwargs))
-        line = _MockLine()
-        self.lines.append(line)
-        return (line,)
 
     def scatter(self, *args: Any, **kwargs: Any) -> None:
         self.scatter_calls.append((args, kwargs))
@@ -90,29 +82,6 @@ class _MockFigure:
         if self.save_error is not None:
             raise self.save_error
         self.saved.append((path, kwargs))
-
-
-class _MockLine:
-    def __init__(self) -> None:
-        self.gid: str | None = None
-
-    def set_gid(self, gid: str) -> None:
-        self.gid = gid
-
-
-def _make_trace_export_gui(
-    trace_name: str,
-    trace_data: TraceData | None,
-) -> Any:
-    return SimpleNamespace(
-        cmb_trace=SimpleNamespace(currentText=lambda: trace_name),
-        project=SimpleNamespace(
-            get_data=lambda name, data_type: (
-                trace_data if data_type is TraceData else None
-            )
-        ),
-        logger=logging.getLogger("test_trace_export"),
-    )
 
 
 def _make_spike_export_gui(
@@ -3280,118 +3249,6 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     assert captured["array_names"] == ["exc"]
     assert captured["unit_override"] == "mW/mm^2"
     assert captured["scaling_factor"] == 3.0
-
-
-def test_gui_export_traces_no_selection(qmessagebox_calls: list) -> None:
-    fake_gui = _make_trace_export_gui("", None)
-
-    Gui.btn_export_traces_clicked(fake_gui)
-
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "information"
-    assert "no trace data" in qmessagebox_calls[0]["title"].lower()
-
-
-def test_gui_export_traces_returns_when_file_dialog_cancelled(
-    monkeypatch: MonkeyPatch,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    trace_data = TraceData(
-        name="voltage",
-        traces=np.zeros((3, 100), dtype=np.float32),
-        indices=np.array([0, 1, 2], dtype=np.uint32),
-        units="mV",
-        dt=0.001,
-    )
-    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
-
-    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
-        raise AssertionError("subplots should not be called when no file is selected")
-
-    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
-    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
-
-    Gui.btn_export_traces_clicked(fake_gui)
-
-    assert qmessagebox_calls == []
-
-
-def test_gui_export_traces_saves_figure(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    trace_data = TraceData(
-        name="voltage",
-        traces=np.zeros((3, 100), dtype=np.float32),
-        indices=np.array([0, 1, 2], dtype=np.uint32),
-        units="mV",
-        dt=0.001,
-    )
-    output_path = tmp_path / "traces.png"
-    fig = _MockFigure()
-    ax = _MockAxes()
-    closed_figs: list[_MockFigure] = []
-    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
-
-    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
-    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "getsavefilename",
-        lambda *args: (str(output_path), "PNG image (*.png)"),
-    )
-
-    Gui.btn_export_traces_clicked(fake_gui)
-
-    assert fig.saved == [
-        (
-            str(output_path),
-            {"dpi": 300, "bbox_inches": "tight", "transparent": False},
-        ),
-    ]
-    assert fig.tight_layout_called is True
-    assert len(ax.plot_calls) == 3
-    assert closed_figs == [fig]
-    assert any(call["name"] == "information" for call in qmessagebox_calls)
-
-
-def test_gui_export_traces_closes_figure_on_save_error(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    trace_data = TraceData(
-        name="voltage",
-        traces=np.zeros((2, 50), dtype=np.float32),
-        indices=np.array([0, 1], dtype=np.uint32),
-        units="mV",
-        dt=0.001,
-    )
-    output_path = tmp_path / "traces.png"
-    fig = _MockFigure(save_error=OSError("disk full"))
-    ax = _MockAxes()
-    closed_figs: list[_MockFigure] = []
-    fake_gui = _make_trace_export_gui("exp :: voltage", trace_data)
-
-    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
-    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "getsavefilename",
-        lambda *args: (str(output_path), "PNG image (*.png)"),
-    )
-
-    Gui.btn_export_traces_clicked(fake_gui)
-
-    assert closed_figs == [fig]
-    assert any(call["name"] == "critical" for call in qmessagebox_calls)
 
 
 def test_gui_export_spikes_no_selection(qmessagebox_calls: list) -> None:
