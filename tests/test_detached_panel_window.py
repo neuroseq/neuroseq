@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from qtpy import QtWidgets
 
-from neuroseq.detached_panel_window import DetachedPanelWindow
+from neuroseq.gui import DetachedPanelWindow
 
 
 class _CloseTrackingWidget(QtWidgets.QWidget):

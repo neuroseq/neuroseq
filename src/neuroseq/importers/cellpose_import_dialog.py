@@ -29,9 +29,18 @@ from neuroseq.importers.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.importers.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.importers.importer_cellpose import point_in_circle
 from neuroseq.importers.importer_cellpose import point_in_square
-from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
+
+
+def ensure_unique_ids(values: list[int], error_message: str) -> list[int]:
+    seen: set[int] = set()
+    for value in values:
+        if value in seen:
+            raise ValueError(error_message.format(value=value))
+        seen.add(value)
+    return values
+
 
 CUSTOM_AOI_STRATEGY = "Custom with areas of interest"
 AOI_PIXELS_MODE = "Coordinates (pixels)"

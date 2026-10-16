@@ -6,7 +6,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
 from neuroseq.gui import Gui
-from neuroseq.qt_threading import returns_to_main_thread
+from neuroseq.gui import returns_to_main_thread
 
 
 class _Worker(QtCore.QObject):
@@ -25,7 +25,7 @@ class _Worker(QtCore.QObject):
 
 def test_worker_is_back_on_the_main_thread_after_run(qtbot: QtBot) -> None:
     """A worker that stays on its finished thread is destroyed there by
-    deleteLater, which can deadlock against the GIL (see qt_threading)."""
+    deleteLater, which can deadlock against the GIL (see returns_to_main_thread)."""
     thread = QtCore.QThread()
     worker = _Worker()
     worker.moveToThread(thread)

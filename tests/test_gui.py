@@ -26,10 +26,10 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
+from neuroseq.gui import DetachedPanelWindow
 from neuroseq.gui import Gui
 from neuroseq.gui import ToolbarProgressWidget
 from neuroseq.importers.importer_cellpose import CellposeImportResult

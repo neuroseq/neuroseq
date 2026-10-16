@@ -3,26 +3,33 @@ from __future__ import annotations
 import base64
 import contextlib
 import dataclasses
+import functools
 import gc
 import hashlib
 import inspect
 import json
 import logging
+import os
 import pathlib
 import threading
 from collections.abc import Callable
 from collections.abc import Sequence
 from datetime import UTC
 from datetime import datetime
+from typing import Any
 
 import brian2 as b2
 import brian2.numpy_ as np
+import psutil
+import pynvml
 import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
+from qtpy.QtCore import QTimer
+from qtpy.QtWidgets import QLabel
 
 from neuroseq import __version__
 from neuroseq import theme as theme_module
@@ -40,7 +47,6 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.detached_panel_window import DetachedPanelWindow
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
@@ -68,8 +74,6 @@ from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
-from neuroseq.qt_threading import returns_to_main_thread
-from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.resources.analysis_plugins import _elise_workflows as elise_workflows
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
@@ -88,6 +92,112 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+
+
+class ResourceMonitorLabel(QLabel):
+    def __init__(self):
+        super().__init__()
+        self.logger = logging.getLogger(__name__)
+        self.pid = os.getpid()
+        self.process = psutil.Process(self.pid)
+        self.process.cpu_percent(interval=None)
+        try:
+            pynvml.nvmlInit()
+            self.handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        except pynvml.NVMLError as e:
+            self.logger.warning(f"Could not initialize NVML: {e}")
+            self.handle = None
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_stats)
+        self.timer.start(1000)
+        self.update_stats()
+
+    def update_stats(self):
+        try:
+            cpu_percent = self.process.cpu_percent(interval=None)
+            ram_gb = self.process.memory_info().rss / (1024 * 1024 * 1024)
+            text = f"CPU: {cpu_percent:.1f}% | RAM: {ram_gb:.2f} GB "
+            if self.handle is not None:
+                gpu_percent = pynvml.nvmlDeviceGetUtilizationRates(self.handle).gpu
+                text += f"| GPU: {gpu_percent:.1f}% "
+                for p in pynvml.nvmlDeviceGetComputeRunningProcesses(self.handle):
+                    if p.pid == self.pid and p.usedGpuMemory is not None:
+                        vram_gb = p.usedGpuMemory / (1024 * 1024 * 1024)
+                        text += f"| VRAM: {vram_gb:.2f} GB "
+            self.setText(text)
+        except Exception as e:
+            self.logger.exception(e)
+
+    def closeEvent(self, event):
+        if self.timer.isActive():
+            self.timer.stop()
+        super().closeEvent(event)
+
+
+def returns_to_main_thread[F: Callable[..., Any]](run: F) -> F:
+    """Decorate a worker's ``run`` slot: once it returns, move the worker
+    back to the main thread.
+
+    Workers are normally cleaned up with ``thread.finished -> worker.
+    deleteLater``, which queues the deletion on the *worker's* thread - the
+    one that is shutting down. Destroying a PyQt-wrapped QObject there takes
+    the GIL (sip checks for Python reimplementations of
+    ``disconnectNotify``) while Qt already holds one of its signal/slot
+    mutexes. Qt shares those mutexes between unrelated objects (they are
+    picked from a small pool by address), so the main thread - holding the
+    GIL and connecting some unrelated signal - can wait on the same mutex:
+    a lock-order deadlock, intermittent by nature, that froze CI runs until
+    the job timeout. pytest-timeout's thread method cannot fire either,
+    since the main thread holds the GIL. With the worker back on the main
+    thread, ``deleteLater`` runs there instead and the cycle cannot form.
+
+    Signals the worker emitted while running are unaffected (they were
+    queued to the main thread already).
+    """
+
+    @functools.wraps(run)
+    def wrapper(self: QtCore.QObject, *args: Any, **kwargs: Any) -> Any:
+        try:
+            return run(self, *args, **kwargs)
+        finally:
+            app = QtCore.QCoreApplication.instance()
+            if app is not None:
+                self.moveToThread(app.thread())
+
+    return wrapper  # type: ignore[return-value]
+
+
+class DetachedPanelWindow(QtWidgets.QWidget):
+    """Top-level window wrapping one detached panel instance."""
+
+    def __init__(
+        self,
+        widget: QtWidgets.QWidget,
+        title: str,
+        *,
+        on_close: Callable[[], None] | None = None,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.setWindowFlags(QtCore.Qt.WindowType.Window | QtCore.Qt.WindowType.Tool)
+        self.setWindowTitle(title)
+        self.resize(800, 600)
+        self._widget = widget
+        self._on_close = on_close
+
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        scroll_area = QtWidgets.QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(widget)
+        layout.addWidget(scroll_area)
+
+    def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
+        self._widget.close()
+        if self._on_close is not None:
+            self._on_close()
+        super().closeEvent(event)
 
 
 class SimulationCancelledError(Exception):
