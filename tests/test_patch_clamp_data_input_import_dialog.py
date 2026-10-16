@@ -88,8 +88,8 @@ def test_csv_input_sampling_rate(
 
     name = "injected_current" if header else "current"
     stim = project.stim_arrays[name]
-    assert stim.dt == 0.001
-    expected = [1, 3] if rate == 2000.0 else [1, 1, 2, 2, 3, 3, 4, 4]
+    assert stim.dt == pytest.approx(1.0 / rate)
+    expected = [1, 2, 3, 4]
     np.testing.assert_allclose(stim.values[:, 0], expected)
     assert qmessagebox_calls[-1]["name"] == "information"
 
@@ -112,9 +112,9 @@ def test_patch_clamp_data_input_import_dialog_creates_new_stim_array(
     assert "igor_wave" in project.stim_arrays
     stim_array = project.stim_arrays["igor_wave"]
     assert stim_array.stim_type == StimType.External
-    assert stim_array.dt == 0.001
-    assert stim_array.values.shape == (2, 1)
-    np.testing.assert_allclose(stim_array.values[:, 0], np.array([1.0, 3.0]))
+    assert stim_array.dt == pytest.approx(0.0005)
+    assert stim_array.values.shape == (4, 1)
+    np.testing.assert_allclose(stim_array.values[:, 0], np.array([1.0, 2.0, 3.0, 4.0]))
     assert dialog.selected_stim_name == "igor_wave"
     assert qmessagebox_calls[-1]["name"] == "information"
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
@@ -129,6 +129,27 @@ def test_patch_clamp_data_input_import_dialog_wraps_content_in_scroll_area(
     assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
     assert dialog.scroll_area.widget() is not None
     assert dialog.scroll_area.widgetResizable() is True
+    labels = [label.text() for label in dialog.findChildren(QtWidgets.QLabel)]
+    assert "Imported sample interval:" not in labels
+    assert not hasattr(dialog, "match_source_grid_checkbox")
+
+
+@pytest.mark.parametrize("source_dt", [0.0005, 0.002])
+def test_binary_input_preserves_file_timing(
+    tmp_path: Path, qtbot: QtBot, source_dt: float
+) -> None:
+    values = np.array([1, 2, 3, 4], dtype="<f4")
+    path = tmp_path / "input.ibw"
+    path.write_bytes(_write_ibw_v5(values, wave_name="current", dt=source_dt))
+    project = Project()
+    dialog = PatchClampDataInputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog._import_file()
+
+    stim = project.stim_arrays[dialog.selected_stim_name]
+    assert stim.dt == pytest.approx(source_dt)
+    np.testing.assert_array_equal(stim.values[:, 0], values)
 
 
 def test_patch_clamp_data_input_import_dialog_wave_plot_hidden_initially(
@@ -243,7 +264,6 @@ def test_patch_clamp_data_input_import_dialog_creates_new_stim_array_on_source_g
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.source_dt_spin.setValue(0.0005)
-    dialog.match_source_grid_checkbox.setChecked(True)
     dialog._import_file()
 
     assert "igor_wave" in project.stim_arrays
@@ -251,7 +271,6 @@ def test_patch_clamp_data_input_import_dialog_creates_new_stim_array_on_source_g
     assert stim_array.dt == pytest.approx(0.0005)
     assert stim_array.values.shape == (4, 1)
     np.testing.assert_allclose(stim_array.values[:, 0], np.array([1.0, 2.0, 3.0, 4.0]))
-    assert "match source/file grid" in dialog.target_dt_label.text().lower()
     assert qmessagebox_calls[-1]["name"] == "information"
 
 
@@ -285,7 +304,6 @@ def test_patch_clamp_data_input_import_dialog_imports_into_existing_stim_array_o
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.source_dt_spin.setValue(0.0005)
-    dialog.match_source_grid_checkbox.setChecked(True)
     dialog.import_existing_radio.setChecked(True)
     dialog.target_combo.setCurrentText("stimulus")
     dialog.neuron_index_spin.setValue(1)
@@ -823,7 +841,6 @@ def test_new_input_preserves_existing_stim_and_trace_timing(
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
-    dialog.match_source_grid_checkbox.setChecked(True)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
@@ -865,7 +882,6 @@ def test_patch_clamp_data_input_import_dialog_aborts_import_on_remap_decline(
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.import_existing_radio.setChecked(True)
-    dialog.match_source_grid_checkbox.setChecked(True)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
@@ -888,7 +904,6 @@ def test_patch_clamp_data_input_import_dialog_no_remap_dialog_when_project_is_em
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
-    dialog.match_source_grid_checkbox.setChecked(True)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 

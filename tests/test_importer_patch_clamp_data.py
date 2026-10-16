@@ -189,11 +189,14 @@ def test_prepared_wave_carries_sweep_metadata() -> None:
     assert prepared.samples_per_sweep == 4
 
 
-def test_prepare_igor_wave_for_neuroseq_resamples_to_1ms() -> None:
+@pytest.mark.parametrize("source_dt", [0.0005, 0.002, 1 / 30000])
+def test_prepare_igor_wave_for_neuroseq_preserves_source_timing(
+    source_dt: float,
+) -> None:
     wave = IgorWave(
         name="test_wave",
         values=np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
-        source_dt=0.0005,
+        source_dt=source_dt,
         units="pA",
         axis_units="s",
         source_format="ibw",
@@ -201,9 +204,9 @@ def test_prepare_igor_wave_for_neuroseq_resamples_to_1ms() -> None:
 
     prepared = prepare_igor_wave_for_neuroseq(wave)
 
-    assert prepared.resampled is True
-    assert prepared.target_dt == pytest.approx(0.001)
-    np.testing.assert_allclose(prepared.values, np.array([1.0, 3.0]))
+    assert prepared.resampled is False
+    assert prepared.target_dt == source_dt
+    np.testing.assert_array_equal(prepared.values, wave.values)
 
 
 def test_create_stim_array_from_igor_wave_uses_single_neuron_column() -> None:

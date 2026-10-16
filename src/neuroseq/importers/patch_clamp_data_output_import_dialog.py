@@ -204,17 +204,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
         self.sampling_rate_label.setVisible(self.csv_only)
         self.sampling_rate_spin.setVisible(self.csv_only)
-        self.match_source_grid_checkbox = QtWidgets.QCheckBox(
-            "Adjust NeuroSeq trace grid to source/file grid"
-        )
-        self.match_source_grid_checkbox.toggled.connect(
-            self._on_timing_settings_changed
-        )
-        source_layout.addRow(self.match_source_grid_checkbox)
-        self.target_dt_label = QtWidgets.QLabel(
-            f"{NEUROSEQ_IGOR_TARGET_DT_SECONDS:.3f} s (fixed NeuroSeq grid)"
-        )
-        source_layout.addRow("Imported sample interval:", self.target_dt_label)
         layout.addWidget(self.source_group)
 
         self.target_group = QtWidgets.QGroupBox("Import Target")
@@ -321,22 +310,9 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         self._update_mode_state()
         self._update_preview()
 
-    def _target_dt_seconds(self) -> float:
-        if self.match_source_grid_checkbox.isChecked():
-            return float(self.source_dt_spin.value())
-        return NEUROSEQ_IGOR_TARGET_DT_SECONDS
-
-    def _update_target_dt_label(self) -> None:
-        target_dt = self._target_dt_seconds()
-        if self.match_source_grid_checkbox.isChecked():
-            self.target_dt_label.setText(f"{target_dt:.9f} s (match source/file grid)")
-        else:
-            self.target_dt_label.setText(f"{target_dt:.3f} s (fixed NeuroSeq grid)")
-
     def _on_timing_settings_changed(self) -> None:
         with QtCore.QSignalBlocker(self.sampling_rate_spin):
             self.sampling_rate_spin.setValue(1.0 / self.source_dt_spin.value())
-        self._update_target_dt_label()
         self._update_preview()
         self._update_import_button_state()
 
@@ -622,12 +598,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
 
     def _build_preview_text(self, wave: IgorWave) -> str:
         source_dt = float(self.source_dt_spin.value())
-        target_dt = self._target_dt_seconds()
-        imported_samples = estimate_resampled_sample_count(
-            int(wave.values.size),
-            source_dt,
-            target_dt=target_dt,
-        )
         lines = [
             f"Wave name={wave.name}",
             f"Source format={wave.source_format}",
@@ -638,8 +608,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                 else "Detected source dt=(not stored in file)"
             ),
             f"Import source dt={source_dt:.9f} s",
-            f"Imported sample interval={target_dt:.9f} s",
-            f"Imported samples on target grid={imported_samples}",
             f"Wave units={wave.units or '(none)'}",
             f"Axis units={wave.axis_units or '(none)'}",
             f"Value range={float(np.min(wave.values)):.6g} .. {float(np.max(wave.values)):.6g}",
@@ -655,17 +623,12 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             self.multi_sweep_info.setText("")
             return
         source_dt = float(self.source_dt_spin.value())
-        target_dt = self._target_dt_seconds()
-        target_samples = estimate_resampled_sample_count(
-            int(wave.values.size), source_dt, target_dt=target_dt
-        )
         total_duration_s = float(wave.values.size) * source_dt
         self.multi_sweep_info.setText(
             f"Multi-sweep IBW: {wave.n_sweeps} sweeps × "
             f"{wave.samples_per_sweep} source samples concatenated "
-            f"({wave.values.size} total source samples → "
-            f"{target_samples} samples at the {target_dt * 1000.0:g} ms "
-            f"import grid = {total_duration_s:g} s). "
+            f"({wave.values.size} total source samples at "
+            f"{source_dt * 1000.0:g} ms = {total_duration_s:g} s). "
             "Inter-sweep recording gaps are not preserved."
         )
         self.multi_sweep_info.setVisible(True)
@@ -708,7 +671,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         canvas._is_drawing = False
 
     def _update_preview(self) -> None:
-        self._update_target_dt_label()
         self._update_wave_plot(self.loaded_wave)
         self._update_multi_sweep_info()
         if self.loaded_wave is None:
@@ -732,20 +694,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                 "starting at the selected neuron ID. Plot shows the first column."
             )
         source_dt = float(self.source_dt_spin.value())
-        target_dt = self._target_dt_seconds()
-        info_lines: list[str] = []
-        if abs(source_dt - target_dt) > 1e-9:
-            info_lines.append(
-                "This wave will be resampled to the selected NeuroSeq trace grid "
-                "using zero-order hold. Fast sub-ms changes may be lost."
-            )
-        elif self.match_source_grid_checkbox.isChecked():
-            info_lines.append(
-                "This import will preserve the source/file timestep by adjusting the "
-                "NeuroSeq trace grid."
-            )
-        else:
-            info_lines.append("This wave already matches NeuroSeq's 1 ms timeline.")
+        info_lines = ["Samples are imported at the source sample interval."]
         if self.loaded_wave.source_dt is None:
             info_lines.append(
                 "The source file does not store the sample interval. Review the "
@@ -758,12 +707,12 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         if (
             self.import_existing_radio.isChecked()
             and selected_trace is not None
-            and not stim_dt_matches(float(selected_trace.dt), target_dt)
+            and not stim_dt_matches(float(selected_trace.dt), source_dt)
         ):
             info_lines.append(
                 "The selected target trace data will be remapped from "
                 f"{format_milliseconds(float(selected_trace.dt) * 1000.0)} ms to "
-                f"{format_milliseconds(target_dt * 1000.0)} ms before import."
+                f"{format_milliseconds(source_dt * 1000.0)} ms before import."
             )
         self.info_label.setText("\n".join(info_lines))
 
@@ -946,11 +895,9 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             if len(self.csv_waves) > 1:
                 self._import_csv_table()
                 return
-            target_dt = self._target_dt_seconds()
             prepared_wave = prepare_igor_wave_for_neuroseq(
                 self.loaded_wave,
                 source_dt_override=float(self.source_dt_spin.value()),
-                target_dt=target_dt,
             )
 
             created_new_experiment = False
@@ -1096,12 +1043,10 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         )
         if existing_names.intersection(wave.name for wave in self.csv_waves):
             raise ValueError("A CSV trace name already exists in the target experiment")
-        target_dt = self._target_dt_seconds()
         prepared_waves = [
             prepare_igor_wave_for_neuroseq(
                 wave,
                 source_dt_override=float(self.source_dt_spin.value()),
-                target_dt=target_dt,
             )
             for wave in self.csv_waves
         ]

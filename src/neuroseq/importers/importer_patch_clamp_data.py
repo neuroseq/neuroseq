@@ -576,13 +576,16 @@ def prepare_igor_wave_for_neuroseq(
     wave: IgorWave,
     *,
     source_dt_override: float | None = None,
-    target_dt: float = NEUROSEQ_IGOR_TARGET_DT_SECONDS,
+    target_dt: float | None = None,
 ) -> PreparedIgorWave:
+    """Prepare a wave, preserving its sample interval unless explicitly resampled."""
     source_dt = (
         float(source_dt_override) if source_dt_override is not None else wave.source_dt
     )
     if source_dt is None:
         raise ValueError("Source sample interval is required to import this Igor wave")
+    if target_dt is None:
+        target_dt = float(source_dt)
 
     resampled_values = resample_wave_zero_order_hold(
         wave.values,

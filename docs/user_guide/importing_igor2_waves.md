@@ -31,8 +31,8 @@ then `CSV / Text (.csv, .txt)`. Both extensions accept a single column with one 
 optional first row can contain the waveform name. Without a header, the file
 name supplies the waveform name. Set **Source sampling rate** in Hz and choose
 the input units before importing. The preview and imported duration use this
-sampling rate. By default, the waveform is resampled onto the 1 ms input grid;
-enable **Adjust NeuroSeq input grid to source/file grid** to preserve its timestep.
+sampling rate. All samples are preserved, and the input array uses the source
+sample interval (`dt = 1 / sampling rate`).
 
 - `.ibw`: a single Igor Binary Wave
 - `.pxp`: an Igor Packed Experiment containing one or more waves
@@ -64,7 +64,6 @@ After selecting a wave, the preview shows:
 - source format
 - source sample count
 - detected source sample interval (`dt`) when present
-- imported sample count on the currently selected NeuroSeq import grid
 - units and axis units
 - value range
 - optional Igor note text
@@ -72,13 +71,9 @@ After selecting a wave, the preview shows:
 For CSV files, set the source sampling rate in Hz before import. For Igor binary
 files, the source sample interval is read from the file.
 
-By default, NeuroSeq imports stimulation data onto its 1 ms timeline and uses zero-order-hold resampling when the source `dt` differs from `0.001 s`.
-
-If you enable `Adjust NeuroSeq stim grid to source/file grid`, NeuroSeq instead uses the selected source sample interval as the imported stimulation grid:
-
-- new stimulation arrays are created with that `dt`
-- existing stimulation arrays are remapped to that `dt` before import, after confirmation
-- when source and target `dt` match, the Igor wave is copied without timeline resampling
+Stimuli and recorded traces are imported at the source sample interval without
+resampling. Each new array or trace dataset stores its own `dt`, so different
+acquisition rates can coexist in one project and align by time in the plots.
 
 ## Import targets
 
@@ -91,7 +86,9 @@ The dialog offers two modes:
   - _Replace target neuron values instead of adding to them_ clears the destination column before writing. When unchecked, imported values are added sample-by-sample to the existing column.
   - Other neuron columns are always preserved.
 
-If the target stim array uses a different `dt` than the selected import grid, NeuroSeq asks for confirmation and remaps the target to the import grid before writing the wave.
+If an existing target stimulation array or trace dataset uses a different `dt`
+than the source, NeuroSeq asks for confirmation and resamples that target to the
+source interval before writing the wave. Other datasets keep their intervals.
 
 For packed experiments, the suggested stim name and units update automatically when you choose a different wave.
 

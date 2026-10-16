@@ -85,8 +85,8 @@ def test_csv_output_sampling_rate(
 
     name = "recorded_voltage" if header else "voltage"
     trace = _find_trace_data(project, "CSV recording", name)
-    assert trace.dt == 0.001
-    expected = [1, 3] if rate == 2000.0 else [1, 1, 2, 2, 3, 3, 4, 4]
+    assert trace.dt == pytest.approx(1.0 / rate)
+    expected = [1, 2, 3, 4]
     np.testing.assert_allclose(trace.traces[0], expected)
     assert qmessagebox_calls[-1]["name"] == "information"
 
@@ -114,9 +114,11 @@ def test_csv_table_imports_all_columns(
     names = ["cell_a", "cell_b"] if header else ["recording_1", "recording_2"]
     for index, name in enumerate(names):
         trace = _find_trace_data(project, "Table", name)
-        assert trace.dt == 0.001
+        assert trace.dt == pytest.approx(0.0005)
         np.testing.assert_array_equal(trace.indices, [5 + index])
-        np.testing.assert_allclose(trace.traces[0], np.array([1, 3]) * (10**index))
+        np.testing.assert_allclose(
+            trace.traces[0], np.array([1, 2, 3, 4]) * (10**index)
+        )
     assert len(project.experiments["Table"].data) == 2
     assert qmessagebox_calls[-1]["name"] == "information"
 
@@ -147,6 +149,29 @@ def test_trace_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
     assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
     assert dialog.scroll_area.widget() is not None
     assert dialog.scroll_area.widgetResizable() is True
+    labels = [label.text() for label in dialog.findChildren(QtWidgets.QLabel)]
+    assert "Imported sample interval:" not in labels
+    assert not hasattr(dialog, "match_source_grid_checkbox")
+
+
+@pytest.mark.parametrize("source_dt", [0.0005, 0.002])
+def test_binary_output_preserves_file_timing(
+    tmp_path: Path, qtbot: QtBot, source_dt: float
+) -> None:
+    values = np.array([1, 2, 3, 4], dtype="<f4")
+    path = tmp_path / "output.ibw"
+    path.write_bytes(_write_ibw_v5(values, wave_name="voltage", dt=source_dt))
+    project = Project()
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(path))
+    dialog._import_file()
+
+    trace = _find_trace_data(
+        project, dialog.selected_experiment_name, dialog.selected_trace_name
+    )
+    assert trace.dt == pytest.approx(source_dt)
+    np.testing.assert_array_equal(trace.traces[0], values)
 
 
 def test_trace_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
@@ -395,7 +420,7 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
         )
         if item is not None and "WaveA" in item.text()
     )
-    assert wave_a_item.text().startswith("âœ“ ")
+    assert wave_a_item.text().startswith("✓ ")
     assert not (wave_a_item.flags() & QtCore.Qt.ItemFlag.ItemIsSelectable)
 
     dialog.new_experiment_combo.setCurrentText("Experiment A")
@@ -604,13 +629,11 @@ def test_trace_dialog_spike_detection_off_adds_no_spikedata(
 
 
 @pytest.mark.parametrize("multiple_columns", [False, True])
-@pytest.mark.parametrize("match_source", [False, True])
 def test_trace_import_preserves_independent_dataset_timing(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     multiple_columns: bool,
-    match_source: bool,
 ) -> None:
     from neuroseq.stim import StimArray
     from neuroseq.stim import StimType
@@ -644,7 +667,6 @@ def test_trace_import_preserves_independent_dataset_timing(
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("Imported")
-    dialog.match_source_grid_checkbox.setChecked(match_source)
     dialog.source_dt_spin.setValue(0.0005)
     dialog._import_file()
 
@@ -655,7 +677,7 @@ def test_trace_import_preserves_independent_dataset_timing(
     names = ["first", "second"] if multiple_columns else ["first"]
     for name in names:
         trace = _find_trace_data(project, "Imported", name)
-        assert trace.dt == pytest.approx(0.0005 if match_source else 0.001)
+        assert trace.dt == pytest.approx(0.0005)
 
 
 def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) -> None:
