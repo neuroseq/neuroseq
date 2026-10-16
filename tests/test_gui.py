@@ -16,6 +16,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+import neuroseq.export.stimulus_export_dialog as stimulus_export_dialog_module
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
@@ -2860,12 +2861,12 @@ def test_gui_export_igor2_single_wave_csv(
 
     output_path = tmp_path / "igor_export.csv"
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module,
         "Igor2SingleWaveExportDialog",
         MockIgor2SingleWaveExportDialog,
     )
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (f"{output_path}", "CSV file (*.csv)"),
     )
@@ -2921,9 +2922,11 @@ def test_gui_export_igor2_single_wave_ibw(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "stim_neuron_1.ibw"
-    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2SingleWaveExportDialog", MockDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
     )
@@ -2976,9 +2979,11 @@ def test_gui_export_igor2_single_wave_ibw_with_as_sweeps_succeeds(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "stim_sweeps.ibw"
-    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2SingleWaveExportDialog", MockDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
     )
@@ -3021,14 +3026,21 @@ def test_gui_export_igor2_single_wave_ibw_as_sweeps_falls_back_for_non_periodic(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "stim_aperiodic.ibw"
-    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2SingleWaveExportDialog", MockDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
     )
 
     info_messages: list[str] = []
+    monkeypatch.setattr(
+        stimulus_export_dialog_module.logger,
+        "info",
+        lambda message, *args: info_messages.append(message % args),
+    )
     fake_gui: Any = SimpleNamespace(
         project=project,
         cmb_stim=SimpleNamespace(currentText=lambda: "stim"),
@@ -3097,9 +3109,11 @@ def test_gui_export_igor2_pxp_stim(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "stim_arrays.pxp"
-    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2PxpStimExportDialog", MockPxpDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Packed Experiment (*.pxp)"),
     )
@@ -3138,7 +3152,9 @@ def test_gui_export_igor2_pxp_stim_requires_selection(
         def exec(self) -> int:
             return QtWidgets.QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
+    monkeypatch.setattr(
+        stimulus_export_dialog_module, "Igor2PxpStimExportDialog", MockPxpDialog
+    )
     fake_gui: Any = SimpleNamespace(project=project)
 
     Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
@@ -3265,9 +3281,11 @@ def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "scaled_wave.ibw"
-    monkeypatch.setattr(neuroseq.gui, "Igor2SingleWaveExportDialog", MockDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2SingleWaveExportDialog", MockDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Binary Wave (*.ibw)"),
     )
@@ -3317,9 +3335,11 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
             return QtWidgets.QDialog.DialogCode.Accepted
 
     output_path = tmp_path / "scaled.pxp"
-    monkeypatch.setattr(neuroseq.gui, "Igor2PxpStimExportDialog", MockPxpDialog)
     monkeypatch.setattr(
-        neuroseq.gui,
+        stimulus_export_dialog_module, "Igor2PxpStimExportDialog", MockPxpDialog
+    )
+    monkeypatch.setattr(
+        stimulus_export_dialog_module,
         "getsavefilename",
         lambda *args: (str(output_path), "Igor Packed Experiment (*.pxp)"),
     )
@@ -3336,7 +3356,7 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
 
         return Igor2PxpExport(path=out, wave_names=["exc_n0"])
 
-    monkeypatch.setattr(neuroseq.gui, "export_igor2_pxp", _fake_export)
+    monkeypatch.setattr(stimulus_export_dialog_module, "export_igor2_pxp", _fake_export)
 
     fake_gui: Any = SimpleNamespace(project=project)
     Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
@@ -4723,8 +4743,6 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
 ) -> None:
     """#588: the stimulation export dialog preselects the input array open
     in the editor, not the first one created."""
-    import neuroseq.gui as gui_module
-
     test_project.add_stim_array(
         StimArray(
             "second_stim",
@@ -4740,12 +4758,14 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
     gui.stim_editor.cmb_stim.setCurrentText("second_stim")
     opened: list[str] = []
 
-    class RecordingDialog(gui_module.StimulationGeneratorDialog):
+    class RecordingDialog(stimulus_export_dialog_module.StimulationGeneratorDialog):
         def exec(self) -> int:
             opened.append(self.stim_combo.currentText())
             return 0
 
-    monkeypatch.setattr(gui_module, "StimulationGeneratorDialog", RecordingDialog)
+    monkeypatch.setattr(
+        stimulus_export_dialog_module, "StimulationGeneratorDialog", RecordingDialog
+    )
 
     gui.open_stimulation_generator_dialog()
 

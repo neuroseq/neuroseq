@@ -46,12 +46,7 @@ from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.example_projects import getting_started_project
 from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
-from neuroseq.export.exporter_igor2 import export_igor2_csv
-from neuroseq.export.exporter_igor2 import export_igor2_ibw
-from neuroseq.export.exporter_igor2 import export_igor2_pxp
-from neuroseq.export.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
-from neuroseq.export.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
-from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
+from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
@@ -1122,169 +1117,15 @@ class Gui(QtWidgets.QMainWindow):
             return
 
     def btn_export_igor2_single_wave_clicked(self) -> None:
-        if not self.project.stim_arrays:
-            QtWidgets.QMessageBox.information(
-                self,
-                "No input entities",
-                "No input data entities available. Create one before exporting.",
-            )
-            return
-
-        stim_name = self.cmb_stim.currentText()
-        if not stim_name or stim_name not in self.project.stim_arrays:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                "No input array is currently selected for export.",
-            )
-            return
-
-        stim_array = self.project.stim_arrays[stim_name]
-        if int(stim_array.values.shape[1]) <= 0:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                "The selected input array has no neurons to export.",
-            )
-            return
-
-        dialog = Igor2SingleWaveExportDialog(stim_name, stim_array, parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-
-        suggested_filename = f"{dialog.experiment_name}.ibw"
-        filename, _ = getsavefilename(
-            self,
-            "Export single wave to Igor2",
-            suggested_filename,
-            "Igor Binary Wave (*.ibw);;CSV file (*.csv)",
-        )
-        if filename == "":
-            return
-
-        output_path = pathlib.Path(filename)
-        suffix = output_path.suffix.lower()
-        if suffix not in {".ibw", ".csv"}:
-            output_path = output_path.with_suffix(".ibw")
-            suffix = ".ibw"
-
-        try:
-            if suffix == ".ibw":
-                export_report = export_igor2_ibw(
-                    output_path,
-                    stim_array,
-                    wave_name=dialog.experiment_name,
-                    neuron_index=dialog.selected_neuron_index,
-                    unit_override=dialog.unit_override,
-                    scaling_factor=dialog.scaling_factor,
-                    as_sweeps=dialog.as_sweeps,
-                )
-                if dialog.as_sweeps and export_report.n_sweeps == 1:
-                    self.logger.info(
-                        "Sweep export requested for '%s' but no period was detected; "
-                        "exported as single sweep.",
-                        stim_array.name,
-                    )
-                fmt_label = f"Igor Binary Wave '{export_report.experiment_name}'"
-            else:
-                if dialog.as_sweeps:
-                    self.logger.info(
-                        "Sweep export requested for '%s' but CSV was selected; "
-                        "exported as single sweep.",
-                        stim_array.name,
-                    )
-                export_report = export_igor2_csv(
-                    output_path,
-                    stim_array,
-                    experiment_name=dialog.experiment_name,
-                    neuron_index=dialog.selected_neuron_index,
-                    scaling_factor=dialog.scaling_factor,
-                )
-                fmt_label = f"CSV experiment '{export_report.experiment_name}'"
-        except Exception as e:
-            self.logger.warning(
-                "Failed to export Igor2 single wave %s: %s",
-                output_path,
-                e,
-            )
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                f"Could not export Igor2 single wave to '{output_path}': {e}",
-            )
-            return
-
-        if export_report.n_sweeps > 1:
-            sweep_note = (
-                f" Split into {export_report.n_sweeps} sweeps × "
-                f"{export_report.sample_count // export_report.n_sweeps} samples."
-            )
-        else:
-            sweep_note = ""
-        QtWidgets.QMessageBox.information(
-            self,
-            "Export Successful",
-            f"Exported {fmt_label} for "
-            f"input '{stim_name}', neuron {export_report.neuron_index}, "
-            f"{export_report.sample_count} samples.{sweep_note}",
+        show_stimulus_export_dialog(
+            self.project,
+            "igor-single",
+            parent=self,
+            current_stim_name=self.cmb_stim.currentText(),
         )
 
     def btn_export_igor2_pxp_stim_clicked(self) -> None:
-        if not self.project.stim_arrays:
-            QtWidgets.QMessageBox.information(
-                self,
-                "No input entities",
-                "No input data entities available. Create one before exporting.",
-            )
-            return
-
-        dialog = Igor2PxpStimExportDialog(self.project, parent=self)
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-
-        selected = dialog.selected_array_names
-        if not selected:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Nothing selected",
-                "No input arrays were selected for export.",
-            )
-            return
-
-        filename, _ = getsavefilename(
-            self,
-            "Export Igor2 Packed Experiment",
-            "stim_arrays.pxp",
-            "Igor Packed Experiment (*.pxp)",
-        )
-        if filename == "":
-            return
-
-        output_path = pathlib.Path(filename)
-        if output_path.suffix.lower() != ".pxp":
-            output_path = output_path.with_suffix(".pxp")
-
-        try:
-            export_report = export_igor2_pxp(
-                output_path,
-                self.project.stim_arrays,
-                array_names=selected,
-                unit_override=dialog.unit_override,
-                scaling_factor=dialog.scaling_factor,
-            )
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                f"PXP export failed:\n{e}",
-            )
-            return
-
-        QtWidgets.QMessageBox.information(
-            self,
-            "Export complete",
-            f"Exported {len(export_report.wave_names)} wave(s) to:\n{export_report.path}",
-        )
+        show_stimulus_export_dialog(self.project, "igor-pxp", parent=self)
 
     def btn_edit_clicked(self) -> None:
         old_neuron_count = self.project.b2_model.get_defined_neuron_count()
@@ -2928,18 +2769,14 @@ class Gui(QtWidgets.QMainWindow):
     def open_stimulation_generator_dialog(self) -> None:
         """Open the stimulation script generator dialog."""
         modifier = self.stim_editor.current_stim_modifier
-        dialog = StimulationGeneratorDialog(
+        show_stimulus_export_dialog(
             self.project,
+            "syscon2",
             parent=self,
             current_stim_name=(None if modifier is None else modifier.stim_array.name),
+            reserved_names=self.syscon2_panel._remote_sequence_names,
+            on_generated=self.syscon2_panel.show_generated_preview,
         )
-        dialog.reserved_names = self.syscon2_panel._remote_sequence_names
-        dialog.sequence_generated.connect(
-            lambda seq, png, targets: self.syscon2_panel.show_generated_preview(
-                seq, png, targets, dialog.export_settings()
-            )
-        )
-        dialog.exec()
 
     # Import stimulus wrappers
 
