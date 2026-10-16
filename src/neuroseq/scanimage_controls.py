@@ -219,9 +219,11 @@ class ScanImageControls(QtWidgets.QWidget):
     def _status(self, status: dict) -> None:
         state = status.get("acq_state", "unknown")
         run = status.get("run", {})
-        self.status_label.setText(
-            f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"
-        )
+        text = f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"
+        if status.get("preview_problem"):
+            # Why no preview frame came, e.g. a display read ScanImage rejected.
+            text += f"\nNo preview frame: {status['preview_problem']}"
+        self.status_label.setText(text)
         idle = state == "idle"
         for widget in (self.record_button, self.preview_button, self.disconnect_button):
             widget.setEnabled(idle and self.connection.run_id is None)

@@ -152,11 +152,16 @@ if ~isempty(run.directory) && strcmp(hSI.acqState,'idle')
     out.files = arrayfun(@(f) fullfile(f.folder,f.name), files, 'UniformOutput',false);
 end
 if strcmp(operation,'status') && isfield(args,'channel') && ~strcmp(hSI.acqState,'idle')
-    channels = hSI.hChannels.channelDisplay;
-    if isprop(hSI.hDisplay,'lastFrameChannels'), channels = hSI.hDisplay.lastFrameChannels; end
+    [images, channels, problem] = display_frames(hSI);
     idx = find(channels == args.channel, 1);
-    images = hSI.hDisplay.lastFrame;
-    if ~isempty(idx) && numel(images) >= idx && ~isempty(images{idx}) && ismatrix(images{idx})
+    if isempty(problem) && isempty(idx)
+        problem = sprintf('Channel %d is not displayed in ScanImage.', args.channel);
+    elseif isempty(problem) && (numel(images) < idx || isempty(images{idx}) || ~ismatrix(images{idx}))
+        problem = 'ScanImage has no frame of this channel yet.';
+    end
+    if ~isempty(problem)
+        out.preview_problem = problem;
+    else
         source = images{idx};
         % Up to 512 pixels per side as recorded; larger frames are averaged
         % in blocks rather than subsampled, which would add noise.
@@ -184,12 +189,49 @@ if strcmp(operation,'status') && isfield(args,'channel') && ~strcmp(hSI.acqState
         if isprop(hSI.hDisplay,'displayRollingAverageFactor')
             out.frame.display_average = double(hSI.hDisplay.displayRollingAverageFactor);
         end
-        if isprop(hSI.hDisplay,'lastFrameNumber'), out.frame.number = hSI.hDisplay.lastFrameNumber; end
-        if isprop(hSI.hDisplay,'lastFrameTimestamp'), out.frame.timestamp = hSI.hDisplay.lastFrameTimestamp; end
+        number = read_display(hSI, 'lastFrameNumber');
+        if ~isempty(number), out.frame.number = number; end
+        timestamp = read_display(hSI, 'lastFrameTimestamp');
+        if ~isempty(timestamp), out.frame.timestamp = timestamp; end
     end
 end
 out.elapsed_ms = 1000 * toc(started);
 reply = jsonencode(out);
+end
+
+function [images, channels, problem] = display_frames(hSI)
+% The last displayed frames and their channels. Reading these can fail in
+% ScanImage 2023.1.0 itself (Display.get.lastFrameChannels raises "Brace
+% indexing is not supported" while its display holds no frames), so a failed
+% read skips the preview frame instead of failing the whole status reply.
+images = {}; problem = '';
+channels = hSI.hChannels.channelDisplay;
+if isprop(hSI.hDisplay,'lastFrameChannels')
+    try
+        channels = hSI.hDisplay.lastFrameChannels;
+    catch err
+        % Fall back to the displayed channels, in the same order.
+        problem = ['lastFrameChannels: ' err.message];
+    end
+end
+try
+    images = hSI.hDisplay.lastFrame;
+    if ~iscell(images), images = {images}; end
+    problem = '';  % the frames themselves are what the preview needs
+catch err
+    problem = ['ScanImage display frame not readable: ' err.message];
+end
+end
+
+function value = read_display(hSI, name)
+% A display property, or empty when it is missing or cannot be read.
+value = [];
+if isprop(hSI.hDisplay, name)
+    try
+        value = hSI.hDisplay.(name);
+    catch
+    end
+end
 end
 
 function value = optional_prop(obj, name)

@@ -1052,3 +1052,20 @@ def test_preview_averages_like_the_scanimage_display(connection, mocker):
     connection._send("status", {"channel": 1})
     connection._reply(_int16_frame_reply(7, np.full((2, 2), 100, np.int16)))
     np.testing.assert_allclose(received.call_args.args[0]["pixels"], 100.0)
+
+
+def test_controls_say_why_no_preview_frame_came(qtbot, connection, tmp_config_dir):
+    from neuroseq.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    connection.status_changed.emit(
+        {
+            "acq_state": "focus",
+            "preview_problem": "ScanImage display frame not readable: Brace indexing",
+        }
+    )
+    assert (
+        "No preview frame: ScanImage display frame not readable: Brace indexing"
+        in panel.status_label.text()
+    )

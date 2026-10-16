@@ -140,6 +140,34 @@ rig = testCase.TestData.rig;
 verifyEqual(testCase,pixels,rig.hDisplay.lastFrame{1});
 end
 
+function testPreviewSurvivesFailingChannelRead(testCase)
+% ScanImage 2023.1.0 can raise from Display.get.lastFrameChannels.
+rig = testCase.TestData.rig;
+rig.hDisplay.failLastFrameChannels = true;
+neuroseq_scanimage('preview','{}');
+status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
+verifyEqual(testCase,status.frame.shape,[512;512]);
+verifyFalse(testCase,isfield(status,'preview_problem'));
+end
+
+function testPreviewReportsUnreadableFrame(testCase)
+rig = testCase.TestData.rig;
+rig.hDisplay.failLastFrameChannels = true;
+rig.hDisplay.failLastFrame = true;
+neuroseq_scanimage('preview','{}');
+status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
+verifyFalse(testCase,isfield(status,'frame'));
+verifySubstring(testCase,status.preview_problem,'Brace indexing');
+verifyEqual(testCase,status.acq_state,'focus');
+end
+
+function testPreviewOfUndisplayedChannel(testCase)
+neuroseq_scanimage('preview','{}');
+status = jsondecode(neuroseq_scanimage('status','{"channel":3}'));
+verifyFalse(testCase,isfield(status,'frame'));
+verifySubstring(testCase,status.preview_problem,'Channel 3 is not displayed');
+end
+
 function testLargePreviewIsBlockAveraged(testCase)
 rig = testCase.TestData.rig;
 rig.hDisplay.lastFrame{1} = reshape(single(1:1024^2),1024,1024);
