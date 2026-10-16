@@ -16,9 +16,11 @@ preserving simulation state across repeated runs.
 
 from __future__ import annotations
 
+import copy
 import sys
 from collections.abc import Mapping
 from types import SimpleNamespace
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -32,6 +34,11 @@ from neuroseq.example_models.NN import ProgressCallback
 from neuroseq.resources.analysis_plugins._replay_metrics import (
     compute_performance_against_target,
 )
+from neuroseq.stim import StimArray
+from neuroseq.stim import StimType
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
 
 FlatParams = dict[str, ParamValue]
 
@@ -590,6 +597,12 @@ class Elise(NN):
         self._D_exc: np.ndarray | None = None
         self._O_inh: np.ndarray | None = None
         self._D_inh: np.ndarray | None = None
+
+    @staticmethod
+    def migrate_project(project: Project) -> None:
+        """Upgrade legacy ELISE stimulus arrays after loading an archive."""
+        _migrate_legacy_elise_stim(project)
+        _migrate_legacy_elise_kinetics_units(project)
 
     def reset(self) -> None:
         self._network = None
@@ -1280,3 +1293,338 @@ def get_simulator() -> Elise:
 
 
 _SIMULATOR = Elise()
+
+
+# Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
+# Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
+# (chord). Max pitch index is 12, so 13 visible neurons cover all pitches.
+# Source: sequence-learning/scripts/patterns/fuer_elise_original.txt
+_FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
+    0,
+    1,
+    0,
+    1,
+    0,
+    4,
+    2,
+    3,
+    (5, 11),
+    (5, 10),
+    8,
+    7,
+    6,
+    5,
+    (4, 12),
+    (4, 10),
+    (4, 9),
+    7,
+    3,
+    4,
+    (5, 11),
+    (5, 10),
+    (5, 8),
+    5,
+]
+_FUER_ELISE_N_PITCHES = 13
+
+
+def _calibrate_phi_for_target_open_fraction(
+    O_target: float,
+    k_a_max: float,
+    phi_m: float,
+    k_d: float,
+    k_r: float,
+) -> float:
+    """Inverse Hill — return φ such that the 3-state steady-state ``O*(φ) == O_target``.
+
+    O* = k_a · k_r / (k_a · k_r + k_a · k_d + k_d · k_r), with
+    k_a = k_a_max · φ / (φ + phi_m). Solving for φ yields:
+        k_a = O_target · k_d · k_r / (k_r · (1 - O_target) - k_d · O_target)
+        φ   = k_a · phi_m / (k_a_max - k_a)
+    """
+    if O_target <= 0:
+        return 0.0
+    denom = k_r * (1.0 - O_target) - k_d * O_target
+    if denom <= 0:
+        raise ValueError(
+            f"O_target={O_target} exceeds physical maximum "
+            f"for k_d={k_d}, k_r={k_r} (denominator <= 0)."
+        )
+    k_a = O_target * k_d * k_r / denom
+    if k_a >= k_a_max:
+        raise ValueError(
+            f"O_target={O_target} exceeds k_a_max={k_a_max} "
+            f"saturation limit (need k_a={k_a:.3e})."
+        )
+    return k_a * phi_m / (k_a_max - k_a)
+
+
+# Default opsin kinetic parameters. Kept as literals here so the
+# photon-flux constants below stay stable across Elise refactors —
+# they must match the corresponding entries in
+# ``neuroseq.example_models.elise.DEFAULT_PARAMS``.
+_ELISE_KIN_EXC = dict(k_a_max=1000.0, phi_m=5e17, k_d=50.0, k_r=5.0)
+_ELISE_KIN_INH = dict(k_a_max=800.0, phi_m=5e17, k_d=10.0, k_r=5.0)
+
+# Active flux is one Hill K_M (≈ 1 mW/mm² at 470 nm), a standard
+# benchtop optogenetic irradiance. Rest is "lights off". Both opsins
+# pulse on/off together; the teaching signal is encoded by which pitch
+# is illuminated at each 10 ms slot, not by sustained inhibitory light.
+_FUER_ELISE_PHI_EXC_ACTIVE: float = float(_ELISE_KIN_EXC["phi_m"])
+_FUER_ELISE_PHI_INH_ACTIVE: float = float(_ELISE_KIN_INH["phi_m"])
+_FUER_ELISE_PHI_EXC_REST: float = 0.0
+_FUER_ELISE_PHI_INH_REST: float = 0.0
+_FUER_ELISE_EVENT_MS: int = 10
+
+
+def _peak_open_fractions_for_pulse(
+    phi_exc: float,
+    phi_inh: float,
+    pulse_ms: int,
+    kin_exc: dict,
+    kin_inh: dict,
+    dt_s: float = 1e-4,
+) -> tuple[float, float]:
+    """Numerically integrate the 3-state kinetics for one square pulse
+    from ``O = D = 0``, returning the peak ``O`` reached for each opsin."""
+    O_e = np.zeros(1, dtype=np.float64)  # noqa: E741
+    D_e = np.zeros(1, dtype=np.float64)
+    O_i = np.zeros(1, dtype=np.float64)  # noqa: E741
+    D_i = np.zeros(1, dtype=np.float64)
+    phi_e_arr = np.array([phi_exc], dtype=np.float64)
+    phi_i_arr = np.array([phi_inh], dtype=np.float64)
+    peak_e = peak_i = 0.0
+    for _ in range(int(round(pulse_ms * 1e-3 / dt_s))):
+        _step_kinetics(O_e, D_e, phi_e_arr, dt=dt_s, **kin_exc)
+        _step_kinetics(O_i, D_i, phi_i_arr, dt=dt_s, **kin_inh)
+        if O_e[0] > peak_e:
+            peak_e = float(O_e[0])
+        if O_i[0] > peak_i:
+            peak_i = float(O_i[0])
+    return peak_e, peak_i
+
+
+# Transient g0 calibration: with the active flux above pulsed for
+# `_FUER_ELISE_EVENT_MS` ms from a fully-closed start, choose g0 so the
+# matching potential at pulse peak hits −50 mV (the active ELISE target).
+# Constraint: g0_exc + g0_inh = 1, plus
+#     (g0_exc · O_exc_peak) / (g0_inh · O_inh_peak) = (1/3)/(2/3) = 0.5
+# ⇒ g0_inh / g0_exc = 2 · O_exc_peak / O_inh_peak.
+# Rest is "lights off"; inactive pitches in the same time slot fall through
+# to E_l = −70 mV via the matching-potential code path's `np.where` branch.
+_O_EXC_PEAK, _O_INH_PEAK = _peak_open_fractions_for_pulse(
+    _FUER_ELISE_PHI_EXC_ACTIVE,
+    _FUER_ELISE_PHI_INH_ACTIVE,
+    _FUER_ELISE_EVENT_MS,
+    _ELISE_KIN_EXC,
+    _ELISE_KIN_INH,
+)
+_ELISE_G0_RATIO = 2.0 * _O_EXC_PEAK / _O_INH_PEAK  # = g0_inh / g0_exc
+_ELISE_G0_EXC = 1.0 / (1.0 + _ELISE_G0_RATIO)
+_ELISE_G0_INH = _ELISE_G0_RATIO / (1.0 + _ELISE_G0_RATIO)
+
+
+def _build_fuer_elise_opsin_stims(
+    tfinal_ms: int = 1920,
+    event_ms: int = 10,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Two opsin photon-flux arrays encoding the Für Elise intro.
+
+    Returns ``(stim_exc, stim_inh)`` of shape ``(tfinal_ms, 13)`` in
+    units of mm⁻²·s⁻¹. Active pitches receive a 10 ms square pulse of
+    ``phi_m`` (≈ 1 mW/mm², a standard benchtop irradiance); inactive
+    pitches are dark (flux = 0). After the 3-state kinetic step, the
+    pulse drives the active pitch's matching potential to −50 mV at
+    peak; inactive pitches in the same time slot fall through to
+    ``E_l = −70 mV`` via the simulator's ``np.where`` branch.
+    """
+    n_pitches = _FUER_ELISE_N_PITCHES
+    stim_exc = np.full(
+        (tfinal_ms, n_pitches), _FUER_ELISE_PHI_EXC_REST, dtype=np.float32
+    )
+    stim_inh = np.full(
+        (tfinal_ms, n_pitches), _FUER_ELISE_PHI_INH_REST, dtype=np.float32
+    )
+    cycle_ms = len(_FUER_ELISE_INTRO) * event_ms
+
+    # Only emit complete cycles; any remainder is left at the rest flux so the
+    # trailing tail isn't a half-phrase.
+    for cycle_start in range(0, tfinal_ms - cycle_ms + 1, cycle_ms):
+        for event_idx, event in enumerate(_FUER_ELISE_INTRO):
+            t_start = cycle_start + event_idx * event_ms
+            t_end = t_start + event_ms
+            pitches = event if isinstance(event, tuple) else (event,)
+            for pitch in pitches:
+                stim_exc[t_start:t_end, pitch] = _FUER_ELISE_PHI_EXC_ACTIVE
+                stim_inh[t_start:t_end, pitch] = _FUER_ELISE_PHI_INH_ACTIVE
+    return stim_exc, stim_inh
+
+
+def create_project() -> Project:
+    """ELISE rate-coded sequence-learning network (Kriener et al., 2024).
+
+    Visible neurons are driven by two virtual opsins (``opsin_exc`` and
+    ``opsin_inh``); the wrapper computes the per-pitch matching potential
+    from their ratio each step. Release (no teaching) is expressed by
+    zeroing both stim arrays in the time range where you want the network
+    to ring out.
+    """
+    from neuroseq.project import Project
+
+    project = Project()
+    project.external_simulate_path = "neuroseq:elise"
+    project.external_simulate_params = copy.deepcopy(DEFAULT_PARAMS)
+    project.load_NN()
+
+    tfinal_ms = 1920  # 8 × 240 ms cycles, exactly periodic
+    stim_exc, stim_inh = _build_fuer_elise_opsin_stims(tfinal_ms=tfinal_ms)
+    project.add_stim_array(
+        StimArray(
+            name="opsin_exc",
+            stim_type=StimType.Excitation,
+            values=stim_exc,
+            units="mm**-2 / second",
+            dt=0.001,
+        )
+    )
+    project.add_stim_array(
+        StimArray(
+            name="opsin_inh",
+            stim_type=StimType.Inhibition,
+            values=stim_inh,
+            units="mm**-2 / second",
+            dt=0.001,
+        )
+    )
+    return project
+
+
+def _matching_potential_to_opsins(
+    u_inp: np.ndarray,
+    E_exc: float,
+    E_inh: float,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    denom = E_inh - E_exc
+    if denom == 0:
+        return None
+    g_exc_vals = ((E_inh - u_inp) / denom).astype(np.float32)
+    g_inh_vals = ((u_inp - E_exc) / denom).astype(np.float32)
+    np.clip(g_exc_vals, 0.0, None, out=g_exc_vals)
+    np.clip(g_inh_vals, 0.0, None, out=g_inh_vals)
+    return g_exc_vals, g_inh_vals
+
+
+def _migrate_legacy_elise_stim(project: Project) -> None:
+    """Convert a single `u_inp` ELISE stim into an opsin-activation pair."""
+    if project.external_simulate_path != "neuroseq:elise":
+        return
+    if "u_inp" not in project.stim_arrays:
+        return
+    if "opsin_exc" in project.stim_arrays or "opsin_inh" in project.stim_arrays:
+        return
+
+    params = project.external_simulate_params or {}
+    E_exc = float(params.get("E_exc", {}).get("value", 0.0))
+    E_inh = float(params.get("E_inh", {}).get("value", -75.0))
+    old = project.stim_arrays["u_inp"]
+    u_inp = np.asarray(old.values, dtype=np.float64)
+    converted = _matching_potential_to_opsins(u_inp, E_exc, E_inh)
+    if converted is None:
+        project.logger.warning("Cannot migrate legacy u_inp stim: E_inh == E_exc")
+        return
+    g_exc_vals, g_inh_vals = converted
+    del project.stim_arrays["u_inp"]
+    project.stim_arrays["opsin_exc"] = StimArray(
+        name="opsin_exc",
+        stim_type=StimType.Excitation,
+        values=g_exc_vals,
+        units="1",
+        dt=float(old.dt),
+    )
+    project.stim_arrays["opsin_inh"] = StimArray(
+        name="opsin_inh",
+        stim_type=StimType.Inhibition,
+        values=g_inh_vals,
+        units="1",
+        dt=float(old.dt),
+    )
+    project.logger.info(
+        "Migrated legacy ELISE 'u_inp' stim to "
+        "'opsin_exc'/'opsin_inh' opsin-activation pair."
+    )
+
+
+def _migrate_legacy_elise_kinetics_units(project: Project) -> None:
+    """Convert pre-kinetic ELISE opsin stims (values in [0,1]) to photon flux.
+
+    Pre-kinetic archives store opsin activations as fractional
+    conductances in [0, 1]. After the 3-state kinetic layer
+    landed, the stim arrays are interpreted as photon flux density
+    (mm^-2 s^-1) instead. Without migration, a 1.0 stim value
+    would be ~17 orders of magnitude below the Hill K_M and the
+    opsin would never open.
+
+    Detection: external_simulate_path is ELISE, both opsin stims
+    exist, the loaded archive predates schema_version 2, and the
+    stim values are within [-2, 2] (allows small float noise above
+    1.0). Migration uses the kinetic defaults from
+    ``Elise.DEFAULT_PARAMS`` to invert the Hill — if a user had
+    already retuned k_a_max etc., they'd have saved at
+    schema_version >= 2 and this migration wouldn't fire.
+    """
+    if project.external_simulate_path != "neuroseq:elise":
+        return
+    if project._loaded_schema_version >= 2:
+        return
+    if "opsin_exc" not in project.stim_arrays or "opsin_inh" not in project.stim_arrays:
+        return
+
+    exc = project.stim_arrays["opsin_exc"]
+    inh = project.stim_arrays["opsin_inh"]
+    exc_max = float(np.max(np.abs(exc.values))) if exc.values.size else 0.0
+    inh_max = float(np.max(np.abs(inh.values))) if inh.values.size else 0.0
+    if exc_max > 2.0 or inh_max > 2.0:
+        # Values already look like photon flux; leave alone.
+        return
+
+    def _side_kin(side: str) -> dict:
+        return dict(
+            k_a_max=float(DEFAULT_PARAMS[f"k_a_max_{side}"]["default"]),
+            phi_m=float(DEFAULT_PARAMS[f"phi_m_{side}"]["default"]),
+            k_d=float(DEFAULT_PARAMS[f"k_d_{side}"]["default"]),
+            k_r=float(DEFAULT_PARAMS[f"k_r_{side}"]["default"]),
+        )
+
+    def _convert(values: np.ndarray, side: str) -> np.ndarray:
+        kin = _side_kin(side)
+        g0 = float(DEFAULT_PARAMS[f"g0_{side}"]["default"])
+        # Old fractional conductance g_old corresponds to an open
+        # fraction O_target = g_old / g0; invert the Hill to get φ.
+        # The largest O reachable at finite flux is the saturating
+        # steady-state O_sat = k_a_max·k_r / (k_a_max·k_r + k_a_max·k_d + k_d·k_r).
+        # Legacy g values above g0·O_sat saturate: clamp O_target so
+        # the inverse Hill stays finite. Migration is lossy here —
+        # this is the documented trade-off for non-default archives.
+        O_sat = (kin["k_a_max"] * kin["k_r"]) / (
+            kin["k_a_max"] * kin["k_r"]
+            + kin["k_a_max"] * kin["k_d"]
+            + kin["k_d"] * kin["k_r"]
+        )
+        O_max = O_sat * (1.0 - 1e-3)  # 0.1% below saturation
+        out = np.empty_like(values, dtype=np.float32)
+        flat_in = values.ravel()
+        flat_out = out.ravel()
+        for i, g_old in enumerate(flat_in):
+            # noqa naming: 'O' is the open-state fraction (per the 3-state spec).
+            O_target = max(0.0, min(float(g_old) / g0, O_max))
+            flat_out[i] = _calibrate_phi_for_target_open_fraction(O_target, **kin)
+        return out
+
+    exc.values = _convert(exc.values, "exc")
+    inh.values = _convert(inh.values, "inh")
+    exc.units = "mm**-2 / second"
+    inh.units = "mm**-2 / second"
+    project.logger.info(
+        "Migrated pre-kinetic ELISE opsin stims (values in [0,1]) "
+        "to photon-flux density (mm^-2 s^-1)."
+    )

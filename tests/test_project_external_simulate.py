@@ -8,8 +8,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from neuroseq.example_models.elise import _matching_potential_to_opsins
+from neuroseq.example_models.elise import _migrate_legacy_elise_stim
 from neuroseq.project import Project
-from neuroseq.project import _matching_potential_to_opsins
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
@@ -121,6 +122,44 @@ def test_metadata_roundtrip_omits_external_when_unset(tmp_path):
     assert reloaded.external_simulate_path is None
     assert reloaded.external_simulate_params == {}
     assert reloaded.external_simulate_function is None
+
+
+@pytest.mark.parametrize("has_migration", [False, True])
+def test_archive_load_supports_optional_backend_migration(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, has_migration: bool
+) -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:custom_backend"
+    project.add_stim_array(
+        StimArray("input", StimType.External, np.ones((2, 1)), "1", 0.001)
+    )
+    archive = tmp_path / "custom_backend.nseq"
+    project.save(archive, _full_options())
+    migrated: list[Project] = []
+
+    def migrate_project(loaded: Project) -> None:
+        # The backend sees the restored stimulus data and archive version.
+        assert loaded._loaded_schema_version == 2
+        np.testing.assert_array_equal(
+            loaded.stim_arrays["input"].values, np.ones((2, 1))
+        )
+        loaded.stim_arrays["input"].units = "mV"
+        migrated.append(loaded)
+
+    backend = SimpleNamespace(simulate=lambda *args, **kwargs: None)
+    if has_migration:
+        backend.migrate_project = migrate_project
+    monkeypatch.setattr(
+        "neuroseq.project.importlib.import_module",
+        lambda name: SimpleNamespace(get_simulator=lambda: backend),
+    )
+
+    loaded = Project(archive)
+
+    assert callable(loaded.external_simulate_function)
+    assert migrated == ([loaded] if has_migration else [])
+    assert loaded.stim_arrays["input"].units == ("mV" if has_migration else "1")
+    assert not loaded.dirty
 
 
 def test_metadata_load_failure_does_not_break_load(tmp_path, monkeypatch):
@@ -237,7 +276,7 @@ def test_legacy_u_inp_stim_migrated_to_opsin_pair_on_load() -> None:
         )
     )
 
-    project._migrate_legacy_elise_stim()
+    _migrate_legacy_elise_stim(project)
 
     assert "u_inp" not in project.stim_arrays
     assert "opsin_exc" in project.stim_arrays
@@ -291,11 +330,11 @@ def test_migration_is_idempotent() -> None:
         )
     )
 
-    project._migrate_legacy_elise_stim()
+    _migrate_legacy_elise_stim(project)
     first_exc = np.array(project.stim_arrays["opsin_exc"].values, copy=True)
     first_inh = np.array(project.stim_arrays["opsin_inh"].values, copy=True)
 
-    project._migrate_legacy_elise_stim()
+    _migrate_legacy_elise_stim(project)
 
     np.testing.assert_array_equal(project.stim_arrays["opsin_exc"].values, first_exc)
     np.testing.assert_array_equal(project.stim_arrays["opsin_inh"].values, first_inh)
@@ -314,7 +353,7 @@ def test_migration_only_for_elise_external_path() -> None:
         )
     )
 
-    project._migrate_legacy_elise_stim()
+    _migrate_legacy_elise_stim(project)
 
     assert "u_inp" in project.stim_arrays
     assert "opsin_exc" not in project.stim_arrays

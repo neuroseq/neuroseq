@@ -3,7 +3,7 @@ from __future__ import annotations
 import brian2.numpy_ as np
 import pytest
 
-from neuroseq.example_projects import _build_fuer_elise_opsin_stims
+from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType

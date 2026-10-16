@@ -10,7 +10,7 @@ from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
-from neuroseq.example_projects import _build_fuer_elise_opsin_stims
+from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.gui import Gui
 from neuroseq.resources.analysis_plugins._replay_metrics import save_learning_curves_csv
 from neuroseq.stim import StimArray
