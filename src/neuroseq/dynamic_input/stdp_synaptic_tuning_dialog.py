@@ -15,9 +15,9 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
 from neuroseq.dialog_helpers import _SelfRaisingDialog
-from neuroseq.dialog_helpers import _set_native_minimized_position
-from neuroseq.dialog_helpers import _WheelToScrollFilter
-from neuroseq.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.dynamic_input.dialog_helpers import _set_native_minimized_position
+from neuroseq.dynamic_input.dialog_helpers import _WheelToScrollFilter
+from neuroseq.dynamic_input.dialog_helpers import _wrap_in_scroll_area
 from neuroseq.dynamic_input.dialog_helpers import confirm_start_routine
 from neuroseq.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.dynamic_input.dynamic_input_blocks import run_to_sample

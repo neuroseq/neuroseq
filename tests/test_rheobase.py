@@ -1,8 +1,8 @@
 import numpy as np
 
-from neuroseq.rheobase import bisection_converged
-from neuroseq.rheobase import count_spikes
-from neuroseq.rheobase import next_bracket
+from neuroseq.dynamic_input.rheobase import bisection_converged
+from neuroseq.dynamic_input.rheobase import count_spikes
+from neuroseq.dynamic_input.rheobase import next_bracket
 
 
 def test_count_spikes_counts_upward_crossings() -> None:

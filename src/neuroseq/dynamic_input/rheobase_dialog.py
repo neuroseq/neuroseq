@@ -16,9 +16,9 @@ from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.dialog_helpers import _SelfRaisingDialog
-from neuroseq.dialog_helpers import _set_native_minimized_position
-from neuroseq.dialog_helpers import _WheelToScrollFilter
-from neuroseq.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.dynamic_input.dialog_helpers import _set_native_minimized_position
+from neuroseq.dynamic_input.dialog_helpers import _WheelToScrollFilter
+from neuroseq.dynamic_input.dialog_helpers import _wrap_in_scroll_area
 from neuroseq.dynamic_input.dialog_helpers import confirm_start_routine
 from neuroseq.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.dynamic_input.dynamic_input_blocks import run_to_sample
@@ -27,8 +27,8 @@ from neuroseq.dynamic_input.dynamic_input_measurement import measure_spike_count
 from neuroseq.dynamic_input.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input.dynamic_input_routine import backend_property
-from neuroseq.rheobase import bisection_converged
-from neuroseq.rheobase import next_bracket
+from neuroseq.dynamic_input.rheobase import bisection_converged
+from neuroseq.dynamic_input.rheobase import next_bracket
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import snap_milliseconds_to_dt

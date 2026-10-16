@@ -17,9 +17,9 @@ from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.dialog_helpers import _SelfRaisingDialog
-from neuroseq.dialog_helpers import _set_native_minimized_position
-from neuroseq.dialog_helpers import _WheelToScrollFilter
-from neuroseq.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.dynamic_input.dialog_helpers import _set_native_minimized_position
+from neuroseq.dynamic_input.dialog_helpers import _WheelToScrollFilter
+from neuroseq.dynamic_input.dialog_helpers import _wrap_in_scroll_area
 from neuroseq.dynamic_input.dialog_helpers import confirm_start_routine
 from neuroseq.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.dynamic_input.dynamic_input_blocks import run_to_sample
@@ -30,10 +30,10 @@ from neuroseq.dynamic_input.dynamic_input_measurement import measure_epsp
 from neuroseq.dynamic_input.dynamic_input_routine import RoutineBackend
 from neuroseq.dynamic_input.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input.dynamic_input_routine import backend_property
-from neuroseq.stdp_window import classify_window
-from neuroseq.stdp_window import delta_t_sweep
-from neuroseq.stdp_window import interleave_by_magnitude
-from neuroseq.stdp_window import percent_change
+from neuroseq.dynamic_input.stdp_window import classify_window
+from neuroseq.dynamic_input.stdp_window import delta_t_sweep
+from neuroseq.dynamic_input.stdp_window import interleave_by_magnitude
+from neuroseq.dynamic_input.stdp_window import percent_change
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import samples_to_milliseconds
 from neuroseq.stim_timing import seconds_to_samples_nearest

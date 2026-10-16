@@ -1,9 +1,9 @@
 import pytest
 
-from neuroseq.stdp_window import classify_window
-from neuroseq.stdp_window import delta_t_sweep
-from neuroseq.stdp_window import interleave_by_magnitude
-from neuroseq.stdp_window import percent_change
+from neuroseq.dynamic_input.stdp_window import classify_window
+from neuroseq.dynamic_input.stdp_window import delta_t_sweep
+from neuroseq.dynamic_input.stdp_window import interleave_by_magnitude
+from neuroseq.dynamic_input.stdp_window import percent_change
 
 
 def test_delta_t_sweep_symmetric_grid_excludes_zero() -> None:
