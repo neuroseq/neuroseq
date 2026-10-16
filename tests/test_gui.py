@@ -107,6 +107,68 @@ def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
     assert called == []
 
 
+@pytest.mark.parametrize(
+    ("handler", "setting", "label"),
+    [
+        (
+            "choose_max_ram_synapse_plot_matrix",
+            "max_ram_synapse_plot_matrix",
+            "synapse matrix plot",
+        ),
+        ("choose_max_ram_trace_plot_matrix", "max_ram_trace_plot_matrix", "trace plot"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("text", "accepted", "expected", "error"),
+    [
+        ("512", True, 512, False),
+        ("0", True, 0, False),
+        ("-1", True, 0, False),
+        ("invalid", True, 256, True),
+        ("512", False, 256, False),
+    ],
+)
+def test_plot_ram_limit_dialog(
+    monkeypatch, handler, setting, label, text, accepted, expected, error
+):
+    from unittest.mock import Mock
+
+    settings = SimpleNamespace(
+        max_ram_synapse_plot_matrix=256, max_ram_trace_plot_matrix=256
+    )
+    refresh = Mock()
+    window = SimpleNamespace(settings=settings, _update_data=refresh)
+    window._choose_plot_ram_limit = lambda *args: Gui._choose_plot_ram_limit(
+        window, *args
+    )
+    chooser = Mock(return_value=(text, accepted))
+    critical = Mock()
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", chooser)
+    monkeypatch.setattr(QtWidgets.QMessageBox, "critical", critical)
+
+    getattr(Gui, handler)(window)
+
+    chooser.assert_called_once_with(
+        window,
+        "RAM limit",
+        f"RAM limit in MB for {label} (0 for no limit)",
+        QtWidgets.QLineEdit.EchoMode.Normal,
+        "256",
+    )
+    assert getattr(settings, setting) == expected
+    other_setting = (
+        "max_ram_trace_plot_matrix"
+        if setting == "max_ram_synapse_plot_matrix"
+        else "max_ram_synapse_plot_matrix"
+    )
+    assert getattr(settings, other_setting) == 256
+    if accepted and not error:
+        refresh.assert_called_once_with(keep_undo_history=True)
+    else:
+        refresh.assert_not_called()
+    assert critical.called == error
+
+
 def test_gui_click_exit(qtbot: QtBot) -> None:
     gui = Gui()
     gui.show()

@@ -2181,38 +2181,25 @@ class Gui(QtWidgets.QMainWindow):
         self.stim_editor.stim_widget.set_keep_short_stimuli_visible(is_visible)
 
     def choose_max_ram_synapse_plot_matrix(self) -> None:
-        new_max_ram, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "RAM limit",
-            "RAM limit in MB for synapse matrix plot (0 for no limit)",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.settings.max_ram_synapse_plot_matrix}",
+        self._choose_plot_ram_limit(
+            "max_ram_synapse_plot_matrix", "synapse matrix plot"
         )
-        if not ok:
-            return
-        try:
-            self.settings.max_ram_synapse_plot_matrix = max(0, int(new_max_ram))
-        except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse RAM limit '{new_max_ram}' as a number",
-            )
-            return
-        self._update_data(keep_undo_history=True)
 
     def choose_max_ram_trace_plot_matrix(self) -> None:
+        self._choose_plot_ram_limit("max_ram_trace_plot_matrix", "trace plot")
+
+    def _choose_plot_ram_limit(self, setting: str, label: str) -> None:
         new_max_ram, ok = QtWidgets.QInputDialog.getText(
             self,
             "RAM limit",
-            "RAM limit in MB for trace plot (0 for no limit)",
+            f"RAM limit in MB for {label} (0 for no limit)",
             QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.settings.max_ram_trace_plot_matrix}",
+            str(getattr(self.settings, setting)),
         )
         if not ok:
             return
         try:
-            self.settings.max_ram_trace_plot_matrix = max(0, int(new_max_ram))
+            limit = max(0, int(new_max_ram))
         except ValueError:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -2220,6 +2207,7 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not parse RAM limit '{new_max_ram}' as a number",
             )
             return
+        setattr(self.settings, setting, limit)
         self._update_data(keep_undo_history=True)
 
     def connect_external_simulation_function(self) -> None:
