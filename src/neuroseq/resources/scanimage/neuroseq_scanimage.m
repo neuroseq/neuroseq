@@ -2,6 +2,7 @@ function reply = neuroseq_scanimage(operation, payload)
 % NeuroSeq adapter for ScanImage Premium 2023.1.0, single-plane raster imaging.
 % The installed API is checked before controls become available.
 persistent run ownedFocus
+started = tic;
 if isempty(ownedFocus), ownedFocus = false; end
 if isempty(run), run = struct('id', '', 'state', 'idle', 'directory', ''); end
 args = jsondecode(payload);
@@ -157,14 +158,37 @@ if strcmp(operation,'status') && isfield(args,'channel') && ~strcmp(hSI.acqState
     images = hSI.hDisplay.lastFrame;
     if ~isempty(idx) && numel(images) >= idx && ~isempty(images{idx}) && ismatrix(images{idx})
         source = images{idx};
-        stride = max(1, ceil(max(size(source)) / 256));
-        img = single(source(1:stride:end, 1:stride:end));
-        out.frame = struct('shape',size(img), 'dtype','float32', 'order','F', ...
+        % Up to 512 pixels per side as recorded; larger frames are averaged
+        % in blocks rather than subsampled, which would add noise.
+        factor = max(1, ceil(max(size(source)) / 512));
+        if factor == 1 && isa(source, 'int16')
+            img = source; dtype = 'int16';
+        elseif factor == 1
+            img = single(source); dtype = 'float32';
+        else
+            rows = floor(size(source,1) / factor) * factor;
+            cols = floor(size(source,2) / factor) * factor;
+            blocks = reshape(single(source(1:rows,1:cols)), factor, rows/factor, factor, cols/factor);
+            img = reshape(mean(mean(blocks,1),3), rows/factor, cols/factor); dtype = 'float32';
+        end
+        out.frame = struct('shape',size(img), 'dtype',dtype, 'order','F', ...
             'data',matlab.net.base64encode(typecast(img(:),'uint8')));
+        % ScanImage's display window for the channel, so the preview has
+        % the same contrast as the ScanImage window.
+        luts = hSI.hChannels.channelLUT;
+        if iscell(luts) && numel(luts) >= args.channel
+            out.frame.lut = double(luts{args.channel});
+        elseif isnumeric(luts) && size(luts,1) >= args.channel
+            out.frame.lut = double(luts(args.channel,:));
+        end
+        if isprop(hSI.hDisplay,'displayRollingAverageFactor')
+            out.frame.display_average = double(hSI.hDisplay.displayRollingAverageFactor);
+        end
         if isprop(hSI.hDisplay,'lastFrameNumber'), out.frame.number = hSI.hDisplay.lastFrameNumber; end
         if isprop(hSI.hDisplay,'lastFrameTimestamp'), out.frame.timestamp = hSI.hDisplay.lastFrameTimestamp; end
     end
 end
+out.elapsed_ms = 1000 * toc(started);
 reply = jsonencode(out);
 end
 

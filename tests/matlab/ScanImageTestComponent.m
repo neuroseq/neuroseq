@@ -14,7 +14,9 @@ classdef ScanImageTestComponent < handle
         channelSave = [1 2]
         channelDisplay = [1 2]
         scanFrameRate = 30
-        lastFrame = {reshape(single(1:512^2),512,512), zeros(512,512,'single')}
+        lastFrame = {reshape(int16(mod(0:512^2-1, 30000)),512,512), zeros(512,512,'single')}
+        channelLUT = {[-88 436], [0 100]}
+        displayRollingAverageFactor = 10
         userFunctionsCfg = struct('ExtraField','preserve me', 'Enable',true, ...
             'Arguments',{{}}, 'UserFcnName','existing_user_function', 'EventName','acqStart')
     end

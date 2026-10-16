@@ -6,6 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
+import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -28,6 +29,7 @@ class ScanImageControls(QtWidgets.QWidget):
         self._last_frame_at: float | None = None
         self._waiting_since: float | None = None
         self._last_frame_number = None
+        self._frame_timing: dict | None = None
         layout = QtWidgets.QVBoxLayout(self)
         connection_row = QtWidgets.QHBoxLayout()
         self.python_edit = QtWidgets.QLineEdit(settings.scanimage_python_path)
@@ -95,6 +97,16 @@ class ScanImageControls(QtWidgets.QWidget):
         self.channel_spin = QtWidgets.QSpinBox()
         self.channel_spin.setRange(1, 32)
         self.channel_spin.valueChanged.connect(self._channel)
+        self.average_spin = QtWidgets.QSpinBox()
+        self.average_spin.setRange(0, 50)
+        self.average_spin.setSpecialValueText("as ScanImage")
+        self.average_spin.setToolTip(
+            "Average the last frames of the preview, like ScanImage's display "
+            "rolling average. Recordings are not affected."
+        )
+        self.average_spin.valueChanged.connect(
+            lambda value: setattr(connection, "preview_average", value or None)
+        )
         self.preview_button = QtWidgets.QPushButton("Preview (Focus)")
         self.preview_button.clicked.connect(self._preview)
         self.record_button = QtWidgets.QPushButton("Record / Arm")
@@ -105,6 +117,8 @@ class ScanImageControls(QtWidgets.QWidget):
             self.live_check,
             QtWidgets.QLabel("Channel"),
             self.channel_spin,
+            QtWidgets.QLabel("Average"),
+            self.average_spin,
             self.preview_button,
             self.record_button,
             self.abort_button,
@@ -226,14 +240,29 @@ class ScanImageControls(QtWidgets.QWidget):
         if number is None or number != self._last_frame_number:
             self._last_frame_at = time.monotonic()
             self._last_frame_number = number
+        self._frame_timing = frame
         self._freshness()
 
     def _freshness(self) -> None:
         if self._last_frame_at is not None:
             age = time.monotonic() - self._last_frame_at
-            self.frame_label.setText(
-                f"Preview frame {self._last_frame_number or '—'} · received {age:.0f} s ago"
-            )
+            text = f"Preview frame {self._last_frame_number or '—'} · received {age:.0f} s ago"
+            timing = self._frame_timing or {}
+            shape = timing.get("pixels", np.empty((0, 0))).shape
+            parts = []
+            if timing.get("rate_hz"):
+                parts.append(f"{timing['rate_hz']:.1f} frames/s")
+            if timing.get("roundtrip_ms") is not None:
+                parts.append(f"{timing['roundtrip_ms']:.0f} ms per request")
+            if timing.get("averaged", 1) > 1:
+                parts.append(f"mean of {timing['averaged']} frames")
+            if timing.get("matlab_ms") is not None:
+                parts.append(f"{timing['matlab_ms']:.0f} ms in MATLAB")
+            if shape[0]:
+                parts.append(f"{shape[1]}×{shape[0]} px")
+            if parts:
+                text += "\n" + " · ".join(parts)
+            self.frame_label.setText(text)
         if (
             self._waiting_since is not None
             and time.monotonic() - self._waiting_since > self.timeout_spin.value()

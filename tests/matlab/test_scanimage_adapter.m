@@ -124,16 +124,33 @@ verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase)
 verifyEqual(testCase,settings(rig),old);
 end
 
-function testPreviewOnlyOnRequestAndReduced(testCase)
+function testPreviewOnlyOnRequestAtFullResolution(testCase)
 neuroseq_scanimage('preview','{}');
 status = jsondecode(neuroseq_scanimage('status','{}'));
 verifyFalse(testCase,isfield(status,'frame'));
+verifyGreaterThanOrEqual(testCase,status.elapsed_ms,0);
 status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
-verifyEqual(testCase,status.frame.shape,[256;256]);
+verifyEqual(testCase,status.frame.shape,[512;512]);
+verifyEqual(testCase,status.frame.dtype,'int16');
+verifyEqual(testCase,status.frame.lut,[-88;436]);
+verifyEqual(testCase,status.frame.display_average,10);
 raw = matlab.net.base64decode(status.frame.data);
-pixels = reshape(typecast(raw,'single'),256,256);
+pixels = reshape(typecast(raw,'int16'),512,512);
 rig = testCase.TestData.rig;
-verifyEqual(testCase,pixels,rig.hDisplay.lastFrame{1}(1:2:end,1:2:end));
+verifyEqual(testCase,pixels,rig.hDisplay.lastFrame{1});
+end
+
+function testLargePreviewIsBlockAveraged(testCase)
+rig = testCase.TestData.rig;
+rig.hDisplay.lastFrame{1} = reshape(single(1:1024^2),1024,1024);
+neuroseq_scanimage('preview','{}');
+status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
+verifyEqual(testCase,status.frame.shape,[512;512]);
+raw = matlab.net.base64decode(status.frame.data);
+pixels = reshape(typecast(raw,'single'),512,512);
+source = rig.hDisplay.lastFrame{1};
+verifyEqual(testCase,pixels(1,1),mean(source(1:2,1:2),'all'),'AbsTol',1e-3);
+verifyEqual(testCase,pixels(3,5),mean(source(5:6,9:10),'all'),'AbsTol',1e-3);
 end
 
 function testReconnectWhileRecordingDoesNotChangeCallbacks(testCase)

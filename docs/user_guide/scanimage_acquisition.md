@@ -4,10 +4,17 @@ The **Image acquisition** toolbar button opens a dialog that connects to a
 running ScanImage MATLAB session. It can show live images in the imaging
 panel's Imaging tab, start or externally arm a recording, abort an acquisition,
 and open its completed TIFF files. ScanImage owns the scanner and original
-recording. NeuroSeq's preview is sampled at up to 5 updates/second
-(1 update/second during an owned recording), only while **Live view** is checked. Preview images are subsampled
-to at most 256 pixels per dimension; original TIFF pixels are unchanged. Preview
-is not the recording stream.
+recording. NeuroSeq's preview is sampled at up to 10 updates/second (1
+update/second during an owned recording), only while **Live view** is checked.
+MATLAB answers these requests on the thread that also runs ScanImage, which sets
+this limit. Preview images keep the recorded pixels up to 512 per side; larger
+frames are averaged in blocks down to 512. They are shown with ScanImage's display
+window (the channel's LUT) for the same contrast. Single frames are too noisy to
+focus on, so, like ScanImage's display (**Display rolling average**), the
+preview shows the mean of the last frames it received: by default as many as
+ScanImage averages, or the number set under **Average**. The recording keeps
+single frames. The Image acquisition dialog shows the measured preview rate, the
+time per request, and the time MATLAB took. Preview is not the recording stream.
 
 This integration targets **ScanImage Premium 2023.1.0**, single-plane raster
 imaging. Its MATLAB adapter requires validation on the actual acquisition PC;

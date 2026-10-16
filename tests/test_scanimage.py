@@ -1,6 +1,7 @@
 import base64
 import json
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from zipfile import ZipFile
@@ -930,3 +931,124 @@ def test_live_preview_and_recorded_playback_share_orientation(
     widget.set_live(True)
     widget.show_live_frame(received[0])
     np.testing.assert_array_equal(widget.current_frame, recorded)
+
+
+def _int16_frame_reply(request_id: int, pixels: np.ndarray, **extra) -> dict:
+    return {
+        "id": request_id,
+        "result": {
+            "acq_state": "focus",
+            "elapsed_ms": 12.5,
+            "frame": {
+                "shape": list(pixels.shape),
+                "dtype": "int16",
+                "data": base64.b64encode(
+                    pixels.astype("<i2").tobytes(order="F")
+                ).decode(),
+                **extra,
+            },
+        },
+    }
+
+
+def test_preview_frames_arrive_at_full_resolution_with_scanimage_contrast(
+    connection, mocker
+):
+    """The preview is the recorded int16 frame, with ScanImage's display
+    window for the channel, so it looks like the ScanImage window."""
+    received = mocker.Mock()
+    connection.frame_received.connect(received)
+    pixels = (
+        np.arange(512 * 512, dtype=np.int32).reshape(512, 512) % 3000 - 500
+    ).astype(np.int16)
+    connection._send("status", {"channel": 1})
+    connection._reply(_int16_frame_reply(1, pixels, lut=[-88, 436]))
+
+    frame = received.call_args.args[0]
+    np.testing.assert_array_equal(frame["pixels"], pixels)
+    assert frame["lut"] == (-88.0, 436.0)
+    assert frame["matlab_ms"] == 12.5
+    assert frame["roundtrip_ms"] >= 0
+
+
+def test_live_preview_requests_the_next_frame_right_away(connection, qtbot):
+    connection.connected = True
+    connection.live_preview = True
+    pixels = np.zeros((4, 4), dtype=np.int16)
+    connection._poll()
+    assert connection._pending == (1, "status")
+    connection._reply(_int16_frame_reply(1, pixels))
+    # Without waiting for the regular 200 ms poll, but at most 10 per second.
+    sent = time.monotonic()
+    qtbot.waitUntil(lambda: connection._pending == (2, "status"), timeout=190)
+    assert time.monotonic() - sent >= 0.05
+
+    connection.run_id = "recording"  # during a recording: at most once a second
+    connection._reply(_int16_frame_reply(2, pixels))
+    qtbot.wait(100)
+    assert connection._pending is None
+
+
+def test_live_frame_uses_the_scanimage_display_window(qtbot):
+    from neuroseq.calcium_video_widget import CalciumVideoWidget
+
+    widget = CalciumVideoWidget()
+    qtbot.addWidget(widget)
+    widget.set_live(True)
+    pixels = np.array([[-1000, -88], [174, 20000]], dtype=np.float32)
+    widget.show_live_frame({"pixels": pixels, "lut": (-88.0, 436.0)})
+    grey = widget.current_frame[..., 0]
+    # Clipped below and above the window, mid-window is mid-grey.
+    assert grey[0, 0] == 0 and grey[0, 1] == 0
+    assert grey[1, 1] == 255
+    assert abs(int(grey[1, 0]) - 127) <= 1
+
+
+def test_controls_show_the_measured_preview_rate(qtbot, connection, tmp_config_dir):
+    from neuroseq.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    connection.frame_received.emit(
+        {
+            "number": 7,
+            "pixels": np.zeros((512, 256)),
+            "rate_hz": 9.5,
+            "roundtrip_ms": 85.0,
+            "matlab_ms": 40.0,
+            "averaged": 10,
+        }
+    )
+    assert (
+        "9.5 frames/s · 85 ms per request · mean of 10 frames · 40 ms in MATLAB"
+        " · 256×512 px"
+    ) in (panel.frame_label.text())
+
+
+def test_preview_averages_like_the_scanimage_display(connection, mocker):
+    """Single frames are too noisy to focus on; the preview averages the last
+    frames, by default as many as ScanImage's display does."""
+    received = mocker.Mock()
+    connection.frame_received.connect(received)
+    for request_id, value in enumerate([0, 10, 20, 30], start=1):
+        connection._send("status", {"channel": 1})
+        connection._reply(
+            _int16_frame_reply(
+                request_id, np.full((2, 2), value, np.int16), display_average=3
+            )
+        )
+    frame = received.call_args.args[0]
+    assert frame["averaged"] == 3
+    np.testing.assert_allclose(frame["pixels"], 20.0)  # mean of 10, 20, 30
+
+    connection.preview_average = 1  # chosen in the dialog
+    connection._send("status", {"channel": 1})
+    connection._reply(_int16_frame_reply(5, np.full((2, 2), 7, np.int16)))
+    np.testing.assert_allclose(received.call_args.args[0]["pixels"], 7.0)
+
+    connection.preview_average = 4
+    connection._send("preview")  # a new preview starts a new average
+    connection._reply({"id": 6, "result": {}})
+    connection._send("status", {"channel": 1})
+    connection._reply(_int16_frame_reply(7, np.full((2, 2), 100, np.int16)))
+    np.testing.assert_allclose(received.call_args.args[0]["pixels"], 100.0)
