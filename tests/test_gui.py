@@ -3257,8 +3257,12 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     ("handler", "dialog_name", "options"),
     [
         ("btn_import_syscon2_seq_clicked", "Syscon2ImportDialog", {}),
-        ("btn_import_igor2_wave_clicked", "IgorImportDialog", {}),
-        ("btn_import_igor2_wave_clicked", "IgorImportDialog", {"csv_only": True}),
+        ("btn_import_igor2_wave_clicked", "PatchClampDataInputImportDialog", {}),
+        (
+            "btn_import_igor2_wave_clicked",
+            "PatchClampDataInputImportDialog",
+            {"csv_only": True},
+        ),
     ],
 )
 @pytest.mark.parametrize("with_path", [False, True])
@@ -3307,7 +3311,7 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 ) -> None:
     project = Project()
 
-    class MockIgorImportDialog:
+    class MockPatchClampDataInputImportDialog:
         def __init__(self, dialog_project: Project, parent=None) -> None:
             assert dialog_project is project
             self.project = dialog_project
@@ -3355,7 +3359,11 @@ def test_gui_import_igor2_wave_updates_selected_stim(
         update_project=_update_project,
     )
 
-    monkeypatch.setattr(neuroseq.gui, "IgorImportDialog", MockIgorImportDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "PatchClampDataInputImportDialog",
+        MockPatchClampDataInputImportDialog,
+    )
     Gui.btn_import_igor2_wave_clicked(fake_gui)
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
@@ -3365,7 +3373,7 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 def test_gui_import_igor2_trace_updates_selected_trace(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    import neuroseq.igor_trace_import_dialog
+    import neuroseq.patch_clamp_data_output_import_dialog
 
     project = Project()
     captured_data: list[TraceData | None] = []
@@ -3377,7 +3385,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
 
     trace_widget.set_data = _set_trace_data
 
-    class MockIgorTraceImportDialog:
+    class MockPatchClampDataOutputImportDialog:
         def __init__(self, dialog_project: Project, parent=None) -> None:
             assert dialog_project is project
             self.project = dialog_project
@@ -3440,9 +3448,9 @@ def test_gui_import_igor2_trace_updates_selected_trace(
     )
 
     monkeypatch.setattr(
-        neuroseq.igor_trace_import_dialog,
-        "IgorTraceImportDialog",
-        MockIgorTraceImportDialog,
+        neuroseq.patch_clamp_data_output_import_dialog,
+        "PatchClampDataOutputImportDialog",
+        MockPatchClampDataOutputImportDialog,
     )
     Gui.btn_import_igor2_trace_clicked(fake_gui)
 
@@ -3456,7 +3464,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
 def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    import neuroseq.igor_trace_import_dialog
+    import neuroseq.patch_clamp_data_output_import_dialog
 
     project = Project()
     project.add_experiment(
@@ -3476,7 +3484,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         )
     )
 
-    class MockIgorTraceImportDialog:
+    class MockPatchClampDataOutputImportDialog:
         def __init__(self, dialog_project: Project, parent=None) -> None:
             assert dialog_project is project
             self.project = dialog_project
@@ -3538,9 +3546,9 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     )
 
     monkeypatch.setattr(
-        neuroseq.igor_trace_import_dialog,
-        "IgorTraceImportDialog",
-        MockIgorTraceImportDialog,
+        neuroseq.patch_clamp_data_output_import_dialog,
+        "PatchClampDataOutputImportDialog",
+        MockPatchClampDataOutputImportDialog,
     )
 
     Gui.btn_import_igor2_trace_clicked(fake_gui)
@@ -3558,7 +3566,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
 def test_gui_imported_igor_stim_can_be_edited_by_click(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    class MockIgorImportDialog:
+    class MockPatchClampDataInputImportDialog:
         def __init__(self, dialog_project: Project, parent=None) -> None:
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
@@ -3635,7 +3643,11 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         cmb_stim=stim_combo,
         update_project=_update_project,
     )
-    monkeypatch.setattr(neuroseq.gui, "IgorImportDialog", MockIgorImportDialog)
+    monkeypatch.setattr(
+        neuroseq.gui,
+        "PatchClampDataInputImportDialog",
+        MockPatchClampDataInputImportDialog,
+    )
 
     Gui.btn_import_igor2_wave_clicked(fake_gui)
 

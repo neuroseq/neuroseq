@@ -16,22 +16,22 @@ from qtpy.compat import getopenfilename
 
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
-from neuroseq.importer_igor2 import NEUROSEQ_IGOR_TARGET_DT_SECONDS
-from neuroseq.importer_igor2 import IgorWave
-from neuroseq.importer_igor2 import create_trace_data_from_igor_wave
-from neuroseq.importer_igor2 import estimate_resampled_sample_count
-from neuroseq.importer_igor2 import import_igor_wave_into_trace_data
-from neuroseq.importer_igor2 import is_pxp_file
-from neuroseq.importer_igor2 import load_csv_trace_table
-from neuroseq.importer_igor2 import load_igor_pxp_file
-from neuroseq.importer_igor2 import load_igor_wave_file
-from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
+from neuroseq.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importer_patch_clamp_data import IgorWave
+from neuroseq.importer_patch_clamp_data import create_trace_data_from_igor_wave
+from neuroseq.importer_patch_clamp_data import estimate_resampled_sample_count
+from neuroseq.importer_patch_clamp_data import import_igor_wave_into_trace_data
+from neuroseq.importer_patch_clamp_data import is_pxp_file
+from neuroseq.importer_patch_clamp_data import load_csv_trace_table
+from neuroseq.importer_patch_clamp_data import load_igor_pxp_file
+from neuroseq.importer_patch_clamp_data import load_igor_wave_file
+from neuroseq.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
-    from neuroseq.importer_igor2 import PreparedIgorWave
+    from neuroseq.importer_patch_clamp_data import PreparedIgorWave
     from neuroseq.project import Project
 
 
@@ -53,7 +53,7 @@ _SPIKE_DETECTION_DEFAULTS = PeakDetectionParams(
 )
 
 
-class IgorTraceImportDialog(QtWidgets.QDialog):
+class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
     """Import Igor2/Sutter patch-clamp TRACE waves into project experiments."""
 
     def __init__(
@@ -876,7 +876,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         if answer != QtWidgets.QMessageBox.StandardButton.Yes:
             return False
 
-        from neuroseq.importer_igor2 import resample_wave_zero_order_hold
+        from neuroseq.importer_patch_clamp_data import resample_wave_zero_order_hold
 
         if target_trace.traces.shape[0] == 0:
             new_sample_count = estimate_resampled_sample_count(

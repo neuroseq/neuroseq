@@ -701,10 +701,10 @@ class Project:
 
     def remap_all_data_to_dt(self, new_dt: float) -> None:
         """ZOH-remap every StimArray and every TraceData in the project to new_dt."""
-        from neuroseq.importer_igor2 import (  # noqa: PLC0415
+        from neuroseq.importer_patch_clamp_data import (  # noqa: PLC0415
             estimate_resampled_sample_count,
         )
-        from neuroseq.importer_igor2 import (  # noqa: PLC0415
+        from neuroseq.importer_patch_clamp_data import (  # noqa: PLC0415
             resample_wave_zero_order_hold,
         )
 

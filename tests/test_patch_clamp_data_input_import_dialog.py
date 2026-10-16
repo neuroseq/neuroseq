@@ -9,17 +9,19 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.export.exporter_igor2 import _write_ibw_v5
-from neuroseq.igor_import_dialog import IgorImportDialog
-from neuroseq.importer_igor2 import IgorPxpLoadReport
-from neuroseq.importer_igor2 import IgorWave
-from neuroseq.importer_igor2 import SkippedPxpRecord
+from neuroseq.importer_patch_clamp_data import IgorPxpLoadReport
+from neuroseq.importer_patch_clamp_data import IgorWave
+from neuroseq.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.patch_clamp_data_input_import_dialog import (
+    PatchClampDataInputImportDialog,
+)
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
 def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
-    dialog = IgorImportDialog(Project())
+    dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
     assert dialog.windowTitle() == "Import patch clamp input"
@@ -35,7 +37,9 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
         filters.append(file_filter)
         return "", ""
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.getopenfilename", choose_file)
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.getopenfilename", choose_file
+    )
     assert not hasattr(dialog, "format_combo")
     dialog._browse_file()
     assert filters == [
@@ -47,7 +51,7 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
 def test_unsupported_input_format(
     qtbot: QtBot, qmessagebox_calls: list[dict[str, str]], tmp_path: Path
 ) -> None:
-    dialog = IgorImportDialog(Project())
+    dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.load_file(str(tmp_path / "input.unsupported"))
     assert dialog.loaded_wave is None
@@ -71,7 +75,7 @@ def test_csv_input_sampling_rate(
     path = tmp_path / f"current{suffix}"
     path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
     project = Project()
-    dialog = IgorImportDialog(project, csv_only=True)
+    dialog = PatchClampDataInputImportDialog(project, csv_only=True)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.sampling_rate_spin.setValue(rate)
@@ -87,7 +91,7 @@ def test_csv_input_sampling_rate(
     assert qmessagebox_calls[-1]["name"] == "information"
 
 
-def test_igor_import_dialog_creates_new_stim_array(
+def test_patch_clamp_data_input_import_dialog_creates_new_stim_array(
     tmp_path: Path,
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
@@ -96,7 +100,7 @@ def test_igor_import_dialog_creates_new_stim_array(
     csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n4.0\n", encoding="utf-8")
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.source_dt_spin.setValue(0.0005)
@@ -113,8 +117,10 @@ def test_igor_import_dialog_creates_new_stim_array(
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
 
 
-def test_igor_import_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
-    dialog = IgorImportDialog(Project())
+def test_patch_clamp_data_input_import_dialog_wraps_content_in_scroll_area(
+    qtbot: QtBot,
+) -> None:
+    dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
 
     assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
@@ -122,8 +128,10 @@ def test_igor_import_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
     assert dialog.scroll_area.widgetResizable() is True
 
 
-def test_igor_import_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
-    dialog = IgorImportDialog(Project())
+def test_patch_clamp_data_input_import_dialog_wave_plot_hidden_initially(
+    qtbot: QtBot,
+) -> None:
+    dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -131,7 +139,7 @@ def test_igor_import_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
     assert not dialog.wave_plot.isVisible()
 
 
-def test_igor_import_dialog_wave_plot_shown_after_wave_load(
+def test_patch_clamp_data_input_import_dialog_wave_plot_shown_after_wave_load(
     tmp_path: Path,
     qtbot: QtBot,
 ) -> None:
@@ -142,7 +150,7 @@ def test_igor_import_dialog_wave_plot_shown_after_wave_load(
     )
     path = tmp_path / "test.ibw"
     path.write_bytes(ibw)
-    dialog = IgorImportDialog(Project())
+    dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -152,9 +160,11 @@ def test_igor_import_dialog_wave_plot_shown_after_wave_load(
     qtbot.waitUntil(lambda: dialog.wave_plot.isVisible())
 
 
-def test_igor_import_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
+def test_patch_clamp_data_input_import_dialog_shows_multi_sweep_info(
+    qtbot: QtBot,
+) -> None:
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.loaded_wave = IgorWave(
         name="multi",
@@ -180,7 +190,7 @@ def test_igor_import_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
     assert parent_group.title() == "Input Waveform Preview"
 
 
-def test_igor_import_dialog_imports_into_existing_stim_array(
+def test_patch_clamp_data_input_import_dialog_imports_into_existing_stim_array(
     tmp_path: Path,
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
@@ -199,7 +209,7 @@ def test_igor_import_dialog_imports_into_existing_stim_array(
         )
     )
 
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.import_existing_radio.setChecked(True)
@@ -217,7 +227,7 @@ def test_igor_import_dialog_imports_into_existing_stim_array(
     assert "import complete" in qmessagebox_calls[-1]["title"].lower()
 
 
-def test_igor_import_dialog_creates_new_stim_array_on_source_grid(
+def test_patch_clamp_data_input_import_dialog_creates_new_stim_array_on_source_grid(
     tmp_path: Path,
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
@@ -226,7 +236,7 @@ def test_igor_import_dialog_creates_new_stim_array_on_source_grid(
     csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n4.0\n", encoding="utf-8")
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.source_dt_spin.setValue(0.0005)
@@ -242,7 +252,7 @@ def test_igor_import_dialog_creates_new_stim_array_on_source_grid(
     assert qmessagebox_calls[-1]["name"] == "information"
 
 
-def test_igor_import_dialog_imports_into_existing_stim_array_on_source_grid(
+def test_patch_clamp_data_input_import_dialog_imports_into_existing_stim_array_on_source_grid(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
@@ -268,7 +278,7 @@ def test_igor_import_dialog_imports_into_existing_stim_array_on_source_grid(
         )
     )
 
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.source_dt_spin.setValue(0.0005)
@@ -291,12 +301,12 @@ def test_igor_import_dialog_imports_into_existing_stim_array_on_source_grid(
     assert "adjusted target input grid" in qmessagebox_calls[-1]["text"].lower()
 
 
-def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
+def test_patch_clamp_data_input_import_dialog_loads_pxp_and_shows_wave_picker(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -319,14 +329,16 @@ def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -345,12 +357,12 @@ def test_igor_import_dialog_loads_pxp_and_shows_wave_picker(
     assert not dialog.import_button.isEnabled()
 
 
-def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
+def test_patch_clamp_data_input_import_dialog_pxp_wave_selection_sets_loaded_wave(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -365,14 +377,16 @@ def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
     )
     fake_waves = {"root/WaveA": wave_a}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -385,12 +399,12 @@ def test_igor_import_dialog_pxp_wave_selection_sets_loaded_wave(
     assert dialog.import_button.isEnabled()
 
 
-def test_igor_import_dialog_pxp_multi_wave_requires_selection(
+def test_patch_clamp_data_input_import_dialog_pxp_multi_wave_requires_selection(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -413,14 +427,16 @@ def test_igor_import_dialog_pxp_multi_wave_requires_selection(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -443,12 +459,12 @@ def test_igor_import_dialog_pxp_multi_wave_requires_selection(
     assert dialog.import_button.isEnabled()
 
 
-def test_igor_import_dialog_loading_csv_after_pxp_clears_wave_picker(
+def test_patch_clamp_data_input_import_dialog_loading_csv_after_pxp_clears_wave_picker(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -467,16 +483,16 @@ def test_igor_import_dialog_loading_csv_after_pxp_clears_wave_picker(
     }
 
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.is_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file",
         lambda path: str(path).lower().endswith(".pxp"),
     )
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -497,13 +513,13 @@ def test_igor_import_dialog_loading_csv_after_pxp_clears_wave_picker(
     assert dialog.import_button.isEnabled()
 
 
-def test_igor_import_dialog_warns_when_pxp_records_are_skipped(
+def test_patch_clamp_data_input_import_dialog_warns_when_pxp_records_are_skipped(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -525,14 +541,16 @@ def test_igor_import_dialog_warns_when_pxp_records_are_skipped(
         )
     ]
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=skipped),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -548,13 +566,13 @@ def test_igor_import_dialog_warns_when_pxp_records_are_skipped(
     assert "could not be parsed and were skipped" in warning_calls[0]["text"]
 
 
-def test_igor_import_dialog_single_wave_pxp_import_stays_open_until_close(
+def test_patch_clamp_data_input_import_dialog_single_wave_pxp_import_stays_open_until_close(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "single.pxp"
     pxp_path.write_bytes(b"fake")
@@ -569,14 +587,16 @@ def test_igor_import_dialog_single_wave_pxp_import_stays_open_until_close(
     )
     fake_waves = {"root/WaveA": wave_a}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -602,13 +622,13 @@ def test_igor_import_dialog_single_wave_pxp_import_stays_open_until_close(
     qtbot.waitUntil(lambda: not dialog.isVisible())
 
 
-def test_igor_import_dialog_stays_open_for_multiple_pxp_imports(
+def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_imports(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two waves from the same .pxp must be importable without reopening the dialog."""
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "multi.pxp"
     pxp_path.write_bytes(b"fake")
@@ -631,14 +651,16 @@ def test_igor_import_dialog_stays_open_for_multiple_pxp_imports(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -687,13 +709,13 @@ def test_igor_import_dialog_stays_open_for_multiple_pxp_imports(
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
 
 
-def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
+def test_patch_clamp_data_input_import_dialog_reimport_same_pxp_wave_is_blocked(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A wave already imported in this .pxp session must not be importable again."""
-    from neuroseq.importer_igor2 import IgorWave
+    from neuroseq.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "multi.pxp"
     pxp_path.write_bytes(b"fake")
@@ -716,14 +738,16 @@ def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -755,7 +779,7 @@ def test_igor_import_dialog_reimport_same_pxp_wave_is_blocked(
     assert dialog.import_button.isEnabled() is False
 
 
-def test_igor_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
+def test_patch_clamp_data_input_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
@@ -783,7 +807,7 @@ def test_igor_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
         lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
     )
 
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.match_source_grid_checkbox.setChecked(True)
@@ -798,7 +822,7 @@ def test_igor_import_dialog_offers_remap_on_dt_change_and_remaps_on_yes(
     assert project.stim_arrays["new_wave"].dt == pytest.approx(0.0005)
 
 
-def test_igor_import_dialog_aborts_import_on_remap_decline(
+def test_patch_clamp_data_input_import_dialog_aborts_import_on_remap_decline(
     tmp_path: Path,
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
@@ -824,7 +848,7 @@ def test_igor_import_dialog_aborts_import_on_remap_decline(
         lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
     )
 
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.match_source_grid_checkbox.setChecked(True)
@@ -837,7 +861,7 @@ def test_igor_import_dialog_aborts_import_on_remap_decline(
     assert project.stim_arrays["existing"].values.shape[0] == 10
 
 
-def test_igor_import_dialog_no_remap_dialog_when_project_is_empty(
+def test_patch_clamp_data_input_import_dialog_no_remap_dialog_when_project_is_empty(
     tmp_path: Path,
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
@@ -848,7 +872,7 @@ def test_igor_import_dialog_no_remap_dialog_when_project_is_empty(
 
     project = Project()
 
-    dialog = IgorImportDialog(project)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.match_source_grid_checkbox.setChecked(True)

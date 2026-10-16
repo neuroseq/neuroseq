@@ -12,10 +12,12 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.export.exporter_igor2 import _write_ibw_v5
-from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
-from neuroseq.importer_igor2 import IgorPxpLoadReport
-from neuroseq.importer_igor2 import IgorWave
-from neuroseq.importer_igor2 import SkippedPxpRecord
+from neuroseq.importer_patch_clamp_data import IgorPxpLoadReport
+from neuroseq.importer_patch_clamp_data import IgorWave
+from neuroseq.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.patch_clamp_data_output_import_dialog import (
+    PatchClampDataOutputImportDialog,
+)
 from neuroseq.project import Project
 
 
@@ -45,7 +47,7 @@ def test_trace_dialog_creates_new_trace_in_new_experiment(
     csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n", encoding="utf-8")
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.new_experiment_name_edit.setText("Experiment A")
@@ -73,7 +75,7 @@ def test_csv_output_sampling_rate(
     path = tmp_path / "voltage.csv"
     path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
     project = Project()
-    dialog = IgorTraceImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("CSV recording")
@@ -101,7 +103,7 @@ def test_csv_table_imports_all_columns(
     path = tmp_path / f"recording{suffix}"
     path.write_text(header + "1,10\n2,20\n3,30\n4,40\n", encoding="utf-8")
     project = Project()
-    dialog = IgorTraceImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("Table")
@@ -129,7 +131,7 @@ def test_csv_table_name_collision_does_not_partially_import(
     project.add_experiment(Experiment("Table", 0.002, [], [existing]))
     path = tmp_path / "recording.csv"
     path.write_text("cell_a,cell_b\n1,10\n2,20\n", encoding="utf-8")
-    dialog = IgorTraceImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_combo.setCurrentText("Table")
@@ -139,7 +141,7 @@ def test_csv_table_name_collision_does_not_partially_import(
 
 
 def test_trace_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
-    dialog = IgorTraceImportDialog(Project())
+    dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
 
     assert isinstance(dialog.scroll_area, QtWidgets.QScrollArea)
@@ -148,7 +150,7 @@ def test_trace_dialog_wraps_content_in_scroll_area(qtbot: QtBot) -> None:
 
 
 def test_trace_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
-    dialog = IgorTraceImportDialog(Project())
+    dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -167,7 +169,7 @@ def test_trace_dialog_wave_plot_shown_after_wave_load(
     )
     path = tmp_path / "test.ibw"
     path.write_bytes(ibw)
-    dialog = IgorTraceImportDialog(Project())
+    dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -179,7 +181,7 @@ def test_trace_dialog_wave_plot_shown_after_wave_load(
 
 def test_trace_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.loaded_wave = IgorWave(
         name="multi",
@@ -217,7 +219,7 @@ def test_trace_dialog_creates_new_trace_in_existing_experiment(
         Experiment(name="Existing", duration=0.0, timepoints=[], data=[])
     )
 
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.new_experiment_combo.setCurrentText("Existing")
@@ -257,7 +259,7 @@ def test_trace_dialog_imports_into_existing_trace_data(
         )
     )
 
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.import_existing_radio.setChecked(True)
@@ -303,14 +305,16 @@ def test_trace_dialog_loads_pxp_and_shows_wave_picker(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_trace_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -355,14 +359,16 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_trace_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -438,14 +444,16 @@ def test_trace_dialog_reimport_same_pxp_wave_is_blocked(
     )
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
-    monkeypatch.setattr("neuroseq.igor_trace_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -504,14 +512,16 @@ def test_trace_dialog_warns_when_pxp_records_are_skipped(
         )
     ]
 
-    monkeypatch.setattr("neuroseq.igor_trace_import_dialog.is_pxp_file", lambda _: True)
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.load_igor_pxp_file",
+        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+    )
+    monkeypatch.setattr(
+        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=skipped),
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
     qtbot.waitUntil(lambda: dialog.isVisible())
@@ -537,7 +547,7 @@ def test_trace_dialog_optional_spike_detection_adds_spikedata(
     csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.detect_spikes_voltage_trace",
+        "neuroseq.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
         lambda *args, **kwargs: SpikeData(
             name="Detected spikes",
             spike_indices=np.array([0], dtype=np.int32),
@@ -546,7 +556,7 @@ def test_trace_dialog_optional_spike_detection_adds_spikedata(
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.new_experiment_name_edit.setText("Experiment A")
@@ -574,12 +584,12 @@ def test_trace_dialog_spike_detection_off_adds_no_spikedata(
         raise AssertionError("Spike detection should not run when checkbox is off")
 
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.detect_spikes_voltage_trace",
+        "neuroseq.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
         _unexpected_spike_detection,
     )
 
     project = Project()
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(csv_path))
     dialog.new_experiment_name_edit.setText("Experiment A")
@@ -627,7 +637,7 @@ def test_trace_import_preserves_independent_dataset_timing(
         pytest.fail("Importing independent traces must not prompt to remap data")
 
     monkeypatch.setattr(QtWidgets.QMessageBox, "question", unexpected_question)
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("Imported")
@@ -657,7 +667,7 @@ def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) ->
     project.add_experiment(
         Experiment(name="sweep_B", duration=0.002, timepoints=[], data=[])
     )
-    dialog = IgorTraceImportDialog(project)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
 
     dialog._load_file(str(first))
@@ -673,7 +683,7 @@ def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) ->
 
 
 def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
-    dialog = IgorTraceImportDialog(Project())
+    dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     assert dialog.windowTitle() == "Import patch clamp output"
     labels = "\n".join(label.text() for label in dialog.findChildren(QtWidgets.QLabel))
@@ -686,7 +696,7 @@ def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
         return "", ""
 
     monkeypatch.setattr(
-        "neuroseq.igor_trace_import_dialog.getopenfilename", choose_file
+        "neuroseq.patch_clamp_data_output_import_dialog.getopenfilename", choose_file
     )
     dialog._browse_file()
     assert filters == [
@@ -697,7 +707,7 @@ def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
 def test_unsupported_output_format(
     qtbot: QtBot, qmessagebox_calls: list[dict[str, str]], tmp_path: Path
 ) -> None:
-    dialog = IgorTraceImportDialog(Project())
+    dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.load_file(str(tmp_path / "output.unsupported"))
     assert dialog.loaded_wave is None

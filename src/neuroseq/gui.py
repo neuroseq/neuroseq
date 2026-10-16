@@ -50,7 +50,6 @@ from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
-from neuroseq.igor_import_dialog import IgorImportDialog
 from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.import_experiment_dialog import ImportExperimentDialog
 from neuroseq.importer_cellpose import CellposeImportResult
@@ -61,6 +60,9 @@ from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.patch_clamp_data_input_import_dialog import (
+    PatchClampDataInputImportDialog,
+)
 from neuroseq.project import Project
 from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
@@ -2564,7 +2566,7 @@ class Gui(QtWidgets.QMainWindow):
 
     def _complete_stimulus_import(
         self,
-        dialog: Syscon2ImportDialog | IgorImportDialog,
+        dialog: Syscon2ImportDialog | PatchClampDataInputImportDialog,
         path: pathlib.Path | None = None,
     ) -> None:
         """Load an optional file and apply an accepted stimulus import to the GUI."""
@@ -2587,21 +2589,23 @@ class Gui(QtWidgets.QMainWindow):
         self, *, csv_only: bool = False, path: pathlib.Path | None = None
     ) -> None:
         dialog = (
-            IgorImportDialog(self.project, parent=self, csv_only=True)
+            PatchClampDataInputImportDialog(self.project, parent=self, csv_only=True)
             if csv_only
-            else IgorImportDialog(self.project, parent=self)
+            else PatchClampDataInputImportDialog(self.project, parent=self)
         )
         Gui._complete_stimulus_import(self, dialog, path)
 
     def btn_import_igor2_trace_clicked(
         self, *, csv_only: bool = False, path: pathlib.Path | None = None
     ) -> None:
-        from neuroseq.igor_trace_import_dialog import IgorTraceImportDialog
+        from neuroseq.patch_clamp_data_output_import_dialog import (
+            PatchClampDataOutputImportDialog,
+        )
 
         dialog = (
-            IgorTraceImportDialog(self.project, parent=self, csv_only=True)
+            PatchClampDataOutputImportDialog(self.project, parent=self, csv_only=True)
             if csv_only
-            else IgorTraceImportDialog(self.project, parent=self)
+            else PatchClampDataOutputImportDialog(self.project, parent=self)
         )
         if path is not None:
             dialog.load_file(str(path))
