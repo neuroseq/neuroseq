@@ -1069,3 +1069,38 @@ def test_controls_say_why_no_preview_frame_came(qtbot, connection, tmp_config_di
         "No preview frame: ScanImage display frame not readable: Brace indexing"
         in panel.status_label.text()
     )
+
+
+def test_record_saves_the_channels_ticked_in_the_dialog(
+    qtbot, connection, tmp_path, tmp_config_dir
+):
+    """Several channels can be saved in one recording; the checkboxes start
+    as ScanImage's own selection."""
+    from neuroseq.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    requests: list[dict] = []
+    panel.record_requested.connect(requests.append)
+    panel.directory_edit.setText(str(tmp_path))
+
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
+    assert [c.text() for c in panel.save_channel_checks] == ["1", "2", "3", "4"]
+    assert panel.saved_channels() == [1]
+    panel._status(
+        {"acq_state": "idle", "channels_available": 4, "saved_channels": [1, 3]}
+    )
+    assert panel.saved_channels() == [1, 3]  # follows ScanImage until chosen here
+
+    panel.save_channel_checks[1].setChecked(True)
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
+    assert panel.saved_channels() == [1, 2, 3]  # the user's choice is kept
+
+    panel._record()
+    assert requests[-1]["channels"] == [1, 2, 3]
+
+    for check in panel.save_channel_checks:
+        check.setChecked(False)
+    panel._record()
+    assert len(requests) == 1
+    assert "at least one channel" in panel.message_label.text()

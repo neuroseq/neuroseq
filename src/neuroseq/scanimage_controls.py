@@ -75,6 +75,20 @@ class ScanImageControls(QtWidgets.QWidget):
         self.frames_spin.setRange(1, 10000000)
         self.frames_spin.setValue(300)
         form.addRow("Frames", self.frames_spin)
+        # One checkbox per ScanImage channel, filled in once connected.
+        self.save_channels_widget = QtWidgets.QWidget()
+        self._save_channels_layout = QtWidgets.QHBoxLayout(self.save_channels_widget)
+        self._save_channels_layout.setContentsMargins(0, 0, 0, 0)
+        self.save_channel_checks: list[QtWidgets.QCheckBox] = []
+        self._save_channels_hint = QtWidgets.QLabel("Connect to choose")
+        self._save_channels_layout.addWidget(self._save_channels_hint)
+        self._save_channels_layout.addStretch(1)
+        self._save_channels_chosen = False
+        self.save_channels_widget.setToolTip(
+            "Channels saved in the recording; several channels are saved "
+            "together. Starts as set in ScanImage, which keeps its own choice."
+        )
+        form.addRow("Save channels", self.save_channels_widget)
         self.external_check = QtWidgets.QCheckBox(
             "Wait for external acquisition trigger"
         )
@@ -199,10 +213,47 @@ class ScanImageControls(QtWidgets.QWidget):
             self.live_check.setChecked(True)
             self._last_frame_number = None
 
+    def saved_channels(self) -> list[int]:
+        return [
+            number
+            for number, check in enumerate(self.save_channel_checks, start=1)
+            if check.isChecked()
+        ]
+
+    def _show_save_channels(self, status: dict) -> None:
+        available = status.get("channels_available")
+        if not isinstance(available, int) or available < 1:
+            return
+        if len(self.save_channel_checks) != available:
+            for check in self.save_channel_checks:
+                check.deleteLater()
+            self.save_channel_checks = []
+            self._save_channels_hint.hide()
+            for number in range(1, available + 1):
+                check = QtWidgets.QCheckBox(str(number))
+                check.toggled.connect(self._save_channels_toggled)
+                self._save_channels_layout.insertWidget(number - 1, check)
+                self.save_channel_checks.append(check)
+        if not self._save_channels_chosen:
+            # Follow ScanImage's selection until the user picks channels here.
+            saved = status.get("saved_channels", [])
+            saved = {int(saved)} if isinstance(saved, int) else {int(c) for c in saved}
+            for number, check in enumerate(self.save_channel_checks, start=1):
+                check.blockSignals(True)
+                check.setChecked(number in saved)
+                check.blockSignals(False)
+
+    def _save_channels_toggled(self, _checked: bool) -> None:
+        self._save_channels_chosen = True
+
     def _record(self) -> None:
         directory = Path(self.directory_edit.text().strip())
         if not self.directory_edit.text().strip() or not directory.is_dir():
             self.show_message("Select an existing recording folder on this PC.")
+            return
+        channels = self.saved_channels()
+        if self.save_channel_checks and not channels:
+            self.show_message("Tick at least one channel to save.")
             return
         run_id = uuid.uuid4().hex
         self.settings.scanimage_recording_directory = str(directory)
@@ -213,10 +264,12 @@ class ScanImageControls(QtWidgets.QWidget):
                 "frames": self.frames_spin.value(),
                 "external_trigger": self.external_check.isChecked(),
                 "name": self.name_edit.text().strip() or "Acquisition",
+                **({"channels": channels} if channels else {}),
             }
         )
 
     def _status(self, status: dict) -> None:
+        self._show_save_channels(status)
         state = status.get("acq_state", "unknown")
         run = status.get("run", {})
         text = f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"

@@ -81,14 +81,25 @@ switch operation
         assert(slices == 1, 'NeuroSeq:MultiplePlanes', 'Only single-plane acquisition is supported.');
         assert(~hSI.hRoiManager.mroiEnable, 'Multi-ROI acquisition is not supported.');
         assert(~hSI.hFastZ.enable, 'FastZ must be disabled.');
-        assert(~isempty(hSI.hChannels.channelSave), 'Select at least one saved channel in ScanImage.');
+        channels = [];
+        if isfield(args,'channels') && ~isempty(args.channels)
+            % Several channels in one recording; ScanImage's own selection
+            % is restored afterwards with the other settings.
+            channels = unique(double(args.channels(:)'));
+            available = hSI.hChannels.channelsAvailable;
+            assert(all(channels >= 1 & channels <= available & channels == fix(channels)), ...
+                'NeuroSeq:InvalidChannels', 'Saved channels must be between 1 and %d.', available);
+        end
+        assert(~isempty(channels) || ~isempty(hSI.hChannels.channelSave), ...
+            'Select at least one saved channel.');
         assert(args.frames >= 1 && args.frames == fix(args.frames), 'Invalid frame count.');
         assert(~exist(args.directory, 'dir'), 'Run directory already exists.');
         [ok, msg] = mkdir(args.directory); assert(ok, msg);
         % Retain settings until completion/abort and restore only once idle.
         old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
             hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
-            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop')};
+            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop'), ...
+            hSI.hChannels.channelSave};
         run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, 'old',{old});
         try
             hSI.hScan2D.logFilePath = args.directory;
@@ -97,6 +108,7 @@ switch operation
             hSI.extTrigEnable = logical(args.external_trigger);
             hSI.hStackManager.framesPerSlice = args.frames;
             hSI.hChannels.loggingEnable = true;
+            if ~isempty(channels), hSI.hChannels.channelSave = channels; end
             % Raw frames, one acquisition: averaging would drop frames and a
             % multi-acquisition loop could delay acqModeDone.
             if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = 1; end
@@ -135,6 +147,9 @@ publicRun = run;
 if isfield(publicRun,'old'), publicRun = rmfield(publicRun,'old'); end
 out = struct('acq_state',hSI.acqState, 'run',publicRun, 'fps',hSI.hRoiManager.scanFrameRate, ...
     'matlab_version',version, 'channels',hSI.hChannels.channelDisplay, 'files',{{}});
+% For the Image acquisition dialog's channel choice.
+out.channels_available = hSI.hChannels.channelsAvailable;
+out.saved_channels = hSI.hChannels.channelSave;
 out.can_abort = ownedFocus || any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}));
 out.settings = recording_settings(hSI);
 if isfield(run,'settings'), out.settings = run.settings; end
@@ -252,6 +267,7 @@ if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
     hSI.hStackManager.framesPerSlice = old{5}; hSI.hChannels.loggingEnable = old{6};
     if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = old{7}; end
     if ~isempty(old{8}), hSI.acqsPerLoop = old{8}; end
+    if numel(old) >= 9, hSI.hChannels.channelSave = old{9}; end
     run = rmfield(run,'old');
 end
 end

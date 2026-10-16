@@ -12,6 +12,7 @@ classdef ScanImageTestComponent < handle
         mroiEnable = false
         enable = false
         channelSave = [1 2]
+        channelsAvailable = 4
         channelDisplay = [1 2]
         scanFrameRate = 30
         channelLUT = {[-88 436], [0 100]}

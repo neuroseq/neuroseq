@@ -32,7 +32,7 @@ end
 function old = settings(rig)
 old = {rig.hScan2D.logFilePath,rig.hScan2D.logFileStem,rig.hScan2D.logFileCounter, ...
     rig.extTrigEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable, ...
-    rig.hScan2D.logAverageFactor,rig.acqsPerLoop};
+    rig.hScan2D.logAverageFactor,rig.acqsPerLoop,rig.hChannels.channelSave};
 end
 
 function testRestoreOnCompletion(testCase)
@@ -108,6 +108,27 @@ neuroseq_scanimage('record',jsonencode(request(testCase)));
 verifyEqual(testCase,[rig.hScan2D.logAverageFactor rig.acqsPerLoop],[1 1]);
 rig.complete(false);
 verifyEqual(testCase,[rig.hScan2D.logAverageFactor rig.acqsPerLoop],[10 2]);
+end
+
+function testRecordsChosenChannelsThenRestoresSelection(testCase)
+rig = testCase.TestData.rig; rig.hChannels.channelSave = 1;
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.channels_available,4);
+verifyEqual(testCase,status.saved_channels,1);
+req = request(testCase); req.channels = [3 1];
+neuroseq_scanimage('record',jsonencode(req));
+verifyEqual(testCase,rig.hChannels.channelSave,[1 3]);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.settings.saved_channels,[1;3]);
+rig.complete(false);
+verifyEqual(testCase,rig.hChannels.channelSave,1);
+end
+
+function testInvalidChannelsRejected(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+req = request(testCase); req.channels = [1 5];
+verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(req)), 'NeuroSeq:InvalidChannels');
+verifyEqual(testCase,settings(rig),old);
 end
 
 function testDisabledStackKeepsSlicesButRecordsOnePlane(testCase)

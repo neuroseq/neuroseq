@@ -68,8 +68,12 @@ whether incoming preview frames are shown; disabling it does not stop imaging.
 The playback slider has no effect on the live image. Abort Focus before
 starting a recording.
 
-Choose a recording folder, experiment name and frame count. **Record / Arm**
-creates a unique run directory and enables ScanImage TIFF logging. When
+Choose a recording folder, experiment name and frame count. **Save channels**
+lists ScanImage's channels and starts with the ones ScanImage saves; tick several
+to record them together in one acquisition. ScanImage's own selection is
+restored after the recording, like the other settings NeuroSeq changes. The
+Imaging tab's channel choice then picks which saved channel is shown.
+**Record / Arm** creates a unique run directory and enables ScanImage TIFF logging. When
 **Wait for external acquisition trigger** is selected, ScanImage waits for
 its configured trigger input. Otherwise it starts through software.
 The first-frame timeout requests an abort if no acquisition start is observed.
