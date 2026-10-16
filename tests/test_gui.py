@@ -3253,6 +3253,55 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     assert captured["scaling_factor"] == 3.0
 
 
+@pytest.mark.parametrize(
+    ("handler", "dialog_name", "options"),
+    [
+        ("btn_import_syscon2_seq_clicked", "Syscon2ImportDialog", {}),
+        ("btn_import_igor2_wave_clicked", "IgorImportDialog", {}),
+        ("btn_import_igor2_wave_clicked", "IgorImportDialog", {"csv_only": True}),
+    ],
+)
+@pytest.mark.parametrize("with_path", [False, True])
+@pytest.mark.parametrize(
+    ("accepted", "selection"), [(True, "imported"), (True, ""), (False, "imported")]
+)
+def test_stimulus_import_completion(
+    monkeypatch, tmp_path, handler, dialog_name, options, with_path, accepted, selection
+):
+    from unittest.mock import Mock
+    from unittest.mock import call
+
+    events = Mock()
+    project = SimpleNamespace(mark_dirty=events.mark_dirty)
+    window = SimpleNamespace(
+        project=project,
+        update_project=events.refresh,
+        cmb_stim=SimpleNamespace(setCurrentText=events.select),
+    )
+    dialog = Mock(selected_stim_name=selection)
+    dialog.load_file = events.load
+    dialog.exec = events.execute
+    dialog.exec.return_value = (
+        QtWidgets.QDialog.DialogCode.Accepted
+        if accepted
+        else QtWidgets.QDialog.DialogCode.Rejected
+    )
+    factory = Mock(return_value=dialog)
+    monkeypatch.setattr(neuroseq.gui, dialog_name, factory)
+    path = tmp_path / "stimulus.csv" if with_path else None
+
+    getattr(Gui, handler)(window, path=path, **options)
+
+    factory.assert_called_once_with(project, parent=window, **options)
+    expected = [call.load(str(path))] if with_path else []
+    expected.append(call.execute())
+    if accepted:
+        expected.extend([call.mark_dirty(), call.refresh(project)])
+        if selection:
+            expected.append(call.select(selection))
+    assert events.mock_calls == expected
+
+
 def test_gui_import_igor2_wave_updates_selected_stim(
     monkeypatch: MonkeyPatch,
 ) -> None:

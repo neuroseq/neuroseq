@@ -2562,17 +2562,26 @@ class Gui(QtWidgets.QMainWindow):
             )
             self._warn_if_cellpose_model_mismatch()
 
+    def _complete_stimulus_import(
+        self,
+        dialog: Syscon2ImportDialog | IgorImportDialog,
+        path: pathlib.Path | None = None,
+    ) -> None:
+        """Load an optional file and apply an accepted stimulus import to the GUI."""
+        if path is not None:
+            dialog.load_file(str(path))
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        self.project.mark_dirty()
+        self.update_project(self.project)
+        if dialog.selected_stim_name:
+            self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+
     def btn_import_syscon2_seq_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
         dialog = Syscon2ImportDialog(self.project, parent=self)
-        if path is not None:
-            dialog.load_file(str(path))
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.project.mark_dirty()
-            self.update_project(self.project)
-            if dialog.selected_stim_name:
-                self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+        Gui._complete_stimulus_import(self, dialog, path)
 
     def btn_import_igor2_wave_clicked(
         self, *, csv_only: bool = False, path: pathlib.Path | None = None
@@ -2582,13 +2591,7 @@ class Gui(QtWidgets.QMainWindow):
             if csv_only
             else IgorImportDialog(self.project, parent=self)
         )
-        if path is not None:
-            dialog.load_file(str(path))
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.project.mark_dirty()
-            self.update_project(self.project)
-            if dialog.selected_stim_name:
-                self.cmb_stim.setCurrentText(dialog.selected_stim_name)
+        Gui._complete_stimulus_import(self, dialog, path)
 
     def btn_import_igor2_trace_clicked(
         self, *, csv_only: bool = False, path: pathlib.Path | None = None
