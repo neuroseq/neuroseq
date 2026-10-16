@@ -2959,36 +2959,12 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_syscon2_seq_clicked()
 
     def btn_import_stimulus_patchclamp_clicked(self) -> None:
-        """Open the patch-clamp input dialog with its format selector."""
+        """Open the patch-clamp input importer directly."""
         self.btn_import_igor2_wave_clicked()
 
     def btn_import_trace_patchclamp_clicked(self) -> None:
-        """Pre-dialog: choose software, then import recorded patch-clamp traces.
-
-        Convention:
-          Current Clamp (CC) -> recorded signal is voltage (mV)
-          Voltage Clamp (VC) -> recorded signal is current (pA)
-        """
-        software, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Import patch clamp traces",
-            (
-                "Patch-clamp convention:\n"
-                "  • Current Clamp (CC): the recorded VOLTAGE is the trace\n"
-                "  • Voltage Clamp (VC): the recorded CURRENT is the trace\n"
-                "\n"
-                "Import from:"
-            ),
-            ["Igor2", "CSV / Text (.csv, .txt)"],
-            0,
-            False,
-        )
-        if not ok:
-            return
-        if software == "Igor2":
-            self.btn_import_igor2_trace_clicked()
-        elif software == "CSV / Text (.csv, .txt)":
-            self.btn_import_igor2_trace_clicked(csv_only=True)
+        """Open the patch-clamp output importer directly."""
+        self.btn_import_igor2_trace_clicked()
 
     # Export wrappers
 
@@ -3471,14 +3447,14 @@ class Gui(QtWidgets.QMainWindow):
             self.btn_import_tif_clicked,
             import_trace_menu,
             None,
-            icon="mdi6.import",
+            icon="mdi.waves",
         )
         add_action(
             "Calcium Imaging (&Suite2p outputs)",
             self.btn_import_suite2p_data_clicked,
             import_trace_menu,
             None,
-            icon="mdi6.import",
+            icon="mdi.waves",
         )
         add_action(
             "&Patch Clamp",

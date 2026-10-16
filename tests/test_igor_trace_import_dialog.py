@@ -670,3 +670,38 @@ def test_new_experiment_is_named_after_the_wave(tmp_path: Path, qtbot: QtBot) ->
     dialog.new_experiment_name_edit.setText("My cell")
     dialog._load_file(str(first))
     assert dialog.new_experiment_name_edit.text() == "My cell"
+
+
+def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
+    dialog = IgorTraceImportDialog(Project())
+    qtbot.addWidget(dialog)
+    assert dialog.windowTitle() == "Import patch clamp output"
+    labels = "\n".join(label.text() for label in dialog.findChildren(QtWidgets.QLabel))
+    assert "VOLTAGE is the trace" in labels
+    assert "CURRENT is the trace" in labels
+    filters = []
+
+    def choose_file(parent, title, directory, file_filter):
+        filters.append(file_filter)
+        return "", ""
+
+    monkeypatch.setattr(
+        "neuroseq.igor_trace_import_dialog.getopenfilename", choose_file
+    )
+    dialog._browse_file()
+    assert filters == [
+        "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
+    ]
+
+
+def test_unsupported_output_format(
+    qtbot: QtBot, qmessagebox_calls: list[dict[str, str]], tmp_path: Path
+) -> None:
+    dialog = IgorTraceImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(tmp_path / "output.unsupported"))
+    assert dialog.loaded_wave is None
+    assert dialog.file_path == ""
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert "Unsupported" in qmessagebox_calls[-1]["text"]
+    assert ".unsupported" in qmessagebox_calls[-1]["text"]

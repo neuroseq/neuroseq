@@ -71,9 +71,7 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        self.setWindowTitle("Import Igor2 Patch-Clamp Trace")
-        if self.csv_only:
-            self.setWindowTitle("Import CSV / Text patch clamp output")
+        self.setWindowTitle("Import patch clamp output")
         self.setModal(True)
         self.resize(860, 780)
 
@@ -89,20 +87,23 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
         self.scroll_area.setWidget(content_widget)
         root_layout.addWidget(self.scroll_area)
 
+        convention = QtWidgets.QLabel(
+            "Patch-clamp convention:\n"
+            "Current Clamp (CC): the recorded VOLTAGE is the trace\n"
+            "Voltage Clamp (VC): the recorded CURRENT is the trace"
+        )
+        convention.setWordWrap(True)
+        layout.addWidget(convention)
+
         intro = QtWidgets.QLabel(
-            "Import Igor2/Sutter patch-clamp trace waves from .ibw, .pxp, or the "
-            "simple NeuroSeq-compatible .csv format. Each wave is stored as a "
-            "single-neuron TraceData inside an Experiment. Packed experiments can "
-            "contain many waves; import as many as you need from the same file, "
-            "then click Close when done."
+            "Import patch-clamp recordings from .pxp, .ibw, .csv, or .txt files. "
+            "Packed experiments can contain multiple traces; import as many as "
+            "you need, then click Close. CSV and text files contain one trace per "
+            "column and one sample per row, with an optional first row naming the "
+            "traces. Set their shared source sampling rate in Hz before importing. "
+            "Choose the recorded signal units below."
         )
         intro.setWordWrap(True)
-        if self.csv_only:
-            intro.setText(
-                "Import CSV or text output with one trace per column and one sample per row. "
-                "An optional first row names the traces. Set the shared source sampling "
-                "rate in Hz before importing. Choose the recorded signal units below."
-            )
         layout.addWidget(intro)
 
         self.file_group = QtWidgets.QGroupBox("File Selection")
@@ -473,11 +474,9 @@ class IgorTraceImportDialog(QtWidgets.QDialog):
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "Select CSV or text output" if self.csv_only else "Select Igor wave",
+            "Select patch-clamp output",
             "",
-            "CSV / Text files (*.csv *.txt)"
-            if self.csv_only
-            else "Wave files (*.ibw *.pxp *.csv *.txt);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV / Text files (*.csv *.txt);;All files (*)",
+            "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)",
         )
         if filename:
             self._load_file(filename)

@@ -138,11 +138,6 @@ def _make_spike_export_gui(
             "btn_import_syscon2_seq_clicked",
         ),
         (
-            "btn_import_trace_patchclamp_clicked",
-            "Igor2",
-            "btn_import_igor2_trace_clicked",
-        ),
-        (
             "btn_export_patch_clamp_stim_clicked",
             "Igor2 - single array (.ibw / .csv)",
             "btn_export_igor2_single_wave_clicked",
@@ -179,40 +174,12 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
 
 
 @pytest.mark.parametrize(
-    ("method_name", "inner_name"),
-    [
-        ("btn_import_trace_patchclamp_clicked", "btn_import_igor2_trace_clicked"),
-    ],
-)
-def test_gui_patchclamp_csv_option(
-    monkeypatch: MonkeyPatch, method_name: str, inner_name: str
-) -> None:
-    def choose_csv(*args, **kwargs):
-        option = "CSV / Text (.csv, .txt)"
-        assert args[3] == ["Igor2", option]
-        return option, True
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", choose_csv)
-    called = []
-    fake_gui: Any = SimpleNamespace(
-        **{inner_name: lambda **kwargs: called.append(kwargs)}
-    )
-    getattr(Gui, method_name)(fake_gui)
-    assert called == [{"csv_only": True}]
-
-
-@pytest.mark.parametrize(
     ("method_name", "software", "inner_name"),
     [
         (
             "btn_import_stimulus_light_clicked",
             "SysCon2",
             "btn_import_syscon2_seq_clicked",
-        ),
-        (
-            "btn_import_trace_patchclamp_clicked",
-            "Igor2",
-            "btn_import_igor2_trace_clicked",
         ),
         (
             "btn_export_patch_clamp_stim_clicked",
@@ -248,33 +215,6 @@ def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
     getattr(Gui, method_name)(fake_gui)
 
     assert called == []
-
-
-def test_patchclamp_pre_dialogs_include_cc_vc_convention(
-    monkeypatch: MonkeyPatch,
-) -> None:
-    captured_labels: list[str] = []
-
-    def fake_get_item(*args: Any, **kwargs: Any) -> tuple[str, bool]:
-        del kwargs
-        captured_labels.append(args[2])
-        return ("Igor2", False)
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", fake_get_item)
-
-    fake_gui: Any = SimpleNamespace(
-        btn_import_igor2_wave_clicked=lambda: None,
-        btn_import_igor2_trace_clicked=lambda: None,
-    )
-
-    Gui.btn_import_trace_patchclamp_clicked(fake_gui)
-
-    assert len(captured_labels) == 1
-    trace_label = captured_labels[0]
-    assert "Current Clamp (CC)" in trace_label
-    assert "Voltage Clamp (VC)" in trace_label
-    assert "VOLTAGE is the trace" in trace_label
-    assert "CURRENT is the trace" in trace_label
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
@@ -4899,4 +4839,17 @@ def test_patchclamp_input_opens_importer_directly(monkeypatch: MonkeyPatch) -> N
         btn_import_igor2_wave_clicked=lambda: called.append(True)
     )
     Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
+    assert called == [True]
+
+
+def test_patchclamp_output_opens_importer_directly(monkeypatch: MonkeyPatch) -> None:
+    def unexpected_chooser(*args, **kwargs):
+        pytest.fail("Output import must open directly without a format pre-dialog")
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", unexpected_chooser)
+    called = []
+    fake_gui: Any = SimpleNamespace(
+        btn_import_igor2_trace_clicked=lambda: called.append(True)
+    )
+    Gui.btn_import_trace_patchclamp_clicked(fake_gui)
     assert called == [True]
