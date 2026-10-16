@@ -1088,26 +1088,6 @@ class Gui(QtWidgets.QMainWindow):
         self._dispatch_io_task(_save_task, f"Saving to {filename.name}…", _on_saved)
         return True
 
-    def btn_export_simulation_results_clicked(self) -> None:
-        filename, _ = getsavefilename(
-            self,
-            "Export results",
-            "data.h5",
-            "hdf5 file (*.h5)",
-        )
-        if filename == "":
-            return
-        try:
-            self.project.b2_model.save_to_h5(filename)
-        except Exception as e:
-            self.logger.warning(f"Failed to export to file {filename}: {e}")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                f"Could not export to file '{filename}': {e}",
-            )
-            return
-
     def btn_edit_clicked(self) -> None:
         old_neuron_count = self.project.b2_model.get_defined_neuron_count()
         mdiag = ModelEditorDialog(
@@ -3113,15 +3093,6 @@ class Gui(QtWidgets.QMainWindow):
             export_data_menu,
             None,
             icon="mdi6.file-code",
-        )
-
-        add_action(
-            "Export &simulation results",
-            self.btn_export_simulation_results_clicked,
-            export_data_menu,
-            None,
-            shortcut="Ctrl+Shift+E",
-            icon="mdi6.content-save-move",
         )
 
         toolbar.addSeparator()

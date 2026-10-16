@@ -2673,52 +2673,6 @@ def test_gui_import(
     gui.close()
 
 
-def test_gui_export_with_simulation_data(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    qtbot.wait(delay_after_update_model_call_in_ms)
-    # generate some simulation data
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
-    gui.btn_continue_simulation_clicked()
-    _wait_for_brian2_simulation(qtbot, gui)
-    filename = tmp_path / "test.h5"
-    assert not filename.exists()
-    # mock getSaveFileName to return the desired filename
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
-    )
-    gui.btn_export_simulation_results_clicked()
-    assert filename.exists()
-    gui.close()
-
-
-def test_gui_export_empty_project(
-    tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
-) -> None:
-    gui = Gui()
-    gui.show()
-    qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible())
-    gui.update_project(Project())
-    filename = tmp_path / "test.h5"
-    assert not filename.exists()
-    assert len(qmessagebox_calls) == 0
-    # mock getSaveFileName to return the desired filename
-    monkeypatch.setattr(
-        QtWidgets.QFileDialog, "getSaveFileName", lambda *args: (f"{filename}", True)
-    )
-    gui.btn_export_simulation_results_clicked()
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "critical"
-    assert "export error" in qmessagebox_calls[0]["title"].lower()
-    assert not filename.exists()
-    gui.close()
-
-
 def test_gui_export_igor2_single_wave_csv(
     tmp_path: Path, monkeypatch: MonkeyPatch, qmessagebox_calls: list
 ) -> None:
