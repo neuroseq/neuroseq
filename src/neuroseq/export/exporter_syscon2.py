@@ -12,11 +12,11 @@ from dataclasses import field
 import brian2.numpy_ as np
 from scipy.ndimage import distance_transform_edt
 
+from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import SysconSequenceObject
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
-from neuroseq.power_lut import PowerLut
-from neuroseq.power_lut import power_lut_mw_to_percent
 from neuroseq.stim import StimArray
 
 _BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")

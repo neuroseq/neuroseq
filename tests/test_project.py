@@ -13,8 +13,8 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
+from neuroseq.export.power_lut import PowerLut
 from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.power_lut import PowerLut
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray

@@ -51,6 +51,7 @@ from neuroseq.export.exporter_igor2 import export_igor2_ibw
 from neuroseq.export.exporter_igor2 import export_igor2_pxp
 from neuroseq.export.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.export.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
+from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
@@ -77,7 +78,6 @@ from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
-from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.syscon2_panel import SysCon2Panel

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from neuroseq.power_lut import DEFAULT_POWER_LUTS
-from neuroseq.power_lut import PowerLut
-from neuroseq.power_lut import parse_power_lut_text
-from neuroseq.power_lut import power_lut_mw_to_percent
-from neuroseq.power_lut import resolve_power_lut
+from neuroseq.export.power_lut import DEFAULT_POWER_LUTS
+from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.power_lut import parse_power_lut_text
+from neuroseq.export.power_lut import power_lut_mw_to_percent
+from neuroseq.export.power_lut import resolve_power_lut
 
 _REFERENCE_LUT_TEXT = """F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
 [_]

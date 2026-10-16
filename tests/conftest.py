@@ -39,10 +39,10 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"

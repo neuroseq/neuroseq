@@ -39,14 +39,14 @@ from neuroseq.export.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.export.exporter_syscon2 import (
     space_out_stim_values_for_slm_off_on_overlap,
 )
+from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.power_lut import parse_power_lut_text
+from neuroseq.export.power_lut import resolve_power_lut
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import export_stim_array
 from neuroseq.export.syscon2_export_service import generate_sequence_text
 from neuroseq.export.syscon2_export_service import validate_export_name
 from neuroseq.icon_manager import icons
-from neuroseq.power_lut import PowerLut
-from neuroseq.power_lut import parse_power_lut_text
-from neuroseq.power_lut import resolve_power_lut
 
 if TYPE_CHECKING:
     from neuroseq.importer_cellpose import CellposeImportResult

@@ -23,13 +23,13 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.export.power_lut import PowerLut
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importer_scanimage import compact_index
 from neuroseq.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
-from neuroseq.power_lut import PowerLut
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType

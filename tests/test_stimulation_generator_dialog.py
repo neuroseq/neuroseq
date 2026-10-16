@@ -7,8 +7,8 @@ import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
+import neuroseq.export.stimulation_generator_dialog as stimulation_generator_dialog_module
 import neuroseq.export.syscon2_export_service as syscon2_export_service_module
-import neuroseq.stimulation_generator_dialog as stimulation_generator_dialog_module
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.export.exporter_syscon2 import InitialSlmLoadViolation
 from neuroseq.export.exporter_syscon2 import OverlappingPulseGroupViolation
@@ -17,12 +17,12 @@ from neuroseq.export.exporter_syscon2 import SlmGapViolation
 from neuroseq.export.exporter_syscon2 import SlmOffOnOverlapViolation
 from neuroseq.export.exporter_syscon2 import SysconExportReport
 from neuroseq.export.exporter_syscon2 import SysconInputSanityReport
+from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.power_lut import PowerLut
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 
 _REFERENCE_LUT_TEXT = """F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
 [_]
@@ -1346,7 +1346,7 @@ def test_standalone_sanity_fix_marks_project_dirty(qtbot):
 def test_default_export_name_counts_todays_exports(tmp_path: Path) -> None:
     import datetime
 
-    from neuroseq.stimulation_generator_dialog import next_default_export_name
+    from neuroseq.export.stimulation_generator_dialog import next_default_export_name
 
     day = datetime.date(2026, 10, 8)
     assert next_default_export_name(None, day) == "export_seq_2026-10-08_1"
@@ -1359,7 +1359,7 @@ def test_default_export_name_counts_todays_exports(tmp_path: Path) -> None:
 def test_default_export_name_avoids_every_collision_source(tmp_path: Path) -> None:
     import datetime
 
-    from neuroseq.stimulation_generator_dialog import next_default_export_name
+    from neuroseq.export.stimulation_generator_dialog import next_default_export_name
 
     day = datetime.date(2026, 10, 8)
     (tmp_path / "export_seq_2026-10-08_1.seq").write_text("x")
@@ -1437,8 +1437,8 @@ def test_loaded_940_lut_marks_dirty_and_survives_project_save(qtbot, tmp_path):
 
 def test_dialog_starts_with_the_given_output_folder(qtbot, tmp_path) -> None:
     """Issue #614: scripts can be generated without browsing for a folder."""
+    from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
     from neuroseq.project import Project
-    from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 
     dialog = StimulationGeneratorDialog(Project(), output_folder=tmp_path)
     qtbot.addWidget(dialog)

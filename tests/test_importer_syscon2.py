@@ -10,6 +10,7 @@ from qtpy import QtWidgets
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importer_syscon2 import parse_syscon2_seq_file
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
@@ -17,7 +18,6 @@ from neuroseq.importer_syscon2 import sequence_to_stim_values
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 
 

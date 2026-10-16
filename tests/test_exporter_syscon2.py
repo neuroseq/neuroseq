@@ -30,10 +30,10 @@ from neuroseq.export.exporter_syscon2 import space_out_stim_values_for_slm
 from neuroseq.export.exporter_syscon2 import (
     space_out_stim_values_for_slm_off_on_overlap,
 )
+from neuroseq.export.power_lut import PowerLut
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importer_syscon2 import sequence_to_stim_values
-from neuroseq.power_lut import PowerLut
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
