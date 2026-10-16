@@ -16,8 +16,8 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def assert_equal(original: Data, loaded: Data) -> None:

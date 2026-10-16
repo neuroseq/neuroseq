@@ -13,8 +13,8 @@ from neuroseq.export.exporter_igor2 import export_igor2_csv
 from neuroseq.export.exporter_igor2 import export_igor2_ibw
 from neuroseq.export.exporter_igor2 import export_igor2_pxp
 from neuroseq.export.exporter_igor2 import generate_igor2_csv_text
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def test_generate_igor2_csv_text_exports_single_neuron_column() -> None:

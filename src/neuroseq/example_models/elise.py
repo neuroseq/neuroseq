@@ -34,8 +34,8 @@ from neuroseq.example_models.NN import ProgressCallback
 from neuroseq.resources.analysis_plugins._replay_metrics import (
     compute_performance_against_target,
 )
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 if TYPE_CHECKING:
     from neuroseq.project import Project

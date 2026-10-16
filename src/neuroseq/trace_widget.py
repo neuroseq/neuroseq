@@ -13,9 +13,9 @@ from qtpy import QtWidgets
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.dialog_helpers import _SelfRaisingDialog
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_widget import apply_cmap_alpha
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_widget import apply_cmap_alpha
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import get_cmap

@@ -17,6 +17,8 @@ from qtpy import QtWidgets
 
 import neuroseq
 import neuroseq.export.stimulus_export_dialog as stimulus_export_dialog_module
+import neuroseq.stimulation.stim
+import neuroseq.stimulation.stim_editor
 from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
@@ -36,10 +38,10 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.static_input.static_input_controller import StaticInputController
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_editor import DrawMode
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_editor import DrawMode
+from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
@@ -3639,7 +3641,9 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         mode=InteractMode.DRAW,
         draw_mode=DrawMode.DRAW,
         draw_stim_length=1,
-        draw_stim=SimpleNamespace(draw_stim_type=neuroseq.stim.DrawStimType.Constant),
+        draw_stim=SimpleNamespace(
+            draw_stim_type=neuroseq.stimulation.stim.DrawStimType.Constant
+        ),
         _is_valid_slice=lambda neuron_slice, time_slice: True,
         draw_stim_region=lambda neuron_slice, time_slice, erase=False: (
             project.stim_arrays["igor_wave"].values.__setitem__(

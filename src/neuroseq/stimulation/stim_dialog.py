@@ -8,9 +8,9 @@ from qtpy.QtWidgets import QLabel
 from qtpy.QtWidgets import QPushButton
 
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import validate_stim_dt_seconds
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import validate_stim_dt_seconds
 
 
 class EditStimDialog(QDialog):

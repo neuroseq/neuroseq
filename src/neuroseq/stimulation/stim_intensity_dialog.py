@@ -2,12 +2,12 @@ import math
 
 from qtpy import QtWidgets
 
-from neuroseq.stim import DrawStim
-from neuroseq.stim import DrawStimType
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import samples_to_milliseconds
-from neuroseq.stim_timing import snap_milliseconds_to_dt
-from neuroseq.stim_widget import StimType
+from neuroseq.stimulation.stim import DrawStim
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import samples_to_milliseconds
+from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
+from neuroseq.stimulation.stim_widget import StimType
 
 
 class StimIntensityDialog(QtWidgets.QDialog):

@@ -4,7 +4,7 @@ import brian2.numpy_ as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 from neuroseq.utils import detect_period
 from neuroseq.utils import parse_number
 

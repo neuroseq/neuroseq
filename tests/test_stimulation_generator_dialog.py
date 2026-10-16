@@ -21,8 +21,8 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 _REFERENCE_LUT_TEXT = """F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
 [_]

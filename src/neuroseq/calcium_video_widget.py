@@ -20,7 +20,7 @@ from neuroseq.fpl_widget import FPLWidget
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.save_imaging_dialog import SaveImagingDialog
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
 NO_STIM_ARRAY = "None"

@@ -14,9 +14,9 @@ from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.dynamic_input.stdp_window_dialog import StdpWindowDialog
 from neuroseq.dynamic_input.stdp_window_dialog import _NoEpspDetected
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:

@@ -3,7 +3,7 @@ from typing import cast
 
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim_editor import StimEditor
 
 
 def test_controller_forwards_lifecycle_to_active_routines(qtbot) -> None:

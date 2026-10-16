@@ -26,7 +26,7 @@ from neuroseq.export.syscon2_export_service import SysconExportError
 from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import export_stim_array
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 logger = logging.getLogger(__name__)
 

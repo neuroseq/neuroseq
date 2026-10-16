@@ -4,8 +4,8 @@ import brian2.numpy_ as np
 import pytest
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _plugin_module():

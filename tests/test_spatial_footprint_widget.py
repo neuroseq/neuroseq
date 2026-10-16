@@ -32,8 +32,8 @@ from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
 
 

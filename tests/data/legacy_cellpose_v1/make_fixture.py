@@ -20,8 +20,8 @@ from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import generate_aoi_stimulus_mapping
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from tests.test_exporter_syscon2 import _template_header
 
 here = pathlib.Path(__file__).parent

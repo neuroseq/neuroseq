@@ -9,8 +9,8 @@ from neuroseq.static_input.stim_pattern_dialog import StimPatternDialog
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 class StaticInputController(QtCore.QObject):

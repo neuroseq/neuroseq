@@ -31,8 +31,8 @@ from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
 from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
 from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.spike_detection import detect_spikes_voltage_trace
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import stim_dt_matches
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.importers.importer_patch_clamp_data import PreparedIgorWave

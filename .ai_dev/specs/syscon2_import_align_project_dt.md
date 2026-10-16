@@ -54,8 +54,8 @@ The local `stim_array` reference captured before the remap is still valid —
 ## Imports added
 
 ```python
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import stim_dt_matches
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import stim_dt_matches
 ```
 
 ---

@@ -14,10 +14,10 @@ from neuroseq.static_input.stim_patterns import generate_per_neuron
 from neuroseq.static_input.stim_patterns import generate_ramp
 from neuroseq.static_input.stim_patterns import generate_sequential
 from neuroseq.static_input.stim_patterns import generate_simultaneous
-from neuroseq.stim import DrawStimType
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_editor import StimEditor
 
 
 def _make_editor(

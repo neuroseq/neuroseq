@@ -635,8 +635,8 @@ def test_trace_import_preserves_independent_dataset_timing(
     monkeypatch: pytest.MonkeyPatch,
     multiple_columns: bool,
 ) -> None:
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     path = tmp_path / "wave.csv"
     path.write_text(

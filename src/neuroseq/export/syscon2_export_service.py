@@ -25,7 +25,7 @@ from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_
 from neuroseq.export.power_lut import resolve_power_lut
 from neuroseq.importers.importer_syscon2 import original_stim_sidecar_path
 from neuroseq.importers.importer_syscon2 import write_original_stim_sidecar
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 if TYPE_CHECKING:
     from neuroseq.export.power_lut import PowerLut

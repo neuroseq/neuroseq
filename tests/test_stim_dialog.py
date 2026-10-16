@@ -1,9 +1,9 @@
 import numpy as np
 from pytestqt.qtbot import QtBot
 
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_dialog import EditStimDialog
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_dialog import EditStimDialog
 
 
 def test_edit_stim_dialog(qtbot: QtBot):
@@ -58,9 +58,9 @@ def test_edit_stim_dialog(qtbot: QtBot):
 def test_syscon_timestep_preset_preserves_exact_quantum(qtbot):
     import numpy as np
 
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
-    from neuroseq.stim_dialog import EditStimDialog
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+    from neuroseq.stimulation.stim_dialog import EditStimDialog
 
     dialog = EditStimDialog(
         StimArray("stim", StimType.Excitation, np.zeros((10, 2)), "1", 0.001), []

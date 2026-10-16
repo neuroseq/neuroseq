@@ -10,7 +10,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 PLUGIN_ID = "membrane_parameters"
 PLUGIN_NAME = "Estimate membrane parameters"

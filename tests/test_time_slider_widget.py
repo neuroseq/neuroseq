@@ -7,9 +7,9 @@ from pytestqt.qtbot import QtBot
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_widget import StimWidget
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_widget import StimWidget
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.trace_widget import TraceWidget
 

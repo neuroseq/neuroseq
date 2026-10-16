@@ -22,8 +22,8 @@ from neuroseq.example_models.elise import DEFAULT_PARAMS
 from neuroseq.example_projects import elise_project
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _save_options() -> SaveLoadOptions:

@@ -36,7 +36,7 @@ from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import default_export_directory
 from neuroseq.export.syscon2_export_service import default_target_directory
 from neuroseq.export.syscon2_export_service import export_stim_array
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 if TYPE_CHECKING:
     from neuroseq.gui_settings import GuiSettings

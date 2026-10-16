@@ -7,7 +7,7 @@ import brian2.numpy_ as np
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
+    from neuroseq.stimulation.stim import StimArray
 
 
 class BlockEditor(Protocol):

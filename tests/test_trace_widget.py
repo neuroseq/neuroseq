@@ -9,15 +9,16 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+import neuroseq.stimulation.stim
 import neuroseq.timeseries_widget
 from neuroseq import theme
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_widget import StimWidget
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_widget import StimWidget
 from neuroseq.trace_widget import TraceNormDialog
 from neuroseq.trace_widget import TraceWidget
 from neuroseq.trace_widget_state import TraceWidgetState
@@ -1963,7 +1964,9 @@ def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -
     values[600:700, 2] = 30.0
     trace_widget.set_stim_overlay_enabled(True)
     trace_widget.set_stim_overlay_data(
-        StimArray("stim", neuroseq.stim.StimType.Excitation, values, "mW", 0.001)
+        StimArray(
+            "stim", neuroseq.stimulation.stim.StimType.Excitation, values, "mW", 0.001
+        )
     )
 
     marks = trace_widget._stim_onset_graphic

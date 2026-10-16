@@ -77,8 +77,8 @@ from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.static_input.static_input_controller import StaticInputController
-from neuroseq.stim import StimArray
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget

@@ -34,10 +34,10 @@ from neuroseq.dynamic_input.stdp_window import classify_window
 from neuroseq.dynamic_input.stdp_window import delta_t_sweep
 from neuroseq.dynamic_input.stdp_window import interleave_by_magnitude
 from neuroseq.dynamic_input.stdp_window import percent_change
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import samples_to_milliseconds
-from neuroseq.stim_timing import seconds_to_samples_nearest
-from neuroseq.stim_timing import snap_milliseconds_to_dt
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import samples_to_milliseconds
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
 
 # Backwards-compatible import for callers/tests that used the former local
 # exception name before measurement was shared between the routines.
@@ -45,8 +45,8 @@ _NoEpspDetected = NoEpspDetected
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 class StdpWindowBackend(RoutineBackend):

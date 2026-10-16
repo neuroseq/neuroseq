@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 import brian2.numpy_ as np
 
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import detect_period
 
 

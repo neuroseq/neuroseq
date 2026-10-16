@@ -18,8 +18,8 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _make_experiment(

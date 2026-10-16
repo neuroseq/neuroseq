@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 from neuroseq.b2_model import B2Model
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 
 def test_default_construction() -> None:

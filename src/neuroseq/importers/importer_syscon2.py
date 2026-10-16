@@ -9,7 +9,7 @@ from pathlib import Path
 
 import brian2.numpy_ as np
 
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 logger = logging.getLogger(__name__)
 

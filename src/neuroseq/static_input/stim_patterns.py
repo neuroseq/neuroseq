@@ -6,7 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from neuroseq.example_models.elise import _FUER_ELISE_INTRO
-from neuroseq.stim import DrawStimType
+from neuroseq.stimulation.stim import DrawStimType
 
 
 def _validate_common(

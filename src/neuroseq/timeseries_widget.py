@@ -23,7 +23,7 @@ from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
 from neuroseq.neuron_subset_dialog import NeuronSubsetDialog
 from neuroseq.region_of_interest import RegionOfInterest
-from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.text import Text
 from neuroseq.timeline import Timeline
 from neuroseq.utils import InteractMode

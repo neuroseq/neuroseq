@@ -11,9 +11,9 @@ from neuroseq import theme
 from neuroseq.data import TraceData
 from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import EPSPMeasurement
 from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:

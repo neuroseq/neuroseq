@@ -174,7 +174,7 @@ Add export function:
         array_names: ordered list of StimArray names to export; defaults to all.
         Inhibitory arrays (StimType.Inhibition) are negated before export.
         """
-        from neuroseq.stim import StimType  # avoid circular at module level
+        from neuroseq.stimulation.stim import StimType  # avoid circular at module level
 
         if array_names is None:
             array_names = list(stim_arrays.keys())
@@ -246,7 +246,7 @@ A minimal dialog that:
     from __future__ import annotations
     from qtpy import QtWidgets
     from neuroseq.project import Project
-    from neuroseq.stim import StimType
+    from neuroseq.stimulation.stim import StimType
 
     class Igor2PxpStimExportDialog(QtWidgets.QDialog):
         def __init__(self, project: Project, parent: QtWidgets.QWidget | None = None):

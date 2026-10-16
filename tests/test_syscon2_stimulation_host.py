@@ -10,8 +10,8 @@ from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 @pytest.fixture()

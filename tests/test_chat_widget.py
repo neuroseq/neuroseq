@@ -12,8 +12,8 @@ from neuroseq.llm.backend import LLMBackendError
 from neuroseq.llm.backend import Message
 from neuroseq.llm.backend import Role
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 class FakeBackend(LLMBackend):

@@ -188,7 +188,7 @@ src/neuroseq/project.py
       def remap_all_data_to_dt(self, new_dt: float) -> None:
           """ZOH-remap every StimArray and every TraceData to new_dt."""
           from neuroseq.importer_igor2 import resample_wave_zero_order_hold
-          from neuroseq.stim_timing import remap_stim_values_to_dt
+          from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
 
           for stim_array in self.stim_arrays.values():
               if not stim_dt_matches(float(stim_array.dt), new_dt):

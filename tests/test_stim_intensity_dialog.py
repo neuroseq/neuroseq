@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.stim import DrawStim
-from neuroseq.stim import DrawStimType
-from neuroseq.stim import StimType
-from neuroseq.stim_intensity_dialog import StimIntensityDialog
+from neuroseq.stimulation.stim import DrawStim
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_intensity_dialog import StimIntensityDialog
 
 
 def test_stim_intensity_dialog(qtbot: QtBot):

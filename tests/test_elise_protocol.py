@@ -13,8 +13,8 @@ from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.gui import Gui
 from neuroseq.resources.analysis_plugins._replay_metrics import save_learning_curves_csv
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 # Mirrors elise_learning_curves.CURVES_ATTR (the plugin loads via a file spec,
 # not as an importable module, so we reference the attribute name directly).

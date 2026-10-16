@@ -4,7 +4,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.project import Project
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import parse_number
 
 

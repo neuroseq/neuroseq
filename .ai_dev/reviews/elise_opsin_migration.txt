@@ -100,7 +100,7 @@ MUST-FIX
 
         def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
             """The default opsin stims remain loop-detectable."""
-            from neuroseq.stim_loop_dialog import _detect_period
+            from neuroseq.stimulation.stim_loop_dialog import _detect_period
 
             stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
             assert _detect_period(stim_exc) == 1
@@ -115,7 +115,7 @@ MUST-FIX
 
         def test_fuer_elise_opsin_stims_default_are_detected_as_periodic():
             """Both default opsin stims encode the 240-ms cycle."""
-            from neuroseq.stim_loop_dialog import _detect_period
+            from neuroseq.stimulation.stim_loop_dialog import _detect_period
 
             stim_exc, stim_inh = _build_fuer_elise_opsin_stims()
             assert _detect_period(stim_exc) == 240

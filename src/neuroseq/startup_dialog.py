@@ -13,10 +13,10 @@ from neuroseq import console_art
 from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
-from neuroseq.stim_timing import seconds_to_samples_ceil
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
+from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
 
 BLANK_STIM_DURATION_SECONDS = 5.0
 # Matches the neuron count "Create input array" (StimEditor) starts from.

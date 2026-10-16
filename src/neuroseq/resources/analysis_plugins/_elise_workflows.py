@@ -213,8 +213,8 @@ def update_stim_arrays(window: Gui, result: dict) -> None:
     teacher-off validation/replay, so the stim array reflects the true
     timeline of what was simulated and lines up with the imported traces.
     """
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     exc_full = result.get("stim_exc_full")
     inh_full = result.get("stim_inh_full")

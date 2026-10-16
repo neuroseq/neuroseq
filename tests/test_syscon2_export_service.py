@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 
 from neuroseq.export import syscon2_export_service as service
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 @pytest.fixture

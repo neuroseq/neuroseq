@@ -9,9 +9,9 @@ from qtpy import QtCore
 from qtpy import QtGui
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.stim_widget import StimArray
-from neuroseq.stim_widget import StimType
-from neuroseq.stim_widget import StimWidget
+from neuroseq.stimulation.stim_widget import StimArray
+from neuroseq.stimulation.stim_widget import StimType
+from neuroseq.stimulation.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 
 
@@ -1023,7 +1023,7 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
 
 
 def test_active_span_finds_bounds_of_contiguous_nonzero_run() -> None:
-    from neuroseq.stim_widget import _active_span
+    from neuroseq.stimulation.stim_widget import _active_span
 
     column = np.array([0, 1, 2, 2, 0, 0, 3, 0], dtype=float)
     assert _active_span(column, 0) is None

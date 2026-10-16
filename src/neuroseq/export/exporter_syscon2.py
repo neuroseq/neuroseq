@@ -17,7 +17,7 @@ from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 _BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
 _HEADER_HASH_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){15}$")

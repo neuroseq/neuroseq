@@ -9,7 +9,7 @@ from neuroseq.static_input.stim_patterns import generate_ramp
 from neuroseq.static_input.stim_patterns import generate_sequential
 from neuroseq.static_input.stim_patterns import generate_simultaneous
 from neuroseq.static_input.stim_patterns import parse_neuron_indices
-from neuroseq.stim import DrawStimType
+from neuroseq.stimulation.stim import DrawStimType
 
 
 def test_sequential_default_matches_getting_started() -> None:

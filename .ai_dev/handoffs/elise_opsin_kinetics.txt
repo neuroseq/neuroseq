@@ -794,7 +794,7 @@ schema_version metadata), save, reload.
     import pytest
     from neuroseq.project import Project
     from neuroseq.save_load_options import SaveLoadOptions
-    from neuroseq.stim import StimArray, StimType
+    from neuroseq.stimulation.stim import StimArray, StimType
     from neuroseq.example_models.elise import DEFAULT_PARAMS
 
     def _build_legacy_project(tfinal_ms: int = 100) -> Project:

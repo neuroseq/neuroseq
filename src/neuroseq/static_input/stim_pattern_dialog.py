@@ -13,10 +13,10 @@ from neuroseq.static_input.stim_patterns import generate_sequential
 from neuroseq.static_input.stim_patterns import generate_simultaneous
 from neuroseq.static_input.stim_patterns import is_finite_number
 from neuroseq.static_input.stim_patterns import parse_neuron_indices
-from neuroseq.stim import DrawStimType
+from neuroseq.stimulation.stim import DrawStimType
 
 if TYPE_CHECKING:
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 _DEFAULT_STATE: dict[str, float | int | str | bool] = {

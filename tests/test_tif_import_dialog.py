@@ -294,8 +294,8 @@ def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
 
 def test_stimulation_suppression_selector_uses_project_stim_arrays(qtbot):
     from neuroseq.importers.tif_import_dialog import TifImportDialog
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
     dialog = TifImportDialog(stim_arrays={"laser": stim})

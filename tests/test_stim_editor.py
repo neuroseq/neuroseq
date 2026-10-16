@@ -14,17 +14,19 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+import neuroseq.stimulation.stim
+import neuroseq.stimulation.stim_editor
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.project import Project
-from neuroseq.stim import DrawStim
-from neuroseq.stim import DrawStimType
-from neuroseq.stim import StimArray
-from neuroseq.stim_editor import DrawMode
-from neuroseq.stim_editor import SelectMode
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim import DrawStim
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim_editor import DrawMode
+from neuroseq.stimulation.stim_editor import SelectMode
+from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
 
 
@@ -223,7 +225,7 @@ def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
     project.stim_arrays = {
         "a": StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((200, 4)),
             "mV",
             0.001,
@@ -376,7 +378,11 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
     project = Project()
     project.stim_arrays = {
         "a": StimArray(
-            "a", neuroseq.stim.StimType.Excitation, np.zeros((127, 17)), "mV", 0.001
+            "a",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((127, 17)),
+            "mV",
+            0.001,
         )
     }
     cmb_stim = QtWidgets.QComboBox()
@@ -417,7 +423,7 @@ def test_stim_editor_pad_and_trim(
     project.stim_arrays = {
         "a": StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.random.random_sample((500, 10)),
             "mV",
             0.001,
@@ -509,7 +515,9 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     values = np.zeros((1000, 4))
     values[900:950, 0] = 1.0  # non-zero tail that trimming would remove
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, values, "mV", 0.001
+        )
     }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -659,7 +667,7 @@ def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:
 
 def test_reset_stim_array_trims_to_simulation_head(qtbot: QtBot):
     from neuroseq.example_projects import default_project
-    from neuroseq.stim_timing import seconds_to_samples_nearest
+    from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
     project = default_project()
     project.run_simulation(0.05)
@@ -806,7 +814,9 @@ def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     values = np.zeros((1000, 4))
     values[900:950, 0] = 1.0  # non-zero content that pad + undo must preserve
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, values, "mV", 0.001
+        )
     }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -854,14 +864,14 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.array([[1.0], [0.0], [0.0], [0.0], [0.0]], dtype=np.float32),
             "mV",
             0.001,
         )
     )
     other_stim = StimArray(
-        "b", neuroseq.stim.StimType.External, np.ones((10, 1)), "pA", 0.0005
+        "b", neuroseq.stimulation.stim.StimType.External, np.ones((10, 1)), "pA", 0.0005
     )
     project.add_stim_array(other_stim)
     other_values = other_stim.values
@@ -877,7 +887,9 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     qtbot.waitUntil(lambda: stim_editor.isVisible())
     stim_editor.set_project(project)
     stim_editor.draw_stim_length = 4
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
@@ -921,7 +933,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     now carries the stim length through StimIntensityDialog too.
     """
     monkeypatch.setattr(
-        neuroseq.stim_editor,
+        neuroseq.stimulation.stim_editor,
         "StimIntensityDialog",
         MockStimIntensityDialog,
     )
@@ -929,7 +941,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.0005208125,
@@ -977,7 +989,7 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.001,
@@ -986,7 +998,7 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     project.add_stim_array(
         StimArray(
             "b",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.002,
@@ -1014,7 +1026,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     wide_modifier = SimpleNamespace(
         stim_array=StimArray(
             "wide",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 50), dtype=np.float32),
             "mV",
             0.001,
@@ -1023,7 +1035,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     single_modifier = SimpleNamespace(
         stim_array=StimArray(
             "single",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 1), dtype=np.float32),
             "mV",
             0.001,
@@ -1040,7 +1052,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
         current_stim_modifier=wide_modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(
             focus_neuron_range=lambda start, stop: focused_ranges.append((start, stop))
@@ -1069,7 +1081,7 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
     modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((2266, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1088,7 +1100,7 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
         current_stim_modifier=modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1115,7 +1127,7 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
     modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((2266, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1134,7 +1146,7 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
         current_stim_modifier=modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1157,7 +1169,7 @@ def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
     old_modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((100, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1166,7 +1178,7 @@ def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
     new_modifier = SimpleNamespace(
         stim_array=StimArray(
             "b",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((50, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1185,7 +1197,7 @@ def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
         current_stim_modifier=old_modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1219,12 +1231,14 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Rejected
 
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     project = Project()
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.002,
@@ -1249,7 +1263,7 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
 def test_stim_editor_mouse_click_draws_and_erases() -> None:
     stim_array = StimArray(
         "igor_wave",
-        neuroseq.stim.StimType.External,
+        neuroseq.stimulation.stim.StimType.External,
         np.zeros((6, 1), dtype=np.float32),
         "pA",
         0.001,
@@ -1292,7 +1306,7 @@ def test_stim_editor_mouse_click_draws_and_erases() -> None:
 def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> None:
     stim_array = StimArray(
         "igor_wave",
-        neuroseq.stim.StimType.External,
+        neuroseq.stimulation.stim.StimType.External,
         np.zeros((1, 1), dtype=np.float32),
         "pA",
         0.001,
@@ -1379,7 +1393,9 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Rejected
 
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     project = Project()
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -1407,10 +1423,12 @@ def test_stim_editor_actions(
     selection_inverted = 2 - selection
     arr[2:7, 1:3] = selection
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, arr, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, arr, "mV", 0.001
+        )
     }
     monkeypatch.setattr(
-        neuroseq.stim_editor,
+        neuroseq.stimulation.stim_editor,
         "StimIntensityDialog",
         MockStimIntensityDialog,
     )
@@ -1802,10 +1820,16 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     values = np.zeros((100, 2), dtype=np.float32)
     values[10:15, 0] = 1
     project.add_stim_array(
-        StimArray("target", neuroseq.stim.StimType.Excitation, values, "1", 0.001)
+        StimArray(
+            "target", neuroseq.stimulation.stim.StimType.Excitation, values, "1", 0.001
+        )
     )
     other_stim = StimArray(
-        "other", neuroseq.stim.StimType.External, np.ones((10, 2)), "1", 0.002
+        "other",
+        neuroseq.stimulation.stim.StimType.External,
+        np.ones((10, 2)),
+        "1",
+        0.002,
     )
     project.add_stim_array(other_stim)
     other_values = other_stim.values

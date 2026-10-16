@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 import brian2.numpy_ as np
 
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 if TYPE_CHECKING:
     from neuroseq.data import TraceData

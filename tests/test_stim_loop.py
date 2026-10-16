@@ -5,12 +5,14 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq
+import neuroseq.stimulation.stim
+import neuroseq.stimulation.stim_editor
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_editor import StimEditor
-from neuroseq.stim_loop_dialog import StimLoopDialog
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_editor import StimEditor
+from neuroseq.stimulation.stim_loop_dialog import StimLoopDialog
 from neuroseq.utils import detect_period
 
 
@@ -148,7 +150,9 @@ def test_stim_editor_loop_stim_array_accepts_and_tiles(
     stim_editor.show()
     qtbot.waitUntil(stim_editor.isVisible)
     stim_editor.set_project(project)
-    monkeypatch.setattr(neuroseq.stim_editor, "StimLoopDialog", _AcceptedDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "StimLoopDialog", _AcceptedDialog
+    )
 
     stim_editor.loop_stim_array()
 
@@ -180,7 +184,9 @@ def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
     stim_editor.show()
     qtbot.waitUntil(stim_editor.isVisible)
     stim_editor.set_project(project)
-    monkeypatch.setattr(neuroseq.stim_editor, "StimLoopDialog", _RejectedDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "StimLoopDialog", _RejectedDialog
+    )
 
     stim_editor.loop_stim_array()
 

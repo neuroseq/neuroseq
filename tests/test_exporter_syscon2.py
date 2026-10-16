@@ -34,8 +34,8 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 _TTL_QUANTUM_US = 520.8125
 _DT_S = 0.0005208125  # exact literal; avoids float rounding from _TTL_QUANTUM_US * 1e-6

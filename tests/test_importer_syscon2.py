@@ -17,8 +17,8 @@ from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
 from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _sample_seq_text() -> str:

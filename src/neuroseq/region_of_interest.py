@@ -4,7 +4,7 @@ import pygfx
 from fastplotlib import Graphic
 from fastplotlib.utils import mesh_masks
 
-from neuroseq.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import format_milliseconds
 
 
 class RegionOfInterest(Graphic):

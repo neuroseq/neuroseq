@@ -18,8 +18,8 @@ from neuroseq.importers.patch_clamp_data_input_import_dialog import (
     PatchClampDataInputImportDialog,
 )
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:

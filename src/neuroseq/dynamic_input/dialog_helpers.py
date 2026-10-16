@@ -9,7 +9,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 if TYPE_CHECKING:
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:

@@ -8,8 +8,8 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 from neuroseq.export.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _stim() -> StimArray:

@@ -29,14 +29,14 @@ from neuroseq.dynamic_input.dynamic_input_routine import SimulationHost
 from neuroseq.dynamic_input.dynamic_input_routine import backend_property
 from neuroseq.dynamic_input.rheobase import bisection_converged
 from neuroseq.dynamic_input.rheobase import next_bracket
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import seconds_to_samples_nearest
-from neuroseq.stim_timing import snap_milliseconds_to_dt
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 class RheobaseBackend(RoutineBackend):

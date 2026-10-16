@@ -11,8 +11,8 @@ from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 ExampleProjectGenerator = Callable[[], Project]
 

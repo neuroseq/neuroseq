@@ -17,11 +17,11 @@ from neuroseq.importers.importer_syscon2 import group_timed_objects_by_neuron_ta
 from neuroseq.importers.importer_syscon2 import import_sequence_into_stim_array
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_file
 from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import remap_stim_values_to_dt
-from neuroseq.stim_timing import stim_dt_matches
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+from neuroseq.stimulation.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.project import Project

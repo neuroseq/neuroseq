@@ -34,8 +34,8 @@ from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
 from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
 from neuroseq.importers.importer_patch_clamp_data import parse_igor_binary_wave_data
 from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 REAL_BROKEN_PXP = Path(
     "/mnt/live3/svintila/code_scraps/igor2_files/test_files/"

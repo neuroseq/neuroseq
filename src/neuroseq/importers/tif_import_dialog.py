@@ -36,7 +36,7 @@ from neuroseq.importers.importer_tif import PipelineCancelled
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import TifPipelineResult
 from neuroseq.qt_threading import returns_to_main_thread
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 
 
 def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:

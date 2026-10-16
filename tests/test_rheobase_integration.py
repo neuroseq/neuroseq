@@ -13,7 +13,7 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
-from neuroseq.stim_editor import StimEditor
+from neuroseq.stimulation.stim_editor import StimEditor
 
 
 def test_rheobase_closed_loop_finds_threshold_on_real_model(

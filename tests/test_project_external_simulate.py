@@ -12,8 +12,8 @@ from neuroseq.example_models.elise import _matching_potential_to_opsins
 from neuroseq.example_models.elise import _migrate_legacy_elise_stim
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _full_options() -> SaveLoadOptions:

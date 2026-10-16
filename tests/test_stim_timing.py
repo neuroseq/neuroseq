@@ -3,16 +3,16 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neuroseq.stim_timing import format_milliseconds
-from neuroseq.stim_timing import milliseconds_to_samples_nearest
-from neuroseq.stim_timing import remap_stim_values_to_dt
-from neuroseq.stim_timing import samples_to_milliseconds
-from neuroseq.stim_timing import samples_to_seconds
-from neuroseq.stim_timing import seconds_to_samples_ceil
-from neuroseq.stim_timing import seconds_to_samples_nearest
-from neuroseq.stim_timing import snap_milliseconds_to_dt
-from neuroseq.stim_timing import stim_dt_matches
-from neuroseq.stim_timing import validate_stim_dt_seconds
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import milliseconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+from neuroseq.stimulation.stim_timing import samples_to_milliseconds
+from neuroseq.stimulation.stim_timing import samples_to_seconds
+from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
+from neuroseq.stimulation.stim_timing import stim_dt_matches
+from neuroseq.stimulation.stim_timing import validate_stim_dt_seconds
 
 
 @pytest.mark.parametrize("dt_seconds", [0.001, 0.0005208125, 2])

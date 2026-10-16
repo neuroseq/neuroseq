@@ -16,6 +16,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq
+import neuroseq.stimulation.stim
 from neuroseq.data import Experiment
 from neuroseq.gui import Gui
 
@@ -223,9 +224,9 @@ def test_run_with_overshoot_tiles_stim_before_dispatch(
 
     stim = np.arange(200, dtype=np.float32).reshape(100, 2)
     project.add_stim_array(
-        neuroseq.stim.StimArray(
+        neuroseq.stimulation.stim.StimArray(
             "u_inp",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             stim,
             "mV",
             0.001,

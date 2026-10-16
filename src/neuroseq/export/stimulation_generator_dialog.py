@@ -51,7 +51,7 @@ from neuroseq.icon_manager import icons
 if TYPE_CHECKING:
     from neuroseq.importers.importer_cellpose import CellposeImportResult
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
+    from neuroseq.stimulation.stim import StimArray
 
 
 _EXPORT_SUFFIXES = (".seq", "_original_stim.npz", "_overview.png")

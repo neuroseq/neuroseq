@@ -12,7 +12,7 @@ from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import StdpSynapticTunin
 from neuroseq.dynamic_input.stdp_window_dialog import StdpWindowDialog
 
 if TYPE_CHECKING:
-    from neuroseq.stim_editor import StimEditor
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 
 class DynamicInputController(QtCore.QObject):

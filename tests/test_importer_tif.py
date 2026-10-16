@@ -116,8 +116,8 @@ def test_roi_average_suppresses_frames_overlapping_stimulation(tmp_path):
     import tifffile
 
     from neuroseq.importers.importer_tif import run_roi_average_pipeline
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     path = tmp_path / "stack.tif"
     stack = np.arange(1, 7, dtype=np.uint16)[:, None, None]

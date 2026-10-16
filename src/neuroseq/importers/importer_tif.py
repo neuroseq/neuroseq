@@ -23,7 +23,7 @@ import brian2.numpy_ as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
-    from neuroseq.stim import StimArray
+    from neuroseq.stimulation.stim import StimArray
 
 logger = logging.getLogger(__name__)
 
