@@ -49,56 +49,6 @@ def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) ->
     qtbot.waitUntil(lambda: gui._io_worker is None, timeout=timeout)
 
 
-class _MockAxes:
-    def __init__(self) -> None:
-        self.scatter_calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
-
-    def scatter(self, *args: Any, **kwargs: Any) -> None:
-        self.scatter_calls.append((args, kwargs))
-
-    def set_xlabel(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-    def set_ylabel(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-    def set_title(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-    def tick_params(self, *args: Any, **kwargs: Any) -> None:
-        return
-
-
-class _MockFigure:
-    def __init__(self, save_error: Exception | None = None) -> None:
-        self.save_error = save_error
-        self.saved: list[tuple[str, dict[str, Any]]] = []
-        self.tight_layout_called = False
-
-    def tight_layout(self) -> None:
-        self.tight_layout_called = True
-
-    def savefig(self, path: str, **kwargs: Any) -> None:
-        if self.save_error is not None:
-            raise self.save_error
-        self.saved.append((path, kwargs))
-
-
-def _make_spike_export_gui(
-    spike_name: str,
-    spike_data: SpikeData | None,
-) -> Any:
-    return SimpleNamespace(
-        cmb_spike=SimpleNamespace(currentText=lambda: spike_name),
-        project=SimpleNamespace(
-            get_data=lambda name, data_type: (
-                spike_data if data_type is SpikeData else None
-            )
-        ),
-        logger=logging.getLogger("test_spike_export"),
-    )
-
-
 @pytest.mark.parametrize(
     ("method_name", "software", "inner_name"),
     [
@@ -720,7 +670,7 @@ def test_reshowing_a_copy_detached_panel_leaves_its_window_open(
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
 
-    gui.detach_panel_copy(gui.trace_widget)
+    gui.detach_panel(gui.trace_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
     action = gui._view_actions[gui.trace_widget]
     assert action.isChecked()
@@ -740,7 +690,7 @@ def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
 
-    gui.detach_panel_copy(gui.trace_widget)
+    gui.detach_panel(gui.trace_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
 
     assert window.windowTitle() == "Traces - Section / Project"
@@ -757,7 +707,7 @@ def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
 
-    gui.detach_panel_copy(gui.trace_widget)
+    gui.detach_panel(gui.trace_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
     detached_widget = window._widget
 
@@ -807,7 +757,7 @@ def test_hovering_in_a_detached_trace_copy_also_highlights_the_neuron(
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
 
-    gui.detach_panel_copy(gui.trace_widget)
+    gui.detach_panel(gui.trace_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
     detached_widget = window._widget
 
@@ -826,7 +776,7 @@ def test_detached_spatial_footprint_copy_shares_state_with_original(
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.spatial_footprint_widget)
 
-    gui.detach_panel_copy(gui.spatial_footprint_widget)
+    gui.detach_panel(gui.spatial_footprint_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
     detached_widget = window._widget
 
@@ -990,7 +940,7 @@ def test_detached_console_copy_close_button_closes_its_own_window_only(
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.console_widget)
 
-    gui.detach_panel_copy(gui.console_widget)
+    gui.detach_panel(gui.console_widget, keep_original=True)
     window = gui._detached_panel_windows[-1]
 
     window._widget.close_requested.emit()
@@ -2816,7 +2766,12 @@ def test_gui_export_igor2_single_wave_csv(
         logger=logging.getLogger("test_gui_export_igor2_single_wave_csv"),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     assert output_path.exists()
     assert (
@@ -2876,7 +2831,12 @@ def test_gui_export_igor2_single_wave_ibw(
         logger=logging.getLogger("test_gui_export_ibw"),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     assert output_path.exists()
     loaded = binarywave.load(output_path)
@@ -2933,7 +2893,12 @@ def test_gui_export_igor2_single_wave_ibw_with_as_sweeps_succeeds(
         logger=logging.getLogger("test_gui_export_ibw_sweeps"),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     loaded = binarywave.load(output_path)
     wave_data = loaded["wave"]["wData"].astype(np.float32)
@@ -2988,7 +2953,12 @@ def test_gui_export_igor2_single_wave_ibw_as_sweeps_falls_back_for_non_periodic(
         ),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     loaded = binarywave.load(output_path)
     wave_data = loaded["wave"]["wData"].astype(np.float32)
@@ -3007,7 +2977,12 @@ def test_gui_export_igor2_single_wave_requires_stim_data(
         ),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "information"
@@ -3059,7 +3034,9 @@ def test_gui_export_igor2_pxp_stim(
 
     fake_gui: Any = SimpleNamespace(project=project)
 
-    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project, "igor-pxp", parent=fake_gui
+    )
 
     assert output_path.exists()
     assert len(qmessagebox_calls) == 1
@@ -3096,7 +3073,9 @@ def test_gui_export_igor2_pxp_stim_requires_selection(
     )
     fake_gui: Any = SimpleNamespace(project=project)
 
-    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project, "igor-pxp", parent=fake_gui
+    )
 
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "warning"
@@ -3181,7 +3160,12 @@ def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(
         logger=logging.getLogger("test_gui_export_ibw_extras"),
     )
 
-    Gui.btn_export_igor2_single_wave_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project,
+        "igor-single",
+        parent=fake_gui,
+        current_stim_name=fake_gui.cmb_stim.currentText(),
+    )
 
     loaded = binarywave.load(output_path)
     wave_data = loaded["wave"]["wData"].astype(np.float32)
@@ -3244,114 +3228,13 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     monkeypatch.setattr(stimulus_export_dialog_module, "export_igor2_pxp", _fake_export)
 
     fake_gui: Any = SimpleNamespace(project=project)
-    Gui.btn_export_igor2_pxp_stim_clicked(fake_gui)
+    stimulus_export_dialog_module.show_stimulus_export_dialog(
+        fake_gui.project, "igor-pxp", parent=fake_gui
+    )
 
     assert captured["array_names"] == ["exc"]
     assert captured["unit_override"] == "mW/mm^2"
     assert captured["scaling_factor"] == 3.0
-
-
-def test_gui_export_spikes_no_selection(qmessagebox_calls: list) -> None:
-    fake_gui = _make_spike_export_gui("", None)
-
-    Gui.btn_export_spikes_clicked(fake_gui)
-
-    assert len(qmessagebox_calls) == 1
-    assert qmessagebox_calls[0]["name"] == "information"
-    assert "no spike data" in qmessagebox_calls[0]["title"].lower()
-
-
-def test_gui_export_spikes_returns_when_file_dialog_cancelled(
-    monkeypatch: MonkeyPatch,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    spike_data = SpikeData(
-        name="spikes",
-        spike_indices=np.array([0, 1], dtype=np.int32),
-        spike_times=np.array([0.1, 0.2], dtype=np.float32),
-    )
-    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
-
-    def _unexpected_subplots(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
-        raise AssertionError("subplots should not be called when no file is selected")
-
-    monkeypatch.setattr(neuroseq.gui, "getsavefilename", lambda *args: ("", ""))
-    monkeypatch.setattr(plt, "subplots", _unexpected_subplots)
-
-    Gui.btn_export_spikes_clicked(fake_gui)
-
-    assert qmessagebox_calls == []
-
-
-def test_gui_export_spikes_saves_figure(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    spike_data = SpikeData(
-        name="spikes",
-        spike_indices=np.array([0, 1, 0], dtype=np.int32),
-        spike_times=np.array([0.1, 0.2, 0.3], dtype=np.float32),
-    )
-    output_path = tmp_path / "spikes.png"
-    fig = _MockFigure()
-    ax = _MockAxes()
-    closed_figs: list[_MockFigure] = []
-    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
-
-    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
-    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "getsavefilename",
-        lambda *args: (str(output_path), "PNG image (*.png)"),
-    )
-
-    Gui.btn_export_spikes_clicked(fake_gui)
-
-    assert fig.saved == [
-        (str(output_path), {"dpi": 300, "bbox_inches": "tight"}),
-    ]
-    assert fig.tight_layout_called is True
-    assert len(ax.scatter_calls) == 1
-    assert closed_figs == [fig]
-    assert any(call["name"] == "information" for call in qmessagebox_calls)
-
-
-def test_gui_export_spikes_closes_figure_on_save_error(
-    monkeypatch: MonkeyPatch,
-    tmp_path: Path,
-    qmessagebox_calls: list,
-) -> None:
-    import matplotlib.pyplot as plt
-
-    spike_data = SpikeData(
-        name="spikes",
-        spike_indices=np.array([0, 1], dtype=np.int32),
-        spike_times=np.array([0.1, 0.2], dtype=np.float32),
-    )
-    output_path = tmp_path / "spikes.png"
-    fig = _MockFigure(save_error=OSError("disk full"))
-    ax = _MockAxes()
-    closed_figs: list[_MockFigure] = []
-    fake_gui = _make_spike_export_gui("exp :: spikes", spike_data)
-
-    monkeypatch.setattr(plt, "subplots", lambda *args, **kwargs: (fig, ax))
-    monkeypatch.setattr(plt, "close", lambda figure: closed_figs.append(figure))
-    monkeypatch.setattr(
-        neuroseq.gui,
-        "getsavefilename",
-        lambda *args: (str(output_path), "PNG image (*.png)"),
-    )
-
-    Gui.btn_export_spikes_clicked(fake_gui)
-
-    assert closed_figs == [fig]
-    assert any(call["name"] == "critical" for call in qmessagebox_calls)
 
 
 def test_gui_import_igor2_wave_updates_selected_stim(
@@ -4540,7 +4423,10 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
         stimulus_export_dialog_module, "StimulationGeneratorDialog", RecordingDialog
     )
 
-    gui.open_stimulation_generator_dialog()
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("SysCon2", True)
+    )
+    gui.btn_export_light_stimulus_clicked()
 
     assert opened == ["second_stim"]
     gui.close()
@@ -4600,8 +4486,6 @@ def test_main_menu_export_updates_setup_preview_without_import(
 ):
     from qtpy import QtGui
 
-    import neuroseq.gui as gui_module
-
     gui = Gui()
     qtbot.addWidget(gui)
     path = tmp_path / "overview.png"
@@ -4609,13 +4493,18 @@ def test_main_menu_export_updates_setup_preview_without_import(
     image.fill()
     image.save(str(path))
 
-    class ExportDialog(gui_module.StimulationGeneratorDialog):
+    class ExportDialog(stimulus_export_dialog_module.StimulationGeneratorDialog):
         def exec(self):
             self.sequence_generated.emit("offline.seq", str(path), frozenset({1}))
             return 0
 
-    monkeypatch.setattr(gui_module, "StimulationGeneratorDialog", ExportDialog)
-    gui.open_stimulation_generator_dialog()
+    monkeypatch.setattr(
+        stimulus_export_dialog_module, "StimulationGeneratorDialog", ExportDialog
+    )
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("SysCon2", True)
+    )
+    gui.btn_export_light_stimulus_clicked()
     assert not gui.syscon2_panel.preview_label.pixmap().isNull()
     assert "not imported" in gui.syscon2_panel.preview_status_label.text()
     assert gui.syscon2_panel.export_settings is not None

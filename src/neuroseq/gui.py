@@ -863,14 +863,6 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.cmb_data.setCurrentText(cmb_data_text)
 
-    def _update_load_progress(
-        self,
-        completed_percent: int,
-    ) -> None:
-        self.logger.info(f"loading :: {completed_percent}% complete")
-        self.progress_dialog.setLabelText("Loading...")
-        self.progress_dialog.setValue(completed_percent)
-
     def _prompt_save_before_action(
         self, title: str, message: str, proceed: Callable[[], None]
     ) -> None:
@@ -1115,17 +1107,6 @@ class Gui(QtWidgets.QMainWindow):
                 f"Could not export to file '{filename}': {e}",
             )
             return
-
-    def btn_export_igor2_single_wave_clicked(self) -> None:
-        show_stimulus_export_dialog(
-            self.project,
-            "igor-single",
-            parent=self,
-            current_stim_name=self.cmb_stim.currentText(),
-        )
-
-    def btn_export_igor2_pxp_stim_clicked(self) -> None:
-        show_stimulus_export_dialog(self.project, "igor-pxp", parent=self)
 
     def btn_edit_clicked(self) -> None:
         old_neuron_count = self.project.b2_model.get_defined_neuron_count()
@@ -2766,18 +2747,6 @@ class Gui(QtWidgets.QMainWindow):
             )
             self.logger.exception(e)
 
-    def open_stimulation_generator_dialog(self) -> None:
-        """Open the stimulation script generator dialog."""
-        modifier = self.stim_editor.current_stim_modifier
-        show_stimulus_export_dialog(
-            self.project,
-            "syscon2",
-            parent=self,
-            current_stim_name=(None if modifier is None else modifier.stim_array.name),
-            reserved_names=self.syscon2_panel._remote_sequence_names,
-            on_generated=self.syscon2_panel.show_generated_preview,
-        )
-
     # Import stimulus wrappers
 
     def btn_import_stimulus_light_clicked(self) -> None:
@@ -2822,76 +2791,6 @@ class Gui(QtWidgets.QMainWindow):
             reserved_names=self.syscon2_panel._remote_sequence_names,
             on_generated=self.syscon2_panel.show_generated_preview,
         )
-
-    def btn_export_traces_vector_clicked(self) -> None:
-        """Preview the main trace panel's current arrangement and scaling."""
-        self.trace_widget.preview_traces()
-
-    def btn_export_spikes_clicked(self) -> None:
-        """Export the currently displayed spike data as a publication-quality raster.
-
-        Produces a scatter-plot raster (spike time vs neuron index) saved at 300 DPI.
-        """
-        import matplotlib.pyplot as plt
-
-        spike_name = self.cmb_spike.currentText()
-        if not spike_name:
-            QtWidgets.QMessageBox.information(
-                self,
-                "No spike data",
-                "No spike data is currently selected in the Spikes panel.",
-            )
-            return
-        spike_data = self.project.get_data(spike_name, SpikeData)
-        if spike_data is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "No spike data",
-                f"Could not retrieve spike data '{spike_name}'.",
-            )
-            return
-
-        filename, _ = getsavefilename(
-            self,
-            "Export spikes",
-            f"{spike_name.replace(' :: ', '_')}_spikes.png",
-            "PNG image (*.png);;SVG vector (*.svg);;PDF document (*.pdf)",
-        )
-        if not filename:
-            return
-
-        fig = None
-        try:
-            fig, ax = plt.subplots(figsize=(12, 5))
-            ax.scatter(
-                spike_data.spike_times,
-                spike_data.spike_indices,
-                s=1,
-                c="black",
-                alpha=0.7,
-                linewidths=0,
-            )
-            ax.set_xlabel("Time (s)", fontsize=12)
-            ax.set_ylabel("Neuron index", fontsize=12)
-            ax.set_title(spike_name, fontsize=13)
-            ax.tick_params(labelsize=10)
-            fig.tight_layout()
-            fig.savefig(filename, dpi=300, bbox_inches="tight")
-            QtWidgets.QMessageBox.information(
-                self,
-                "Export successful",
-                f"Spikes exported to '{filename}'.",
-            )
-        except Exception as exc:
-            self.logger.exception("Failed to export spikes")
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Export error",
-                f"Could not export spikes: {exc}",
-            )
-        finally:
-            if fig is not None:
-                plt.close(fig)
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -3645,9 +3544,6 @@ class Gui(QtWidgets.QMainWindow):
             action = self._view_actions.get(source)
             if action is not None and action.isChecked():
                 action.trigger()
-
-    def detach_panel_copy(self, source: QtWidgets.QWidget) -> None:
-        self.detach_panel(source, keep_original=True)
 
     def _build_fresh_trace_widget(self) -> TraceWidget:
         widget = TraceWidget(
