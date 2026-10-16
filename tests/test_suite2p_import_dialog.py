@@ -7,8 +7,8 @@ from qtpy.QtCore import Qt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.suite2p_import_dialog import Suite2pImportDialog
 
 
 class TestSuite2pImportDialog:

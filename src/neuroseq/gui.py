@@ -51,7 +51,6 @@ from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
-from neuroseq.import_dialog import Suite2pImportDialog
 from neuroseq.importer_cellpose import CellposeImportResult
 from neuroseq.importer_cellpose import clone_cellpose_result
 from neuroseq.importer_tif import DEFAULT_FS
@@ -75,6 +74,7 @@ from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
+from neuroseq.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
 from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.syscon2_panel import SysCon2Panel
