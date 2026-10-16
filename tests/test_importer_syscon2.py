@@ -11,14 +11,14 @@ from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
-from neuroseq.importer_syscon2 import import_sequence_into_stim_array
-from neuroseq.importer_syscon2 import parse_syscon2_seq_file
-from neuroseq.importer_syscon2 import parse_syscon2_seq_text
-from neuroseq.importer_syscon2 import sequence_to_stim_values
+from neuroseq.importers.importer_syscon2 import import_sequence_into_stim_array
+from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_file
+from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
+from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
+from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 
 
 def _sample_seq_text() -> str:
@@ -1779,7 +1779,7 @@ def test_conversion_failure_does_not_remap_project(tmp_path, qtbot, mocker):
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
     mocker.patch(
-        "neuroseq.syscon2_import_dialog.import_sequence_into_stim_array",
+        "neuroseq.importers.syscon2_import_dialog.import_sequence_into_stim_array",
         side_effect=ValueError("bad sequence"),
     )
     dialog._import_file()
@@ -1941,8 +1941,8 @@ def test_remap_failure_does_not_mutate_any_live_arrays(tmp_path, qtbot, mocker):
 
 
 def test_group_merges_simultaneous_multi_spot_shapes() -> None:
-    from neuroseq.importer_syscon2 import SysconSequenceObject
-    from neuroseq.importer_syscon2 import _group_entities_by_center_distance
+    from neuroseq.importers.importer_syscon2 import SysconSequenceObject
+    from neuroseq.importers.importer_syscon2 import _group_entities_by_center_distance
 
     def shape(idx: int, start_us: float, x: float, y: float) -> SysconSequenceObject:
         return SysconSequenceObject(
@@ -1971,8 +1971,8 @@ def test_group_merges_simultaneous_multi_spot_shapes() -> None:
 
 
 def test_group_uses_exported_neuron_tags() -> None:
-    from neuroseq.importer_syscon2 import SysconSequenceObject
-    from neuroseq.importer_syscon2 import _group_entities_by_center_distance
+    from neuroseq.importers.importer_syscon2 import SysconSequenceObject
+    from neuroseq.importers.importer_syscon2 import _group_entities_by_center_distance
 
     objs = [
         SysconSequenceObject(

@@ -29,7 +29,7 @@ from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.gui import Gui
 from neuroseq.gui import ToolbarProgressWidget
-from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
@@ -1593,7 +1593,9 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
         def exec(self) -> QtWidgets.QDialog.DialogCode:
             return QtWidgets.QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
     gui = Gui()
     qtbot.addWidget(gui)
 
@@ -1628,7 +1630,9 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         def exec(self) -> QtWidgets.QDialog.DialogCode:
             return QtWidgets.QDialog.DialogCode.Accepted
 
-    monkeypatch.setattr("neuroseq.tif_import_dialog.TifImportDialog", _FakeDialog)
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
 
     class _FakeGui:
         def __init__(self) -> None:
@@ -3373,7 +3377,7 @@ def test_gui_import_igor2_wave_updates_selected_stim(
 def test_gui_import_igor2_trace_updates_selected_trace(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    import neuroseq.patch_clamp_data_output_import_dialog
+    import neuroseq.importers.patch_clamp_data_output_import_dialog
 
     project = Project()
     captured_data: list[TraceData | None] = []
@@ -3448,7 +3452,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
     )
 
     monkeypatch.setattr(
-        neuroseq.patch_clamp_data_output_import_dialog,
+        neuroseq.importers.patch_clamp_data_output_import_dialog,
         "PatchClampDataOutputImportDialog",
         MockPatchClampDataOutputImportDialog,
     )
@@ -3464,7 +3468,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
 def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    import neuroseq.patch_clamp_data_output_import_dialog
+    import neuroseq.importers.patch_clamp_data_output_import_dialog
 
     project = Project()
     project.add_experiment(
@@ -3546,7 +3550,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     )
 
     monkeypatch.setattr(
-        neuroseq.patch_clamp_data_output_import_dialog,
+        neuroseq.importers.patch_clamp_data_output_import_dialog,
         "PatchClampDataOutputImportDialog",
         MockPatchClampDataOutputImportDialog,
     )

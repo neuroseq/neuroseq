@@ -17,8 +17,8 @@ from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
 from neuroseq.fpl_widget import FPLWidget
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_scanimage import compact_index
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.save_imaging_dialog import SaveImagingDialog
 from neuroseq.stim import StimArray
 

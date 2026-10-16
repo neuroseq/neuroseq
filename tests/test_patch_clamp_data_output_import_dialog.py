@@ -12,10 +12,10 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.export.exporter_igor2 import _write_ibw_v5
-from neuroseq.importer_patch_clamp_data import IgorPxpLoadReport
-from neuroseq.importer_patch_clamp_data import IgorWave
-from neuroseq.importer_patch_clamp_data import SkippedPxpRecord
-from neuroseq.patch_clamp_data_output_import_dialog import (
+from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
+from neuroseq.importers.importer_patch_clamp_data import IgorWave
+from neuroseq.importers.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.importers.patch_clamp_data_output_import_dialog import (
     PatchClampDataOutputImportDialog,
 )
 from neuroseq.project import Project
@@ -306,10 +306,11 @@ def test_trace_dialog_loads_pxp_and_shows_wave_picker(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -360,10 +361,11 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -445,10 +447,11 @@ def test_trace_dialog_reimport_same_pxp_wave_is_blocked(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -513,10 +516,11 @@ def test_trace_dialog_warns_when_pxp_records_are_skipped(
     ]
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=skipped),
     )
 
@@ -547,7 +551,7 @@ def test_trace_dialog_optional_spike_detection_adds_spikedata(
     csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
         lambda *args, **kwargs: SpikeData(
             name="Detected spikes",
             spike_indices=np.array([0], dtype=np.int32),
@@ -584,7 +588,7 @@ def test_trace_dialog_spike_detection_off_adds_no_spikedata(
         raise AssertionError("Spike detection should not run when checkbox is off")
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
         _unexpected_spike_detection,
     )
 
@@ -696,7 +700,8 @@ def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
         return "", ""
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_output_import_dialog.getopenfilename", choose_file
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.getopenfilename",
+        choose_file,
     )
     dialog._browse_file()
     assert filters == [

@@ -25,16 +25,16 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.data import Data
-from neuroseq.importer_cellpose import CellPoseImporter
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
-from neuroseq.importer_suite2p import _resolve_suite2p_indices
-from neuroseq.importer_suite2p import prepare_suite2p_spikes
-from neuroseq.importer_suite2p import prepare_suite2p_traces
-from neuroseq.importer_tif import DEFAULT_FS
-from neuroseq.importer_tif import PipelineCancelled
-from neuroseq.importer_tif import TifPipelineParams
-from neuroseq.importer_tif import TifPipelineResult
+from neuroseq.importers.importer_cellpose import CellPoseImporter
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_suite2p import _resolve_suite2p_indices
+from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
+from neuroseq.importers.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importers.importer_tif import DEFAULT_FS
+from neuroseq.importers.importer_tif import PipelineCancelled
+from neuroseq.importers.importer_tif import TifPipelineParams
+from neuroseq.importers.importer_tif import TifPipelineResult
 from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.stim import StimArray
 
@@ -195,7 +195,7 @@ class _PipelineWorker(QtCore.QObject):
     def run(self) -> None:
         handler = _QtLogHandler(self.log.emit)
         suite2p_logger = logging.getLogger("suite2p")
-        neuroseq_logger = logging.getLogger("neuroseq.importer_tif")
+        neuroseq_logger = logging.getLogger("neuroseq.importers.importer_tif")
         suite2p_level = suite2p_logger.level
         neuroseq_level = neuroseq_logger.level
         suite2p_logger.setLevel(logging.INFO)
@@ -211,7 +211,7 @@ class _PipelineWorker(QtCore.QObject):
                 self.progress.emit(msg, float(frac))
 
             if self._pipeline == "roi_average":
-                from neuroseq.importer_tif import run_roi_average_pipeline
+                from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
                 if self._masks is None:
                     raise ValueError("ROI averaging requires Cellpose masks")
@@ -223,7 +223,7 @@ class _PipelineWorker(QtCore.QObject):
                     stim_array=self._stim_array,
                 )
             else:
-                from neuroseq.importer_tif import run_suite2p_pipeline
+                from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
                 result = run_suite2p_pipeline(
                     self._tif_paths, self._masks, self._params, progress=callback

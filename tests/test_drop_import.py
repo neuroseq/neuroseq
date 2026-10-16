@@ -183,7 +183,7 @@ def test_dropping_on_a_panel(
 def test_dropped_seq_file_is_loaded_in_the_dialog(
     gui: Gui, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
+    from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 
     seen: list[str] = []
 
@@ -201,8 +201,8 @@ def test_menu_imports_still_ask_for_files(
 ) -> None:
     """The menu actions pass Qt's "checked" flag; the new keyword-only file
     parameters must not pick it up."""
-    from neuroseq.cellpose_import_dialog import CellposeImportDialog
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     opened: list[str] = []
 

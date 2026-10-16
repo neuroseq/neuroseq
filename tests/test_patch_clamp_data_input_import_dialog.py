@@ -9,10 +9,10 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.export.exporter_igor2 import _write_ibw_v5
-from neuroseq.importer_patch_clamp_data import IgorPxpLoadReport
-from neuroseq.importer_patch_clamp_data import IgorWave
-from neuroseq.importer_patch_clamp_data import SkippedPxpRecord
-from neuroseq.patch_clamp_data_input_import_dialog import (
+from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
+from neuroseq.importers.importer_patch_clamp_data import IgorWave
+from neuroseq.importers.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.importers.patch_clamp_data_input_import_dialog import (
     PatchClampDataInputImportDialog,
 )
 from neuroseq.project import Project
@@ -38,7 +38,8 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
         return "", ""
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.getopenfilename", choose_file
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.getopenfilename",
+        choose_file,
     )
     assert not hasattr(dialog, "format_combo")
     dialog._browse_file()
@@ -306,7 +307,7 @@ def test_patch_clamp_data_input_import_dialog_loads_pxp_and_shows_wave_picker(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -330,10 +331,11 @@ def test_patch_clamp_data_input_import_dialog_loads_pxp_and_shows_wave_picker(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -362,7 +364,7 @@ def test_patch_clamp_data_input_import_dialog_pxp_wave_selection_sets_loaded_wav
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -378,10 +380,11 @@ def test_patch_clamp_data_input_import_dialog_pxp_wave_selection_sets_loaded_wav
     fake_waves = {"root/WaveA": wave_a}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -404,7 +407,7 @@ def test_patch_clamp_data_input_import_dialog_pxp_multi_wave_requires_selection(
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -428,10 +431,11 @@ def test_patch_clamp_data_input_import_dialog_pxp_multi_wave_requires_selection(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -464,7 +468,7 @@ def test_patch_clamp_data_input_import_dialog_loading_csv_after_pxp_clears_wave_
     qtbot: QtBot,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -483,11 +487,11 @@ def test_patch_clamp_data_input_import_dialog_loading_csv_after_pxp_clears_wave_
     }
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
         lambda path: str(path).lower().endswith(".pxp"),
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -519,7 +523,7 @@ def test_patch_clamp_data_input_import_dialog_warns_when_pxp_records_are_skipped
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "test.pxp"
     pxp_path.write_bytes(b"fake")
@@ -542,10 +546,11 @@ def test_patch_clamp_data_input_import_dialog_warns_when_pxp_records_are_skipped
     ]
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=skipped),
     )
 
@@ -572,7 +577,7 @@ def test_patch_clamp_data_input_import_dialog_single_wave_pxp_import_stays_open_
     monkeypatch: pytest.MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "single.pxp"
     pxp_path.write_bytes(b"fake")
@@ -588,10 +593,11 @@ def test_patch_clamp_data_input_import_dialog_single_wave_pxp_import_stays_open_
     fake_waves = {"root/WaveA": wave_a}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -628,7 +634,7 @@ def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_import
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Two waves from the same .pxp must be importable without reopening the dialog."""
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "multi.pxp"
     pxp_path.write_bytes(b"fake")
@@ -652,10 +658,11 @@ def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_import
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 
@@ -715,7 +722,7 @@ def test_patch_clamp_data_input_import_dialog_reimport_same_pxp_wave_is_blocked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A wave already imported in this .pxp session must not be importable again."""
-    from neuroseq.importer_patch_clamp_data import IgorWave
+    from neuroseq.importers.importer_patch_clamp_data import IgorWave
 
     pxp_path = tmp_path / "multi.pxp"
     pxp_path.write_bytes(b"fake")
@@ -739,10 +746,11 @@ def test_patch_clamp_data_input_import_dialog_reimport_same_pxp_wave_is_blocked(
     fake_waves = {"root/WaveA": wave_a, "root/WaveB": wave_b}
 
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.is_pxp_file", lambda _: True
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.is_pxp_file",
+        lambda _: True,
     )
     monkeypatch.setattr(
-        "neuroseq.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.load_igor_pxp_file",
         lambda _: IgorPxpLoadReport(waves=fake_waves, skipped=[]),
     )
 

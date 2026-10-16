@@ -11,7 +11,7 @@ from neuroseq.brightness_contrast import apply_display_range
 from neuroseq.brightness_contrast import auto_display_range
 from neuroseq.brightness_contrast import build_lut
 from neuroseq.brightness_contrast import luminance_histogram
-from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 
 

@@ -5,12 +5,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from neuroseq.importer_cellpose import CellPoseImporter
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import clone_cellpose_result
-from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
-from neuroseq.importer_cellpose import load_background_image
-from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_cellpose import CellPoseImporter
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import clone_cellpose_result
+from neuroseq.importers.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importers.importer_cellpose import load_background_image
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.utils import neuron_indices_to_colors
 
 """

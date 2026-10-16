@@ -30,7 +30,6 @@ from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.calcium_video_widget import CalciumVideoWidget
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
@@ -51,17 +50,20 @@ from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.heatmap_widget import HeatmapWidget
 from neuroseq.icon_manager import icons
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import clone_cellpose_result
-from neuroseq.importer_tif import DEFAULT_FS
+from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import clone_cellpose_result
+from neuroseq.importers.importer_tif import DEFAULT_FS
+from neuroseq.importers.patch_clamp_data_input_import_dialog import (
+    PatchClampDataInputImportDialog,
+)
+from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
+from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
-from neuroseq.patch_clamp_data_input_import_dialog import (
-    PatchClampDataInputImportDialog,
-)
 from neuroseq.project import Project
 from neuroseq.qt_threading import returns_to_main_thread
 from neuroseq.resource_monitor_label import ResourceMonitorLabel
@@ -74,9 +76,7 @@ from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
-from neuroseq.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
-from neuroseq.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
@@ -2247,7 +2247,7 @@ class Gui(QtWidgets.QMainWindow):
     ) -> None:
         """Open dialog to run the Suite2p pipeline on raw 2-photon TIFFs,
         optionally with ``paths`` already listed."""
-        from neuroseq.tif_import_dialog import TifImportDialog
+        from neuroseq.importers.tif_import_dialog import TifImportDialog
 
         dialog = TifImportDialog(
             self,
@@ -2598,7 +2598,7 @@ class Gui(QtWidgets.QMainWindow):
     def btn_import_igor2_trace_clicked(
         self, *, csv_only: bool = False, path: pathlib.Path | None = None
     ) -> None:
-        from neuroseq.patch_clamp_data_output_import_dialog import (
+        from neuroseq.importers.patch_clamp_data_output_import_dialog import (
             PatchClampDataOutputImportDialog,
         )
 

@@ -3,12 +3,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from neuroseq.importer_suite2p import _resolve_suite2p_indices
-from neuroseq.importer_suite2p import compute_normalized_suite2p_spikes
-from neuroseq.importer_suite2p import compute_normalized_suite2p_traces
-from neuroseq.importer_suite2p import prepare_suite2p_spikes
-from neuroseq.importer_suite2p import prepare_suite2p_traces
-from neuroseq.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.importers.importer_suite2p import _resolve_suite2p_indices
+from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_spikes
+from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
+from neuroseq.importers.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 
 
 def test_prepare_suite2p_traces_produces_widget_payload(suite2p_import_data_dir):

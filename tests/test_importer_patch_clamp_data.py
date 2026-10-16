@@ -12,20 +12,28 @@ import brian2.numpy_ as np
 import pytest
 
 from neuroseq.data import TraceData
-from neuroseq.importer_patch_clamp_data import IgorPxpLoadReport
-from neuroseq.importer_patch_clamp_data import IgorWave
-from neuroseq.importer_patch_clamp_data import create_stim_array_from_igor_wave
-from neuroseq.importer_patch_clamp_data import create_trace_data_from_igor_wave
-from neuroseq.importer_patch_clamp_data import import_igor_wave_into_stim_array
-from neuroseq.importer_patch_clamp_data import import_igor_wave_into_trace_data
-from neuroseq.importer_patch_clamp_data import is_pxp_file
-from neuroseq.importer_patch_clamp_data import load_csv_trace_table
-from neuroseq.importer_patch_clamp_data import load_igor_csv_file
-from neuroseq.importer_patch_clamp_data import load_igor_ibw_file
-from neuroseq.importer_patch_clamp_data import load_igor_pxp_file
-from neuroseq.importer_patch_clamp_data import load_igor_wave_file
-from neuroseq.importer_patch_clamp_data import parse_igor_binary_wave_data
-from neuroseq.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
+from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
+from neuroseq.importers.importer_patch_clamp_data import IgorWave
+from neuroseq.importers.importer_patch_clamp_data import (
+    create_stim_array_from_igor_wave,
+)
+from neuroseq.importers.importer_patch_clamp_data import (
+    create_trace_data_from_igor_wave,
+)
+from neuroseq.importers.importer_patch_clamp_data import (
+    import_igor_wave_into_stim_array,
+)
+from neuroseq.importers.importer_patch_clamp_data import (
+    import_igor_wave_into_trace_data,
+)
+from neuroseq.importers.importer_patch_clamp_data import is_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_csv_trace_table
+from neuroseq.importers.importer_patch_clamp_data import load_igor_csv_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_ibw_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
+from neuroseq.importers.importer_patch_clamp_data import parse_igor_binary_wave_data
+from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 

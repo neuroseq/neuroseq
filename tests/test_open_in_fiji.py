@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def test_open_in_fiji_passes_image_path(qtbot, mocker, tmp_path: Path):
-    from neuroseq.cellpose_import_dialog import CellposeImportDialog
+    from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 
     dialog = CellposeImportDialog(parent=None)
     qtbot.addWidget(dialog)
@@ -19,7 +19,7 @@ def test_open_in_fiji_passes_image_path(qtbot, mocker, tmp_path: Path):
     fake_fiji.write_text("")
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value=str(fake_fiji))
     start_detached = mocker.patch(
-        "neuroseq.cellpose_import_dialog.QtCore.QProcess.startDetached",
+        "neuroseq.importers.cellpose_import_dialog.QtCore.QProcess.startDetached",
         return_value=True,
     )
 
@@ -28,7 +28,7 @@ def test_open_in_fiji_passes_image_path(qtbot, mocker, tmp_path: Path):
 
 
 def test_open_in_fiji_without_image_starts_empty_fiji(qtbot, mocker, tmp_path: Path):
-    from neuroseq.cellpose_import_dialog import CellposeImportDialog
+    from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 
     dialog = CellposeImportDialog(parent=None)
     qtbot.addWidget(dialog)
@@ -38,7 +38,7 @@ def test_open_in_fiji_without_image_starts_empty_fiji(qtbot, mocker, tmp_path: P
     fake_fiji.write_text("")
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value=str(fake_fiji))
     start_detached = mocker.patch(
-        "neuroseq.cellpose_import_dialog.QtCore.QProcess.startDetached",
+        "neuroseq.importers.cellpose_import_dialog.QtCore.QProcess.startDetached",
         return_value=True,
     )
 
@@ -47,13 +47,13 @@ def test_open_in_fiji_without_image_starts_empty_fiji(qtbot, mocker, tmp_path: P
 
 
 def test_open_in_fiji_no_op_when_fiji_unset(qtbot, mocker):
-    from neuroseq.cellpose_import_dialog import CellposeImportDialog
+    from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 
     dialog = CellposeImportDialog(parent=None)
     qtbot.addWidget(dialog)
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value="")
     start_detached = mocker.patch(
-        "neuroseq.cellpose_import_dialog.QtCore.QProcess.startDetached"
+        "neuroseq.importers.cellpose_import_dialog.QtCore.QProcess.startDetached"
     )
     dialog._open_in_fiji()
     start_detached.assert_not_called()

@@ -24,10 +24,10 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.export.power_lut import PowerLut
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import resolve_stimulus_to_cellpose_mapping
-from neuroseq.importer_scanimage import compact_index
-from neuroseq.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_scanimage import compact_index
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.save_load_options import SaveLoadOptions
@@ -701,10 +701,10 @@ class Project:
 
     def remap_all_data_to_dt(self, new_dt: float) -> None:
         """ZOH-remap every StimArray and every TraceData in the project to new_dt."""
-        from neuroseq.importer_patch_clamp_data import (  # noqa: PLC0415
+        from neuroseq.importers.importer_patch_clamp_data import (  # noqa: PLC0415
             estimate_resampled_sample_count,
         )
-        from neuroseq.importer_patch_clamp_data import (  # noqa: PLC0415
+        from neuroseq.importers.importer_patch_clamp_data import (  # noqa: PLC0415
             resample_wave_zero_order_hold,
         )
 

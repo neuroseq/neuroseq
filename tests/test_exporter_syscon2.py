@@ -31,9 +31,9 @@ from neuroseq.export.exporter_syscon2 import (
     space_out_stim_values_for_slm_off_on_overlap,
 )
 from neuroseq.export.power_lut import PowerLut
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_syscon2 import parse_syscon2_seq_text
-from neuroseq.importer_syscon2 import sequence_to_stim_values
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
+from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
@@ -397,7 +397,7 @@ def test_export_seq_starts_with_ttl_out_1_trigger_pulse() -> None:
         <= first_pulse.start_time_us
     )
     # An exported file is recognised as a Holo4D layout when re-imported.
-    from neuroseq.importer_syscon2 import _looks_like_holo4d_timeline_layout
+    from neuroseq.importers.importer_syscon2 import _looks_like_holo4d_timeline_layout
 
     assert _looks_like_holo4d_timeline_layout(sequence, tick_resolution_us=500)
 
@@ -1802,7 +1802,9 @@ def test_generate_syscon2_sequence_text_raises_when_segmentation_array_is_none()
 ):
     import numpy as _np
 
-    from neuroseq.importer_cellpose import CellposeImportResult as _CellposeImportResult
+    from neuroseq.importers.importer_cellpose import (
+        CellposeImportResult as _CellposeImportResult,
+    )
 
     no_seg = _CellposeImportResult(
         image_path=Path("dummy.png"),
@@ -2153,9 +2155,9 @@ def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None
 
 
 def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
-    from neuroseq.importer_syscon2 import original_stim_sidecar_path
-    from neuroseq.importer_syscon2 import parse_syscon2_seq_file
-    from neuroseq.importer_syscon2 import write_original_stim_sidecar
+    from neuroseq.importers.importer_syscon2 import original_stim_sidecar_path
+    from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_file
+    from neuroseq.importers.importer_syscon2 import write_original_stim_sidecar
 
     n_neurons = 5
     values = np.zeros((900, n_neurons), dtype=np.float32)

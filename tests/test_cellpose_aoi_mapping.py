@@ -9,18 +9,18 @@ from PIL import Image
 from pytestqt.qtbot import QtBot
 
 from neuroseq import io
-from neuroseq.cellpose_import_dialog import AOI_PERCENT_MODE
-from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
-from neuroseq.importer_cellpose import AOIRole
-from neuroseq.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import CircleAOI
-from neuroseq.importer_cellpose import SquareAOI
-from neuroseq.importer_cellpose import default_aoi_config
-from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
-from neuroseq.importer_cellpose import point_in_circle
-from neuroseq.importer_cellpose import point_in_square
+from neuroseq.importers.cellpose_import_dialog import AOI_PERCENT_MODE
+from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
+from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.importer_cellpose import AOIRole
+from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CircleAOI
+from neuroseq.importers.importer_cellpose import SquareAOI
+from neuroseq.importers.importer_cellpose import default_aoi_config
+from neuroseq.importers.importer_cellpose import generate_aoi_stimulus_mapping
+from neuroseq.importers.importer_cellpose import point_in_circle
+from neuroseq.importers.importer_cellpose import point_in_square
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 

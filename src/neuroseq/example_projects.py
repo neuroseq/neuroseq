@@ -7,9 +7,9 @@ from pathlib import Path
 import brian2 as b2
 import brian2.numpy_ as np
 
-from neuroseq.importer_cellpose import CellPoseImporter
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importers.importer_cellpose import CellPoseImporter
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import generate_linear_stimulus_mapping
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType

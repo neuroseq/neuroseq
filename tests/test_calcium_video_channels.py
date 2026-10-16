@@ -106,7 +106,7 @@ def test_gui_keeps_the_channel_choice_per_video(
 
 def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) -> None:
     """Issue #596: the video shows each mapped cell's neuron id."""
-    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
 
     segmentation = -np.ones((4, 4), dtype=np.int32)
     segmentation[0:2, 0:2] = 0

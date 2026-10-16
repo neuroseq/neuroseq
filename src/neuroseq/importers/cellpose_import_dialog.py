@@ -16,19 +16,19 @@ from qtpy.compat import getopenfilename
 from neuroseq.brightness_contrast import DisplayRange
 from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
-from neuroseq.importer_cellpose import AOIRole
-from neuroseq.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importer_cellpose import CellPoseImporter
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import CircleAOI
-from neuroseq.importer_cellpose import SquareAOI
-from neuroseq.importer_cellpose import clone_aoi_config
-from neuroseq.importer_cellpose import clone_cellpose_result
-from neuroseq.importer_cellpose import default_aoi_config
-from neuroseq.importer_cellpose import generate_aoi_stimulus_mapping
-from neuroseq.importer_cellpose import generate_linear_stimulus_mapping
-from neuroseq.importer_cellpose import point_in_circle
-from neuroseq.importer_cellpose import point_in_square
+from neuroseq.importers.importer_cellpose import AOIRole
+from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importers.importer_cellpose import CellPoseImporter
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CircleAOI
+from neuroseq.importers.importer_cellpose import SquareAOI
+from neuroseq.importers.importer_cellpose import clone_aoi_config
+from neuroseq.importers.importer_cellpose import clone_cellpose_result
+from neuroseq.importers.importer_cellpose import default_aoi_config
+from neuroseq.importers.importer_cellpose import generate_aoi_stimulus_mapping
+from neuroseq.importers.importer_cellpose import generate_linear_stimulus_mapping
+from neuroseq.importers.importer_cellpose import point_in_circle
+from neuroseq.importers.importer_cellpose import point_in_square
 from neuroseq.mapping_validation import ensure_unique_ids
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
@@ -437,7 +437,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         right_layout.setSpacing(8)
         right_layout.addWidget(self.mapping_group)
         guidance_path = (
-            Path(__file__).resolve().parents[2]
+            Path(__file__).resolve().parents[3]
             / "example_data"
             / "cellpose_guidance.png"
         )

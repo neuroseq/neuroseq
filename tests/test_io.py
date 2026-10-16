@@ -350,7 +350,7 @@ def test_experiment_json_normalizes_quantity_times_to_float(tmp_path: Path) -> N
 
 
 def _cellpose_result_for_io(display_range: tuple[int, int] | None):
-    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
 
     return CellposeImportResult(
         image_path=Path("fov.png"),

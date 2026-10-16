@@ -16,7 +16,7 @@ from neuroseq.cell_overlay_widget import CellOverlayWidget
 from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.fpl_widget import FPLWidget
-from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 
 SELECTION_OUTLINE_RED = (0.9, 0.15, 0.15)

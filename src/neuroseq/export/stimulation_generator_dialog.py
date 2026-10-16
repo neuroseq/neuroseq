@@ -49,7 +49,7 @@ from neuroseq.export.syscon2_export_service import validate_export_name
 from neuroseq.icon_manager import icons
 
 if TYPE_CHECKING:
-    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
     from neuroseq.project import Project
     from neuroseq.stim import StimArray
 

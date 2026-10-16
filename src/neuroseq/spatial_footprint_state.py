@@ -7,8 +7,8 @@ from qtpy import QtCore
 
 from neuroseq.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.cell_overlay_widget import stim_id_to_cellpose_id
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import load_background_image
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import load_background_image
 
 
 class SpatialFootprintState(QtCore.QObject):

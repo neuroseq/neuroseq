@@ -10,7 +10,7 @@ import pytest
 import tifffile
 
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.importer_scanimage import index_recording
+from neuroseq.importers.importer_scanimage import index_recording
 from neuroseq.scanimage_connection import ScanImageConnection
 from neuroseq.scanimage_engine_worker import EngineAdapter
 

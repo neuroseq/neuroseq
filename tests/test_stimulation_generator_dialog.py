@@ -19,7 +19,7 @@ from neuroseq.export.exporter_syscon2 import SysconExportReport
 from neuroseq.export.exporter_syscon2 import SysconInputSanityReport
 from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
-from neuroseq.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType

@@ -13,15 +13,19 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
-from neuroseq.importer_patch_clamp_data import IgorWave
-from neuroseq.importer_patch_clamp_data import create_stim_array_from_igor_wave
-from neuroseq.importer_patch_clamp_data import estimate_resampled_sample_count
-from neuroseq.importer_patch_clamp_data import import_igor_wave_into_stim_array
-from neuroseq.importer_patch_clamp_data import is_pxp_file
-from neuroseq.importer_patch_clamp_data import load_igor_pxp_file
-from neuroseq.importer_patch_clamp_data import load_igor_wave_file
-from neuroseq.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
+from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importers.importer_patch_clamp_data import IgorWave
+from neuroseq.importers.importer_patch_clamp_data import (
+    create_stim_array_from_igor_wave,
+)
+from neuroseq.importers.importer_patch_clamp_data import estimate_resampled_sample_count
+from neuroseq.importers.importer_patch_clamp_data import (
+    import_igor_wave_into_stim_array,
+)
+from neuroseq.importers.importer_patch_clamp_data import is_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
+from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.stim import StimType
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import stim_dt_matches

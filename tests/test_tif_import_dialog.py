@@ -14,7 +14,7 @@ from qtpy import QtWidgets
 
 
 def _make_pipeline_result():
-    from neuroseq.importer_tif import TifPipelineResult
+    from neuroseq.importers.importer_tif import TifPipelineResult
 
     n_neurons, n_frames = 4, 100
     F = np.random.default_rng(0).random((n_neurons, n_frames)).astype(np.float32)
@@ -63,8 +63,8 @@ def _make_pipeline_result_with_masks():
 def test_pipeline_worker_dispatches_and_forwards_progress(
     qtbot, mocker, pipeline, function_name
 ):
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.tif_import_dialog import _PipelineWorker
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.tif_import_dialog import _PipelineWorker
 
     result = _make_pipeline_result()
 
@@ -73,7 +73,7 @@ def test_pipeline_worker_dispatches_and_forwards_progress(
         return result
 
     run = mocker.patch(
-        f"neuroseq.importer_tif.{function_name}", side_effect=fake_pipeline
+        f"neuroseq.importers.importer_tif.{function_name}", side_effect=fake_pipeline
     )
     worker = _PipelineWorker(
         [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), pipeline
@@ -93,8 +93,8 @@ def test_pipeline_worker_dispatches_and_forwards_progress(
 
 
 def test_pipeline_worker_forwards_log_signal(qtbot, mocker):
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.tif_import_dialog import _PipelineWorker
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.tif_import_dialog import _PipelineWorker
 
     result = _make_pipeline_result()
 
@@ -104,7 +104,8 @@ def test_pipeline_worker_forwards_log_signal(qtbot, mocker):
         return result
 
     mocker.patch(
-        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=fake_pipeline
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        side_effect=fake_pipeline,
     )
     worker = _PipelineWorker(
         [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), "suite2p"
@@ -118,11 +119,11 @@ def test_pipeline_worker_forwards_log_signal(qtbot, mocker):
 
 
 def test_pipeline_worker_emits_failure(mocker):
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.tif_import_dialog import _PipelineWorker
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.tif_import_dialog import _PipelineWorker
 
     mocker.patch(
-        "neuroseq.importer_tif.run_roi_average_pipeline",
+        "neuroseq.importers.importer_tif.run_roi_average_pipeline",
         side_effect=ValueError("bad stack"),
     )
     worker = _PipelineWorker(
@@ -137,7 +138,7 @@ def test_pipeline_worker_emits_failure(mocker):
 
 
 def test_dialog_disables_loaded_radio_when_no_cellpose_data(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -147,7 +148,7 @@ def test_dialog_disables_loaded_radio_when_no_cellpose_data(qtbot):
 
 
 def test_current_experiment_masks_with_mapping_are_default(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     cellpose_import = MagicMock()
     cellpose_import.stimulus_to_cellpose_mapping = {4: 0, 7: 1}
@@ -165,7 +166,7 @@ def test_selected_mapping_reconstructs_linear_offset(qtbot):
     stimulus_to_cellpose_mapping, so _selected_mapping() used to read a bare
     None there and import under an unintended identity mapping instead of
     the offset the user actually selected."""
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     cellpose_import = MagicMock()
     cellpose_import.stimulus_to_cellpose_mapping = None
@@ -180,7 +181,7 @@ def test_selected_mapping_reconstructs_linear_offset(qtbot):
 
 
 def test_third_radio_selected_resolves_to_none_masks(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -191,7 +192,7 @@ def test_third_radio_selected_resolves_to_none_masks(qtbot):
 
 
 def test_auto_detect_radio_forces_and_disables_pipeline_combo(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -208,7 +209,7 @@ def test_auto_detect_radio_forces_and_disables_pipeline_combo(qtbot):
 
 
 def test_auto_detect_radio_shows_diameter_spinbox_only_in_auto_detect_mode(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -224,7 +225,7 @@ def test_auto_detect_radio_shows_diameter_spinbox_only_in_auto_detect_mode(qtbot
 
 
 def test_dialog_body_is_scrollable_but_run_buttons_stay_fixed(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -236,7 +237,7 @@ def test_dialog_body_is_scrollable_but_run_buttons_stay_fixed(qtbot):
 
 
 def test_wheel_over_parameter_field_scrolls_without_changing_value(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -265,7 +266,7 @@ def test_wheel_over_parameter_field_scrolls_without_changing_value(qtbot):
 
 
 def test_dialog_requires_tifs(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -276,7 +277,7 @@ def test_dialog_requires_tifs(qtbot):
 
 
 def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -292,9 +293,9 @@ def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
 
 
 def test_stimulation_suppression_selector_uses_project_stim_arrays(qtbot):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
     from neuroseq.stim import StimArray
     from neuroseq.stim import StimType
-    from neuroseq.tif_import_dialog import TifImportDialog
 
     stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
     dialog = TifImportDialog(stim_arrays={"laser": stim})
@@ -312,7 +313,7 @@ def test_stimulation_suppression_checkbox_unchecked_with_no_stim_arrays(qtbot):
     """Regression (#580): with no input arrays in the project, the checkbox
     used to stay disabled *and* checked, so the user couldn't untick it even
     though it reads as "suppression is on"."""
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None, stim_arrays={})
     qtbot.addWidget(dialog)
@@ -323,7 +324,7 @@ def test_stimulation_suppression_checkbox_unchecked_with_no_stim_arrays(qtbot):
 
 
 def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -345,13 +346,16 @@ def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
         return result
 
     mocker.patch(
-        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=fake_pipeline
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        side_effect=fake_pipeline,
     )
     mocker.patch(
-        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.question",
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     accept = mocker.patch.object(dialog, "accept")
 
     dialog._start_pipeline()
@@ -364,7 +368,7 @@ def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
 
 
 def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -374,10 +378,10 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
     dialog._tif_list.addItem(str(tif))
     dialog._auto_detect_radio.setChecked(True)
     question = mocker.patch(
-        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.question",
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.No,
     )
-    run = mocker.patch("neuroseq.importer_tif.run_suite2p_pipeline")
+    run = mocker.patch("neuroseq.importers.importer_tif.run_suite2p_pipeline")
 
     dialog._start_pipeline()
 
@@ -389,7 +393,9 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
     run.side_effect = lambda *_args, progress, **_kwargs: result
     question.reset_mock()
     question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     accept = mocker.patch.object(dialog, "accept")
 
     dialog._start_pipeline()
@@ -403,7 +409,7 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
 def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     qtbot, mocker, tmp_path
 ):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     # Build a fake cellpose result so the "use loaded" path works.
     cellpose_import = MagicMock()
@@ -422,7 +428,7 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
 
     result = _make_pipeline_result()
     mock_run = mocker.patch(
-        "neuroseq.importer_tif.run_suite2p_pipeline",
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
         return_value=result,
     )
     # Avoid the success dialog blocking the event loop.
@@ -444,14 +450,14 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
 
 
 def test_finalize_roi_average_imports_raw_trace_only(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
     result = _make_pipeline_result()
     result.extra["pipeline"] = "roi_average"
     information = mocker.patch(
-        "neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information"
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
     )
     accept = mocker.patch.object(dialog, "accept")
 
@@ -483,9 +489,9 @@ def test_finalize_roi_average_trace_indices_follow_mapping_after_remap(qtbot, mo
     because it never got a raw_cellpose_ids array for remap_cellpose_indices()
     to work from."""
     from neuroseq.data import Experiment
-    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
     from neuroseq.project import Project
-    from neuroseq.tif_import_dialog import TifImportDialog
 
     cellpose_import = CellposeImportResult(
         image_path=Path("dummy.png"),
@@ -499,7 +505,9 @@ def test_finalize_roi_average_trace_indices_follow_mapping_after_remap(qtbot, mo
     qtbot.addWidget(dialog)
     result = _make_pipeline_result()
     result.extra["pipeline"] = "roi_average"
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     mocker.patch.object(dialog, "accept")
 
     dialog._finalize_import(result)
@@ -536,7 +544,7 @@ def test_seg_file_source_sets_new_cellpose_result_after_finalize(
     mocker,
     tmp_path,
 ):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -550,7 +558,9 @@ def test_seg_file_source_sets_new_cellpose_result_after_finalize(
     dialog._use_seg_radio.setChecked(True)
     dialog._propagate_new_segmentation = True
     result = _make_pipeline_result_with_masks()
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     mocker.patch.object(dialog, "accept")
 
     dialog._finalize_import(result)
@@ -565,7 +575,7 @@ def test_auto_detect_source_sets_new_cellpose_result_with_no_segmentation_path(
     mocker,
     tmp_path,
 ):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -575,7 +585,9 @@ def test_auto_detect_source_sets_new_cellpose_result_with_no_segmentation_path(
     dialog._auto_detect_radio.setChecked(True)
     dialog._propagate_new_segmentation = True
     result = _make_pipeline_result_with_masks()
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     mocker.patch.object(dialog, "accept")
 
     dialog._finalize_import(result)
@@ -586,7 +598,7 @@ def test_auto_detect_source_sets_new_cellpose_result_with_no_segmentation_path(
 
 
 def test_use_loaded_radio_does_not_set_new_cellpose_result(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     cellpose_import = MagicMock()
     cellpose_import.segmentation_array = np.zeros((2, 3), dtype=np.int32) - 1
@@ -597,7 +609,9 @@ def test_use_loaded_radio_does_not_set_new_cellpose_result(qtbot, mocker, tmp_pa
     dialog._tif_paths.append(tif)
     dialog._use_loaded_radio.setChecked(True)
     result = _make_pipeline_result_with_masks()
-    mocker.patch("neuroseq.tif_import_dialog.QtWidgets.QMessageBox.information")
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
     mocker.patch.object(dialog, "accept")
 
     dialog._finalize_import(result)
@@ -606,7 +620,9 @@ def test_use_loaded_radio_does_not_set_new_cellpose_result(qtbot, mocker, tmp_pa
 
 
 def test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image():
-    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+    from neuroseq.importers.tif_import_dialog import (
+        _build_cellpose_result_from_pipeline,
+    )
 
     result = _make_pipeline_result_with_masks()
 
@@ -624,7 +640,9 @@ def test_build_cellpose_result_from_pipeline_matches_masks_and_mean_image():
 
 
 def test_build_cellpose_result_from_pipeline_prefers_matching_background_image():
-    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+    from neuroseq.importers.tif_import_dialog import (
+        _build_cellpose_result_from_pipeline,
+    )
 
     result = _make_pipeline_result_with_masks()
     # A non-monotonic pattern (unlike mean_image's plain ramp) so a min-max
@@ -640,7 +658,9 @@ def test_build_cellpose_result_from_pipeline_prefers_matching_background_image()
 
 
 def test_build_cellpose_result_from_pipeline_ignores_mismatched_background_image():
-    from neuroseq.tif_import_dialog import _build_cellpose_result_from_pipeline
+    from neuroseq.importers.tif_import_dialog import (
+        _build_cellpose_result_from_pipeline,
+    )
 
     result = _make_pipeline_result_with_masks()
     wrong_shape_background = np.zeros((9, 9), dtype=np.float32)
@@ -656,7 +676,7 @@ def test_build_cellpose_result_from_pipeline_ignores_mismatched_background_image
 
 
 def test_load_seg_file_background_image_prefers_embedded_img_key(tmp_path: Path):
-    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+    from neuroseq.importers.tif_import_dialog import _load_seg_file_background_image
 
     seg_path = tmp_path / "fake_seg.npy"
     embedded_img = np.arange(6, dtype=np.uint16).reshape(2, 3)
@@ -676,7 +696,7 @@ def test_load_seg_file_background_image_prefers_embedded_img_key(tmp_path: Path)
 def test_load_seg_file_background_image_falls_back_to_filename(tmp_path: Path):
     import tifffile
 
-    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+    from neuroseq.importers.tif_import_dialog import _load_seg_file_background_image
 
     image_path = tmp_path / "AVG_projection.tif"
     projection = np.arange(6, dtype=np.uint16).reshape(2, 3)
@@ -699,7 +719,7 @@ def test_load_seg_file_background_image_falls_back_to_filename(tmp_path: Path):
 def test_load_seg_file_background_image_returns_none_when_unavailable(
     tmp_path: Path,
 ):
-    from neuroseq.tif_import_dialog import _load_seg_file_background_image
+    from neuroseq.importers.tif_import_dialog import _load_seg_file_background_image
 
     seg_path = tmp_path / "fake_seg.npy"
     np.save(
@@ -717,7 +737,7 @@ def test_load_seg_file_background_image_returns_none_when_unavailable(
 
 
 def test_pipeline_progress_dialog_details_toggle(qtbot):
-    from neuroseq.tif_import_dialog import _PipelineProgressDialog
+    from neuroseq.importers.tif_import_dialog import _PipelineProgressDialog
 
     dialog = _PipelineProgressDialog("Starting", "Cancel", 0, 100)
     qtbot.addWidget(dialog)
@@ -748,7 +768,7 @@ def test_pipeline_progress_dialog_details_toggle(qtbot):
     ],
 )
 def test_cellpose_result_to_masks_round_trip(seg, expected):
-    from neuroseq.tif_import_dialog import _cellpose_result_to_masks
+    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
 
     fake_result = MagicMock()
     fake_result.segmentation_array = seg
@@ -756,7 +776,7 @@ def test_cellpose_result_to_masks_round_trip(seg, expected):
 
 
 def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -767,7 +787,7 @@ def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):
     b.write_bytes(b"")
 
     mocker.patch(
-        "neuroseq.tif_import_dialog.QtWidgets.QFileDialog.getOpenFileNames",
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QFileDialog.getOpenFileNames",
         return_value=([str(a), str(b), str(a)], ""),
     )
     dialog._browse_tifs()
@@ -777,7 +797,7 @@ def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):
 
 
 def test_remove_selected_tifs_clears_list_and_paths(qtbot, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -794,7 +814,7 @@ def test_remove_selected_tifs_clears_list_and_paths(qtbot, tmp_path):
 
 
 def test_browse_seg_file_sets_path_and_switches_radio(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=MagicMock())
     qtbot.addWidget(dialog)
@@ -802,7 +822,8 @@ def test_browse_seg_file_sets_path_and_switches_radio(qtbot, mocker, tmp_path):
     seg = tmp_path / "image_seg.npy"
     seg.write_bytes(b"")
     mocker.patch(
-        "neuroseq.tif_import_dialog.getopenfilename", return_value=(str(seg), "")
+        "neuroseq.importers.tif_import_dialog.getopenfilename",
+        return_value=(str(seg), ""),
     )
     dialog._browse_seg_file()
     assert dialog._seg_file_path == seg
@@ -810,7 +831,7 @@ def test_browse_seg_file_sets_path_and_switches_radio(qtbot, mocker, tmp_path):
 
 
 def test_resolve_masks_requires_seg_when_seg_radio_selected(qtbot):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -820,7 +841,7 @@ def test_resolve_masks_requires_seg_when_seg_radio_selected(qtbot):
 
 
 def test_resolve_masks_requires_cellpose_when_loaded_radio_selected(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=MagicMock())
     qtbot.addWidget(dialog)
@@ -833,7 +854,7 @@ def test_resolve_masks_requires_cellpose_when_loaded_radio_selected(qtbot, mocke
 
 
 def test_launch_fiji_runs_qprocess_with_selected_tif(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
@@ -848,60 +869,62 @@ def test_launch_fiji_runs_qprocess_with_selected_tif(qtbot, mocker, tmp_path):
 
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value=str(fake_fiji))
     start_detached = mocker.patch(
-        "neuroseq.tif_import_dialog.QtCore.QProcess.startDetached", return_value=True
+        "neuroseq.importers.tif_import_dialog.QtCore.QProcess.startDetached",
+        return_value=True,
     )
     dialog._launch_fiji()
     start_detached.assert_called_once_with(str(fake_fiji), [str(a)])
 
 
 def test_launch_fiji_no_op_when_path_not_resolved(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value="")
     start_detached = mocker.patch(
-        "neuroseq.tif_import_dialog.QtCore.QProcess.startDetached"
+        "neuroseq.importers.tif_import_dialog.QtCore.QProcess.startDetached"
     )
     dialog._launch_fiji()
     start_detached.assert_not_called()
 
 
 def test_launch_cellpose_invokes_subprocess(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
     mocker.patch(
-        "neuroseq.tif_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.tif_import_dialog.importlib.util.find_spec",
         return_value=object(),  # cellpose "found"
     )
     # Stub the post-launch GPU warning: it imports torch, whose first-time CUDA
     # init shells out via subprocess.Popen (e.g. `ldconfig -p`). Because
-    # `neuroseq.tif_import_dialog.subprocess` is the real subprocess module,
+    # `neuroseq.importers.tif_import_dialog.subprocess` is the real subprocess module,
     # the patch below is global and would otherwise count that call too, making
     # this assertion order-dependent on whether torch was already imported.
     mocker.patch("neuroseq.gpu.warn_if_gpu_unavailable")
-    popen = mocker.patch("neuroseq.tif_import_dialog.subprocess.Popen")
+    popen = mocker.patch("neuroseq.importers.tif_import_dialog.subprocess.Popen")
     dialog._launch_cellpose()
     popen.assert_called_once()
 
 
 def test_launch_cellpose_warns_when_missing(qtbot, mocker):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
     mocker.patch(
-        "neuroseq.tif_import_dialog.importlib.util.find_spec", return_value=None
+        "neuroseq.importers.tif_import_dialog.importlib.util.find_spec",
+        return_value=None,
     )
-    popen = mocker.patch("neuroseq.tif_import_dialog.subprocess.Popen")
+    popen = mocker.patch("neuroseq.importers.tif_import_dialog.subprocess.Popen")
     dialog._launch_cellpose()
     popen.assert_not_called()
 
 
 def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     cellpose_import = MagicMock()
     cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
@@ -914,7 +937,7 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
     dialog._tif_list.addItem(str(tif))
 
     mocker.patch(
-        "neuroseq.importer_tif.run_suite2p_pipeline",
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
         side_effect=RuntimeError("synthetic failure"),
     )
     dialog._start_pipeline()
@@ -923,8 +946,8 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
 
 
 def test_pipeline_worker_cancel_emits_cancelled_not_failed(mocker):
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.tif_import_dialog import _PipelineWorker
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.tif_import_dialog import _PipelineWorker
 
     worker = _PipelineWorker(
         [], np.ones((2, 2), dtype=np.int32), TifPipelineParams(), "roi_average"
@@ -937,7 +960,8 @@ def test_pipeline_worker_cancel_emits_cancelled_not_failed(mocker):
         raise AssertionError("pipeline kept running after cancel")
 
     mocker.patch(
-        "neuroseq.importer_tif.run_roi_average_pipeline", side_effect=fake_pipeline
+        "neuroseq.importers.importer_tif.run_roi_average_pipeline",
+        side_effect=fake_pipeline,
     )
     events = {"cancelled": 0, "failed": [], "finished": []}
     worker.cancelled.connect(lambda: events.__setitem__("cancelled", 1))
@@ -955,7 +979,7 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     """Regression test for #592: cancelling must not destroy a running QThread."""
     import threading
 
-    from neuroseq.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
     cellpose_import = MagicMock()
     cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
@@ -978,7 +1002,8 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
         raise AssertionError("pipeline kept running after cancel")
 
     mocker.patch(
-        "neuroseq.importer_tif.run_suite2p_pipeline", side_effect=slow_pipeline
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        side_effect=slow_pipeline,
     )
     rejected = MagicMock()
     mocker.patch.object(
