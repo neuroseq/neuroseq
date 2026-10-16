@@ -18,7 +18,7 @@ from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
 
 
-def test_input_format_selector(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
     dialog = IgorImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
@@ -36,15 +36,25 @@ def test_input_format_selector(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
         return "", ""
 
     monkeypatch.setattr("neuroseq.igor_import_dialog.getopenfilename", choose_file)
-    dialog.format_combo.setCurrentIndex(1)
-    assert dialog.sampling_rate_spin.isVisible()
+    assert not hasattr(dialog, "format_combo")
     dialog._browse_file()
-    assert filters[-1] == "CSV / Text files (*.csv *.txt)"
-    dialog.format_combo.setCurrentIndex(0)
-    assert not dialog.sampling_rate_spin.isVisible()
-    dialog._browse_file()
-    assert "*.ibw" in filters[-1]
+    assert filters == [
+        "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
+    ]
     dialog.close()
+
+
+def test_unsupported_input_format(
+    qtbot: QtBot, qmessagebox_calls: list[dict[str, str]], tmp_path: Path
+) -> None:
+    dialog = IgorImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog.load_file(str(tmp_path / "input.unsupported"))
+    assert dialog.loaded_wave is None
+    assert dialog.file_path == ""
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert "Unsupported" in qmessagebox_calls[-1]["text"]
+    assert ".unsupported" in qmessagebox_calls[-1]["text"]
 
 
 @pytest.mark.parametrize("suffix", [".csv", ".txt", ".TXT"])

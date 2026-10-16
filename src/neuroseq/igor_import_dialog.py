@@ -80,21 +80,15 @@ class IgorImportDialog(QtWidgets.QDialog):
         convention.setWordWrap(True)
         layout.addWidget(convention)
 
-        format_layout = QtWidgets.QFormLayout()
-        self.format_combo = QtWidgets.QComboBox()
-        self.format_combo.addItems(["Igor2", "CSV / Text (.csv, .txt)"])
-        self.format_combo.setCurrentIndex(1 if self.csv_only else 0)
-        format_layout.addRow("Import from:", self.format_combo)
-        layout.addLayout(format_layout)
-
         self.intro = QtWidgets.QLabel(
-            "Import patch-clamp input waveforms from .ibw, .pxp, or the simple "
-            "NeuroSeq-compatible .csv format. Packed experiments can contain many "
+            "Import patch-clamp input waveforms from .pxp, .ibw, .csv, or .txt files. "
+            "CSV and text files contain one numeric sample per row and an optional "
+            "name/header on the first row; set their source sampling rate below. "
+            "Packed experiments can contain many "
             "waves; import as many as you need from the same file, then click Close "
             "when done. Imported waves are placed on NeuroSeq's 1 ms timeline using "
             "zero-order-hold resampling when needed."
         )
-        self.igor_intro = self.intro.text()
         self.intro.setWordWrap(True)
         layout.addWidget(self.intro)
 
@@ -182,8 +176,6 @@ class IgorImportDialog(QtWidgets.QDialog):
         source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
         self.sampling_rate_label.setVisible(self.csv_only)
         self.sampling_rate_spin.setVisible(self.csv_only)
-        self.format_combo.currentIndexChanged.connect(self._on_format_changed)
-        self._on_format_changed(self.format_combo.currentIndex())
         self.match_source_grid_checkbox = QtWidgets.QCheckBox(
             "Adjust NeuroSeq input grid to source/file grid"
         )
@@ -356,31 +348,12 @@ class IgorImportDialog(QtWidgets.QDialog):
         self._update_preview()
         self._update_import_button_state()
 
-    def _on_format_changed(self, index: int) -> None:
-        self.csv_only = index == 1
-        self.intro.setText(
-            "Import a CSV or text input waveform with one numeric sample per row and "
-            "an optional name/header on the first row. Set the source sampling "
-            "rate in Hz before importing. Choose the input units below."
-            if self.csv_only
-            else self.igor_intro
-        )
-        is_csv = (
-            self.loaded_wave.source_format == "csv"
-            if self.loaded_wave is not None
-            else self.csv_only
-        )
-        self.sampling_rate_label.setVisible(is_csv)
-        self.sampling_rate_spin.setVisible(is_csv)
-
     def _browse_file(self) -> None:
         filename, _ = getopenfilename(
             self,
-            "Select CSV or text input" if self.csv_only else "Select patch-clamp input",
+            "Select patch-clamp input",
             "",
-            "CSV / Text files (*.csv *.txt)"
-            if self.csv_only
-            else "Wave files (*.ibw *.pxp *.csv *.txt);;Igor Binary Wave (*.ibw);;Igor Packed Experiment (*.pxp);;CSV / Text files (*.csv *.txt);;All files (*)",
+            "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)",
         )
         if filename:
             self._load_file(filename)
