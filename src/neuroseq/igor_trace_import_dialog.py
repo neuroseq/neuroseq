@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType
 from typing import TYPE_CHECKING
@@ -25,7 +26,6 @@ from neuroseq.importer_igor2 import load_csv_trace_table
 from neuroseq.importer_igor2 import load_igor_pxp_file
 from neuroseq.importer_igor2 import load_igor_wave_file
 from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
-from neuroseq.importer_patchclamp import PeakDetectionParams
 from neuroseq.spike_detection import detect_spikes_voltage_trace
 from neuroseq.stim_timing import format_milliseconds
 from neuroseq.stim_timing import stim_dt_matches
@@ -33,6 +33,16 @@ from neuroseq.stim_timing import stim_dt_matches
 if TYPE_CHECKING:
     from neuroseq.importer_igor2 import PreparedIgorWave
     from neuroseq.project import Project
+
+
+@dataclass
+class PeakDetectionParams:
+    peak_height: float
+    peak_prominence: float
+    min_interval: float
+    peak_distance: int
+    peak_width: int
+
 
 _SPIKE_DETECTION_DEFAULTS = PeakDetectionParams(
     peak_height=3.0,
