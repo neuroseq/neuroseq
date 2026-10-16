@@ -1,5 +1,5 @@
 """Qt-free SysCon2 ``.seq`` export used by the generator dialog, the panel's one-click
-export, and :mod:`neuroseq.syscon2_stimulation_host`.
+export, and :mod:`neuroseq.device_control.syscon2_stimulation_host`.
 
 Keeping a single code path here means every way of producing a sequence applies the same
 export settings and the same sanity gate.

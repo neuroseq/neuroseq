@@ -7,10 +7,10 @@ import threading
 import pytest
 from pytestqt.qtbot import QtBot
 
-import neuroseq.syscon2_connection_manager as connection_manager_module
-from neuroseq.syscon2_client import SysCon2ConnectionError
-from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
-from neuroseq.syscon2_protocol import encode_string
+import neuroseq.device_control.syscon2_connection_manager as connection_manager_module
+from neuroseq.device_control.syscon2_client import SysCon2ConnectionError
+from neuroseq.device_control.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.device_control.syscon2_protocol import encode_string
 
 # A string response whose declared length (DWord header) is honored, but whose
 # payload byte isn't 7-bit ASCII - read_string() raises SysCon2ProtocolError

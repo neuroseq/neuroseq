@@ -10,8 +10,11 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-import neuroseq.syscon2_connection_manager as connection_manager_module
-import neuroseq.syscon2_panel as syscon2_panel_module
+import neuroseq.device_control.syscon2_connection_manager as connection_manager_module
+import neuroseq.device_control.syscon2_panel as syscon2_panel_module
+from neuroseq.device_control.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.device_control.syscon2_panel import SysCon2Panel
+from neuroseq.device_control.syscon2_protocol import encode_string
 from neuroseq.export.syscon2_export_service import SysconExportError
 from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
@@ -19,9 +22,6 @@ from neuroseq.export.syscon2_export_service import default_export_directory
 from neuroseq.project import Project
 from neuroseq.stim import StimArray
 from neuroseq.stim import StimType
-from neuroseq.syscon2_connection_manager import SysCon2ConnectionManager
-from neuroseq.syscon2_panel import SysCon2Panel
-from neuroseq.syscon2_protocol import encode_string
 
 
 class FakeTransport:
@@ -157,7 +157,7 @@ def test_delete_sequence_requires_confirmation(
     panel.sequence_list.setCurrentRow(0)
 
     question = mocker.patch(
-        "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.No,
     )
     qtbot.mouseClick(panel.btn_delete_sequence, QtCore.Qt.MouseButton.LeftButton)
@@ -179,14 +179,14 @@ def test_holo4d_run_requires_confirmation(
     _connect(panel, qtbot, monkeypatch, fake)
 
     mocker.patch(
-        "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.No,
     )
     qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
     assert fake.sent == []
 
     mocker.patch(
-        "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
@@ -211,7 +211,7 @@ def test_laser_emission_uses_selected_device_after_confirmation(
     assert panel.description_combo.currentText() == "Chameleon"
 
     mocker.patch(
-        "neuroseq.syscon2_panel.QtWidgets.QMessageBox.question",
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
     with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
@@ -229,7 +229,9 @@ def test_command_failure_shows_warning(
     fake = FakeTransport([encode_string("Error: device busy")])
     _connect(panel, qtbot, monkeypatch, fake)
 
-    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    warning = mocker.patch(
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
+    )
     with qtbot.waitSignal(panel._manager.command_failed, timeout=2000):
         qtbot.mouseClick(panel.btn_refresh_sequences, QtCore.Qt.MouseButton.LeftButton)
 
@@ -241,7 +243,9 @@ def test_send_to_syscon2_without_project_shows_warning(
     panel: SysCon2Panel, qtbot: QtBot, mocker
 ) -> None:
     dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
-    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    warning = mocker.patch(
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
+    )
 
     qtbot.mouseClick(panel.btn_send_to_syscon2, QtCore.Qt.MouseButton.LeftButton)
 
@@ -473,7 +477,9 @@ def test_export_current_failure_warns_and_does_not_import(
     panel._export_settings = _settings()
     stim = StimArray("a", StimType.External, np.zeros((4, 2)), "", 0.001)
     panel.set_current_stim_provider(lambda: stim)
-    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    warning = mocker.patch(
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
+    )
     handler = mocker.patch.object(panel, "_on_dialog_sequence_generated")
 
     panel._on_export_current_clicked()
@@ -756,7 +762,9 @@ def test_stop_failure_with_nothing_running_returns_to_idle(panel, mocker):
     panel._on_command_finished(run, None)
     panel._on_state_changed({"Holo4D": "Busy"})
     assert "[hardware state: busy]" in panel.execution_label.text()
-    warning = mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    warning = mocker.patch(
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
+    )
     panel._on_holo4d_stop_clicked()
     stop = submit.call_args.args[0]
     panel._on_command_failed(stop, "Could not stop current sequence")
@@ -1022,7 +1030,7 @@ def test_target_power_beside_the_export_button(
     export = mocker.patch.object(
         syscon2_panel_module, "export_stim_array", side_effect=SysconExportError("x")
     )
-    mocker.patch("neuroseq.syscon2_panel.QtWidgets.QMessageBox.warning")
+    mocker.patch("neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning")
     panel._on_export_current_clicked()
 
     used = export.call_args.args[2]

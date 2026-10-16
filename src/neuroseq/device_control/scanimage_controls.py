@@ -9,8 +9,8 @@ from pathlib import Path
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.scanimage_connection import ScanImageConnection
 
 
 class ScanImageControls(QtWidgets.QWidget):

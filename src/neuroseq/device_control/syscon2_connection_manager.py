@@ -1,6 +1,6 @@
 """Qt-facing persistent connection to SysCon2, running on its own background thread.
 
-:class:`SysCon2ConnectionManager` owns a :class:`~neuroseq.syscon2_client.SysCon2Client` on a
+:class:`SysCon2ConnectionManager` owns a :class:`~neuroseq.device_control.syscon2_client.SysCon2Client` on a
 worker ``QThread`` and polls ``Holo4D::GetState`` roughly once a second. Callers on the GUI
 thread use the public methods below; each emits a request signal that Qt marshals onto the
 worker thread automatically (a signal/slot connection between objects living on different
@@ -15,11 +15,11 @@ from collections.abc import Callable
 
 from qtpy import QtCore
 
-from neuroseq.syscon2_client import NamedPipeTransport
-from neuroseq.syscon2_client import SysCon2Client
-from neuroseq.syscon2_client import SysCon2ConnectionError
-from neuroseq.syscon2_protocol import SysCon2Error
-from neuroseq.syscon2_protocol import SysCon2ProtocolError
+from neuroseq.device_control.syscon2_client import NamedPipeTransport
+from neuroseq.device_control.syscon2_client import SysCon2Client
+from neuroseq.device_control.syscon2_client import SysCon2ConnectionError
+from neuroseq.device_control.syscon2_protocol import SysCon2Error
+from neuroseq.device_control.syscon2_protocol import SysCon2ProtocolError
 
 logger = logging.getLogger(__name__)
 

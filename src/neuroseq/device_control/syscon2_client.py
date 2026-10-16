@@ -20,15 +20,15 @@ from dataclasses import dataclass
 from typing import Any
 from typing import Protocol
 
-from neuroseq.syscon2_protocol import Reader
-from neuroseq.syscon2_protocol import build_command_frame
-from neuroseq.syscon2_protocol import encode_bool
-from neuroseq.syscon2_protocol import encode_dword
-from neuroseq.syscon2_protocol import encode_float
-from neuroseq.syscon2_protocol import encode_string
-from neuroseq.syscon2_protocol import parse_standard_response
-from neuroseq.syscon2_protocol import parse_string_response
-from neuroseq.syscon2_protocol import read_string
+from neuroseq.device_control.syscon2_protocol import Reader
+from neuroseq.device_control.syscon2_protocol import build_command_frame
+from neuroseq.device_control.syscon2_protocol import encode_bool
+from neuroseq.device_control.syscon2_protocol import encode_dword
+from neuroseq.device_control.syscon2_protocol import encode_float
+from neuroseq.device_control.syscon2_protocol import encode_string
+from neuroseq.device_control.syscon2_protocol import parse_standard_response
+from neuroseq.device_control.syscon2_protocol import parse_string_response
+from neuroseq.device_control.syscon2_protocol import read_string
 
 PIPE_NAME = "SysCon2ControlInterface"
 

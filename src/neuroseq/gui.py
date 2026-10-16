@@ -41,6 +41,9 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
 from neuroseq.detached_panel_window import DetachedPanelWindow
+from neuroseq.device_control.scanimage_connection import ScanImageConnection
+from neuroseq.device_control.scanimage_controls import ScanImageControls
+from neuroseq.device_control.syscon2_panel import SysCon2Panel
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.example_projects import getting_started_project
@@ -69,15 +72,12 @@ from neuroseq.resource_monitor_label import ResourceMonitorLabel
 from neuroseq.resources.analysis_plugins import _elise_workflows as elise_workflows
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
-from neuroseq.scanimage_connection import ScanImageConnection
-from neuroseq.scanimage_controls import ScanImageControls
 from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stim import StimArray
 from neuroseq.stim_editor import StimEditor
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
-from neuroseq.syscon2_panel import SysCon2Panel
 from neuroseq.time_slider_widget import TimeSliderWidget
 from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget import TraceWidget

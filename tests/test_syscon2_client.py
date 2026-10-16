@@ -4,17 +4,17 @@ import sys
 
 import pytest
 
-from neuroseq.syscon2_client import LightsourceStatus
-from neuroseq.syscon2_client import NamedPipeTransport
-from neuroseq.syscon2_client import SysCon2Client
-from neuroseq.syscon2_client import SysCon2ConnectionError
-from neuroseq.syscon2_client import SysCon2UnavailableError
-from neuroseq.syscon2_protocol import SysCon2Error
-from neuroseq.syscon2_protocol import build_command_frame
-from neuroseq.syscon2_protocol import encode_bool
-from neuroseq.syscon2_protocol import encode_dword
-from neuroseq.syscon2_protocol import encode_float
-from neuroseq.syscon2_protocol import encode_string
+from neuroseq.device_control.syscon2_client import LightsourceStatus
+from neuroseq.device_control.syscon2_client import NamedPipeTransport
+from neuroseq.device_control.syscon2_client import SysCon2Client
+from neuroseq.device_control.syscon2_client import SysCon2ConnectionError
+from neuroseq.device_control.syscon2_client import SysCon2UnavailableError
+from neuroseq.device_control.syscon2_protocol import SysCon2Error
+from neuroseq.device_control.syscon2_protocol import build_command_frame
+from neuroseq.device_control.syscon2_protocol import encode_bool
+from neuroseq.device_control.syscon2_protocol import encode_dword
+from neuroseq.device_control.syscon2_protocol import encode_float
+from neuroseq.device_control.syscon2_protocol import encode_string
 
 
 class FakeTransport:
@@ -263,7 +263,7 @@ def pipe_api(monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import Mock
 
-    import neuroseq.syscon2_client as module
+    import neuroseq.device_control.syscon2_client as module
 
     api = SimpleNamespace(
         GENERIC_READ=1,
@@ -308,7 +308,7 @@ def test_pipe_timeout_cancels_and_reaps_io_before_close(
 ):
     from unittest.mock import Mock
 
-    import neuroseq.syscon2_client as module
+    import neuroseq.device_control.syscon2_client as module
 
     now = [0.0]
     monkeypatch.setattr(module.time, "monotonic", lambda: now[0])
@@ -399,6 +399,6 @@ def test_real_named_pipe_timeout(direction):
     ],
 )
 def test_parse_state_is_tolerant(text: str, expected: str) -> None:
-    from neuroseq.syscon2_client import _parse_state
+    from neuroseq.device_control.syscon2_client import _parse_state
 
     assert _parse_state(text) == expected

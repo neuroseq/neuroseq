@@ -7,13 +7,24 @@ reserved for protocol replies. No arbitrary MATLAB evaluation is exposed.
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import io
 import json
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
+
+
+def _load_importer():
+    """Load the Qt-free indexer without importing the NeuroSeq package."""
+    path = Path(__file__).resolve().parents[1] / "importers" / "importer_scanimage.py"
+    spec = importlib.util.spec_from_file_location("importer_scanimage", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load ScanImage indexer from {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class EngineAdapter:
@@ -31,15 +42,14 @@ class EngineAdapter:
                     "Named MATLAB session not found. Run matlab.engine.shareEngine('NeuroSeqScanImage') in the ScanImage MATLAB window."
                 )
             self.engine = matlab.engine.connect_matlab(name)
-            importlib.import_module("importer_scanimage")
+            _load_importer()
             self.engine.addpath(
-                str(Path(__file__).parent / "resources" / "scanimage"), nargout=0
+                str(Path(__file__).resolve().parents[1] / "resources" / "scanimage"),
+                nargout=0,
             )
             return self._call("probe", {})
         if operation == "index":
-            from importer_scanimage import index_recording
-
-            return index_recording(arguments["paths"])
+            return _load_importer().index_recording(arguments["paths"])
         if operation == "record":
             # Write provenance before issuing any hardware command. A sidecar
             # survives a GUI crash even if the project has not been saved yet.

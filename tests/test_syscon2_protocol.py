@@ -2,34 +2,34 @@ from __future__ import annotations
 
 import pytest
 
-from neuroseq.syscon2_protocol import SysCon2Error
-from neuroseq.syscon2_protocol import SysCon2ProtocolError
-from neuroseq.syscon2_protocol import build_command_frame
-from neuroseq.syscon2_protocol import bytes_reader
-from neuroseq.syscon2_protocol import encode_bool
-from neuroseq.syscon2_protocol import encode_byte
-from neuroseq.syscon2_protocol import encode_command
-from neuroseq.syscon2_protocol import encode_double
-from neuroseq.syscon2_protocol import encode_dword
-from neuroseq.syscon2_protocol import encode_float
-from neuroseq.syscon2_protocol import encode_qword
-from neuroseq.syscon2_protocol import encode_raw
-from neuroseq.syscon2_protocol import encode_string
-from neuroseq.syscon2_protocol import encode_structures
-from neuroseq.syscon2_protocol import encode_word
-from neuroseq.syscon2_protocol import parse_standard_response
-from neuroseq.syscon2_protocol import parse_string_response
-from neuroseq.syscon2_protocol import read_bool
-from neuroseq.syscon2_protocol import read_byte
-from neuroseq.syscon2_protocol import read_data_response_status
-from neuroseq.syscon2_protocol import read_double
-from neuroseq.syscon2_protocol import read_dword
-from neuroseq.syscon2_protocol import read_float
-from neuroseq.syscon2_protocol import read_qword
-from neuroseq.syscon2_protocol import read_raw
-from neuroseq.syscon2_protocol import read_string
-from neuroseq.syscon2_protocol import read_structures
-from neuroseq.syscon2_protocol import read_word
+from neuroseq.device_control.syscon2_protocol import SysCon2Error
+from neuroseq.device_control.syscon2_protocol import SysCon2ProtocolError
+from neuroseq.device_control.syscon2_protocol import build_command_frame
+from neuroseq.device_control.syscon2_protocol import bytes_reader
+from neuroseq.device_control.syscon2_protocol import encode_bool
+from neuroseq.device_control.syscon2_protocol import encode_byte
+from neuroseq.device_control.syscon2_protocol import encode_command
+from neuroseq.device_control.syscon2_protocol import encode_double
+from neuroseq.device_control.syscon2_protocol import encode_dword
+from neuroseq.device_control.syscon2_protocol import encode_float
+from neuroseq.device_control.syscon2_protocol import encode_qword
+from neuroseq.device_control.syscon2_protocol import encode_raw
+from neuroseq.device_control.syscon2_protocol import encode_string
+from neuroseq.device_control.syscon2_protocol import encode_structures
+from neuroseq.device_control.syscon2_protocol import encode_word
+from neuroseq.device_control.syscon2_protocol import parse_standard_response
+from neuroseq.device_control.syscon2_protocol import parse_string_response
+from neuroseq.device_control.syscon2_protocol import read_bool
+from neuroseq.device_control.syscon2_protocol import read_byte
+from neuroseq.device_control.syscon2_protocol import read_data_response_status
+from neuroseq.device_control.syscon2_protocol import read_double
+from neuroseq.device_control.syscon2_protocol import read_dword
+from neuroseq.device_control.syscon2_protocol import read_float
+from neuroseq.device_control.syscon2_protocol import read_qword
+from neuroseq.device_control.syscon2_protocol import read_raw
+from neuroseq.device_control.syscon2_protocol import read_string
+from neuroseq.device_control.syscon2_protocol import read_structures
+from neuroseq.device_control.syscon2_protocol import read_word
 
 # Golden vectors transcribed verbatim from the manual's §1.1.1 "Examples".
 _BYTE_EXAMPLE = (bytes([0x74]), 116)

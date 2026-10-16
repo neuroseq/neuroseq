@@ -9,10 +9,10 @@ import numpy as np
 import pytest
 import tifffile
 
+from neuroseq.device_control.scanimage_connection import ScanImageConnection
+from neuroseq.device_control.scanimage_engine_worker import EngineAdapter
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.importers.importer_scanimage import index_recording
-from neuroseq.scanimage_connection import ScanImageConnection
-from neuroseq.scanimage_engine_worker import EngineAdapter
 
 
 @pytest.fixture
@@ -82,6 +82,28 @@ def test_engine_connect_requires_exact_running_session(mocker):
 def test_engine_does_not_expose_arbitrary_eval():
     with pytest.raises(ValueError, match="Unknown"):
         EngineAdapter().dispatch("eval", {"code": "anything"})
+
+
+def test_engine_indexes_recording_with_relocated_worker(recording):
+    paths, _ = recording
+    result = EngineAdapter().dispatch("index", {"paths": paths})
+    assert result["channels"] == [1, 2]
+    assert len(result["frames"]["page"]) == 8
+
+
+def test_engine_connect_adds_existing_matlab_resources(mocker):
+    matlab = ModuleType("matlab")
+    engine = ModuleType("matlab.engine")
+    matlab.engine = engine
+    engine.find_matlab = mocker.Mock(return_value=("NeuroSeqScanImage",))
+    session = mocker.Mock()
+    session.neuroseq_scanimage.return_value = "{}"
+    engine.connect_matlab = mocker.Mock(return_value=session)
+    mocker.patch.dict(sys.modules, {"matlab": matlab, "matlab.engine": engine})
+    EngineAdapter().dispatch("connect", {"session": "NeuroSeqScanImage"})
+    resources = Path(session.addpath.call_args.args[0])
+    assert (resources / "neuroseq_scanimage.m").is_file()
+    assert (resources / "neuroseq_scanimage_event.m").is_file()
 
 
 @pytest.fixture
@@ -271,7 +293,7 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
 def test_controls_trigger_timeout_and_foreign_acquisition(
     qtbot, connection, mocker, tmp_config_dir
 ):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -280,7 +302,9 @@ def test_controls_trigger_timeout_and_foreign_acquisition(
     assert not panel.abort_button.isEnabled()
     assert not panel.record_button.isEnabled()
     connection.run_id = "run"
-    mocker.patch("neuroseq.scanimage_controls.time.monotonic", return_value=100)
+    mocker.patch(
+        "neuroseq.device_control.scanimage_controls.time.monotonic", return_value=100
+    )
     panel._status(
         {
             "acq_state": "grab",
@@ -297,19 +321,19 @@ def test_controls_trigger_timeout_and_foreign_acquisition(
 def test_controls_remember_python_and_folder_across_sessions(
     qtbot, connection, mocker, tmp_config_dir, tmp_path
 ):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     python = tmp_path / "python.exe"
     python.write_text("")
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
     mocker.patch(
-        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getOpenFileName",
+        "neuroseq.device_control.scanimage_controls.QtWidgets.QFileDialog.getOpenFileName",
         return_value=(str(python), ""),
     )
     panel._browse_python()
     mocker.patch(
-        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getExistingDirectory",
+        "neuroseq.device_control.scanimage_controls.QtWidgets.QFileDialog.getExistingDirectory",
         return_value=str(tmp_path),
     )
     panel._browse_directory()
@@ -332,7 +356,7 @@ def test_controls_remember_python_and_folder_across_sessions(
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
     from qtpy import QtCore
 
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -413,7 +437,9 @@ def test_completed_count_mismatch_does_not_attach_recording(
     connection._expected_frames = 100
     connection._last_status = {"run": {"id": "run", "state": "completed"}}
     connection._finalize_since = 0
-    mocker.patch("neuroseq.scanimage_connection.time.monotonic", return_value=100)
+    mocker.patch(
+        "neuroseq.device_control.scanimage_connection.time.monotonic", return_value=100
+    )
     ready = mocker.Mock()
     connection.recording_ready.connect(ready)
     connection._send("index")
@@ -591,7 +617,7 @@ def test_preview_is_opt_in_and_throttled_during_recording(connection, mocker):
     connection.live_preview = True
     connection.run_id = "recording"
     clock = mocker.patch(
-        "neuroseq.scanimage_connection.time.monotonic", return_value=10
+        "neuroseq.device_control.scanimage_connection.time.monotonic", return_value=10
     )
     assert poll_args() == {"channel": 1}
     clock.return_value = 10.2

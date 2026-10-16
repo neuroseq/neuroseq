@@ -13,6 +13,7 @@ from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.dynamic_input_routine import DynamicInputDialog
 from neuroseq.project import Project
 from neuroseq.rheobase_dialog import RheobaseDialog
@@ -40,7 +41,6 @@ from neuroseq.stim_timing import seconds_to_samples_ceil
 from neuroseq.stim_timing import seconds_to_samples_nearest
 from neuroseq.stim_timing import stim_dt_matches
 from neuroseq.stim_widget import StimWidget
-from neuroseq.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
