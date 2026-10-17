@@ -38,7 +38,6 @@ from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
 from neuroseq.background_jobs import ExternalSimWorker
 from neuroseq.calcium_video_widget import CalciumVideoWidget
-from neuroseq.chat_widget import ChatWidget
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.custom_analysis_widget import CustomAnalysisType
@@ -70,7 +69,8 @@ from neuroseq.importers.patch_clamp_data_input_import_dialog import (
 )
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
-from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.llm.chat_widget import ChatWidget
+from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area

@@ -6,11 +6,11 @@ from dataclasses import dataclass
 import brian2.numpy_ as np
 from pytestqt.qtbot import QtBot
 
-from neuroseq.chat_widget import ChatWidget
 from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
 from neuroseq.llm.backend import Message
 from neuroseq.llm.backend import Role
+from neuroseq.llm.chat_widget import ChatWidget
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -57,9 +57,11 @@ def _make_widget(
     *,
     settings: _FakeSettings | None = None,
 ) -> ChatWidget:
-    monkeypatch.setattr("neuroseq.chat_widget.build_static_prompt", lambda: "STATIC")
     monkeypatch.setattr(
-        "neuroseq.chat_widget.GuiSettings",
+        "neuroseq.llm.chat_widget.build_static_prompt", lambda: "STATIC"
+    )
+    monkeypatch.setattr(
+        "neuroseq.llm.chat_widget.GuiSettings",
         lambda: settings or _FakeSettings(),
     )
     monkeypatch.setattr(ChatWidget, "_make_backend", backend_factory)
