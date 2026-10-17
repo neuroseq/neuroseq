@@ -245,9 +245,13 @@ class StimEditor(QtWidgets.QWidget):
     def pad_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
             return
+        stim_array = self.current_stim_modifier.stim_array
+        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         padding_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
             "Pad input arrays",
+            f"Current duration of '{stim_array.name}': {current_length_secs:g} s "
+            f"({format_milliseconds(current_length_secs * 1000)} ms)\n"
             "Padding to add to input arrays in seconds",
             QtWidgets.QLineEdit.EchoMode.Normal,
             f"{self.pad_stim_array_secs}",
@@ -271,8 +275,6 @@ class StimEditor(QtWidgets.QWidget):
             )
             return
         self.pad_stim_array_secs = paddings_seconds_as_float
-        stim_array = self.current_stim_modifier.stim_array
-        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         try:
             self._apply_pad(current_length_secs + self.pad_stim_array_secs)
         except Exception as e:
@@ -283,13 +285,16 @@ class StimEditor(QtWidgets.QWidget):
             )
             return
 
-    def _apply_pad(self, total_length_secs: float) -> None:
+    def _apply_pad(
+        self, total_length_secs: float, only_stim_name: str | None = None
+    ) -> None:
         """Pad every stim array up to ``total_length_secs`` as one undoable step.
 
         Like :meth:`_apply_trim`, this is routed through the modifier's undo
         stack (rather than clearing it) so Ctrl+Z removes the padding again --
         and, because the stim array is the authoritative timeline, growing it
         re-exposes any simulated data a prior trim had windowed out.
+        ``only_stim_name`` limits padding to one array when editing its duration.
         """
         if self.current_stim_modifier is None or self.project is None:
             return
@@ -298,15 +303,20 @@ class StimEditor(QtWidgets.QWidget):
             total_length_secs,
             self.stim_widget,
             self.current_stim_modifier.stim_array.name,
+            only_stim_name=only_stim_name,
         )
         self._push_timeline_action(action)
 
     def trim_stim_array(self) -> None:
         if self.current_stim_modifier is None or self.project is None:
             return
+        stim_array = self.current_stim_modifier.stim_array
+        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         trim_seconds, ok = QtWidgets.QInputDialog.getText(
             self,
             "Trim input arrays",
+            f"Current duration of '{stim_array.name}': {current_length_secs:g} s "
+            f"({format_milliseconds(current_length_secs * 1000)} ms)\n"
             "Seconds to trim from the input arrays",
             QtWidgets.QLineEdit.EchoMode.Normal,
             "5.0",
@@ -329,8 +339,6 @@ class StimEditor(QtWidgets.QWidget):
                 "Seconds to trim must be positive.",
             )
             return
-        stim_array = self.current_stim_modifier.stim_array
-        current_length_secs = stim_array.dt * stim_array.values.shape[0]
         new_length_secs = current_length_secs - trim_seconds_as_float
         if new_length_secs <= 0.0:
             QtWidgets.QMessageBox.critical(
@@ -1178,6 +1186,38 @@ class StimEditor(QtWidgets.QWidget):
             parent=self,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            stim = self.current_stim_modifier.stim_array
+            old_duration = samples_to_seconds(stim.values.shape[0], stim.dt)
+            target_samples = None
+            if not math.isclose(dialog.duration_seconds, old_duration, rel_tol=1e-12):
+                target_samples = max(
+                    1, seconds_to_samples_nearest(dialog.duration_seconds, dialog.dt)
+                )
+                baseline_samples = (
+                    stim.values.shape[0]
+                    if stim_dt_matches(stim.dt, dialog.dt)
+                    else seconds_to_samples_ceil(old_duration, dialog.dt)
+                )
+                if target_samples != baseline_samples:
+                    duration = samples_to_seconds(target_samples, dialog.dt)
+                    action = "Trim" if target_samples < baseline_samples else "Extend"
+                    details = (
+                        "Samples after the new end will be removed."
+                        if action == "Trim"
+                        else "New samples will be filled with zeros."
+                    )
+                    answer = QtWidgets.QMessageBox.question(
+                        self,
+                        "Change input array duration",
+                        f"{action} input array '{old_name}' from {old_duration:g} s "
+                        f"to {duration:g} s ({format_milliseconds(duration * 1000)} ms)?\n"
+                        f"{details} You can undo this duration change.",
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
+                        QtWidgets.QMessageBox.StandardButton.No,
+                    )
+                    if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                        return
             old_draw_duration_seconds = samples_to_seconds(
                 self.draw_stim_length, self._current_stim_dt_seconds()
             )
@@ -1200,16 +1240,31 @@ class StimEditor(QtWidgets.QWidget):
                     1,
                     seconds_to_samples_nearest(old_draw_duration_seconds, dialog.dt),
                 )
-            if dialog.name != old_name:
-                self.project.rename_stim_array(old_name, dialog.name)
-            self.project.update_stim_array_properties(
-                dialog.name,
-                n_neurons=dialog.n_neurons,
-                stim_type=dialog.stim_type,
-                units=dialog.units,
-                dt=dialog.dt,
+            properties_changed = (
+                dialog.name != old_name
+                or dialog.n_neurons != stim.values.shape[1]
+                or dialog.stim_type != stim.stim_type
+                or dialog.units != stim.units
+                or not stim_dt_matches(dialog.dt, stim.dt)
             )
-            self.set_project(self.project, stim_to_select=dialog.name)
+            if properties_changed:
+                if dialog.name != old_name:
+                    self.project.rename_stim_array(old_name, dialog.name)
+                self.project.update_stim_array_properties(
+                    dialog.name,
+                    n_neurons=dialog.n_neurons,
+                    stim_type=dialog.stim_type,
+                    units=dialog.units,
+                    dt=dialog.dt,
+                )
+                self.set_project(self.project, stim_to_select=dialog.name)
+            if target_samples is not None:
+                stim = self.project.stim_arrays[dialog.name]
+                duration = samples_to_seconds(target_samples, stim.dt)
+                if target_samples < stim.values.shape[0]:
+                    self._apply_trim(duration, only_stim_name=dialog.name)
+                elif target_samples > stim.values.shape[0]:
+                    self._apply_pad(duration, only_stim_name=dialog.name)
 
     def delete_stim_array(self):
         if self.current_stim_modifier is None:

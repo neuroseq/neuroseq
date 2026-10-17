@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from qtpy import QtWidgets
 from qtpy.QtWidgets import QDialog
 from qtpy.QtWidgets import QGridLayout
@@ -31,22 +33,24 @@ class EditStimDialog(QDialog):
         self.n_neurons = stim_array.values.shape[1]
         self.units = stim_array.units
         self.dt = stim_array.dt
+        self.duration_seconds = stim_array.values.shape[0] * self.dt
         self._name_error = ""
         self._dt_error = ""
+        self._duration_error = ""
 
         self.setWindowTitle(title)
         self.setModal(True)
 
-        self.layout = QGridLayout()
-        self.setLayout(self.layout)
+        self.grid_layout = QGridLayout()
+        self.setLayout(self.grid_layout)
 
-        self.layout.addWidget(QLabel("Name:"), 0, 0)
+        self.grid_layout.addWidget(QLabel("Name:"), 0, 0)
         self.txt_name = QtWidgets.QLineEdit(self)
         self.txt_name.setText(self.name)
         self.txt_name.textChanged.connect(self.txt_name_text_changed)
-        self.layout.addWidget(self.txt_name, 0, 1)
+        self.grid_layout.addWidget(self.txt_name, 0, 1)
 
-        self.layout.addWidget(QLabel("Type:"), 1, 0)
+        self.grid_layout.addWidget(QLabel("Type:"), 1, 0)
         self.cmb_type = QtWidgets.QComboBox(self)
         self.cmb_type.addItem("Excitatory", StimType.Excitation)
         self.cmb_type.addItem("Inhibitory", StimType.Inhibition)
@@ -57,23 +61,23 @@ class EditStimDialog(QDialog):
             ]
         )
         self.cmb_type.currentIndexChanged.connect(self.cmb_type_index_changed)
-        self.layout.addWidget(self.cmb_type, 1, 1)
+        self.grid_layout.addWidget(self.cmb_type, 1, 1)
 
-        self.layout.addWidget(QLabel("Number of neurons:"), 2, 0)
+        self.grid_layout.addWidget(QLabel("Number of neurons:"), 2, 0)
         self.spin_neurons = QtWidgets.QSpinBox(self)
         self.spin_neurons.setMinimum(1)
         self.spin_neurons.setMaximum(1000000)
         self.spin_neurons.setValue(self.n_neurons)
         self.spin_neurons.valueChanged.connect(self.spin_neurons_value_changed)
-        self.layout.addWidget(self.spin_neurons, 2, 1)
+        self.grid_layout.addWidget(self.spin_neurons, 2, 1)
 
-        self.layout.addWidget(QLabel("Units:"), 3, 0)
+        self.grid_layout.addWidget(QLabel("Units:"), 3, 0)
         self.txt_units = QtWidgets.QLineEdit(self)
         self.txt_units.setText(self.units)
         self.txt_units.textChanged.connect(self.txt_units_text_changed)
-        self.layout.addWidget(self.txt_units, 3, 1)
+        self.grid_layout.addWidget(self.txt_units, 3, 1)
 
-        self.layout.addWidget(QLabel("Timestep (s):"), 4, 0)
+        self.grid_layout.addWidget(QLabel("Timestep (s):"), 4, 0)
         self.txt_dt = QtWidgets.QLineEdit(self)
         self.txt_dt.setText(f"{self.dt}")
         self.txt_dt.textChanged.connect(self.txt_dt_text_changed)
@@ -91,18 +95,30 @@ class EditStimDialog(QDialog):
             self.cmb_dt_presets.addItem(label, seconds)
         self.cmb_dt_presets.activated.connect(self._apply_dt_preset)
         timestep_row.addWidget(self.cmb_dt_presets)
-        self.layout.addLayout(timestep_row, 4, 1)
+        self.grid_layout.addLayout(timestep_row, 4, 1)
+
+        self.txt_duration = QtWidgets.QLineEdit(self)
+        self.txt_duration.setText(str(self.duration_seconds))
+        self.txt_duration.setToolTip(
+            "Duration is rounded to the nearest input timestep."
+        )
+        self.txt_duration.textChanged.connect(self.txt_duration_text_changed)
+        if title == "Edit input array":
+            self.grid_layout.addWidget(QLabel("Duration (s):"), 5, 0)
+            self.grid_layout.addWidget(self.txt_duration, 5, 1)
+        else:
+            self.txt_duration.hide()
 
         self.lbl_error = QLabel("")
         self.lbl_error.setStyleSheet("color: red")
-        self.layout.addWidget(self.lbl_error, 5, 0, 1, 2)
+        self.grid_layout.addWidget(self.lbl_error, 6, 0, 1, 2)
 
         self.button_layout = QHBoxLayout()
         self.btn_save = QPushButton("Save")
         self.btn_cancel = QPushButton("Cancel")
         self.button_layout.addWidget(self.btn_save)
         self.button_layout.addWidget(self.btn_cancel)
-        self.layout.addLayout(self.button_layout, 6, 0, 1, 2)
+        self.grid_layout.addLayout(self.button_layout, 7, 0, 1, 2)
 
         self.btn_save.clicked.connect(self.accept)
         self.btn_cancel.clicked.connect(self.reject)
@@ -116,11 +132,23 @@ class EditStimDialog(QDialog):
             self.txt_dt.setText(str(seconds))
 
     def _update_validation_state(self) -> None:
-        error = self._name_error or self._dt_error
+        error = self._name_error or self._dt_error or self._duration_error
         self.btn_save.setEnabled(error == "")
         self.txt_name.setStyleSheet("color: red" if self._name_error else "")
         self.txt_dt.setStyleSheet("color: red" if self._dt_error else "")
+        self.txt_duration.setStyleSheet("color: red" if self._duration_error else "")
         self.lbl_error.setText(error)
+
+    def txt_duration_text_changed(self, text: str) -> None:
+        try:
+            duration = float(text)
+            if not math.isfinite(duration) or duration <= 0:
+                raise ValueError
+            self.duration_seconds = duration
+            self._duration_error = ""
+        except ValueError:
+            self._duration_error = "Input duration must be a positive finite number."
+        self._update_validation_state()
 
     def txt_name_text_changed(self, text: str) -> None:
         self.name = text

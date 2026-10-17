@@ -199,11 +199,13 @@ class PadReversibleAction:
         total_length_seconds: float,
         stim_widget: StimWidget,
         target_stim_name: str,
+        only_stim_name: str | None = None,
     ) -> None:
         self.project = project
         self.total_length_seconds = float(total_length_seconds)
         self.stim_widget = stim_widget
         self.target_stim_name = target_stim_name
+        self.only_stim_name = only_stim_name
         # Populated on ``__call__``: each array's length before the pad, so undo
         # can slice the trailing zeros back off.
         self.before_lengths: dict[str, int] = {}
@@ -217,7 +219,9 @@ class PadReversibleAction:
             name: int(arr.values.shape[0])
             for name, arr in self.project.stim_arrays.items()
         }
-        self.project.pad_stim_arrays(self.total_length_seconds)
+        self.project.pad_stim_arrays(
+            self.total_length_seconds, only_stim_name=self.only_stim_name
+        )
         self._refresh_stim_widget()
         self.project.update_limits()
 

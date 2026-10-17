@@ -856,6 +856,7 @@ def test_edit_stim_array_dt_change_requires_confirmation(
             self.n_neurons = stim_array.values.shape[1]
             self.units = stim_array.units
             self.dt = 0.002
+            self.duration_seconds = stim_array.values.shape[0] * stim_array.dt
 
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -1862,3 +1863,117 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     question.reset_mock()
     assert editor.prepare_syscon_timestep()
     question.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "duration, expected_samples", [(0.004, 4), (0.014, 14), (0.017, 17), (0.0044, 4)]
+)
+@pytest.mark.parametrize("confirm", [False, True])
+@pytest.mark.parametrize("rename", [False, True])
+def test_edit_stim_duration_requires_confirmation(
+    qtbot, monkeypatch, duration, expected_samples, confirm, rename
+):
+    from neuroseq.stimulation.stim_dialog import EditStimDialog
+
+    project = Project()
+    values = np.arange(10, dtype=np.float32).reshape(-1, 1)
+    stim = StimArray(
+        "a", neuroseq.stimulation.stim.StimType.Excitation, values.copy(), "mV", 0.001
+    )
+    other = StimArray("b", stim.stim_type, values.copy(), "mV", 0.001)
+    project.add_stim_array(stim)
+    project.add_stim_array(other)
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project, stim_to_select="a")
+    modifier = editor.current_stim_modifier
+    modifier.do(slice(0, 1), slice(0, 1), 42.0)
+    before_resize = stim.values.copy()
+    project.dirty = False
+
+    def edit(dialog):
+        dialog.txt_duration.setText(str(duration))
+        if rename:
+            dialog.txt_name.setText("renamed")
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(EditStimDialog, "exec", edit)
+    questions = []
+
+    def question(*args):
+        questions.append(args)
+        return (
+            QtWidgets.QMessageBox.StandardButton.Yes
+            if confirm
+            else QtWidgets.QMessageBox.StandardButton.No
+        )
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", question)
+    editor.edit_stim_array()
+    assert len(questions) == 1
+    assert questions[0][1] == "Change input array duration"
+    assert "0.01 s" in questions[0][2]
+    assert (
+        "Trim" in questions[0][2]
+        if expected_samples < 10
+        else "Extend" in questions[0][2]
+    )
+    if confirm:
+        assert project.dirty
+        assert ("renamed" if rename else "a") in project.stim_arrays
+        assert stim.values.shape == (expected_samples, 1)
+        np.testing.assert_array_equal(
+            stim.values[: min(10, expected_samples)], before_resize[:expected_samples]
+        )
+        if expected_samples > 10:
+            assert np.all(stim.values[10:] == 0)
+        assert project.max_time_secs == approx(max(0.01, expected_samples * 0.001))
+        assert editor.action_undo.isEnabled()
+        editor.undo()
+        np.testing.assert_array_equal(stim.values, before_resize)
+        assert editor.action_redo.isEnabled()
+        editor.redo()
+        assert stim.values.shape == (expected_samples, 1)
+        editor.undo()
+        if not rename:
+            assert editor.current_stim_modifier is modifier
+            editor.undo()
+            np.testing.assert_array_equal(stim.values, values)
+    else:
+        assert not project.dirty
+        assert "a" in project.stim_arrays
+        assert "renamed" not in project.stim_arrays
+        np.testing.assert_array_equal(stim.values, before_resize)
+    np.testing.assert_array_equal(other.values, values)
+
+
+@pytest.mark.parametrize("action", ["pad_stim_array", "trim_stim_array"])
+def test_pad_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
+    qtbot, monkeypatch, action
+):
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((125, 1)),
+            "mV",
+            0.001,
+        )
+    )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    labels = []
+
+    def get_text(*args):
+        labels.append(args[2])
+        return "", False
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", get_text)
+    getattr(editor, action)()
+    assert "0.125 s (125 ms)" in labels[0]

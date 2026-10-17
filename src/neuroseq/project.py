@@ -945,16 +945,30 @@ class Project:
         self.update_limits()
         self.mark_dirty()
 
-    def pad_stim_arrays(self, total_time_seconds: float):
+    def pad_stim_arrays(
+        self, total_time_seconds: float, only_stim_name: str | None = None
+    ):
         """
-        Pad all StimArrays in the project to a length of total_time_seconds
+        Pad all StimArrays in the project to a length of total_time_seconds.
+
+        A selected array is padded to the nearest sample, for duration editing.
         """
         for name, stim_array in self.stim_arrays.items():
+            if only_stim_name is not None and name != only_stim_name:
+                continue
             n_timestamps = stim_array.values.shape[0]
             array_time_secs = stim_array.dt * n_timestamps
             padding_required_secs = total_time_seconds - array_time_secs
             if padding_required_secs > 0:
-                n_pad = math.ceil(padding_required_secs / stim_array.dt)
+                n_pad = (
+                    max(
+                        0,
+                        seconds_to_samples_nearest(total_time_seconds, stim_array.dt)
+                        - n_timestamps,
+                    )
+                    if only_stim_name is not None
+                    else math.ceil(padding_required_secs / stim_array.dt)
+                )
                 self.logger.info(
                     f"Adding {padding_required_secs}s / {n_pad} timestamps of padding to {name}: {stim_array.values.shape}"
                 )
