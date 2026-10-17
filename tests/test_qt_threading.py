@@ -6,7 +6,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
 from neuroseq.background_jobs import returns_to_main_thread
-from neuroseq.gui import Gui
+from neuroseq.project_workspace import ProjectWorkspace
 
 
 class _Worker(QtCore.QObject):
@@ -65,7 +65,7 @@ def test_worker_returns_to_main_thread_even_when_run_raises(qtbot: QtBot) -> Non
 def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
     """Checked at thread.finished - the moment deleteLater is queued - since
     the worker is deleted shortly afterwards and can't be inspected later."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     release = threading.Event()
 

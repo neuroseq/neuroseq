@@ -41,6 +41,7 @@ from neuroseq.stimulation.stim import StimArray
 if TYPE_CHECKING:
     from neuroseq.gui_settings import GuiSettings
     from neuroseq.project import Project
+    from neuroseq.workspace_devices import SysCon2Session
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +133,9 @@ class _SequencePreview(QtWidgets.QScrollArea):
         if self._source.isNull():
             return
         self._fit_mode = True
-        available = self.viewport().size()
+        viewport = self.viewport()
+        assert viewport is not None
+        available = viewport.size()
         self._zoom = min(
             available.width() / self._source.width(),
             available.height() / self._source.height(),
@@ -173,7 +176,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self,
         parent: QtWidgets.QWidget | None = None,
         *,
-        manager: SysCon2ConnectionManager | None = None,
+        manager: SysCon2ConnectionManager | SysCon2Session | None = None,
         settings: GuiSettings | None = None,
     ) -> None:
         super().__init__(parent)
@@ -795,7 +798,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             row
             for row in range(self.sequence_list.count())
             if pathlib.PureWindowsPath(
-                self.sequence_list.item(row).text().replace("/", "\\")
+                self._sequence_item_text(row).replace("/", "\\")
             ).name.lower()
             == key
         ]
@@ -805,8 +808,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         in_target = [
             row
             for row in matches
-            if self.sequence_list.item(row)
-            .text()
+            if self._sequence_item_text(row)
             .lower()
             .replace("/", "\\")
             .startswith(target)
@@ -850,9 +852,13 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _remote_sequence_names(self) -> list[str]:
         return [
-            self.sequence_list.item(row).text()
-            for row in range(self.sequence_list.count())
+            self._sequence_item_text(row) for row in range(self.sequence_list.count())
         ]
+
+    def _sequence_item_text(self, row: int) -> str:
+        item = self.sequence_list.item(row)
+        assert item is not None
+        return item.text()
 
     def _show_preview_for_sequence(self, remote_path: str) -> None:
         """Show a preview for a sequence chosen in the manager.

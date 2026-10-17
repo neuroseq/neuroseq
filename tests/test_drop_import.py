@@ -11,17 +11,17 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.gui import DROP_SEGMENT
-from neuroseq.gui import DROP_TRACES
-from neuroseq.gui import DROP_VIDEO
-from neuroseq.gui import Gui
+from neuroseq.project_workspace import DROP_SEGMENT
+from neuroseq.project_workspace import DROP_TRACES
+from neuroseq.project_workspace import DROP_VIDEO
+from neuroseq.project_workspace import ProjectWorkspace
 
 LEGACY_SEQ = Path(__file__).parent / "data" / "legacy_cellpose_v1" / "legacy_export.seq"
 
 
 @pytest.fixture
 def gui(qtbot: QtBot):
-    window = Gui()
+    window = ProjectWorkspace()
     qtbot.addWidget(window)
     yield window
     window._close_confirmed = True
@@ -29,7 +29,9 @@ def gui(qtbot: QtBot):
 
 
 @pytest.fixture
-def calls(gui: Gui, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
+def calls(
+    gui: ProjectWorkspace, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[str, dict]]:
     """Record the import handlers a drop reaches instead of opening dialogs."""
     recorded: list[tuple[str, dict]] = []
     for name in (
@@ -49,7 +51,7 @@ def calls(gui: Gui, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict]]:
     return recorded
 
 
-def test_file_types_go_to_their_import(gui: Gui, calls: list) -> None:
+def test_file_types_go_to_their_import(gui: ProjectWorkspace, calls: list) -> None:
     gui.import_dropped_files(
         [Path("p.nseq"), Path("s.seq"), Path("w.ibw"), Path("t.csv")], target=None
     )
@@ -67,7 +69,9 @@ def test_file_types_go_to_their_import(gui: Gui, calls: list) -> None:
     ]
 
 
-def test_waves_dropped_on_the_input_array_become_inputs(gui: Gui, calls: list) -> None:
+def test_waves_dropped_on_the_input_array_become_inputs(
+    gui: ProjectWorkspace, calls: list
+) -> None:
     gui.import_dropped_files([Path("w.pxp"), Path("t.txt")], target="input")
     assert [name for name, _ in calls] == [
         "btn_import_igor2_wave_clicked",
@@ -85,7 +89,7 @@ def test_waves_dropped_on_the_input_array_become_inputs(gui: Gui, calls: list) -
     ],
 )
 def test_imaging_files_follow_the_panel(
-    gui: Gui,
+    gui: ProjectWorkspace,
     calls: list,
     monkeypatch: pytest.MonkeyPatch,
     target: str,
@@ -110,7 +114,7 @@ def test_imaging_files_follow_the_panel(
 
 
 def test_imaging_files_elsewhere_ask_what_to_do(
-    gui: Gui, calls: list, monkeypatch: pytest.MonkeyPatch
+    gui: ProjectWorkspace, calls: list, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     offered: list[list[str]] = []
 
@@ -134,7 +138,7 @@ def test_imaging_files_elsewhere_ask_what_to_do(
 
 
 def test_unknown_files_are_reported(
-    gui: Gui, calls: list, qmessagebox_calls: list[dict[str, str]]
+    gui: ProjectWorkspace, calls: list, qmessagebox_calls: list[dict[str, str]]
 ) -> None:
     gui.import_dropped_files([Path("notes.docx")], target=None)
     assert calls == []
@@ -143,7 +147,7 @@ def test_unknown_files_are_reported(
 
 
 def test_dropping_on_a_panel(
-    gui: Gui, calls: list, qtbot: QtBot, tmp_path: Path
+    gui: ProjectWorkspace, calls: list, qtbot: QtBot, tmp_path: Path
 ) -> None:
     """A real drop event, routed by the panel under the cursor."""
     gui.show()
@@ -181,7 +185,7 @@ def test_dropping_on_a_panel(
 
 
 def test_dropped_seq_file_is_loaded_in_the_dialog(
-    gui: Gui, monkeypatch: pytest.MonkeyPatch
+    gui: ProjectWorkspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 
@@ -197,7 +201,7 @@ def test_dropped_seq_file_is_loaded_in_the_dialog(
 
 
 def test_menu_imports_still_ask_for_files(
-    gui: Gui, monkeypatch: pytest.MonkeyPatch
+    gui: ProjectWorkspace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The menu actions pass Qt's "checked" flag; the new keyword-only file
     parameters must not pick it up."""

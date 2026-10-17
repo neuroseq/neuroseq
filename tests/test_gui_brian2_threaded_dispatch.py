@@ -7,14 +7,14 @@ import pytest
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 
-import neuroseq.gui
-from neuroseq.gui import Gui
+import neuroseq.project_workspace
 from neuroseq.project import Project
+from neuroseq.project_workspace import ProjectWorkspace
 
 
 @pytest.fixture
 def gui_with_b2_project(qtbot: QtBot, test_project: Project):
-    widget = Gui()
+    widget = ProjectWorkspace()
     qtbot.addWidget(widget)
     test_project.external_simulate_path = None
     test_project.external_simulate_function = None
@@ -35,14 +35,14 @@ def gui_with_b2_project(qtbot: QtBot, test_project: Project):
 
 def _set_simulation_time(monkeypatch: MonkeyPatch, seconds: float) -> None:
     monkeypatch.setattr(
-        neuroseq.gui,
+        neuroseq.project_workspace,
         "getSimulationTime",
         lambda *args, **kwargs: seconds,
     )
 
 
 def test_brian2_sim_runs_on_worker_thread(
-    qtbot: QtBot, gui_with_b2_project: Gui, monkeypatch: MonkeyPatch
+    qtbot: QtBot, gui_with_b2_project: ProjectWorkspace, monkeypatch: MonkeyPatch
 ) -> None:
     seen_thread_ids: list[int | None] = []
 
@@ -66,7 +66,7 @@ def test_brian2_sim_runs_on_worker_thread(
 
 
 def test_brian2_progress_dialog_shows_label_transition(
-    qtbot: QtBot, gui_with_b2_project: Gui, monkeypatch: MonkeyPatch
+    qtbot: QtBot, gui_with_b2_project: ProjectWorkspace, monkeypatch: MonkeyPatch
 ) -> None:
     allow_report = threading.Event()
 
@@ -102,7 +102,7 @@ def test_brian2_progress_dialog_shows_label_transition(
 
 
 def test_brian2_finished_calls_update_data(
-    qtbot: QtBot, gui_with_b2_project: Gui, monkeypatch: MonkeyPatch
+    qtbot: QtBot, gui_with_b2_project: ProjectWorkspace, monkeypatch: MonkeyPatch
 ) -> None:
     calls: list[bool] = []
 
@@ -130,7 +130,7 @@ def test_brian2_finished_calls_update_data(
 
 def test_brian2_failure_surfaces_critical_dialog(
     qtbot: QtBot,
-    gui_with_b2_project: Gui,
+    gui_with_b2_project: ProjectWorkspace,
     monkeypatch: MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
@@ -164,7 +164,7 @@ def test_brian2_failure_surfaces_critical_dialog(
 
 def test_brian2_run_button_blocks_reentrancy(
     qtbot: QtBot,
-    gui_with_b2_project: Gui,
+    gui_with_b2_project: ProjectWorkspace,
     monkeypatch: MonkeyPatch,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
@@ -215,7 +215,7 @@ def test_brian2_run_button_blocks_reentrancy(
 
 
 def test_brian2_close_event_drains_inflight_sim(
-    qtbot: QtBot, gui_with_b2_project: Gui, monkeypatch: MonkeyPatch
+    qtbot: QtBot, gui_with_b2_project: ProjectWorkspace, monkeypatch: MonkeyPatch
 ) -> None:
     block = threading.Event()
 

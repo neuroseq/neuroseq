@@ -11,8 +11,8 @@ from qtpy import QtWidgets
 
 import neuroseq
 from neuroseq.example_projects import default_project
-from neuroseq.gui import Gui
 from neuroseq.project import Project
+from neuroseq.project_workspace import ProjectWorkspace
 from neuroseq.save_load_options import SaveLoadOptions
 
 
@@ -33,7 +33,7 @@ class _MockSaveLoadOptionsDialog:
 
 @pytest.fixture
 def gui(qtbot: QtBot):
-    widget = Gui()
+    widget = ProjectWorkspace()
     qtbot.addWidget(widget)
     yield widget
     try:
@@ -45,7 +45,7 @@ def gui(qtbot: QtBot):
 
 def _patch_save_dialog(monkeypatch: MonkeyPatch, filename: str) -> None:
     monkeypatch.setattr(
-        neuroseq.gui, "SaveLoadOptionsDialog", _MockSaveLoadOptionsDialog
+        neuroseq.project_workspace, "SaveLoadOptionsDialog", _MockSaveLoadOptionsDialog
     )
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -64,7 +64,7 @@ def _patch_open_dialog(monkeypatch: MonkeyPatch, filename: str) -> None:
 
 @pytest.mark.parametrize("workflow", ["io", "brian2", "external", "elise"])
 def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
-    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, workflow: str
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch, workflow: str
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
@@ -100,7 +100,7 @@ def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
 
 
 def test_close_keeps_window_open_when_worker_cannot_stop(
-    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
@@ -120,7 +120,7 @@ def test_close_keeps_window_open_when_worker_cannot_stop(
 
 
 def test_save_runs_on_worker_thread(
-    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, tmp_path
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch, tmp_path
 ):
     gui.load_project(default_project())
     save_thread_ids: list[int | None] = []
@@ -145,7 +145,7 @@ def test_save_runs_on_worker_thread(
 
 
 def test_file_menu_disabled_during_save(
-    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, tmp_path
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch, tmp_path
 ):
     gui.load_project(default_project())
 
@@ -166,7 +166,6 @@ def test_file_menu_disabled_during_save(
     assert not gui.menu_file.isEnabled()
     assert not gui.toolbar_file.isEnabled()
     assert not gui.continue_simulation_action.isEnabled()
-    assert not gui.tab_bar.isEnabled()
 
     block.set()
     qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
@@ -174,12 +173,11 @@ def test_file_menu_disabled_during_save(
     assert gui.menu_file.isEnabled()
     assert gui.toolbar_file.isEnabled()
     assert gui.continue_simulation_action.isEnabled()
-    assert gui.tab_bar.isEnabled()
 
 
 def test_save_failure_surfaces_error_and_keeps_ui_unfrozen(
     qtbot: QtBot,
-    gui: Gui,
+    gui: ProjectWorkspace,
     monkeypatch: MonkeyPatch,
     tmp_path,
     qmessagebox_calls,
@@ -208,7 +206,7 @@ def test_save_failure_surfaces_error_and_keeps_ui_unfrozen(
 
 
 def test_load_runs_on_worker_thread(
-    qtbot: QtBot, gui: Gui, monkeypatch: MonkeyPatch, tmp_path
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch, tmp_path
 ):
     # First save a project synchronously via Project.save (worker test
     # already covers async save).

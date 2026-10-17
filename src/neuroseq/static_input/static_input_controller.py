@@ -8,7 +8,6 @@ from neuroseq.static_input.stim_pattern_dialog import StimPatternContext
 from neuroseq.static_input.stim_pattern_dialog import StimPatternDialog
 
 if TYPE_CHECKING:
-    from neuroseq.project import Project
     from neuroseq.stimulation.stim import StimArray
     from neuroseq.stimulation.stim_editor import StimEditor
 
@@ -22,17 +21,9 @@ class StaticInputController(QtCore.QObject):
         super().__init__(parent)
         self.editor = editor
         self._pattern_dialog: StimPatternDialog | None = None
-        editor.project_changed.connect(self._on_project_changed)
         editor.current_stim_changed.connect(self._refresh_context)
         editor.current_stim_cleared.connect(self._reset_start_time)
         editor.destroyed.connect(self.discard_dialog)
-
-    def _on_project_changed(self, outgoing: Project | None, incoming: Project) -> None:
-        if self._pattern_dialog is None:
-            return
-        if outgoing is not None:
-            outgoing.static_input_state = self._pattern_dialog.capture_state()
-        self._pattern_dialog.restore_state(incoming.static_input_state)
 
     def _current_pattern_context(self) -> StimPatternContext:
         if self.editor.current_stim_modifier is None:
@@ -62,7 +53,6 @@ class StaticInputController(QtCore.QObject):
             return
         if self._pattern_dialog is None:
             self._pattern_dialog = StimPatternDialog(self.editor)
-            self._pattern_dialog.restore_state(self.editor.project.static_input_state)
         self._refresh_context(self.editor.current_stim_modifier.stim_array)
         self._pattern_dialog.show()
         self._pattern_dialog.raise_()
@@ -70,10 +60,6 @@ class StaticInputController(QtCore.QObject):
 
     def discard_dialog(self) -> None:
         if self._pattern_dialog is not None:
-            if self.editor.project is not None:
-                self.editor.project.static_input_state = (
-                    self._pattern_dialog.capture_state()
-                )
             self._pattern_dialog.close()
             self._pattern_dialog.deleteLater()
             self._pattern_dialog = None

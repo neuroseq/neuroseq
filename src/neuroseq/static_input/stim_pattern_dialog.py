@@ -234,41 +234,6 @@ class StimPatternDialog(_SelfRaisingDialog):
             self.radio_sequential.setChecked(True)
         self._scope_changed()
 
-    def capture_state(self) -> dict[str, float | int | str | bool]:
-        """The user-entered values, for stashing on the active project (see
-        Project.static_input_state). The pattern radio isn't included:
-        set_context() re-picks it for the scope on every stim selection."""
-        return {
-            "scope_specific": self.radio_scope_specific.isChecked(),
-            "neuron_indices": self.edit_neuron_indices.text(),
-            "pulse_ms": float(self.spin_pulse_ms.value()),
-            "ipi_ms": float(self.spin_ipi_ms.value()),
-            "magnitude": float(self.spin_magnitude.value()),
-            "value1": float(self.spin_value1.value()),
-            "value2": float(self.spin_value2.value()),
-            "repeats": int(self.spin_repeats.value()),
-            "pulse_repetitions": int(self.spin_pulse_repetitions.value()),
-            "start_time_ms": float(self.spin_start_time_ms.value()),
-        }
-
-    def restore_state(self, state: dict[str, float | int | str | bool] | None) -> None:
-        """Load values saved by capture_state(); None restores the defaults
-        a freshly opened dialog has (a project that never used it)."""
-        values = {**_DEFAULT_STATE, **(state or {})}
-        if values["scope_specific"]:
-            self.radio_scope_specific.setChecked(True)
-        else:
-            self.radio_scope_all.setChecked(True)
-        self.edit_neuron_indices.setText(str(values["neuron_indices"]))
-        self.spin_pulse_ms.setValue(float(values["pulse_ms"]))
-        self.spin_ipi_ms.setValue(float(values["ipi_ms"]))
-        self.spin_magnitude.setValue(float(values["magnitude"]))
-        self.spin_value1.setValue(float(values["value1"]))
-        self.spin_value2.setValue(float(values["value2"]))
-        self.spin_repeats.setValue(int(values["repeats"]))
-        self.spin_pulse_repetitions.setValue(int(values["pulse_repetitions"]))
-        self.spin_start_time_ms.setValue(float(values["start_time_ms"]))
-
     def reset_start_time(self) -> None:
         self.spin_start_time_ms.setValue(0.0)
 

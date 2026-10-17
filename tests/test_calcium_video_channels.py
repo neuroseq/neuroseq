@@ -79,11 +79,11 @@ def test_channel_controls_emit_the_choice(
 def test_gui_keeps_the_channel_choice_per_video(
     qtbot: QtBot, two_channel_movie: Path, tmp_path: Path
 ) -> None:
-    from neuroseq.gui import Gui
     from neuroseq.project import Project
+    from neuroseq.project_workspace import ProjectWorkspace
     from neuroseq.save_load_options import SaveLoadOptions
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     # A TIFF import with two channels shows its functional channel.
     gui.project.add_calcium_video(

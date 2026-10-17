@@ -221,6 +221,16 @@ class ChatWidget(QtWidgets.QWidget):
         if self._worker is not None:
             self._worker.request_stop()
 
+    def stop_worker(self, timeout_ms: int = 10000) -> bool:
+        """Drain a streaming request before its workspace is destroyed."""
+        if self._worker is None:
+            return True
+        self._worker.request_stop()
+        if not self._worker.wait(timeout_ms):
+            return False
+        self._cleanup_worker()
+        return True
+
     def _on_clear_clicked(self) -> None:
         self._history.clear()
         self._transient_assistant_html = None
@@ -255,4 +265,5 @@ class ChatWidget(QtWidgets.QWidget):
             parts.append(self._transient_assistant_html)
         self.history_view.setHtml("".join(parts))
         scrollbar = self.history_view.verticalScrollBar()
+        assert scrollbar is not None
         scrollbar.setValue(scrollbar.maximum())

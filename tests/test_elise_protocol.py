@@ -11,7 +11,7 @@ from pytestqt.qtbot import QtBot
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
-from neuroseq.gui import Gui
+from neuroseq.project_workspace import ProjectWorkspace
 from neuroseq.resources.analysis_plugins._replay_metrics import save_learning_curves_csv
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -224,7 +224,7 @@ def test_learning_curves_plugin_is_discovered() -> None:
 
 
 def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         assert hasattr(gui, "elise_protocol_action")
@@ -324,7 +324,7 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
         "neuroseq.resources.analysis_plugins._elise_workflows.getsavefilename",
         lambda *a, **k: ("", ""),
     )
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         append = mocker.patch.object(gui, "_append_experimental_data")
@@ -348,7 +348,7 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
 
 
 def test_on_protocol_failed_tears_down(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         gui._on_elise_protocol_failed("boom")
@@ -358,7 +358,7 @@ def test_on_protocol_failed_tears_down(qtbot: QtBot) -> None:
 
 
 def test_on_protocol_cancelled_and_progress(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         gui._on_elise_protocol_progress(0.5)
@@ -410,7 +410,7 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
         lambda *a, **k: ("", ""),
     )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         gui.project.external_simulate_path = "neuroseq:elise"

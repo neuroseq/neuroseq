@@ -271,23 +271,24 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
-    gui = Gui()
-    qtbot.addWidget(gui)
+    window = Gui()
+    qtbot.addWidget(window)
+    gui = window.active_workspace
     original = gui.project
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui._start_scanimage_recording(
         {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
     )
     assert original.imaging_acquisitions[0]["status"] == "requested"
-    gui.update_project(Project())
+    other = window._add_workspace(Project())
     result = index_recording(recording[0])
     result.update(run_id="one", status="completed")
-    gui._scanimage_recording_ready(result)
+    window.devices.scanimage.recording_ready.emit(result)
     assert "Test" in original.experiments
-    assert not gui.project.imaging_acquisitions
+    assert not other.project.imaging_acquisitions
     assert original.calcium_video_paths
-    gui._close_confirmed = True
-    gui.close()
+    original.dirty = False
+    window.close()
 
 
 def test_controls_trigger_timeout_and_foreign_acquisition(
@@ -449,9 +450,9 @@ def test_completed_count_mismatch_does_not_attach_recording(
 
 
 def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recording):
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui._start_scanimage_recording(
@@ -636,8 +637,9 @@ def test_new_recording_preserves_imported_movie(
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
-    gui = Gui()
-    qtbot.addWidget(gui)
+    window = Gui()
+    qtbot.addWidget(window)
+    gui = window.active_workspace
     project = gui.project
     imported = Path(recording[0][0])
     project.add_calcium_video([imported], 20, name="Imported")
@@ -646,17 +648,17 @@ def test_new_recording_preserves_imported_movie(
         {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
     )
     if switch_project:
-        gui.update_project(Project())
+        window._add_workspace(Project())
     result = index_recording(recording[0])
     result.update(run_id="new", status="completed")
-    gui._scanimage_recording_ready(result)
+    window.devices.scanimage.recording_ready.emit(result)
     assert [video["name"] for video in project.calcium_videos] == ["Imported", "New"]
     assert project.calcium_videos[0]["paths"] == [str(imported)]
     assert project.calcium_videos[0]["fps"] == 20
     assert project.calcium_scanimage_index == result
     assert project.imaging_acquisitions[0]["recording"] == result
     if switch_project:
-        gui.update_project(project)
+        window.project_tabs.setCurrentWidget(gui)
     assert [gui.cmb_video.itemText(i) for i in range(gui.cmb_video.count())] == [
         "Imported",
         "New",
@@ -671,8 +673,8 @@ def test_new_recording_preserves_imported_movie(
     assert gui.calcium_video_widget.recorded_channel == 1
     assert gui.scanimage_controls.channel_spin.value() == 1
     assert "was not saved" in gui.scanimage_controls.message_label.text()
-    gui._close_confirmed = True
-    gui.close()
+    project.dirty = False
+    window.close()
 
 
 def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocker):
@@ -692,9 +694,9 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
     from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
     from neuroseq.data import Experiment
     from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.experiments["Imaging"] = Experiment("Imaging", 10, [], [])
     gui.update_project(gui.project)
@@ -770,9 +772,9 @@ def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording)
 def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     from qtpy import QtWidgets
 
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     # The Video tab must keep mirroring the Cell segmentation tab, so no
     # acquisition controls may be inserted above its canvas.
@@ -799,10 +801,10 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
 def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
     from qtpy import QtCore
 
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
     from tests.test_spatial_footprint_widget import _cellpose_result
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitExposed(gui)
@@ -826,12 +828,12 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
 
 
 def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
-    from neuroseq.gui import Gui
     from neuroseq.project import Project
+    from neuroseq.project_workspace import ProjectWorkspace
     from neuroseq.save_load_options import SaveLoadOptions
 
     first, second = (Path(p) for p in recording[0])
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.add_calcium_video([first], 10)
     gui.project.add_calcium_video([second], 20)
@@ -859,9 +861,9 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
 def test_selecting_a_video_with_missing_files_keeps_the_current_one(
     qtbot, recording, qmessagebox_calls
 ):
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     present = Path(recording[0][0])
     gui.project.add_calcium_video([Path("/missing/video.tif")], 10)

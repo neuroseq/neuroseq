@@ -211,19 +211,16 @@ class FPLWidget(QtWidgets.QWidget):
     def closeEvent(self, event):
         if self.figure is not None:
             self._set_fpl_rendering(False)
-            app = QtWidgets.QApplication.instance()
-            if app is not None:
-                try:
-                    # wait for any pending renders to complete
-                    self.figure.renderer.device._poll_wait()
-                except Exception as exc:
-                    self.logger.debug("Could not poll GPU device on close (%s).", exc)
-                app.processEvents(
-                    QtCore.QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents
-                )
-            # stop the renderer before closing the widget otherwise it may try to render to the deleted object
-            if hasattr(self.figure, "close"):
-                self.figure.close()
+            figure = self.figure
+            # Finish GPU work before dropping the canvas textures. Do not pump
+            # Qt's event loop here: it can submit new renders and reenter a
+            # workspace while its other plots are being disposed.
+            try:
+                figure.renderer.device._poll_wait()
+            except Exception as exc:
+                self.logger.debug("Could not poll GPU device on close (%s).", exc)
+            if hasattr(figure, "close"):
+                figure.close()
             self.figure = None
         super().closeEvent(event)
 

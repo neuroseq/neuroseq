@@ -30,13 +30,14 @@ from neuroseq.data import TraceData
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
-from neuroseq.gui import DetachedPanelWindow
 from neuroseq.gui import Gui
-from neuroseq.gui import ToolbarProgressWidget
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
+from neuroseq.project_workspace import DetachedPanelWindow
+from neuroseq.project_workspace import ProjectWorkspace
+from neuroseq.project_workspace import ToolbarProgressWidget
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.static_input.static_input_controller import StaticInputController
 from neuroseq.stimulation.stim import StimArray
@@ -50,7 +51,9 @@ from neuroseq.utils import InteractMode
 delay_after_update_model_call_in_ms = 50
 
 
-def _wait_for_brian2_simulation(qtbot: QtBot, gui: Gui, timeout: int = 90000) -> None:
+def _wait_for_brian2_simulation(
+    qtbot: QtBot, gui: ProjectWorkspace, timeout: int = 90000
+) -> None:
     qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=timeout)
 
 
@@ -78,7 +81,7 @@ def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
     called: list[bool] = []
     fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
 
-    getattr(Gui, method_name)(fake_gui)
+    getattr(ProjectWorkspace, method_name)(fake_gui)
 
     assert called == [True]
 
@@ -107,7 +110,7 @@ def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
     called: list[bool] = []
     fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
 
-    getattr(Gui, method_name)(fake_gui)
+    getattr(ProjectWorkspace, method_name)(fake_gui)
 
     assert called == []
 
@@ -143,15 +146,15 @@ def test_plot_ram_limit_dialog(
     )
     refresh = Mock()
     window = SimpleNamespace(settings=settings, _update_data=refresh)
-    window._choose_plot_ram_limit = lambda *args: Gui._choose_plot_ram_limit(
-        window, *args
+    window._choose_plot_ram_limit = lambda *args: (
+        ProjectWorkspace._choose_plot_ram_limit(window, *args)
     )
     chooser = Mock(return_value=(text, accepted))
     critical = Mock()
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", chooser)
     monkeypatch.setattr(QtWidgets.QMessageBox, "critical", critical)
 
-    getattr(Gui, handler)(window)
+    getattr(ProjectWorkspace, handler)(window)
 
     chooser.assert_called_once_with(
         window,
@@ -175,7 +178,7 @@ def test_plot_ram_limit_dialog(
 
 
 def test_gui_click_exit(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -193,7 +196,7 @@ def test_syscon2_panel_targets_drive_spatial_footprint_crosses(qtbot: QtBot) -> 
     should mark its targeted neurons with a cross in the Spatial Footprints
     panel - wired via the shared SpatialFootprintState, not a direct
     reference between the two widgets."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     gui.syscon2_panel.targets_changed.emit(frozenset({2, 5}))
@@ -206,7 +209,7 @@ def test_gui_open_fiji_and_cellpose_buttons(
 ) -> None:
     import neuroseq.external_tools as external_tools
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     fiji_action = _find_action(gui.menu_tools, "Open Fiji")
@@ -236,7 +239,7 @@ def test_tools_menu_holds_fiji_cellpose_and_change_fiji_path(
     toolbar and Settings menu into their own Tools menu, between Settings
     and Help (issue #535).
     """
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     menu_bar = gui.menuBar()
@@ -261,7 +264,7 @@ def test_tools_menu_holds_fiji_cellpose_and_change_fiji_path(
 def test_stim_array_ops_button_sits_next_to_stim_data_combobox_with_full_menu(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     actions = gui.toolbar_data.actions()
@@ -294,7 +297,7 @@ def test_stim_array_ops_button_sits_next_to_stim_data_combobox_with_full_menu(
 def test_view_toolbar_has_separator_before_toggle_selection_text(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     actions = gui.toolbar_view.actions()
@@ -313,7 +316,7 @@ def test_show_all_stim_arrays_action_is_in_the_view_toolbar(qtbot: QtBot) -> Non
     reference rather than duplicated, so it stays the same QAction that
     toggle_show_all_stim_arrays() checks/toggles.
     """
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     action = gui.stim_editor.action_show_all_stim_arrays
@@ -344,7 +347,7 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
         "open_dynamic_input_designer",
         lambda self: dynamic_calls.append(1),
     )
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     for button in (gui.btn_design_static_input, gui.btn_design_dynamic_input):
@@ -376,7 +379,7 @@ def test_design_static_and_dynamic_buttons_are_in_the_view_toolbar(
 
 
 def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     actions = gui.toolbar_file.actions()
@@ -397,7 +400,7 @@ def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
 def test_playback_toolbar_separates_speed_from_transport_controls(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     actions = gui.toolbar_playback.actions()
@@ -409,7 +412,7 @@ def test_playback_toolbar_separates_speed_from_transport_controls(
 
 
 def test_data_toolbar_groups_dataset_pairs_with_separators(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     toolbar = gui.toolbar_data
@@ -433,7 +436,7 @@ def test_data_toolbar_groups_dataset_pairs_with_separators(qtbot: QtBot) -> None
 def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     actions = gui.menu_file.actions()
@@ -475,7 +478,7 @@ def test_trim_to_mapped_neurons_action_lives_in_the_stim_array_ops_menu(
 
     stim array ops dropdown next to the stim data combobox (issue #535),
     disabled until there's an actual mapping to trim to."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     action = gui.stim_editor.action_trim_to_mapped_neurons
     assert action in gui.stim_array_ops_menu.actions()
@@ -498,7 +501,7 @@ def test_trim_to_mapped_neurons_action_lives_in_the_stim_array_ops_menu(
 def test_trim_to_mapped_neurons_action_triggers_the_trim_handler(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0})
@@ -517,7 +520,7 @@ def test_trim_to_mapped_neurons_reports_nothing_to_trim_without_mapping(
     qtbot: QtBot,
     qmessagebox_calls: list,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.cellpose_data = _make_gui_cellpose_result(mapping=None)
@@ -535,7 +538,7 @@ def test_trim_to_mapped_neurons_reports_nothing_to_trim_when_fully_mapped(
     qtbot: QtBot,
     qmessagebox_calls: list,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.cellpose_data = _make_gui_cellpose_result(mapping={0: 0, 1: 1, 2: 2})
@@ -553,7 +556,7 @@ def test_trim_to_mapped_neurons_cancelled_confirm_makes_no_changes(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.add_stim_array(
@@ -584,7 +587,7 @@ def test_trim_to_mapped_neurons_confirmed_trims_and_forces_save_as(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.add_stim_array(
@@ -620,7 +623,9 @@ def test_trim_to_mapped_neurons_confirmed_trims_and_forces_save_as(
     gui.close()
 
 
-def _add_detach_panel_test_data(gui: Gui) -> tuple[TraceData, SpikeData, SynapseData]:
+def _add_detach_panel_test_data(
+    gui: ProjectWorkspace,
+) -> tuple[TraceData, SpikeData, SynapseData]:
     trace_data = TraceData(
         name="trace",
         traces=np.arange(12, dtype=np.float32).reshape(3, 4),
@@ -664,7 +669,7 @@ def _add_detach_panel_test_data(gui: Gui) -> tuple[TraceData, SpikeData, Synapse
 
 
 def test_spatial_footprint_panel_toggle_shows_and_hides(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     action = gui._view_actions[gui.spatial_footprint_widget]
 
@@ -683,7 +688,7 @@ def test_spatial_footprint_panel_toggle_shows_and_hides(qtbot: QtBot) -> None:
 
 
 def test_detach_panel_hides_original_and_shows_fresh_window(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     trace_data, _, synapse_data = _add_detach_panel_test_data(gui)
     panels: list[QtWidgets.QWidget] = [
@@ -725,7 +730,7 @@ def test_reshowing_a_plainly_detached_panel_closes_its_detached_window(
     """A plain "Detach panel" (not "Detach copy") hides the docked panel;
     checking "Show X" again should bring it back into the dock and close
     the now-redundant floating window, not leave both visible."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
@@ -749,7 +754,7 @@ def test_reshowing_a_copy_detached_panel_leaves_its_window_open(
     """ "Detach copy of panel" never unchecks "Show X" in the first place,
     but toggling it off and back on should not touch the independent
     copy window either."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
@@ -769,7 +774,7 @@ def test_reshowing_a_copy_detached_panel_leaves_its_window_open(
 
 
 def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
@@ -786,7 +791,7 @@ def test_detach_copy_keeps_original_visible(qtbot: QtBot) -> None:
 
 
 def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
@@ -816,7 +821,7 @@ def test_detached_trace_copy_shares_state_with_original(qtbot: QtBot) -> None:
 def test_hovering_a_neuron_in_trace_or_stim_highlights_it_in_spatial_footprints(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
 
@@ -836,7 +841,7 @@ def test_hovering_a_neuron_in_trace_or_stim_highlights_it_in_spatial_footprints(
 def test_hovering_in_a_detached_trace_copy_also_highlights_the_neuron(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.trace_widget)
@@ -855,7 +860,7 @@ def test_hovering_in_a_detached_trace_copy_also_highlights_the_neuron(
 def test_detached_spatial_footprint_copy_shares_state_with_original(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.spatial_footprint_widget)
@@ -885,7 +890,7 @@ def test_detached_spatial_footprint_copy_shares_state_with_original(
 def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
 
@@ -931,7 +936,7 @@ def test_neuron_click_rebuilds_stim_and_trace_layout_only_once(
 def test_deselecting_a_cell_restores_the_vertical_zoom(qtbot: QtBot) -> None:
     """Issue #604: selecting a cell fits the plots to its rows; deselecting
     it must go back to the earlier vertical zoom, not zoom all the way out."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     controllers = [gui.controller, gui.trace_controller, gui.spike_controller]
@@ -952,7 +957,7 @@ def test_deselecting_a_cell_restores_the_vertical_zoom(qtbot: QtBot) -> None:
 def test_right_click_on_a_cell_centres_its_trace(qtbot: QtBot) -> None:
     """Issue #603: right-clicking a cell scrolls the traces to its neuron
     and keeps the vertical zoom, without hiding any trace."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui.trace_controller.set_vertical_view((1.0, 0.0))
@@ -970,7 +975,7 @@ def test_switching_project_ignores_the_previous_projects_data_names(
     """Issue #595: closing a tab or opening a project re-windows the shown
     data before the data selectors are refilled, so they can still name the
     previous project's simulation monitors, which this project lacks."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     # As while update_project() runs: the selectors are not refilled yet,
     # and their own change handlers have not run.
@@ -992,7 +997,7 @@ def test_switching_project_ignores_the_previous_projects_data_names(
 def test_cell_selection_applies_to_every_trace_view(qtbot: QtBot) -> None:
     """Issue #596: a selected cell also filters the universal data widget,
     and choosing data again keeps the selection in every view."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.data_widget)
@@ -1019,7 +1024,7 @@ def test_cell_selection_applies_to_every_trace_view(qtbot: QtBot) -> None:
 def test_detached_console_copy_close_button_closes_its_own_window_only(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
     gui._auto_show_widget(gui.console_widget)
@@ -1036,7 +1041,7 @@ def test_detached_console_copy_close_button_closes_its_own_window_only(
 
 
 def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     for widget in (
@@ -1075,7 +1080,7 @@ def test_detach_custom_analysis_before_anything_analyzed_shows_message(
     qtbot: QtBot,
     qmessagebox_calls: list,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     gui.detach_panel(gui.custom_analysis_widget, keep_original=False)
@@ -1090,7 +1095,7 @@ def test_detach_custom_analysis_before_anything_analyzed_shows_message(
 def test_detach_custom_analysis_after_analysis_seeds_from_last_shown(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     trace_data, _, _ = _add_detach_panel_test_data(gui)
 
@@ -1113,7 +1118,7 @@ def test_detach_custom_analysis_after_analysis_seeds_from_last_shown(
 
 
 def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     trace_data, _, _ = _add_detach_panel_test_data(gui)
 
@@ -1132,7 +1137,7 @@ def test_custom_analysis_popup_title_includes_originating_tab(qtbot: QtBot) -> N
 
 
 def test_closing_the_main_window_closes_static_input_designer(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.update_project(default_project())
     gui.static_input_controller.open_pattern_designer()
@@ -1155,7 +1160,7 @@ def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
     so closing the main window would otherwise leave them open as orphaned
     windows: findChildren() never finds them, since they were never made
     Qt children of the main window in the first place."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.update_project(default_project())
 
@@ -1200,24 +1205,21 @@ def test_switching_project_tabs_restores_each_tabs_own_time_slider_position(
 ) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
-    tab0_project = gui.project
     tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
 
-    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    gui._add_workspace(tab1_project)
     assert gui.time_slider.t_ms == 0  # a freshly opened tab has no history
 
     gui.time_slider.set_current_time_ms(3000)
-    gui._activate_tab_index(0, reset_controller=True)
+    gui.project_tabs.setCurrentIndex(0)
     assert gui.time_slider.t_ms == 0  # tab0 was never scrubbed
-    assert tab1_project.last_time_ms == 3000  # remembered on the way out
 
     gui.time_slider.set_current_time_ms(200)
-    gui._activate_tab_index(1, reset_controller=True)
-    assert gui.time_slider.t_ms == 3000  # restored from tab1_project.last_time_ms
-    assert tab0_project.last_time_ms == 200
+    gui.project_tabs.setCurrentIndex(1)
+    assert gui.time_slider.t_ms == 3000
 
-    gui._activate_tab_index(0, reset_controller=True)
-    assert gui.time_slider.t_ms == 200  # restored from tab0_project.last_time_ms
+    gui.project_tabs.setCurrentIndex(0)
+    assert gui.time_slider.t_ms == 200
     gui.close()
 
 
@@ -1233,7 +1235,7 @@ def test_switching_to_tab_with_no_stim_arrays_still_updates_time_slider_range(
     tab1_project = _make_timed_project(500, dt=0.01)  # 5.0s
     assert not tab1_project.stim_arrays
 
-    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    gui._add_workspace(tab1_project)
 
     assert gui.time_slider.t_max_ms == 5000
     gui.close()
@@ -1244,7 +1246,7 @@ def test_closing_the_only_dirty_tab_prompts_to_save_then_opens_example_project(
 ) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
-    assert len(gui.tabs) == 1
+    assert len(gui.workspaces) == 1
     gui.project.mark_dirty()
 
     warn_calls: list[tuple] = []
@@ -1258,7 +1260,7 @@ def test_closing_the_only_dirty_tab_prompts_to_save_then_opens_example_project(
     gui._close_tab(0)
 
     assert len(warn_calls) == 1  # asked about saving before replacing the tab
-    assert len(gui.tabs) == 1
+    assert len(gui.workspaces) == 1
     assert gui.project.project_name == "Getting Started Project"
     gui.close()
 
@@ -1268,7 +1270,7 @@ def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
 ) -> None:
     gui = Gui()
     qtbot.addWidget(gui)
-    assert len(gui.tabs) == 1
+    assert len(gui.workspaces) == 1
     assert not gui.project.dirty
 
     warn_calls: list[tuple] = []
@@ -1281,7 +1283,7 @@ def test_closing_the_only_clean_tab_opens_example_project_without_prompting(
     gui._close_tab(0)
 
     assert warn_calls == []  # nothing unsaved, so no prompt was needed
-    assert len(gui.tabs) == 1
+    assert len(gui.workspaces) == 1
     assert gui.project.project_name == "Getting Started Project"
     gui.close()
 
@@ -1296,38 +1298,34 @@ def test_closing_a_tab_shows_the_next_projects_own_data(
 
     gui = Gui()
     qtbot.addWidget(gui)
-    _add_detach_panel_test_data(gui)
+    _add_detach_panel_test_data(gui.active_workspace)
     movie = tmp_path / "movie.tif"
     tifffile.imwrite(movie, np.zeros((3, 4, 4), dtype=np.uint16))
     gui.project.add_calcium_video([movie], 10.0)
     gui._refresh_calcium_video_widgets()
     closed = gui.project
-    gui._open_project_in_new_tab(Project())
+    gui._add_workspace(Project())
     blank = gui.project
-    gui._open_project_in_new_tab(Project())
+    gui._add_workspace(Project())
 
-    gui.tab_bar.setCurrentIndex(0)
-    gui._remove_tab(0)
+    gui.project_tabs.setCurrentIndex(0)
+    gui._remove_workspace(gui.workspaces[0])
 
-    assert gui.tabs[gui._active_tab_index] is blank
-    assert gui.tab_bar.currentIndex() == gui._active_tab_index == 0
+    assert gui.active_workspace.project is blank
+    assert gui.project_tabs.currentIndex() == 0
     assert gui.calcium_video_widget._paths == []
     assert gui.spatial_footprint_widget._cellpose_data is None
     assert gui.trace_widget.data is None
     assert gui.cmb_trace.count() == 0
     assert blank.calcium_videos == [] and blank.cellpose_data is None
-    assert closed not in gui.tabs
+    assert all(w.project is not closed for w in gui.workspaces)
     gui.close()
 
 
 def test_switching_project_tabs_restores_each_tabs_own_spatial_footprint_selection(
     qtbot: QtBot,
 ) -> None:
-    """Regression test for #555: the Spatial Footprints panel's selection
-    lives on one shared SpatialFootprintState (see SpatialFootprintWidget's
-    ``state`` parameter), and set_data() - called on every tab switch -
-    always clears it. Switching tabs used to silently deselect whatever the
-    user had selected, even when switching straight back."""
+    """Each workspace keeps its own selection when other tabs become active."""
     gui = Gui()
     qtbot.addWidget(gui)
     tab0_project = gui.project
@@ -1336,29 +1334,28 @@ def test_switching_project_tabs_restores_each_tabs_own_spatial_footprint_selecti
 
     tab1_project = Project()
     tab1_project.cellpose_data = _make_gui_cellpose_result(mapping=None)
-    gui._open_project_in_new_tab(tab1_project, reset_controller=True)
+    gui._add_workspace(tab1_project)
     assert gui._spatial_footprint_state.selected_cellpose_ids == set()
 
     gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(2)
     assert gui._spatial_footprint_state.selected_cellpose_ids == {2}
 
-    gui._activate_tab_index(0, reset_controller=True)
+    gui.project_tabs.setCurrentIndex(0)
     assert gui._spatial_footprint_state.selected_cellpose_ids == set()
-    assert tab1_project.selected_cellpose_ids == {2}  # remembered on the way out
 
     gui.spatial_footprint_widget.overlay_widget.neuron_clicked.emit(1)
     assert gui._spatial_footprint_state.selected_cellpose_ids == {1}
 
-    gui._activate_tab_index(1, reset_controller=True)
+    gui.project_tabs.setCurrentIndex(1)
     assert gui._spatial_footprint_state.selected_cellpose_ids == {2}  # restored
 
-    gui._activate_tab_index(0, reset_controller=True)
+    gui.project_tabs.setCurrentIndex(0)
     assert gui._spatial_footprint_state.selected_cellpose_ids == {1}  # restored
     gui.close()
 
 
 def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     _add_detach_panel_test_data(gui)
 
@@ -1373,7 +1370,7 @@ def test_closing_gui_with_open_detached_windows_does_not_crash(qtbot: QtBot) -> 
 def test_clicking_neuron_in_spatial_footprint_greys_trace_and_stim_rows(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = Project()
     project.add_stim_array(
@@ -1482,7 +1479,7 @@ def _stim_trace_overlay_project() -> tuple[Project, TraceData]:
 
 
 def test_toggle_stim_trace_overlay_shows_and_hides_stim_panel(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project, _ = _stim_trace_overlay_project()
     gui.update_project(project)
@@ -1508,7 +1505,7 @@ def test_toggle_stim_trace_overlay_shows_and_hides_stim_panel(qtbot: QtBot) -> N
 def test_toggle_stim_trace_overlay_respects_manually_hidden_stim_panel(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project, _ = _stim_trace_overlay_project()
     gui.update_project(project)
@@ -1525,7 +1522,7 @@ def test_toggle_stim_trace_overlay_respects_manually_hidden_stim_panel(
 
 
 def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project, _ = _stim_trace_overlay_project()
     other_values = np.full((10, 3), 5.0, dtype=np.float32)
@@ -1546,7 +1543,7 @@ def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> 
 def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project, _ = _stim_trace_overlay_project()
     project.stim_arrays["stim"].values[5, 1] = 3.0  # neuron 1 stimulated at t=5ms
@@ -1564,7 +1561,7 @@ def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(
 def test_switching_current_stim_array_refreshes_active_stim_highlight(
     qtbot: QtBot,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project, _ = _stim_trace_overlay_project()
     other_values = np.zeros((10, 3), dtype=np.float32)
@@ -1598,8 +1595,8 @@ def test_import_cellpose_data_populates_and_shows_spatial_footprint_panel(
         def get_imported_data(self) -> CellposeImportResult:
             return imported
 
-    monkeypatch.setattr("neuroseq.gui.CellposeImportDialog", _FakeDialog)
-    gui = Gui()
+    monkeypatch.setattr("neuroseq.project_workspace.CellposeImportDialog", _FakeDialog)
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     gui.btn_import_cellpose_data_clicked()
@@ -1634,7 +1631,7 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
     monkeypatch.setattr(
         "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
     )
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     gui.btn_import_tif_clicked()
@@ -1690,7 +1687,7 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
 
     fake_gui = _FakeGui()
 
-    Gui.btn_import_tif_clicked(fake_gui)  # type: ignore[arg-type]
+    ProjectWorkspace.btn_import_tif_clicked(fake_gui)  # type: ignore[arg-type]
 
     assert len(appended) == 1
     assert fake_gui.project.cellpose_data is existing
@@ -1718,8 +1715,8 @@ def test_spatial_footprint_empty_button_opens_cellpose_import(
         def get_imported_data(self) -> CellposeImportResult:
             return imported
 
-    monkeypatch.setattr("neuroseq.gui.CellposeImportDialog", _FakeDialog)
-    gui = Gui()
+    monkeypatch.setattr("neuroseq.project_workspace.CellposeImportDialog", _FakeDialog)
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     gui.spatial_footprint_widget.import_button.click()
@@ -1733,7 +1730,7 @@ def test_spatial_footprint_empty_button_opens_cellpose_import(
 
 
 def test_deleting_cellpose_data_clears_spatial_footprint_panel(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.cellpose_data = _make_gui_cellpose_result()
     gui.spatial_footprint_widget.set_data(gui.project.cellpose_data)
@@ -1753,7 +1750,7 @@ def test_gui_choose_fiji_path_forces_prompt(
 ) -> None:
     import neuroseq.fiji as fiji_module
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
 
     calls: list[dict] = []
@@ -1774,7 +1771,7 @@ def test_gui_theme_menu_toggles_theme_and_persists(
 ) -> None:
     from neuroseq import theme as theme_module
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1823,7 +1820,7 @@ def test_gui_applies_persisted_theme_on_startup(qtbot: QtBot, tmp_config_dir) ->
     # Persist a dark theme to the (temporary) config before launching.
     GuiSettings().theme = theme_module.DARK
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1838,7 +1835,7 @@ def test_gui_starts_in_retro_theme_without_config(qtbot: QtBot, tmp_config_dir) 
     from neuroseq import theme as theme_module
 
     # No config has been written, so the GUI must come up in the default theme.
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1863,7 +1860,7 @@ def test_timeseries_panels_and_slider_share_one_width(qtbot: QtBot) -> None:
     vertical splitter for that reason; the synapse / cell-segmentation column
     sits beside the whole stack rather than beside the stim editor alone.
     """
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1899,7 +1896,7 @@ def test_retro_time_slider_elapsed_side_is_green(qtbot: QtBot) -> None:
 
 
 def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1934,7 +1931,7 @@ def test_gui_open_example_project_menu_has_subsections(qtbot: QtBot) -> None:
 
 
 def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1963,7 +1960,7 @@ def test_gui_cellpose_import_action_moved_to_file_menu(qtbot: QtBot) -> None:
 
 
 def test_gui_has_no_export_graphics_menu(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -1989,7 +1986,7 @@ def test_gui_has_no_export_graphics_menu(qtbot: QtBot) -> None:
 def test_gui_simulate_and_playback(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project, tmp_config_dir
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
@@ -2082,7 +2079,7 @@ class _MainThreadCancelTrigger(QtCore.QObject):
 def test_gui_simulate_and_cancel(
     monkeypatch: MonkeyPatch, qtbot: QtBot, test_project: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
@@ -2120,7 +2117,7 @@ def test_file_menu_shortcuts_are_disabled_during_a_running_io_task(
     disabled, letting a user open/switch tabs while a Brian2 simulation
     (or any other IO task) was still running for the previously active
     tab."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     qtbot.addWidget(gui)
 
@@ -2138,55 +2135,28 @@ def test_file_menu_shortcuts_are_disabled_during_a_running_io_task(
     gui.close()
 
 
-def test_brian2_simulation_finish_does_not_touch_a_different_tab(
+def test_brian2_simulation_finish_updates_only_its_workspace(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
     test_project: Project,
-    qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    """Regression test for #556: if the active tab changes while a Brian2
-    simulation is running (e.g. through the shortcut bypass fixed above),
-    its completion callback used to unconditionally refresh the shared
-    widgets from ``self.project`` and tell stim_editor's Design dynamic
-    input dialogs the simulation finished - both of which, by then, belong
-    to whichever *other* tab is active, not the one that was simulated."""
-    gui = Gui()
-    gui.load_project(test_project)
+    gui = Gui(test_project)
     qtbot.addWidget(gui)
-    simulated_project = gui.project
+    workspace = gui.active_workspace
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.2", True))
-
-    gui.btn_continue_simulation_clicked()
-    assert gui._background_job.worker is not None
-
-    # Switch tabs while the simulation for `simulated_project` is still
-    # running on the worker thread - this is exactly what the (now fixed)
-    # shortcut bypass let a user do despite the "disabled" File menu/tab bar.
-    other_project = default_project()
-    gui._open_project_in_new_tab(other_project, reset_controller=True)
-    assert gui.project is other_project
-
-    _wait_for_brian2_simulation(qtbot, gui)
-
-    # The simulation still ran to completion and its results live on the
-    # project that was actually simulated...
-    assert float(simulated_project.b2_model.network.t) > 0
-
-    # ...but the other (now active) tab was left alone: no combo-box entries
-    # borrowed from the simulated project, and the user was told where the
-    # results actually went instead of the change silently landing elsewhere.
-    assert gui.project is other_project
-    assert gui.cmb_trace.count() == 0
-    assert any(
-        call["name"] == "information" and "project switch" in call["text"]
-        for call in qmessagebox_calls
-    )
-    gui._close_confirmed = True
+    workspace.btn_continue_simulation_clicked()
+    other = gui._add_workspace(default_project())
+    _wait_for_brian2_simulation(qtbot, workspace)
+    assert float(test_project.b2_model.network.t) > 0
+    assert workspace.cmb_trace.count() > 0
+    assert gui.active_workspace is other
+    assert other.cmb_trace.count() == 0
+    test_project.dirty = False
     gui.close()
 
 
 def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitUntil(gui.isVisible)
@@ -2225,7 +2195,7 @@ def test_simulation_progress_is_embedded_in_view_toolbar(qtbot: QtBot) -> None:
 
 
 def test_gui_new(tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2254,15 +2224,17 @@ def test_create_new_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None:
     loaded_project: list[Project] = []
 
     monkeypatch.setattr(
-        "neuroseq.gui.gc.collect",
+        "neuroseq.project_workspace.gc.collect",
         lambda: collect_calls.__setitem__(0, collect_calls[0] + 1),
     )
-    monkeypatch.setattr("neuroseq.gui.default_project", lambda: sentinel_project)
+    monkeypatch.setattr(
+        "neuroseq.project_workspace.default_project", lambda: sentinel_project
+    )
 
     fake_gui: Any = SimpleNamespace(
         load_project=lambda project: loaded_project.append(project)
     )
-    Gui._create_new_project(fake_gui)
+    ProjectWorkspace._create_new_project(fake_gui)
 
     assert collect_calls[0] == 1
     assert loaded_project == [sentinel_project]
@@ -2292,19 +2264,19 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
         proceeded[0] += 1
 
     # Cancel: neither save nor proceed.
-    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    ProjectWorkspace._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert proceeded[0] == 0
     assert save_events == []
 
     # Discard: proceed immediately, without saving.
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
-    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    ProjectWorkspace._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert proceeded[0] == 1
     assert save_events == []
 
     # Save: save first, then proceed via the on_success chain.
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
-    Gui._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
+    ProjectWorkspace._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert save_events == ["save"]
     assert proceeded[0] == 2
 
@@ -2325,7 +2297,7 @@ def test_prompt_save_before_action_skips_prompt_when_not_dirty(
     fake_gui: Any = SimpleNamespace(project=Project())  # dirty=False by default
     proceeded = [0]
 
-    Gui._prompt_save_before_action(
+    ProjectWorkspace._prompt_save_before_action(
         fake_gui, "T", "M", lambda: proceeded.__setitem__(0, 1)
     )
 
@@ -2352,18 +2324,18 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
         _close_confirmed=False,
         _save_project=fake_save,
         close=lambda: closed.__setitem__(0, closed[0] + 1),
-        tabs=[dirty_project],
+        project=dirty_project,
     )
 
     # Cancel: keep the app open.
-    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not ProjectWorkspace._prompt_save_before_close(fake_gui)
     assert not fake_gui._close_confirmed
     assert save_callbacks == []
     assert closed == [0]
 
     # Discard: close immediately.
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Discard
-    assert Gui._prompt_save_before_close(fake_gui)
+    assert ProjectWorkspace._prompt_save_before_close(fake_gui)
     assert fake_gui._close_confirmed
     assert save_callbacks == []
     assert closed == [0]
@@ -2371,7 +2343,7 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     # Save: block the current close, then close from the save success callback.
     fake_gui._close_confirmed = False
     answer_box["answer"] = QtWidgets.QMessageBox.StandardButton.Save
-    assert not Gui._prompt_save_before_close(fake_gui)
+    assert not ProjectWorkspace._prompt_save_before_close(fake_gui)
     assert not fake_gui._close_confirmed
     assert len(save_callbacks) == 1
     assert closed == [0]
@@ -2394,13 +2366,13 @@ def test_prompt_save_before_close_skips_prompt_when_no_tab_is_dirty(
         return QtWidgets.QMessageBox.StandardButton.Cancel
 
     monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
-    # Two clean tabs; neither is dirty.
+    # A standalone workspace owns one clean project.
     fake_gui: Any = SimpleNamespace(
         _close_confirmed=False,
-        tabs=[Project(), Project()],
+        project=Project(),
     )
 
-    assert Gui._prompt_save_before_close(fake_gui)
+    assert ProjectWorkspace._prompt_save_before_close(fake_gui)
 
     assert warning_calls == []
     assert fake_gui._close_confirmed
@@ -2442,7 +2414,7 @@ def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None
     loaded_project: list[Project] = []
 
     monkeypatch.setattr(
-        "neuroseq.gui.gc.collect",
+        "neuroseq.project_workspace.gc.collect",
         lambda: collect_calls.__setitem__(0, collect_calls[0] + 1),
     )
 
@@ -2453,7 +2425,7 @@ def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None
     fake_gui: Any = SimpleNamespace(
         load_project=lambda project: loaded_project.append(project)
     )
-    Gui._load_example_project(fake_gui, generator)
+    ProjectWorkspace._load_example_project(fake_gui, generator)
 
     assert collect_calls[0] == 1
     assert generator_calls[0] == 1
@@ -2463,7 +2435,7 @@ def test_load_example_project_calls_gc_collect(monkeypatch: MonkeyPatch) -> None
 def test_gui_open(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2505,7 +2477,7 @@ def test_gui_open(
 def test_gui_open_adds_to_recent_projects(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_path: Path, test_project: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2534,7 +2506,7 @@ def test_gui_open_adds_to_recent_projects(
 def test_gui_save_adds_to_recent_projects(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2554,7 +2526,7 @@ def test_gui_save_adds_to_recent_projects(
 
 
 def test_gui_toggle_grid(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2574,7 +2546,7 @@ def test_gui_toggle_grid(qtbot: QtBot) -> None:
 
 
 def test_gui_toggle_minimum_stimulus_size(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     stim_widget = gui.stim_editor.stim_widget
     assert stim_widget.keep_short_stimuli_visible
@@ -2603,7 +2575,7 @@ class MockSaveLoadOptionsDialog:
 def test_gui_save(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2618,7 +2590,9 @@ def test_gui_save(
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("save options dialog should not be shown")
 
-    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "SaveLoadOptionsDialog", _fail_if_called
+    )
     # mock getSaveFileName to return the desired filename
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -2652,7 +2626,7 @@ def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
 ) -> None:
     """Once a project has a file path, plain Save (Ctrl+S) writes straight
     back to it without showing the options or file-picker dialogs."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2668,7 +2642,9 @@ def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("dialog should not be shown for a quick save")
 
-    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "SaveLoadOptionsDialog", _fail_if_called
+    )
     monkeypatch.setattr(QtWidgets.QFileDialog, "getSaveFileName", _fail_if_called)
 
     gui.btn_save_clicked()
@@ -2681,7 +2657,7 @@ def test_gui_save_as_uses_all_options_without_options_dialog(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
     """Save As prompts for a destination and includes every project component."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2700,7 +2676,9 @@ def test_gui_save_as_uses_all_options_without_options_dialog(
     def _fail_if_called(*args, **kwargs):
         raise AssertionError("save options dialog should not be shown")
 
-    monkeypatch.setattr(neuroseq.gui, "SaveLoadOptionsDialog", _fail_if_called)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "SaveLoadOptionsDialog", _fail_if_called
+    )
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
         "getSaveFileName",
@@ -2723,7 +2701,7 @@ def test_gui_import(
     project_ornstein: Project,
     test_project: Project,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -2753,7 +2731,7 @@ def test_gui_import(
     MockSaveLoadOptionsDialog.options.include_simulation_data = False
     MockSaveLoadOptionsDialog.options.include_experimental_data = False
     monkeypatch.setattr(
-        neuroseq.gui,
+        neuroseq.project_workspace,
         "SaveLoadOptionsDialog",
         MockSaveLoadOptionsDialog,
     )
@@ -3151,7 +3129,9 @@ def test_gui_stimulus_export_delegates_format_selection(monkeypatch, handler, mo
     from unittest.mock import Mock
 
     entry_point = Mock()
-    monkeypatch.setattr(neuroseq.gui, "show_stimulus_export_dialog", entry_point)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "show_stimulus_export_dialog", entry_point
+    )
     project = Project()
     panel = SimpleNamespace(
         _remote_sequence_names=Mock(), show_generated_preview=Mock()
@@ -3162,7 +3142,7 @@ def test_gui_stimulus_export_delegates_format_selection(monkeypatch, handler, mo
         syscon2_panel=panel,
     )
 
-    getattr(Gui, handler)(window)
+    getattr(ProjectWorkspace, handler)(window)
 
     kwargs = dict(parent=window, current_stim_name="selected")
     if mode == "light":
@@ -3333,10 +3313,10 @@ def test_stimulus_import_completion(
         else QtWidgets.QDialog.DialogCode.Rejected
     )
     factory = Mock(return_value=dialog)
-    monkeypatch.setattr(neuroseq.gui, dialog_name, factory)
+    monkeypatch.setattr(neuroseq.project_workspace, dialog_name, factory)
     path = tmp_path / "stimulus.csv" if with_path else None
 
-    getattr(Gui, handler)(window, path=path, **options)
+    getattr(ProjectWorkspace, handler)(window, path=path, **options)
 
     factory.assert_called_once_with(project, parent=window, **options)
     expected = [call.load(str(path))] if with_path else []
@@ -3402,11 +3382,11 @@ def test_gui_import_igor2_wave_updates_selected_stim(
     )
 
     monkeypatch.setattr(
-        neuroseq.gui,
+        neuroseq.project_workspace,
         "PatchClampDataInputImportDialog",
         MockPatchClampDataInputImportDialog,
     )
-    Gui.btn_import_igor2_wave_clicked(fake_gui)
+    ProjectWorkspace.btn_import_igor2_wave_clicked(fake_gui)
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
     assert "igor_wave" in project.stim_arrays
@@ -3485,8 +3465,10 @@ def test_gui_import_igor2_trace_updates_selected_trace(
         _focus_neuron_range=lambda n_neurons: None,
         _keep_cell_selection=lambda widget: None,
     )
-    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
-        fake_gui, cmb_name
+    fake_gui._apply_trace_selection = lambda cmb_name: (
+        ProjectWorkspace._apply_trace_selection(  # type: ignore[attr-defined]
+            fake_gui, cmb_name
+        )
     )
 
     monkeypatch.setattr(
@@ -3494,7 +3476,7 @@ def test_gui_import_igor2_trace_updates_selected_trace(
         "PatchClampDataOutputImportDialog",
         MockPatchClampDataOutputImportDialog,
     )
-    Gui.btn_import_igor2_trace_clicked(fake_gui)
+    ProjectWorkspace.btn_import_igor2_trace_clicked(fake_gui)
 
     assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
     assert "Experiment A" in project.experiments
@@ -3583,8 +3565,10 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         _focus_neuron_range=lambda n_neurons: focus_calls.append(n_neurons),
         _keep_cell_selection=lambda widget: None,
     )
-    fake_gui._apply_trace_selection = lambda cmb_name: Gui._apply_trace_selection(  # type: ignore[attr-defined]
-        fake_gui, cmb_name
+    fake_gui._apply_trace_selection = lambda cmb_name: (
+        ProjectWorkspace._apply_trace_selection(  # type: ignore[attr-defined]
+            fake_gui, cmb_name
+        )
     )
 
     monkeypatch.setattr(
@@ -3593,7 +3577,7 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         MockPatchClampDataOutputImportDialog,
     )
 
-    Gui.btn_import_igor2_trace_clicked(fake_gui)
+    ProjectWorkspace.btn_import_igor2_trace_clicked(fake_gui)
 
     assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
     assert captured_data[-1] is not None
@@ -3688,12 +3672,12 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         update_project=_update_project,
     )
     monkeypatch.setattr(
-        neuroseq.gui,
+        neuroseq.project_workspace,
         "PatchClampDataInputImportDialog",
         MockPatchClampDataInputImportDialog,
     )
 
-    Gui.btn_import_igor2_wave_clicked(fake_gui)
+    ProjectWorkspace.btn_import_igor2_wave_clicked(fake_gui)
 
     assert fake_editor.current_stim_modifier is not None
     assert fake_editor.current_stim_modifier.stim_array.name == "igor_wave"
@@ -3732,7 +3716,7 @@ def test_gui_set_neuron_refocuses_to_selected_trace_range() -> None:
         _keep_cell_selection=lambda widget: None,
     )
 
-    Gui._apply_trace_selection(fake_gui, "Cellpose :: traces")
+    ProjectWorkspace._apply_trace_selection(fake_gui, "Cellpose :: traces")
 
     assert captured_data == [trace_data]
     assert focus_calls == [1]
@@ -3766,7 +3750,7 @@ def test_gui_set_spike_refocuses_to_selected_spike_range() -> None:
         _keep_cell_selection=lambda widget: None,
     )
 
-    Gui._apply_spike_selection(fake_gui, "Cellpose :: spikes")
+    ProjectWorkspace._apply_spike_selection(fake_gui, "Cellpose :: spikes")
 
     assert captured_data == [spike_data]
     assert focus_calls == [1]
@@ -3802,7 +3786,7 @@ def test_apply_spike_selection_does_not_auto_show_for_a_never_simulated_monitor(
         _auto_show_widget=lambda widget: auto_show_calls.append(widget),
     )
 
-    Gui._apply_spike_selection(fake_gui, "Simulation :: P")
+    ProjectWorkspace._apply_spike_selection(fake_gui, "Simulation :: P")
 
     assert spike_widget.data is None
     assert auto_show_calls == []
@@ -3836,7 +3820,7 @@ def test_set_synapse_does_not_auto_show_for_a_never_simulated_monitor() -> None:
     # set_synapse is @with_wait_cursor-wrapped, which touches the live
     # QApplication cursor - call the unwrapped function so this test doesn't
     # need a real Qt application.
-    Gui.set_synapse.__wrapped__(fake_gui, "Simulation :: Ce / we")  # type: ignore[attr-defined]
+    ProjectWorkspace.set_synapse.__wrapped__(fake_gui, "Simulation :: Ce / we")  # type: ignore[attr-defined]
 
     assert heatmap_widget.data is None
     assert auto_show_calls == []
@@ -3881,7 +3865,7 @@ def test_gui_set_data_refocuses_combined_trace_view() -> None:
         _keep_cell_selection=lambda widget: None,
     )
 
-    Gui._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")
+    ProjectWorkspace._apply_data_selection(fake_gui, "Cellpose :: traces [trace]")
 
     assert captured_data == [trace_data]
     assert focus_calls == [1]
@@ -3918,13 +3902,13 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
             self,
             imported: CellposeImportResult | None,
         ) -> int:
-            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
 
         def _expand_stim_arrays_to_neuron_count(
             self,
             target_neuron_count: int,
         ) -> list[str]:
-            return Gui._expand_stim_arrays_to_neuron_count(
+            return ProjectWorkspace._expand_stim_arrays_to_neuron_count(
                 self,  # type: ignore[arg-type]
                 target_neuron_count,
             )
@@ -3945,7 +3929,7 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
         stimulus_to_cellpose_mapping=None,
     )
 
-    resized_names = Gui._apply_cellpose_import_result(fake_gui, imported)  # type: ignore[arg-type]
+    resized_names = ProjectWorkspace._apply_cellpose_import_result(fake_gui, imported)  # type: ignore[arg-type]
 
     assert resized_names == ["stim"]
     assert fake_gui.last_cellpose_import is not None
@@ -3966,7 +3950,7 @@ class _RemapFakeGui:
         self,
         imported: CellposeImportResult | None,
     ) -> int:
-        return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+        return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
 
 
 def _cellpose_result_with_mapping(
@@ -3999,7 +3983,7 @@ def test_gui_apply_cellpose_import_result_remaps_existing_trace_data() -> None:
     project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
     fake_gui = _RemapFakeGui(project)
 
-    Gui._apply_cellpose_import_result(
+    ProjectWorkspace._apply_cellpose_import_result(
         fake_gui,  # type: ignore[arg-type]
         _cellpose_result_with_mapping({9: 0, 2: 1}),
     )
@@ -4025,7 +4009,7 @@ def test_gui_apply_cellpose_import_result_warns_on_remap_conflict(
 
     # Cellpose id 0 maps explicitly to stim 1, cellpose id 1 falls back to
     # identity (stim 1 too) - a collision that cannot be resolved.
-    Gui._apply_cellpose_import_result(
+    ProjectWorkspace._apply_cellpose_import_result(
         fake_gui,  # type: ignore[arg-type]
         _cellpose_result_with_mapping({1: 0}),
     )
@@ -4043,7 +4027,7 @@ def test_gui_checkpoints(
     project_ornstein: Project,
     qmessagebox_calls: list,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4081,7 +4065,7 @@ def test_gui_checkpoints(
 
 
 def test_gui_edit_stim_with_console(qtbot: QtBot, project_ornstein: Project) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4120,7 +4104,7 @@ def test_gui_synapse_ram_limit(
     tmp_config_dir,
     test_project: Project,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
@@ -4174,7 +4158,7 @@ def test_gui_synapse_ram_limit(
 def test_gui_brian2_backend(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4204,7 +4188,7 @@ def test_gui_stim_padding(
     qmessagebox_calls: list,
     tmp_config_dir,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4229,7 +4213,7 @@ def test_gui_stim_padding(
 def test_gui_restore_settings_on_restart(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4251,7 +4235,7 @@ def test_gui_restore_settings_on_restart(
     gui.close()
     qtbot.wait(delay_after_update_model_call_in_ms)
 
-    gui2 = Gui()
+    gui2 = ProjectWorkspace()
     gui2.show()
     qtbot.addWidget(gui2)
     qtbot.waitUntil(lambda: gui2.isVisible())
@@ -4268,7 +4252,7 @@ def test_gui_playback_speed(
     qmessagebox_calls: list,
     test_project: Project,
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
@@ -4314,7 +4298,7 @@ class MockAddExperimentDataDialog:
 def test_gui_simulate_external_model(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.show()
     qtbot.addWidget(gui)
     qtbot.waitUntil(lambda: gui.isVisible())
@@ -4338,7 +4322,7 @@ def test_gui_simulate_external_model(
         lambda *args: (f"{simulation_time_secs}", True),
     )
     monkeypatch.setattr(
-        neuroseq.gui,
+        neuroseq.project_workspace,
         "AddExperimentDataDialog",
         MockAddExperimentDataDialog,
     )
@@ -4367,7 +4351,7 @@ def test_gui_simulate_external_model(
 def test_integration_modeleditor_delete_restore(
     qtbot: QtBot, qmessagebox_calls: list, test_project: Project
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     gui.load_project(test_project)
     gui.show()
     qtbot.addWidget(gui)
@@ -4435,7 +4419,7 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
             self.project = project
 
         def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
-            return Gui._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
+            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
 
     fake = _FakeGui(project)
 
@@ -4452,17 +4436,17 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
 
     # no cellpose data -> no warning
     project.cellpose_data = None
-    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    ProjectWorkspace._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
     assert len(qmessagebox_calls) == 0
 
     # matching counts (10 cells, 10 neurons) -> no warning
     project.cellpose_data = _cellpose_with(10)
-    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    ProjectWorkspace._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
     assert len(qmessagebox_calls) == 0
 
     # mismatch (25 cells vs 10 neurons) -> warning
     project.cellpose_data = _cellpose_with(25)
-    Gui._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    ProjectWorkspace._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "warning"
     assert "mismatch" in qmessagebox_calls[0]["title"].lower()
@@ -4473,7 +4457,7 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
 def test_brian2_busy_notifies_dynamic_input(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitUntil(gui.isVisible)
@@ -4496,7 +4480,7 @@ def test_brian2_busy_notifies_dynamic_input(
 
 
 def test_toolbar_progress_does_not_auto_hide_at_maximum(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitUntil(gui.isVisible)
@@ -4531,7 +4515,7 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
             0.001,
         )
     )
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.load_project(test_project)
     gui.stim_editor.cmb_stim.setCurrentText("second_stim")
@@ -4559,7 +4543,7 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
     from neuroseq.export.syscon2_export_service import SysconExportSettings
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = default_project()
     gui.update_project(project)
@@ -4584,7 +4568,9 @@ def test_import_keeps_syscon_routine_settings_and_selected_stim(qtbot, monkeypat
     settings = SysconExportSettings(config_text="config")
     gui.syscon2_panel._export_settings = settings
     monkeypatch.setattr(
-        neuroseq.gui, "AddExperimentDataDialog", MockAddExperimentDataDialog
+        neuroseq.project_workspace,
+        "AddExperimentDataDialog",
+        MockAddExperimentDataDialog,
     )
     recording = Experiment("new_recording", 1.0, [], [SpikeData("spikes", [0], [0.2])])
 
@@ -4609,7 +4595,7 @@ def test_main_menu_export_updates_setup_preview_without_import(
 ):
     from qtpy import QtGui
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     path = tmp_path / "overview.png"
     image = QtGui.QPixmap(100, 50)
@@ -4643,7 +4629,7 @@ def test_patchclamp_input_opens_importer_directly(monkeypatch: MonkeyPatch) -> N
     fake_gui: Any = SimpleNamespace(
         btn_import_igor2_wave_clicked=lambda: called.append(True)
     )
-    Gui.btn_import_stimulus_patchclamp_clicked(fake_gui)
+    ProjectWorkspace.btn_import_stimulus_patchclamp_clicked(fake_gui)
     assert called == [True]
 
 
@@ -4656,5 +4642,5 @@ def test_patchclamp_output_opens_importer_directly(monkeypatch: MonkeyPatch) -> 
     fake_gui: Any = SimpleNamespace(
         btn_import_igor2_trace_clicked=lambda: called.append(True)
     )
-    Gui.btn_import_trace_patchclamp_clicked(fake_gui)
+    ProjectWorkspace.btn_import_trace_patchclamp_clicked(fake_gui)
     assert called == [True]

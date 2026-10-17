@@ -18,7 +18,7 @@ from qtpy import QtWidgets
 import neuroseq
 import neuroseq.stimulation.stim
 from neuroseq.data import Experiment
-from neuroseq.gui import Gui
+from neuroseq.project_workspace import ProjectWorkspace
 
 
 class _MockImportDialog:
@@ -42,7 +42,7 @@ def _set_simulation_time(monkeypatch: MonkeyPatch, seconds: float) -> None:
     )
 
 
-def _wait_for_external_simulation(qtbot: QtBot, gui: Gui):
+def _wait_for_external_simulation(qtbot: QtBot, gui: ProjectWorkspace):
     # Poll until the worker has been fully torn down. Using waitUntil
     # rather than waitSignal here is robust to the race where a fast
     # simulator (e.g. an "old-style" sim with no progress callback) emits
@@ -56,7 +56,7 @@ def test_run_dispatches_to_external_when_path_set(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     """Run simulation should call _do_external_simulation, not b2_model.run_simulation."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
 
@@ -93,7 +93,7 @@ def test_run_dispatches_to_b2_when_path_unset(
     qtbot: QtBot, monkeypatch: MonkeyPatch
 ) -> None:
     """With no external_simulate_path, Run should hit the b2_model path."""
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
     assert project.external_simulate_path is None
@@ -132,7 +132,7 @@ def test_external_simulation_passes_params_kwarg(
         "    return Experiment('mock', simulation_time, [], [])\n"
     )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
     project.external_simulate_path = str(sim_path)
@@ -154,7 +154,9 @@ def test_external_simulation_passes_params_kwarg(
         },
     }
 
-    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "AddExperimentDataDialog", _MockImportDialog
+    )
 
     gui._do_external_simulation(2.0)
     _wait_for_external_simulation(qtbot, gui)
@@ -177,7 +179,7 @@ def test_run_dialog_default_is_suggested_simulation_time(
     ) -> Experiment:
         return Experiment("unused", simulation_time, [], [])
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.external_simulate_path = "neuroseq:elise"
     gui.project.external_simulate_function = _external_sim
@@ -210,12 +212,14 @@ def test_run_with_overshoot_tiles_stim_before_dispatch(
         "    return Experiment('mock', simulation_time, [], [])\n"
     )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "AddExperimentDataDialog", _MockImportDialog
+    )
     monkeypatch.setattr(
         QtWidgets.QInputDialog,
         "getText",
@@ -263,9 +267,9 @@ def test_btn_edit_clicked_writes_external_params_back(
         def exec(self) -> bool:
             return True
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    monkeypatch.setattr(neuroseq.gui, "ModelEditorDialog", _Dialog)
+    monkeypatch.setattr(neuroseq.project_workspace, "ModelEditorDialog", _Dialog)
     monkeypatch.setattr(gui.project, "update_limits", lambda: None)
     monkeypatch.setattr(gui, "update_project", lambda project: None)
 
@@ -294,9 +298,9 @@ def test_btn_edit_clicked_writes_b2model_back(
         def exec(self) -> bool:
             return True
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    monkeypatch.setattr(neuroseq.gui, "ModelEditorDialog", _Dialog)
+    monkeypatch.setattr(neuroseq.project_workspace, "ModelEditorDialog", _Dialog)
     monkeypatch.setattr(gui.project, "update_limits", lambda: None)
     monkeypatch.setattr(gui, "update_project", lambda project: None)
 
@@ -316,7 +320,7 @@ def test_load_external_simulation_function_failure_clears_state(
     ) -> Experiment:
         return Experiment("previous", simulation_time, [], [])
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.external_simulate_path = "previous"
     gui.project.external_simulator = object()
@@ -338,7 +342,7 @@ def test_load_external_simulation_function_failure_clears_state(
 
 def test_external_simulator_accepts_progress_detection() -> None:
     """The signature-introspection helper opts in only when ``progress`` is named."""
-    from neuroseq.gui import _external_simulator_accepts_progress
+    from neuroseq.project_workspace import _external_simulator_accepts_progress
 
     def old_sim(stims_dict, simulation_time, params=None):
         pass
@@ -374,12 +378,14 @@ def test_external_simulation_passes_progress_when_accepted(
         "    return Experiment('mock', simulation_time, [], [])\n"
     )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "AddExperimentDataDialog", _MockImportDialog
+    )
 
     # Spy on setValue to observe the progress percentages routed into the
     # dialog. The dialog itself auto-resets to -1 once value reaches 100.
@@ -419,12 +425,14 @@ def test_external_simulation_skips_progress_for_old_simulators(
         "    return Experiment('mock', simulation_time, [], [])\n"
     )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     project = gui.project
     project.external_simulate_path = str(sim_path)
     project.load_NN()
-    monkeypatch.setattr(neuroseq.gui, "AddExperimentDataDialog", _MockImportDialog)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "AddExperimentDataDialog", _MockImportDialog
+    )
 
     gui._do_external_simulation(1.0)
     _wait_for_external_simulation(qtbot, gui)

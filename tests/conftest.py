@@ -16,6 +16,12 @@ if sys.platform.startswith("linux"):
     pathlib.Path("/tmp/mpl").mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
+# Select the requested Qt binding before fastplotlib chooses a GUI backend.
+# Otherwise installations containing both bindings can load PySide6 here even
+# when QT_API and pytest-qt request PyQt6, mixing incompatible Qt libraries.
+from qtpy import QtCore
+from qtpy import QtWidgets
+
 if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {"1", "true", "yes"}:
     from fastplotlib.layouts._figure import Figure
 
@@ -28,8 +34,6 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from numpy.typing import NDArray
-from qtpy import QtCore
-from qtpy import QtWidgets
 
 if TYPE_CHECKING:
     pass

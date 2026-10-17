@@ -482,46 +482,17 @@ def test_dialog_sequential_repeats_replay_the_whole_sequence(qtbot: QtBot) -> No
     assert dialog.spin_start_time_ms.value() == 3540.0
 
 
-def _second_project() -> Project:
-    project = Project()
-    project.add_stim_array(
-        StimArray(
-            "other",
-            StimType.Excitation,
-            np.zeros((500, 10), dtype=np.float32),
-            "nS",
-            0.001,
-        )
-    )
-    return project
-
-
-def test_dialog_values_are_confined_to_their_project(qtbot: QtBot) -> None:
-    """#587: values entered in one project must not show up in another, and
-    must come back when switching back."""
-    editor, first, static_input = _make_editor(qtbot)
-    second = _second_project()
-    dialog = _open_dialog(static_input)
-    dialog.spin_pulse_ms.setValue(250.0)
-    dialog.spin_ipi_ms.setValue(75.0)
-    dialog.spin_magnitude.setValue(3.5)
-    dialog.spin_start_time_ms.setValue(400.0)
-
-    editor.set_project(second)
-    assert dialog.spin_pulse_ms.value() == 100.0
-    assert dialog.spin_ipi_ms.value() == 18.0
-    assert dialog.spin_magnitude.value() == 1.0
-    assert dialog.spin_start_time_ms.value() == 0.0
-    dialog.spin_pulse_ms.setValue(5.0)
-
-    editor.set_project(first)
-    assert dialog.spin_pulse_ms.value() == 250.0
-    assert dialog.spin_ipi_ms.value() == 75.0
-    assert dialog.spin_magnitude.value() == 3.5
-    assert dialog.spin_start_time_ms.value() == 400.0
-
-    editor.set_project(second)
-    assert dialog.spin_pulse_ms.value() == 5.0
+def test_separate_editors_keep_their_own_designer_values(qtbot: QtBot) -> None:
+    _, _, first = _make_editor(qtbot)
+    _, _, second = _make_editor(qtbot)
+    first_dialog = _open_dialog(first)
+    first_dialog.spin_pulse_ms.setValue(250.0)
+    second_dialog = _open_dialog(second)
+    assert second_dialog is not first_dialog
+    assert second_dialog.spin_pulse_ms.value() == 100.0
+    second_dialog.spin_pulse_ms.setValue(5.0)
+    assert _open_dialog(first).spin_pulse_ms.value() == 250.0
+    assert _open_dialog(second).spin_pulse_ms.value() == 5.0
 
 
 def test_dialog_values_survive_refreshing_the_same_project(qtbot: QtBot) -> None:
@@ -555,34 +526,13 @@ def test_designer_is_disabled_for_an_empty_project(qtbot: QtBot) -> None:
     assert dialog.lbl_stim_name.text() == "a"
 
 
-def test_discarding_designer_preserves_settings_for_reopening(qtbot: QtBot) -> None:
-    editor, project, static_input = _make_editor(qtbot)
+def test_discarding_designer_releases_its_dialog(qtbot: QtBot) -> None:
+    _, _, static_input = _make_editor(qtbot)
     dialog = _open_dialog(static_input)
-    dialog.spin_pulse_ms.setValue(250.0)
-
     static_input.discard_dialog()
     static_input.discard_dialog()
-
     assert not dialog.isVisible()
     assert static_input._pattern_dialog is None
-    assert project.static_input_state is not None
-    assert project.static_input_state["pulse_ms"] == 250.0
-    assert _open_dialog(static_input).spin_pulse_ms.value() == 250.0
-
-
-def test_dialog_opened_after_switching_starts_from_the_project_state(
-    qtbot: QtBot,
-) -> None:
-    editor, first, static_input = _make_editor(qtbot)
-    second = _second_project()
-    second.static_input_state = {"pulse_ms": 42.0, "scope_specific": True}
-
-    editor.set_project(second)
-    dialog = _open_dialog(static_input)
-
-    assert dialog.spin_pulse_ms.value() == 42.0
-    assert dialog.radio_scope_specific.isChecked()
-    assert dialog.spin_ipi_ms.value() == 18.0
 
 
 def test_dialog_uses_the_same_pattern_names_in_both_scopes(qtbot: QtBot) -> None:

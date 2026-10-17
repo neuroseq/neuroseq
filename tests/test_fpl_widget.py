@@ -4,6 +4,7 @@ import pygfx
 import pytest
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -99,6 +100,24 @@ class _DummyFigure:
 
     def close(self) -> None:
         return
+
+
+def test_closing_canvas_does_not_reenter_the_qt_event_loop(monkeypatch, qtbot):
+    events = []
+    figure = _DummyFigure([])
+    monkeypatch.setattr("neuroseq.fpl_widget.fpl.Figure", lambda **kwargs: figure)
+    monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
+    widget = FPLWidget()
+    qtbot.addWidget(widget)
+
+    def close_figure():
+        events.append("closed")
+
+    monkeypatch.setattr(figure, "close", close_figure)
+    QtCore.QTimer.singleShot(0, lambda: events.append("queued callback"))
+    widget.close()
+    assert events == ["closed"]
+    qtbot.waitUntil(lambda: events == ["closed", "queued callback"])
 
 
 def test_fpl_widget_uses_bitmap_present_method_for_headless_tests(

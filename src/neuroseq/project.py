@@ -149,26 +149,6 @@ class Project:
         self.max_time_secs = 0.0
         self.max_neurons = 0
 
-        # Last time-slider position (ms) shown while this project's tab was
-        # active. Transient GUI state, per-project so switching tabs restores
-        # each project's own playback position instead of sharing one global
-        # slider value; not persisted to the saved archive.
-        self.last_time_ms: int = 0
-
-        # "Design static input" dialog values (pulse/interval/magnitude/...)
-        # last used while this project was active, so the dialog's history
-        # stays within a project instead of leaking into the next one
-        # (#587). Transient GUI state like last_time_ms; not persisted.
-        self.static_input_state: dict[str, float | int | str | bool] | None = None
-
-        # Cell(s) selected in the Spatial Footprints panel while this
-        # project's tab was active. Transient GUI state, per-project like
-        # last_time_ms - the panel's selection lives on one shared
-        # SpatialFootprintState, so without this it would be wiped by
-        # set_data() the moment another tab becomes active (issue #555); not
-        # persisted to the saved archive.
-        self.selected_cellpose_ids: set[int] = set()
-
         # External-simulation function state. `external_simulate_path` is either
         # a filesystem path to a `.py` file or a `neuroseq:<module_name>`
         # sentinel resolving to `neuroseq.example_models.<module_name>.simulate`.

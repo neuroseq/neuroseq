@@ -54,7 +54,6 @@ class StimEditor(QtWidgets.QWidget):
     """A GUI to edit 2-d numpy arrays of neuron stimuli interactively using mouse and keyboard input."""
 
     limits_modified = QtCore.Signal()
-    project_changed = QtCore.Signal(object, object)  # outgoing, incoming
     current_stim_cleared = QtCore.Signal()
     time_range_focus_requested = QtCore.Signal(float, float)
     current_stim_changed = QtCore.Signal(object)  # StimArray | None
@@ -143,17 +142,14 @@ class StimEditor(QtWidgets.QWidget):
     def closeEvent(self, event):
         # explicitly close the fastplotlib figure to avoid the renderer trying
         # to access it after Qt has destroyed this container (same pattern as
-        # Gui.closeEvent, DataWidget.closeEvent, CellOverlayWidget.closeEvent).
+        # ProjectWorkspace.dispose, DataWidget.closeEvent, CellOverlayWidget.closeEvent).
         self.stim_widget.close()
         super().closeEvent(event)
 
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
-        outgoing_project = self.project
         self.project = project
-        if outgoing_project is not project:
-            self.project_changed.emit(outgoing_project, project)
         self.project.update_limits()
         if self.current_stim_modifier is not None and keep_undo_history:
             for k in self.stims_dict:
@@ -1531,7 +1527,7 @@ class StimEditor(QtWidgets.QWidget):
             action.setVisible(False)
         # Stim array lifecycle operations moved to a single dropdown button
         # next to the stim array combobox in the top Data toolbar (issue
-        # #535) - see Gui._add_stim_array_ops_button_to_data_toolbar(), which
+        # #535) - see ProjectWorkspace._add_stim_array_ops_button_to_data_toolbar(), which
         # adds these same actions into that button's menu. They stay
         # registered on `menu` (the "Actions" context menu) and on `self`
         # (for their keyboard shortcuts, where applicable) but not on the
@@ -1584,7 +1580,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         # Pad/Trim/Loop stim array also moved to the stim array ops dropdown
         # in the top Data toolbar (issue #535) - see
-        # Gui._add_stim_array_ops_button_to_data_toolbar().
+        # ProjectWorkspace._add_stim_array_ops_button_to_data_toolbar().
         self.action_pad_stim_array = add_action(
             "Pad input array (Ctrl+Shift+Plus)",
             self.pad_stim_array,

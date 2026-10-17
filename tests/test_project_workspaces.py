@@ -1,0 +1,327 @@
+from __future__ import annotations
+
+import threading
+
+import numpy as np
+import pytest
+from qtpy import QtCore
+from qtpy import QtWidgets
+
+from neuroseq.data import Experiment
+from neuroseq.gui import Gui
+from neuroseq.gui_settings import GuiSettings
+from neuroseq.project import Project
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.workspace_devices import WorkspaceDevices
+
+
+def _project() -> Project:
+    project = Project()
+    project.add_stim_array(
+        StimArray("input", StimType.Excitation, np.zeros((500, 2)), "nS", 0.01)
+    )
+    project.dirty = False
+    return project
+
+
+@pytest.fixture
+def window(qtbot, monkeypatch):
+    monkeypatch.setattr(GuiSettings, "save_config_settings", lambda self: None)
+    widget = Gui(_project())
+    qtbot.addWidget(widget)
+    yield widget
+    for workspace in widget.workspaces:
+        workspace.project.dirty = False
+    widget.close()
+
+
+def test_tabs_keep_complete_workspaces_and_undo_history(window, monkeypatch):
+    first = window.active_workspace
+    first.console_widget.namespace()["local_value"] = "first"
+    first.time_slider.set_current_time_ms(1200)
+    first.controller.focus_time_range(0.5, 1.5)
+    first.static_input_controller.open_pattern_designer()
+    dialog = first.static_input_controller._pattern_dialog
+    dialog.spin_pulse_ms.setValue(250)
+    first.stim_editor.replace_stim_values_with_undo("input", np.ones((500, 2)))
+    modifier = first.stim_editor.current_stim_modifier
+    first.dynamic_input_controller._open_routine_dialog_for(
+        first.dynamic_input_controller.RHEOBASE_ROUTINE
+    )
+    dynamic_dialog = first.dynamic_input_controller._rheobase_dialog
+    expected_range = first.controller.current_time_range()
+    monkeypatch.setattr(
+        first,
+        "update_project",
+        lambda *args, **kwargs: pytest.fail("tab switch rebuilt widgets"),
+    )
+
+    second = window._add_workspace(_project())
+    assert second.project is not first.project
+    for name in (
+        "stim_editor",
+        "controller",
+        "trace_widget",
+        "spike_widget",
+        "heatmap_widget",
+        "time_slider",
+        "console_widget",
+        "chat_widget",
+        "syscon2_panel",
+        "custom_analysis_widget",
+        "static_input_controller",
+        "dynamic_input_controller",
+    ):
+        assert getattr(first, name) is not getattr(second, name)
+    assert "local_value" not in second.console_widget.namespace()
+    assert second.time_slider.t_ms == 0
+    assert not second.stim_editor.current_stim_modifier.action_stack
+
+    window.project_tabs.setCurrentWidget(first)
+    assert first.time_slider.t_ms == 1200
+    assert first.controller.current_time_range() == expected_range
+    assert first.console_widget.namespace()["local_value"] == "first"
+    assert first.static_input_controller._pattern_dialog is dialog
+    assert dialog.spin_pulse_ms.value() == 250
+    assert first.dynamic_input_controller._rheobase_dialog is dynamic_dialog
+    assert first.stim_editor.current_stim_modifier is modifier
+    modifier.undo()
+    assert not first.project.stim_arrays["input"].values.any()
+    modifier.redo()
+    assert first.project.stim_arrays["input"].values.all()
+
+
+def test_hidden_workspace_receives_its_own_background_result(
+    window, qtbot, monkeypatch
+):
+    first = window.active_workspace
+    started, release = threading.Event(), threading.Event()
+
+    def simulate(*args, **kwargs):
+        started.set()
+        release.wait(5)
+        return Experiment("result", 0.1, [], [])
+
+    first.project.external_simulate_function = simulate
+    monkeypatch.setattr(
+        first, "_append_experimental_data", first.project.add_experiment
+    )
+    first._do_external_simulation(0.1)
+    qtbot.waitUntil(started.is_set)
+    second = window._add_workspace(_project())
+    try:
+        assert window.project_tabs.isEnabled()
+        assert first._background_job.busy
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not first._background_job.busy)
+    assert "result" in first.project.experiments
+    assert "result" not in second.project.experiments
+    assert window.active_workspace is second
+
+
+def test_tab_reordering_keeps_project_identity_and_close_releases_only_its_owner(
+    window,
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    second.time_slider.toggle_pause()
+    window.project_tabs.tabBar().moveTab(1, 0)
+    assert window.active_workspace is second
+    assert second.time_slider.timer.isActive()
+    assert window.workspaces == [second, first]
+    window._close_tab(0)
+    assert second._disposed
+    assert not first._disposed
+    assert window.active_workspace is first
+    assert not first.syscon2_panel._manager._closed
+
+
+def test_hidden_playback_pauses_and_live_frames_have_only_one_receiver(
+    window, monkeypatch
+):
+    first = window.active_workspace
+    first.time_slider.set_current_time_ms(1200)
+    first.time_slider.toggle_pause()
+    assert first.time_slider.timer.isActive()
+    second = window._add_workspace(_project())
+    assert not first.time_slider.timer.isActive()
+    assert first.time_slider.t_ms == 1200
+    assert not first._live_frames_connected
+    assert second._live_frames_connected
+    assert first.scanimage_connection is second.scanimage_connection
+
+
+def test_close_application_checks_unsaved_hidden_projects(window, monkeypatch):
+    first = window.active_workspace
+    first.project.mark_dirty()
+    second = window._add_workspace(_project())
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Cancel,
+    )
+    assert not window.close()
+    assert window.active_workspace is first
+    assert not first._disposed and not second._disposed
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Discard,
+    )
+    assert window.close()
+    assert first._disposed and second._disposed
+
+
+def test_close_tab_waits_for_save_and_tracks_workspace_after_reordering(
+    window, monkeypatch
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    second.project.mark_dirty()
+    callbacks = []
+    monkeypatch.setattr(
+        second, "_save_project", lambda on_success: callbacks.append(on_success)
+    )
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Save,
+    )
+    window._close_tab(1)
+    assert not second._disposed
+    window.project_tabs.tabBar().moveTab(1, 0)
+    callbacks[0](None)
+    assert second._disposed and not first._disposed
+
+
+def test_shortcut_only_dispatches_in_the_active_workspace(window, qtbot, monkeypatch):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    calls = []
+    monkeypatch.setattr(first, "_create_new_project", lambda: calls.append("first"))
+    monkeypatch.setattr(second, "_create_new_project", lambda: calls.append("second"))
+    window.activateWindow()
+    second.console_widget.setFocus()
+    qtbot.waitUntil(lambda: window.isActiveWindow())
+    qtbot.keyClick(
+        second.console_widget,
+        QtCore.Qt.Key.Key_N,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
+    )
+    assert calls == ["second"]
+    window.project_tabs.setCurrentWidget(first)
+    first.console_widget.setFocus()
+    qtbot.keyClick(
+        first.console_widget,
+        QtCore.Qt.Key.Key_N,
+        QtCore.Qt.KeyboardModifier.ControlModifier,
+    )
+    assert calls == ["second", "first"]
+    tab_bar = window.project_tabs.tabBar()
+    tab_bar.setFocus()
+    qtbot.keyClick(
+        tab_bar, QtCore.Qt.Key.Key_N, QtCore.Qt.KeyboardModifier.ControlModifier
+    )
+    assert calls == ["second", "first", "first"]
+
+
+def test_close_keeps_all_workspaces_alive_when_a_hidden_job_cannot_stop(
+    window, monkeypatch
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    with monkeypatch.context() as patch:
+        patch.setattr(first, "stop_background_job", lambda: False)
+        assert not window.close()
+        assert not first._disposed and not second._disposed
+        assert window.active_workspace is second
+
+
+def test_failed_save_during_application_close_restores_the_window(window, monkeypatch):
+    workspace = window.active_workspace
+    workspace.project.mark_dirty()
+    callbacks = {}
+
+    def save(**kwargs):
+        callbacks.update(kwargs)
+        return True
+
+    monkeypatch.setattr(workspace, "_save_project", save)
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Save,
+    )
+    assert not window.close()
+    assert not window.isEnabled()
+    callbacks["on_failure"]("save failed")
+    assert window.isEnabled()
+    assert workspace.project.dirty and not workspace._disposed
+
+
+def test_recording_workspace_stays_open_until_its_acquisition_is_finalized(window):
+    workspace = window.active_workspace
+    workspace._scanimage_run_ids.add("pending-run")
+    try:
+        window._close_tab(0)
+        assert not workspace._disposed
+        assert window.active_workspace is workspace
+    finally:
+        workspace._scanimage_run_ids.clear()
+
+
+class _Manager(QtCore.QObject):
+    connected = QtCore.Signal()
+    disconnected = QtCore.Signal(str)
+    state_changed = QtCore.Signal(dict)
+    state_poll_failed = QtCore.Signal(str)
+    command_finished = QtCore.Signal(str, object)
+    command_failed = QtCore.Signal(str, str)
+
+    def __init__(self):
+        super().__init__()
+        self.requests = []
+
+    def submit(self, name, fn):
+        self.requests.append(name)
+
+    def shutdown(self):
+        pass
+
+
+def test_shared_syscon_connection_routes_replies_to_requesting_workspace(
+    qapp, monkeypatch
+):
+    monkeypatch.setattr("neuroseq.workspace_devices.SysCon2ConnectionManager", _Manager)
+    devices = WorkspaceDevices()
+    first, second = devices.syscon_session(devices), devices.syscon_session(devices)
+    replies, failures = [], []
+    first.command_finished.connect(
+        lambda name, result: replies.append(("first", name, result))
+    )
+    second.command_finished.connect(
+        lambda name, result: replies.append(("second", name, result))
+    )
+    second.command_failed.connect(lambda name, error: failures.append((name, error)))
+    first.submit("sequence_manager.import.1", lambda client: None)
+    second.submit("sequence_manager.import.1", lambda client: None)
+    devices.syscon.command_finished.emit(devices.syscon.requests[0], "A")
+    devices.syscon.command_finished.emit(devices.syscon.requests[1], "B")
+    devices.syscon.command_failed.emit(devices.syscon.requests[1], "error")
+    assert replies == [
+        ("first", "sequence_manager.import.1", "A"),
+        ("second", "sequence_manager.import.1", "B"),
+    ]
+    assert failures == [("sequence_manager.import.1", "error")]
+    # A callback already queued before disconnect may still reach the session.
+    QtCore.QTimer.singleShot(
+        0, lambda: first._finished(devices.syscon.requests[0], "queued reply")
+    )
+    first.shutdown()
+    devices.syscon.command_finished.emit(devices.syscon.requests[0], "late")
+    qapp.processEvents()
+    assert len(replies) == 2
+    second.shutdown()
+    devices.shutdown()
