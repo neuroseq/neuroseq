@@ -35,6 +35,28 @@ class FPLWidget(QtWidgets.QWidget):
         self.figure: fpl.Figure = fpl.Figure(
             controllers=controller, canvas_kwargs=canvas_kwargs
         )
+        # Qt deletes child widgets without sending them a close event. Keep
+        # cleanup independent of this QWidget so it can also run from destroyed,
+        # before Qt deletes the figure's native canvas children.
+        figure_to_close: fpl.Figure | None = self.figure
+        logger = self.logger
+
+        def close_figure() -> None:
+            nonlocal figure_to_close
+            if figure_to_close is None:
+                return
+            figure = figure_to_close
+            figure.canvas.set_update_mode("manual")
+            # Finish GPU work without pumping Qt events during teardown.
+            try:
+                figure.renderer.device._poll_wait()
+            except Exception as exc:
+                logger.debug("Could not poll GPU device on close (%s).", exc)
+            figure.close()
+            figure_to_close = None
+
+        self._close_figure = close_figure
+        self.destroyed.connect(close_figure)
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
@@ -210,17 +232,7 @@ class FPLWidget(QtWidgets.QWidget):
 
     def closeEvent(self, event):
         if self.figure is not None:
-            self._set_fpl_rendering(False)
-            figure = self.figure
-            # Finish GPU work before dropping the canvas textures. Do not pump
-            # Qt's event loop here: it can submit new renders and reenter a
-            # workspace while its other plots are being disposed.
-            try:
-                figure.renderer.device._poll_wait()
-            except Exception as exc:
-                self.logger.debug("Could not poll GPU device on close (%s).", exc)
-            if hasattr(figure, "close"):
-                figure.close()
+            self._close_figure()
             self.figure = None
         super().closeEvent(event)
 

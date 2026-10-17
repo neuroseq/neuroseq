@@ -6,9 +6,29 @@ from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
+from rendercanvas.qt import QRenderWidget
 
 from neuroseq import theme
 from neuroseq.fpl_widget import FPLWidget
+
+
+@pytest.mark.parametrize("close_plot", [True, False])
+def test_closed_plot_is_unregistered_before_qt_deletes_canvas(qtbot, close_plot):
+    parent = QtWidgets.QWidget()
+    widget = FPLWidget(parent=parent)
+    canvas = widget.figure.canvas
+    native_canvas = canvas._subwidget
+    group = QRenderWidget._rc_canvas_group
+    assert native_canvas in group.get_canvases()
+
+    if close_plot:
+        widget.close()
+    # Keep the Python wrappers alive, as plot/controller references do, while
+    # Qt destroys the native widgets on a closed project tab.
+    parent.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    assert canvas.get_closed()
+    assert native_canvas not in group.get_canvases(close_closed=True)
 
 
 def test_fpl_widget_apply_theme_updates_background(qtbot: QtBot) -> None:
