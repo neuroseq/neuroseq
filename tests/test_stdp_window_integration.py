@@ -5,9 +5,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from neuroseq.dynamic_input.stdp_window_dialog import StdpWindowDialog
 from neuroseq.example_projects import two_hh_neurons_with_plasticity
+
+# Real Hodgkin-Huxley sweeps run several Brian2 simulation segments using the
+# NumPy backend. Allow slower CI runners more than the default 60 seconds.
+pytestmark = pytest.mark.timeout(300)
 
 
 class _BrianEditor:
