@@ -1,19 +1,13 @@
 from __future__ import annotations
 
-import base64
 import contextlib
-import dataclasses
 import gc
-import hashlib
 import inspect
-import json
 import logging
 import pathlib
 import threading
 from collections.abc import Callable
 from collections.abc import Sequence
-from datetime import UTC
-from datetime import datetime
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -44,7 +38,6 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_widget import DataWidget
-from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
@@ -87,6 +80,7 @@ from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
 from neuroseq.utils import with_wait_cursor
+from neuroseq.workspace_acquisition_controller import WorkspaceAcquisitionController
 from neuroseq.workspace_devices import WorkspaceDevices
 
 
@@ -344,29 +338,23 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.calcium_video_widget.channels_changed.connect(
             self._on_calcium_video_channels_changed
         )
-        self.scanimage_connection = self.devices.scanimage
-        # Modeless, so the live image stays visible in the Video tab. Keeping
-        # the controls out of that tab keeps it aligned with Cell segmentation.
-        self.scanimage_dialog = QtWidgets.QDialog(self)
-        self.scanimage_dialog.setWindowTitle("Image acquisition")
-        self.scanimage_controls = ScanImageControls(
-            self.scanimage_connection, self.settings, self.scanimage_dialog
+        self.acquisition_controller = WorkspaceAcquisitionController(
+            self.devices.scanimage,
+            self.settings,
+            self.calcium_video_widget,
+            project=lambda: self.project,
+            current_stim=self._current_stim_array,
+            export_settings=lambda: self.syscon2_panel.export_settings,
+            video_widgets=lambda: self.findChildren(CalciumVideoWidget),
+            show_video=lambda: self._auto_show_widget(self.calcium_video_widget),
+            parent=self,
         )
-        QtWidgets.QVBoxLayout(self.scanimage_dialog).addWidget(self.scanimage_controls)
-        self.scanimage_controls.live_changed.connect(self._set_scanimage_live)
-        self.scanimage_controls.channel_changed.connect(self._set_scanimage_channel)
-        self.scanimage_connection.frame_received.connect(
-            self.calcium_video_widget.show_live_frame
-        )
-        self._live_frames_connected = True
-        self.scanimage_controls.record_requested.connect(
-            self._start_scanimage_recording
-        )
-        self.scanimage_connection.status_changed.connect(self._scanimage_status)
-        self.scanimage_connection.recording_ready.connect(
-            self._scanimage_recording_ready
-        )
-        self._scanimage_run_ids: set[str] = set()
+        self.acquisition_controller.recording_added.connect(self._on_recording_added)
+        # Compatibility handles for integrations using the workspace directly.
+        self.scanimage_connection = self.acquisition_controller.connection
+        self.scanimage_dialog = self.acquisition_controller.dialog
+        self.scanimage_controls = self.acquisition_controller.controls
+        self._scanimage_run_ids = self.acquisition_controller.run_ids
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -639,17 +627,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         """Pause hidden playback without changing its position or plot state."""
         if not active:
             self.time_slider.timer.stop()
-        # Only the visible workspace consumes the shared live image stream.
-        if self._live_frames_connected:
-            self.scanimage_connection.frame_received.disconnect(
-                self.calcium_video_widget.show_live_frame
-            )
-            self._live_frames_connected = False
-        if active:
-            self._live_frames_connected = True
-            self.scanimage_connection.frame_received.connect(
-                self.calcium_video_widget.show_live_frame
-            )
+        self.acquisition_controller.set_active(active)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
@@ -2068,72 +2046,19 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 shown_channel=self.project.calcium_video_channels[1],
             )
 
+    def _on_recording_added(self) -> None:
+        self._refresh_calcium_video_widgets()
+        self._update_combo_boxes()
+        self.update_limits()
+
     def _start_scanimage_recording(self, arguments: dict) -> None:
-        if self.scanimage_connection.run_id is not None:
-            self.scanimage_controls.show_message(
-                "An acquisition is already being finalized."
-            )
-            return
-        project = self.project
-        record = dict(arguments)
-        record.update(
-            status="requested",
-            requested_at=datetime.now(UTC).isoformat(),
-            synchronization="unverified",
-        )
-        stim = self._current_stim_array()
-        if stim is not None:
-            values = np.ascontiguousarray(stim.values)
-            record["stimulus_snapshot"] = {
-                "name": stim.name,
-                "dt": stim.dt,
-                "shape": list(values.shape),
-                "dtype": values.dtype.str,
-                "sha256": hashlib.sha256(values.tobytes()).hexdigest(),
-                "data": base64.b64encode(values.tobytes()).decode(),
-            }
-        settings = self.syscon2_panel.export_settings
-        if settings is not None:
-            record["syscon_export_settings"] = json.loads(
-                json.dumps(dataclasses.asdict(settings), default=str)
-            )
-        if self.scanimage_connection.command(
-            "record", {**arguments, "manifest": record}
-        ):
-            project.imaging_acquisitions.append(record)
-            project.mark_dirty()
-            self._scanimage_run_ids.add(arguments["run_id"])
-            self.scanimage_controls.live_check.setChecked(True)
+        return self.acquisition_controller.start_scanimage_recording(arguments)
 
     def _scanimage_status(self, status: dict) -> None:
-        run = status.get("run", {})
-        if run.get("id") not in self._scanimage_run_ids:
-            return
-        project = self.project
-        record = next(
-            r for r in project.imaging_acquisitions if r["run_id"] == run["id"]
-        )
-        previous = record.get("status")
-        record["status"] = run.get("state", "unknown")
-        if "error" in run:
-            record["error"] = run["error"]
-        elif record["status"] in {"recording", "completed", "aborted"}:
-            record.pop("error", None)
-        for source, target in (
-            ("matlab_version", "matlab_version"),
-            ("scanimage_version", "scanimage_version"),
-            ("settings", "scanimage_settings"),
-            ("files", "files"),
-        ):
-            if source in status:
-                record[target] = status[source]
-        if record["status"] != previous:
-            project.mark_dirty()
+        return self.acquisition_controller.scanimage_status(status)
 
     def _open_image_acquisition_dialog(self) -> None:
-        self.scanimage_dialog.show()
-        self.scanimage_dialog.raise_()
-        self.scanimage_dialog.activateWindow()
+        return self.acquisition_controller.open_image_acquisition_dialog()
 
     def _refresh_video_selector(self) -> None:
         if not hasattr(self, "cmb_video"):
@@ -2179,70 +2104,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._auto_show_widget(self.calcium_video_widget)
 
     def _set_scanimage_live(self, live: bool) -> None:
-        self.calcium_video_widget.set_live(live)
-        if live:
-            self._auto_show_widget(self.calcium_video_widget)
-        if not live:
-            self._set_scanimage_channel(self.scanimage_controls.channel_spin.value())
+        return self.acquisition_controller.set_scanimage_live(live)
 
     def _set_scanimage_channel(self, channel: int) -> None:
-        index = self.project.calcium_scanimage_index
-        if index is not None and not self.scanimage_controls.live_check.isChecked():
-            channel = self._recorded_scanimage_channel(index, channel)
-        for widget in self.findChildren(CalciumVideoWidget):
-            widget.set_recorded_channel(channel)
+        return self.acquisition_controller.set_scanimage_channel(channel)
 
     def _recorded_scanimage_channel(self, index: dict | None, channel: int) -> int:
-        if index is not None and channel not in index["channels"]:
-            selected = index["channels"][0]
-            self.scanimage_controls.show_message(
-                f"Channel {channel} was not saved in this recording; showing channel {selected}."
-            )
-            self.scanimage_controls.channel_spin.blockSignals(True)
-            self.scanimage_controls.channel_spin.setValue(selected)
-            self.scanimage_controls.channel_spin.blockSignals(False)
-            self.scanimage_connection.channel = selected
-            return selected
-        return channel
+        return self.acquisition_controller.recorded_scanimage_channel(index, channel)
 
     def _scanimage_recording_ready(self, result: dict) -> None:
-        if result["run_id"] not in self._scanimage_run_ids:
-            return
-        self._scanimage_run_ids.remove(result["run_id"])
-        project = self.project
-        record = next(
-            r for r in project.imaging_acquisitions if r["run_id"] == result["run_id"]
-        )
-        record.update(
-            status=result["status"],
-            recording=result,
-            finished_at=datetime.now(UTC).isoformat(),
-        )
-        record.pop("error", None)
-        name = record["name"]
-        if name in project.experiments:
-            name = f"{name} ({result['run_id'][:8]})"
-        project.experiments[name] = Experiment(
-            name=name, duration=result["duration_s"], timepoints=[], data=[]
-        )
-        record["experiment_name"] = name
-        project.add_calcium_video(
-            [pathlib.Path(p) for p in result["paths"]],
-            result["fps"],
-            name=name,
-            run_id=result["run_id"],
-        )
-        self.scanimage_controls.show_message(
-            f"Recording {name} added to the imaging data."
-        )
-        project.mark_dirty()
-        project.update_limits()
-        self.scanimage_controls.live_check.setChecked(False)
-        self._refresh_calcium_video_widgets()
-        self._update_combo_boxes()
-        self.update_limits()
-        # Movie availability does not imply extracted traces are ready. Do not
-        # call SysCon2StimulationHost.acquisition_imported here.
+        return self.acquisition_controller.scanimage_recording_ready(result)
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -3831,11 +3702,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._disposed = True
         self.set_active(False)
         self.syscon2_panel.shutdown()
-        self.scanimage_dialog.close()
-        self.scanimage_connection.status_changed.disconnect(self._scanimage_status)
-        self.scanimage_connection.recording_ready.disconnect(
-            self._scanimage_recording_ready
-        )
+        self.acquisition_controller.dispose()
         if self._owns_devices:
             self.devices.shutdown()
         self.time_slider.close()

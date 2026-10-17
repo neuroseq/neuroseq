@@ -148,8 +148,8 @@ def test_hidden_playback_pauses_and_live_frames_have_only_one_receiver(
     second = window._add_workspace(_project())
     assert not first.time_slider.timer.isActive()
     assert first.time_slider.t_ms == 1200
-    assert not first._live_frames_connected
-    assert second._live_frames_connected
+    assert not first.acquisition_controller._live_frames_connected
+    assert second.acquisition_controller._live_frames_connected
     assert first.scanimage_connection is second.scanimage_connection
 
 
