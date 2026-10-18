@@ -3,16 +3,17 @@ from __future__ import annotations
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.project import Project
 
 
-class ExperimentsManagerDialog(QtWidgets.QDialog):
-    """A dialog that allows the user to view and manage all experiments in the project."""
+class DataManagerDialog(QtWidgets.QDialog):
+    """View and manage project data grouped by simulation run or recording."""
 
-    experiments_changed = QtCore.Signal()
+    data_changed = QtCore.Signal()
 
     def __init__(
         self,
@@ -21,7 +22,7 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(parent)
         self.project = project
-        self.setWindowTitle("Manage Experiments")
+        self.setWindowTitle("Manage Data")
         self.setModal(True)
         self.resize(800, 600)
 
@@ -30,14 +31,14 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
         self.setLayout(layout)
 
         # Title
-        title = QtWidgets.QLabel("Experiments in Project")
+        title = QtWidgets.QLabel("Data in Project")
         title_font = title.font()
         title_font.setPointSize(12)
         title_font.setBold(True)
         title.setFont(title_font)
         layout.addWidget(title)
 
-        # Table widget to display experiments
+        # Table widget to display data groups
         self.table = QtWidgets.QTableWidget()
         self.table.setColumnCount(4)
         self.table.setHorizontalHeaderLabels(
@@ -58,7 +59,7 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
         # Information label
         self.info_label = QtWidgets.QLabel()
         self.info_label.setStyleSheet("color: gray; font-style: italic;")
-        self.info_label.setText(f"Total: {len(self.project.experiments)} experiment(s)")
+        self.info_label.setText(f"Total: {len(self.project.experiments)} data group(s)")
         layout.addWidget(self.info_label)
 
         # Button layout
@@ -81,7 +82,7 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
         self._on_selection_changed()
 
     def _populate_table(self) -> None:
-        """Populate the table with experiment data."""
+        """Populate the table with project data groups."""
         self.table.setRowCount(len(self.project.experiments))
 
         for row, (exp_name, experiment) in enumerate(self.project.experiments.items()):
@@ -102,15 +103,15 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
             self.table.setItem(row, 2, data_item)
 
             # Details
-            details = self._get_experiment_details(experiment)
+            details = self._get_data_details(experiment)
             details_item = QtWidgets.QTableWidgetItem(details)
             self.table.setItem(row, 3, details_item)
 
         # Resize columns to content
         self.table.resizeColumnsToContents()
 
-    def _get_experiment_details(self, experiment) -> str:
-        """Generate a detailed description of the experiment's data."""
+    def _get_data_details(self, experiment: Experiment) -> str:
+        """Describe the data in a simulation run or recording."""
         details_parts = []
         for datum in experiment.data:
             if isinstance(datum, TraceData):
@@ -143,21 +144,21 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
         if not selected_rows:
             return
 
-        # Get the experiment names to delete
-        experiments_to_delete = []
+        # Get the data group names to delete
+        data_groups_to_delete = []
         for row in selected_rows:
             name_item = self.table.item(row, 0)
-            exp_key = name_item.data(QtCore.Qt.ItemDataRole.UserRole)
-            experiments_to_delete.append((row, exp_key, name_item.text()))
+            group_key = name_item.data(QtCore.Qt.ItemDataRole.UserRole)
+            data_groups_to_delete.append((row, group_key, name_item.text()))
 
         # Show confirmation dialog
-        exp_names = ", ".join([name for _, _, name in experiments_to_delete])
-        if len(experiments_to_delete) == 1:
-            message = f"Are you sure you want to delete the experiment '{exp_names}'?"
+        group_names = ", ".join([name for _, _, name in data_groups_to_delete])
+        if len(data_groups_to_delete) == 1:
+            message = f"Are you sure you want to delete the data group '{group_names}'?"
         else:
             message = (
-                f"Are you sure you want to delete {len(experiments_to_delete)} "
-                f"experiments?\n\n{exp_names}"
+                f"Are you sure you want to delete {len(data_groups_to_delete)} "
+                f"data groups?\n\n{group_names}"
             )
 
         reply = QtWidgets.QMessageBox.question(
@@ -170,28 +171,28 @@ class ExperimentsManagerDialog(QtWidgets.QDialog):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            # Delete experiments (in reverse row order to maintain indices)
-            for _, exp_key, _ in reversed(experiments_to_delete):
-                del self.project.experiments[exp_key]
+            # Delete data groups (in reverse row order to maintain indices)
+            for _, group_key, _ in reversed(data_groups_to_delete):
+                del self.project.experiments[group_key]
             self.project.mark_dirty()
 
             # Refresh the table
             self._populate_table()
             self.info_label.setText(
-                f"Total: {len(self.project.experiments)} experiment(s)"
+                f"Total: {len(self.project.experiments)} data group(s)"
             )
-            self.experiments_changed.emit()
+            self.data_changed.emit()
 
             # Show success message
-            if len(experiments_to_delete) == 1:
+            if len(data_groups_to_delete) == 1:
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Experiment Deleted",
-                    f"Experiment '{exp_names}' has been deleted successfully.",
+                    "Data Deleted",
+                    f"Data group '{group_names}' has been deleted successfully.",
                 )
             else:
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Experiments Deleted",
-                    f"{len(experiments_to_delete)} experiments have been deleted successfully.",
+                    "Data Deleted",
+                    f"{len(data_groups_to_delete)} data groups have been deleted successfully.",
                 )

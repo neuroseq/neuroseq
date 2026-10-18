@@ -7,12 +7,12 @@
 3. Run and record outputs.
 4. Export and compare results.
 
-## Managing experiment sets
+## Managing project data
 
-**Experiment → Manage Experiments** opens the experiment manager dialog,
-which lists every experiment in the current project and lets you rename,
-delete, or mark the active experiment (see
-[Connecting simulations and experiments](simulations_and_experiments.md#manage-experiments)
+**File → Manage Data** opens the data manager dialog,
+which lists project data grouped by simulation run or recording and lets you
+inspect or delete selected groups (see
+[Connecting simulations and experiments](simulations_and_experiments.md#manage-data)
 for details).
 
 ## Generating synthetic data (GUI)

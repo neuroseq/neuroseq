@@ -24,6 +24,7 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.data_manager_dialog import DataManagerDialog
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
@@ -389,11 +390,11 @@ def test_file_toolbar_groups_actions_with_separators(qtbot: QtBot) -> None:
         return texts.index(text)
 
     # {New, Open Project, Import from Project} | {Save Project} |
-    # {Edit Model} | {Generate Synthetic Data, Manage Experiments}
+    # {Edit Model} | {Generate Synthetic Data, Manage Data}
     assert actions[index_of("Save Project") - 1].isSeparator()
     assert actions[index_of("Edit Model") - 1].isSeparator()
     assert actions[index_of("Generate Synthetic Data...") - 1].isSeparator()
-    assert texts[index_of("Generate Synthetic Data...") + 1] == "Manage Experiments"
+    assert texts[index_of("Generate Synthetic Data...") + 1] == "Manage Data"
     gui.close()
 
 
@@ -433,7 +434,7 @@ def test_data_toolbar_groups_dataset_pairs_with_separators(qtbot: QtBot) -> None
     gui.close()
 
 
-def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
+def test_manage_data_action_sits_next_to_generate_synthetic_data(
     qtbot: QtBot,
 ) -> None:
     gui = ProjectWorkspace()
@@ -445,7 +446,12 @@ def test_manage_experiments_action_sits_next_to_generate_synthetic_data(
         for i, action in enumerate(actions)
         if action.text().replace("&", "") == "Generate Synthetic Data..."
     )
-    assert actions[generate_index + 1].text().replace("&", "") == "Manage Experiments"
+    assert actions[generate_index + 1].text().replace("&", "") == "Manage Data"
+    actions[generate_index + 1].trigger()
+    dialog = gui.findChild(DataManagerDialog)
+    assert dialog is not None
+    assert dialog.windowTitle() == "Manage Data"
+    dialog.close()
     gui.close()
 
 

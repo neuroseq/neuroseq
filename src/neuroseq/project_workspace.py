@@ -32,11 +32,11 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.data_manager_dialog import DataManagerDialog
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
-from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
 from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.icon_manager import icons
@@ -982,9 +982,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.project.update_limits()
             self.update_project(self.project)
 
-    def btn_manage_experiments_clicked(self) -> None:
-        dialog = ExperimentsManagerDialog(self.project, parent=self)
-        dialog.experiments_changed.connect(lambda: self.update_project(self.project))
+    def btn_manage_data_clicked(self) -> None:
+        dialog = DataManagerDialog(self.project, parent=self)
+        dialog.data_changed.connect(lambda: self.update_project(self.project))
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             # Update the GUI with changes made in the dialog
             self.update_project(self.project)
@@ -2720,8 +2720,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             else None,
         )
         add_action(
-            "&Manage Experiments",
-            self.btn_manage_experiments_clicked,
+            "&Manage Data",
+            self.btn_manage_data_clicked,
             menu,
             toolbar,
             shortcut=None,
