@@ -12,17 +12,19 @@ from qtpy import QtWidgets
 import neuroseq.stimulation.stim
 import neuroseq.visualization.timeseries_widget
 from neuroseq import theme
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
-from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
-from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization.trace_widget import TraceNormDialog
 from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+from neuroseq.visualization_support.region_of_interest import RegionOfInterest
+from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 
 
 def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None:

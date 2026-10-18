@@ -28,7 +28,6 @@ from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
 from neuroseq.background_jobs import ExternalSimWorker
 from neuroseq.console_widget import ConsoleWidget
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -59,13 +58,10 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
-from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.static_input.static_input_controller import StaticInputController
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog
-from neuroseq.time_slider_widget import TimeSliderWidget
-from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import add_action
 from neuroseq.utils import add_items_to_combobox
 from neuroseq.utils import getSimulationTime
@@ -80,6 +76,12 @@ from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidg
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
+from neuroseq.visualization_support.time_slider_widget import TimeSliderWidget
+from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 from neuroseq.workspace_acquisition_controller import WorkspaceAcquisitionController
 from neuroseq.workspace_devices import WorkspaceDevices
 

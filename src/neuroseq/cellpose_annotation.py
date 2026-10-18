@@ -10,10 +10,10 @@ import numpy as np
 import tifffile
 from PIL import Image
 
-from neuroseq.brightness_contrast import DisplayRange
-from neuroseq.brightness_contrast import apply_display_range
-from neuroseq.brightness_contrast import to_8bit
 from neuroseq.gpu import torch_gpu_status
+from neuroseq.visualization_support.brightness_contrast import DisplayRange
+from neuroseq.visualization_support.brightness_contrast import apply_display_range
+from neuroseq.visualization_support.brightness_contrast import to_8bit
 
 MAX_SOURCE_FRAMES = 300
 FRAME_STEP = 2

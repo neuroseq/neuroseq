@@ -7,13 +7,15 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.visualization.heatmap_widget import HeatmapWidget
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 class DataWidget(QtWidgets.QWidget):

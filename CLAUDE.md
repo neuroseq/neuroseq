@@ -106,6 +106,8 @@ io.py                         — .nseq archive persistence (ZIP + JSON + .npy b
 
 Visualization widgets live in `src/neuroseq/visualization/`. Interactive data views use fastplotlib for GPU-accelerated rendering; custom analysis uses Matplotlib.
 
+Shared plot navigation, playback, view state, selection, and brightness controls live in `src/neuroseq/visualization_support/`.
+
 - `trace_widget.py` — stacked neuron voltage traces
 - `spike_widget.py` — spike raster scatter plot
 - `heatmap_widget.py` — synapse weight matrix

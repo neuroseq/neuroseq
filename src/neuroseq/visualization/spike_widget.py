@@ -6,10 +6,12 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
 from neuroseq.utils import neuron_indices_to_colors
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 class SpikeWidget(TimeseriesWidget):

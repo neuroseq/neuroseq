@@ -12,7 +12,6 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import DrawStim
@@ -37,6 +36,9 @@ from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
 from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 class DrawMode(Enum):

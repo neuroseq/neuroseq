@@ -7,7 +7,7 @@ import brian2.numpy_ as np
 import pygfx
 from qtpy import QtWidgets
 
-from neuroseq.gridlines import GridLines
+from neuroseq.visualization_support.gridlines import GridLines
 
 
 class ConstrainedPanZoomController(pygfx.PanZoomController):

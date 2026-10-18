@@ -5,7 +5,6 @@ from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.project import Project
 from neuroseq.static_input.static_input_controller import StaticInputController
 from neuroseq.static_input.stim_pattern_dialog import StimPatternDialog
@@ -18,6 +17,9 @@ from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_editor import StimEditor
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def _make_editor(

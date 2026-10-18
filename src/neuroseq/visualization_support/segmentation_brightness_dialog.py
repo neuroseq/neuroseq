@@ -7,10 +7,10 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.brightness_contrast import BrightnessContrastDialog
-from neuroseq.brightness_contrast import DisplayRange
-from neuroseq.brightness_contrast import apply_display_range
-from neuroseq.brightness_contrast import to_8bit
+from neuroseq.visualization_support.brightness_contrast import BrightnessContrastDialog
+from neuroseq.visualization_support.brightness_contrast import DisplayRange
+from neuroseq.visualization_support.brightness_contrast import apply_display_range
+from neuroseq.visualization_support.brightness_contrast import to_8bit
 
 PREVIEW_SIZE = 512
 

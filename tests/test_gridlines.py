@@ -2,7 +2,7 @@ import brian2 as b2
 import numpy as np
 import pytest
 
-from neuroseq.gridlines import GridLines
+from neuroseq.visualization_support.gridlines import GridLines
 
 
 def _max_x(gridlines: GridLines) -> float:

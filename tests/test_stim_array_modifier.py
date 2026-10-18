@@ -4,7 +4,6 @@ import numpy as np
 from pytest import approx
 from pytestqt.qtbot import QtBot
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -12,6 +11,9 @@ from neuroseq.stimulation.stim_array_modifier import PadReversibleAction
 from neuroseq.stimulation.stim_array_modifier import StimArrayModifier
 from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
 from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def test_timed_array_modifier(qtbot: QtBot) -> None:

@@ -13,7 +13,6 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
-from neuroseq.brightness_contrast import DisplayRange
 from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
 from neuroseq.importers.importer_cellpose import AOIRole
 from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
@@ -31,6 +30,7 @@ from neuroseq.importers.importer_cellpose import point_in_square
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
+from neuroseq.visualization_support.brightness_contrast import DisplayRange
 
 
 def ensure_unique_ids(values: list[int], error_message: str) -> list[int]:
@@ -1414,7 +1414,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         """Show the image to segment with brightness/contrast controls
         (issue #611); None if the user cancels."""
         from neuroseq.cellpose_annotation import load_annotation_image
-        from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+        from neuroseq.visualization_support.segmentation_brightness_dialog import (
+            SegmentationBrightnessDialog,
+        )
 
         try:
             image = load_annotation_image(filename)

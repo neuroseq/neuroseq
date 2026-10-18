@@ -19,7 +19,6 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import CircleAOI
 from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
-from neuroseq.spatial_footprint_state import SpatialFootprintState
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
@@ -37,6 +36,7 @@ from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_BL
 from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 
 
 def _right_click_event() -> SimpleNamespace:

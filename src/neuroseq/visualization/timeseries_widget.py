@@ -15,18 +15,20 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.gridlines import GridLines
-from neuroseq.neuron_subset_dialog import NeuronSubsetDialog
-from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
 from neuroseq.visualization.fpl_widget import FPLWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+from neuroseq.visualization_support.gridlines import GridLines
+from neuroseq.visualization_support.neuron_subset_dialog import NeuronSubsetDialog
+from neuroseq.visualization_support.region_of_interest import RegionOfInterest
 
 
 class Text(Graphic):

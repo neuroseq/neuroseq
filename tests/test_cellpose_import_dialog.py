@@ -526,8 +526,10 @@ def test_brightness_is_adjusted_before_segmentation(
 ) -> None:
     """Issue #611: with "Adjust brightness first", the chosen window is
     passed on to the segmentation; cancelling segments nothing."""
-    from neuroseq.brightness_contrast import DisplayRange
-    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+    from neuroseq.visualization_support.brightness_contrast import DisplayRange
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
 
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)
@@ -571,8 +573,10 @@ def test_brightness_is_adjusted_before_segmentation(
 
 
 def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
-    from neuroseq.brightness_contrast import DisplayRange
-    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+    from neuroseq.visualization_support.brightness_contrast import DisplayRange
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
 
     image = np.linspace(0, 4000, 64, dtype=np.float32).reshape(8, 8)
     dialog = SegmentationBrightnessDialog(image)

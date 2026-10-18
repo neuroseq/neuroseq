@@ -8,11 +8,13 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtGui
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.utils import InteractMode
 from neuroseq.visualization.stim_widget import StimArray
 from neuroseq.visualization.stim_widget import StimType
 from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def test_stim_preview_keeps_editor_menu(qtbot, monkeypatch):

@@ -10,15 +10,17 @@ import pygfx
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
-from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import get_cmap
 from neuroseq.utils import neuron_indices_to_colors
 from neuroseq.visualization.stim_widget import apply_cmap_alpha
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 
 
 class _SelfRaisingDialog(QtWidgets.QDialog):

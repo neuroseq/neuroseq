@@ -7,13 +7,15 @@ from qtpy import QtWidgets
 import neuroseq
 import neuroseq.stimulation.stim
 import neuroseq.stimulation.stim_editor
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.stimulation.stim_loop_dialog import StimLoopDialog
 from neuroseq.utils import detect_period
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def _make_project(*stim_arrays: StimArray) -> Project:

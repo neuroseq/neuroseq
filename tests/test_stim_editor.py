@@ -16,7 +16,6 @@ from qtpy import QtWidgets
 import neuroseq
 import neuroseq.stimulation.stim
 import neuroseq.stimulation.stim_editor
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
@@ -28,6 +27,9 @@ from neuroseq.stimulation.stim_editor import DrawMode
 from neuroseq.stimulation.stim_editor import SelectMode
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 class MockStimIntensityDialog:
