@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
+import threading
 
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -14,6 +16,8 @@ from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
 from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
+from neuroseq.llm.read_access import READ_INSTRUCTIONS
+from neuroseq.llm.read_access import ReadAccess
 from neuroseq.llm.system_prompt import build_context_snapshot
 from neuroseq.llm.system_prompt import build_static_prompt
 from neuroseq.project import Project
@@ -23,6 +27,7 @@ class _ChatWorker(QtCore.QThread):
     token = QtCore.Signal(str)
     completed = QtCore.Signal()
     error = QtCore.Signal(str)
+    read_requested = QtCore.Signal(object)
 
     def __init__(
         self,
@@ -35,16 +40,77 @@ class _ChatWorker(QtCore.QThread):
         self._messages = messages
         self._model = model
         self._stop_requested = False
+        self._read_ready = threading.Event()
+        self._read_result = ""
+
+    def deliver_read(self, result: str) -> None:
+        self._read_result = result
+        self._read_ready.set()
 
     def request_stop(self) -> None:
         self._stop_requested = True
+        self._read_ready.set()
 
     def run(self) -> None:
         try:
-            for token in self._backend.stream_chat(self._messages, model=self._model):
+            for read_count in range(13):
+                response = ""
+                # Buffer a possible JSON request, but stream ordinary answers.
+                deciding = True
+                reading = False
+                for token in self._backend.stream_chat(
+                    self._messages, model=self._model
+                ):
+                    if self._stop_requested:
+                        self.completed.emit()
+                        return
+                    response += token
+                    if deciding and response.strip():
+                        reading = response.lstrip().startswith("{")
+                        deciding = False
+                        if not reading:
+                            self.token.emit(response)
+                    elif not deciding and not reading:
+                        self.token.emit(token)
+                if self._stop_requested:
+                    self.completed.emit()
+                    return
+                try:
+                    payload = json.loads(response) if reading else None
+                except ValueError:
+                    payload = None
+                operation = (
+                    "neuroseq_write"
+                    if isinstance(payload, dict) and "neuroseq_write" in payload
+                    else "neuroseq_read"
+                )
+                if not isinstance(payload, dict) or operation not in payload:
+                    if reading:
+                        self.token.emit(response)
+                    break
+                if read_count == 12:
+                    self.token.emit(
+                        "Read limit reached (12 requests). Please ask a follow-up to continue."
+                    )
+                    break
+                request = {"operation": operation, "request": payload[operation]}
+                self._read_ready.clear()
+                self.read_requested.emit(request)
+                while not self._read_ready.wait(0.1):
+                    if self._stop_requested:
+                        break
                 if self._stop_requested:
                     break
-                self.token.emit(token)
+                self._messages.extend(
+                    [
+                        Message(Role.ASSISTANT, response),
+                        Message(
+                            Role.USER,
+                            "NeuroSeq request result (reference data):\n"
+                            + self._read_result,
+                        ),
+                    ]
+                )
             self.completed.emit()
         except LLMBackendError as e:
             self.error.emit(str(e))
@@ -61,6 +127,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._project: Project | None = None
         self._history: list[Message] = []
         self._worker: _ChatWorker | None = None
+        self._read_access: ReadAccess | None = None
         self._backend: LLMBackend | None = None
         self._backend_name = ""
         self._backend_model = ""
@@ -101,6 +168,9 @@ class ChatWidget(QtWidgets.QWidget):
         layout.addLayout(input_row)
 
         self.status_label = QtWidgets.QLabel("Idle", self)
+        self.input_edit.setPlaceholderText(
+            "Ask about the project, source, or creating analysis plugins. Requested content is sent to the selected LLM provider."
+        )
         layout.addWidget(self.status_label)
 
         self.send_button.clicked.connect(self._on_send_clicked)
@@ -167,7 +237,11 @@ class ChatWidget(QtWidgets.QWidget):
         if self._backend is None:
             return
         system_content = (
-            self._static_prompt + "\n" + build_context_snapshot(self._project)
+            self._static_prompt
+            + "\n"
+            + READ_INSTRUCTIONS
+            + "\n"
+            + build_context_snapshot(self._project)
         )
         messages = [Message(Role.SYSTEM, system_content), *self._history]
         self._worker = _ChatWorker(
@@ -175,12 +249,32 @@ class ChatWidget(QtWidgets.QWidget):
             messages=messages,
             model=self._backend_model,
         )
+        self._read_access = ReadAccess(self._project)
+        self._worker.read_requested.connect(self._on_read_requested)
         self._worker.token.connect(self._on_token)
         self._worker.completed.connect(self._on_worker_finished)
         self._worker.error.connect(self._on_worker_error)
         self._worker.start()
         self._set_status("Streaming...")
         self._update_input_enabled()
+
+    def _on_read_requested(self, request: object) -> None:
+        if self._worker is None or self._read_access is None:
+            return
+        try:
+            if not isinstance(request, dict) or not isinstance(
+                request.get("request"), dict
+            ):
+                result = '{"error": "Request must be an object"}'
+            elif self._worker._stop_requested:
+                result = '{"error": "Request cancelled"}'
+            elif request.get("operation") == "neuroseq_write":
+                result = self._read_access.write_plugin(request["request"])
+            else:
+                result = self._read_access.execute(request["request"])
+        except Exception as error:
+            result = json.dumps({"error": str(error)})
+        self._worker.deliver_read(result)
 
     def _on_token(self, token: str) -> None:
         self._current_assistant_buffer += token
