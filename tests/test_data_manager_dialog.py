@@ -52,3 +52,9 @@ def test_delete_selected_data_groups(
     assert dialog.info_label.text() == f"Total: {len(expected_keys)} data group(s)"
     assert project.dirty is confirmed
     assert changed == ([True] if confirmed else [])
+    if confirmed:
+        assert len(project.history) == 1
+        project.history.undo()
+        assert list(project.experiments) == ["first", "empty", "second"]
+        project.history.redo()
+        assert list(project.experiments) == expected_keys

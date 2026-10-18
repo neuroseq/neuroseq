@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Callable
 from enum import Enum
 from typing import Literal
 from typing import overload
@@ -73,6 +74,8 @@ class StimEditor(QtWidgets.QWidget):
         self.controller = controller
         self.toolbar = toolbar
         self.project: Project | None = None
+        self._unsubscribe_history: Callable[[], None] | None = None
+        self.history_enabled = True
         self.cmb_stim = cmb_stim
         self.current_stim_modifier: StimArrayModifier | None = None
         self.mode = InteractMode.DRAW
@@ -145,12 +148,35 @@ class StimEditor(QtWidgets.QWidget):
         # explicitly close the fastplotlib figure to avoid the renderer trying
         # to access it after Qt has destroyed this container (same pattern as
         # ProjectWorkspace.dispose, DataWidget.closeEvent, CellOverlayWidget.closeEvent).
+        self.disconnect_history()
         self.stim_widget.close()
         super().closeEvent(event)
+
+    def disconnect_history(self) -> None:
+        if self._unsubscribe_history is not None:
+            self._unsubscribe_history()
+            self._unsubscribe_history = None
+
+    def _history_changed(self, event: str) -> None:
+        if event in ("undo", "redo") and self.project is not None:
+            selected = self.cmb_stim.currentText()
+            self.set_project(
+                self.project, keep_undo_history=True, stim_to_select=selected
+            )
+        self._stim_values_updated()
 
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
+        # History belongs to the project; rebuilding views must not reset it.
+        keep_undo_history = (
+            keep_undo_history
+            and project is self.project
+            and self.stims_dict.keys() == project.stim_arrays.keys()
+        )
+        if project is not self.project or self._unsubscribe_history is None:
+            self.disconnect_history()
+            self._unsubscribe_history = project.history.subscribe(self._history_changed)
         self.project = project
         self.project.update_limits()
         if self.current_stim_modifier is not None and keep_undo_history:
@@ -166,7 +192,7 @@ class StimEditor(QtWidgets.QWidget):
         self.stims_dict = {}
         if self.project is not None and self.project.stim_arrays is not None:
             self.stims_dict = {
-                k: StimArrayModifier(v, self.stim_widget)
+                k: StimArrayModifier(v, self.stim_widget, project.history)
                 for k, v in self.project.stim_arrays.items()
             }
         have_stims = self.project is not None and len(self.stims_dict) > 0
@@ -181,6 +207,7 @@ class StimEditor(QtWidgets.QWidget):
         if not have_stims:
             self.current_stim_modifier = None
             self.current_stim_changed.emit(None)
+            self._stim_values_updated()
             return
         self.limits_modified.emit()
         self.cmb_stim.addItems(list(self.stims_dict.keys()))
@@ -193,6 +220,7 @@ class StimEditor(QtWidgets.QWidget):
     def update_stim_values_dict(self, stims_values_dict: dict[str, np.ndarray]) -> None:
         if self.project is None or self.project.stim_arrays is None:
             return
+        self.project.history.clear()
         for name, array_values in stims_values_dict.items():
             if name not in self.project.stim_arrays:
                 self.logger.warning(f"Stimuli '{name}' not found in project: ignoring")
@@ -500,24 +528,11 @@ class StimEditor(QtWidgets.QWidget):
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction
     ) -> None:
-        """Run a whole-timeline resize action and push it onto the undo stack.
-
-        Trim and pad both resize every stim array at once, so this applies the
-        action on the current modifier's stack (preserving undo history) and
-        clears the other per-array stacks, whose indices no longer line up with
-        the shared timeline (as ``apply_pattern`` does for the same reason).
-        """
+        """Record one timeline change in the shared chronological history."""
         if self.current_stim_modifier is None or self.project is None:
             return
         modifier = self.current_stim_modifier
-        modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
-        modifier.action_stack.append(action)
-        action(modifier.stim_array, self.stim_widget)
-        modifier.current_index = len(modifier.action_stack) - 1
-        for other in self.stims_dict.values():
-            if other is not modifier:
-                other.action_stack = []
-                other.current_index = -1
+        modifier.execute_action(action)
         self.controller.set_limits(
             float(self.project.max_time_secs),
             max(1, int(self.project.max_neurons)),
@@ -546,12 +561,15 @@ class StimEditor(QtWidgets.QWidget):
 
     def _stim_values_updated(self) -> None:
         self._update_amplitude_action()
-        if self.current_stim_modifier is None:
-            self.action_undo.setEnabled(False)
-            self.action_redo.setEnabled(False)
-            return
-        self.action_undo.setEnabled(self.current_stim_modifier.can_undo())
-        self.action_redo.setEnabled(self.current_stim_modifier.can_redo())
+        history = self.project.history if self.project is not None else None
+        self.action_undo.setEnabled(
+            self.history_enabled and history is not None and history.can_undo()
+        )
+        self.action_redo.setEnabled(
+            self.history_enabled and history is not None and history.can_redo()
+        )
+        self.action_undo.setToolTip(f"Undo {history.undo_label}" if history else "Undo")
+        self.action_redo.setToolTip(f"Redo {history.redo_label}" if history else "Redo")
 
     def _stim_data_modified(self) -> None:
         """Call after any real edit to the current stim array's values -
@@ -595,8 +613,7 @@ class StimEditor(QtWidgets.QWidget):
         )
         if resampled_in_place:
             assert target_modifier is not None
-            target_modifier.action_stack = []
-            target_modifier.current_index = -1
+            target_modifier.history.clear()
         if target_modifier is not None and (
             self.current_stim_modifier != target_modifier or shape_changed
         ):
@@ -928,28 +945,28 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_data_modified()
 
     def undo(self) -> None:
-        if self.current_stim_modifier is None:
+        if self.project is None or not self.history_enabled:
             return
-        self.current_stim_modifier.undo()
+        self.project.history.undo()
         if self.project is not None:
             self.controller.set_limits(
                 float(self.project.max_time_secs),
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_data_modified()
+        self._stim_values_updated()
 
     def redo(self) -> None:
-        if self.current_stim_modifier is None:
+        if self.project is None or not self.history_enabled:
             return
-        self.current_stim_modifier.redo()
+        self.project.history.redo()
         if self.project is not None:
             self.controller.set_limits(
                 float(self.project.max_time_secs),
                 max(1, int(self.project.max_neurons)),
             )
             self.limits_modified.emit()
-        self._stim_data_modified()
+        self._stim_values_updated()
 
     def save_selected_stim(self) -> None:
         if (
@@ -1157,7 +1174,7 @@ class StimEditor(QtWidgets.QWidget):
             "Use SysCon2 timestep",
             f"SysCon2 requires 0.5208125 ms samples. Resample input array '{stim.name}' "
             "using zero-order hold? Existing timing may shift by one sample. "
-            "Input undo history will be cleared.",
+            "Project data undo history will be cleared.",
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.No,
             QtWidgets.QMessageBox.StandardButton.No,
@@ -1327,14 +1344,7 @@ class StimEditor(QtWidgets.QWidget):
             new_values,
             self.stim_widget,
         )
-        modifier.action_stack = modifier.action_stack[: modifier.current_index + 1]
-        modifier.action_stack.append(action)
-        action(modifier.stim_array, self.stim_widget)
-        modifier.current_index = len(modifier.action_stack) - 1
-        for other in self.stims_dict.values():
-            if other is not modifier:
-                other.action_stack = []
-                other.current_index = -1
+        modifier.execute_action(action)
         self.controller.set_limits(
             float(self.project.max_time_secs),
             max(1, int(self.project.max_neurons)),

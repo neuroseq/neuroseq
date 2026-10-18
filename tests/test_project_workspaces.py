@@ -8,6 +8,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import Experiment
+from neuroseq.data import TraceData
 from neuroseq.gui import Gui
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
@@ -90,6 +91,43 @@ def test_tabs_keep_complete_workspaces_and_undo_history(window, monkeypatch):
     assert not first.project.stim_arrays["input"].values.any()
     modifier.redo()
     assert first.project.stim_arrays["input"].values.all()
+
+
+def test_shared_data_history_refreshes_workspace_and_detaches_replaced_project(window):
+    workspace = window.active_workspace
+    project = workspace.project
+    project.add_experiment(
+        Experiment(
+            "imported",
+            1.0,
+            [],
+            [TraceData("voltage", np.ones((2, 10)), np.arange(2), "mV", 0.1)],
+        )
+    )
+    workspace.update_project(project)
+    data_name = next(
+        name for name in project.get_data_names(TraceData) if "imported" in name
+    )
+    assert workspace.cmb_trace.findText(data_name) >= 0
+    workspace.cmb_trace.setCurrentText(data_name)
+    assert workspace.stim_editor.action_undo.isEnabled()
+    workspace._set_simulation_actions_enabled(False)
+    assert not workspace.stim_editor.action_undo.isEnabled()
+    workspace.stim_editor.undo()
+    assert "imported" in project.experiments
+    workspace._set_simulation_actions_enabled(True)
+    workspace.stim_editor.action_undo.trigger()
+    assert "imported" not in project.experiments
+    assert workspace.cmb_trace.findText(data_name) == -1
+    workspace.stim_editor.action_redo.trigger()
+    assert "imported" in project.experiments
+    assert workspace.cmb_trace.findText(data_name) >= 0
+    replacement = _project()
+    workspace.update_project(replacement)
+    project.history.undo()
+    assert workspace.project is replacement
+    assert workspace.cmb_trace.findText(data_name) == -1
+    assert not workspace.stim_editor.action_undo.isEnabled()
 
 
 def test_hidden_workspace_receives_its_own_background_result(

@@ -10,8 +10,11 @@ import runpy
 import uuid
 import zipfile
 from collections.abc import Callable
+from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
+from contextlib import contextmanager
+from copy import copy
 from typing import Protocol
 from typing import overload
 
@@ -30,6 +33,8 @@ from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
+from neuroseq.project_history import ProjectCommand
+from neuroseq.project_history import ProjectHistory
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -129,6 +134,8 @@ class Project:
         # (see mark_dirty()'s docstring); cleared by save() and, defensively,
         # at the very end of this constructor regardless of how it got here.
         self.dirty = False
+        self.history = ProjectHistory()
+        self.history.subscribe(self._history_changed)
         self.filepath = None
         self.b2_model: B2Model = B2Model()
         self.project_name: str | None = None
@@ -248,6 +255,85 @@ class Project:
         accepts new state).
         """
         self.dirty = True
+
+    def _history_changed(self, event: str) -> None:
+        if event != "clear":
+            self.mark_dirty()
+
+    def _experiment_restorer(self, names: Sequence[str]) -> Callable[[], None]:
+        """Retain affected data versions without duplicating large NumPy buffers.
+
+        The mutators using this helper replace array buffers (append_data does
+        this too). They must never write into an existing buffer in place.
+        Preserve object identity for callers holding an experiment or dataset.
+        """
+        order = list(self.experiments)
+        states = {}
+        for name in names:
+            if name not in self.experiments:
+                continue
+            experiment = self.experiments[name]
+            saved = copy(experiment)
+            saved.timepoints = list(experiment.timepoints)
+            saved.data = list(experiment.data)
+            states[name] = (
+                experiment,
+                saved,
+                [(datum, vars(datum).copy()) for datum in experiment.data],
+            )
+
+        def restore() -> None:
+            for name in names:
+                self.experiments.pop(name, None)
+            for name, (experiment, saved, data_states) in states.items():
+                experiment.name = saved.name
+                experiment.duration = saved.duration
+                experiment.timepoints = list(saved.timepoints)
+                experiment.data = list(saved.data)
+                for datum, attributes in data_states:
+                    vars(datum).update(attributes)
+                self.experiments[name] = experiment
+            # Restore display order, retaining any unrelated entries.
+            ordered_names = [name for name in order if name in self.experiments]
+            ordered_names.extend(name for name in self.experiments if name not in order)
+            self.experiments = {name: self.experiments[name] for name in ordered_names}
+            self.update_limits()
+
+        return restore
+
+    @contextmanager
+    def _edit_experiments(self, names: Sequence[str], label: str) -> Iterator[None]:
+        undo = self._experiment_restorer(names)
+        was_dirty = self.dirty
+        try:
+            yield
+        except Exception:
+            undo()
+            self.dirty = was_dirty
+            raise
+        else:
+            redo = self._experiment_restorer(names)
+            self.history.record_applied(ProjectCommand(label, redo, undo))
+
+    def remove_experiments(self, names: Sequence[str]) -> None:
+        """Delete a selection of data groups as one undoable edit."""
+        names = [name for name in dict.fromkeys(names) if name in self.experiments]
+        if not names:
+            return
+        with self._edit_experiments(names, "Delete data groups"):
+            for name in names:
+                del self.experiments[name]
+            self.update_limits()
+            self.mark_dirty()
+
+    def replace_experiment(self, experiment: Experiment) -> None:
+        """Replace a data group while retaining the previous version for undo."""
+        if experiment.name not in self.experiments:
+            raise KeyError(experiment.name)
+        with self._edit_experiments([experiment.name], "Replace data group"):
+            self.experiments[experiment.name] = experiment
+            self.update_limits()
+            self.mark_dirty()
 
     @property
     def selected_calcium_video(self) -> dict | None:
@@ -396,6 +482,8 @@ class Project:
             f"Importing components from '{filepath}' into existing project"
         )
         with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
+            # Replacing model/components is a new baseline, not a data command.
+            self.history.clear()
             if options.include_model:
                 self.logger.info("  - importing b2_model")
                 self.b2_model = B2Model()
@@ -571,12 +659,14 @@ class Project:
         stim_dt = validate_stim_dt_seconds(stim_array.dt)
         stim_array.values = ensure_2d_stim_values(stim_array.values)
         stim_array.dt = stim_dt
+        self.history.clear()
         self.stim_arrays[stim_array.name] = stim_array
         self.update_limits()
         self.mark_dirty()
 
     def delete_stim_array(self, name: str):
         if name in self.stim_arrays:
+            self.history.clear()
             del self.stim_arrays[name]
         self.update_limits()
         self.mark_dirty()
@@ -587,6 +677,8 @@ class Project:
         dt = validate_stim_dt_seconds(dt)
         stim_array = self.stim_arrays[name]
         old_dt = validate_stim_dt_seconds(stim_array.dt)
+        if not stim_dt_matches(old_dt, dt) or n_neurons != stim_array.values.shape[1]:
+            self.history.clear()
         stim_array.stim_type = stim_type
         stim_array.units = units
         if not stim_dt_matches(old_dt, dt):
@@ -619,6 +711,7 @@ class Project:
         self.mark_dirty()
 
     def rename_stim_array(self, name: str, new_name: str):
+        self.history.clear()
         stim_array = self.stim_arrays.pop(name)
         stim_array.name = new_name
         self.stim_arrays[stim_array.name] = stim_array
@@ -754,40 +847,41 @@ class Project:
         self.logger.info(
             f"Appending experimental data to experiment '{experiment_name}'"
         )
-        existing_experiment = self.experiments[experiment_name]
-        if time_offset_seconds is None:
-            time_offset_seconds = existing_experiment.duration
-        # match data by type and name and append
-        for datum in new_data:
-            existing_datum = next(
-                (
-                    d
-                    for d in existing_experiment.data
-                    if d.name == datum.name and isinstance(d, type(datum))
-                ),
-                None,
+        with self._edit_experiments([experiment_name], "Append experimental data"):
+            existing_experiment = self.experiments[experiment_name]
+            if time_offset_seconds is None:
+                time_offset_seconds = existing_experiment.duration
+            # match data by type and name and append
+            for datum in new_data:
+                existing_datum = next(
+                    (
+                        d
+                        for d in existing_experiment.data
+                        if d.name == datum.name and isinstance(d, type(datum))
+                    ),
+                    None,
+                )
+                if existing_datum is not None:
+                    self.logger.info(
+                        f"  - appending '{datum.name}' to '{datum.name}' at {time_offset_seconds}s"
+                    )
+                    append_data(
+                        existing_datum, datum, duration_seconds, time_offset_seconds
+                    )
+                else:
+                    self.logger.warning(
+                        f"'{datum.name}' not found when trying to append - adding new data instead of appending."
+                    )
+                    self.experiments[experiment_name].data.append(datum)
+            for t in [time_offset_seconds, time_offset_seconds + duration_seconds]:
+                if t not in existing_experiment.timepoints:
+                    existing_experiment.timepoints.append(t)
+            existing_experiment.timepoints.sort()
+            existing_experiment.duration = max(
+                existing_experiment.duration, time_offset_seconds + duration_seconds
             )
-            if existing_datum is not None:
-                self.logger.info(
-                    f"  - appending '{datum.name}' to '{datum.name}' at {time_offset_seconds}s"
-                )
-                append_data(
-                    existing_datum, datum, duration_seconds, time_offset_seconds
-                )
-            else:
-                self.logger.warning(
-                    f"'{datum.name}' not found when trying to append - adding new data instead of appending."
-                )
-                self.experiments[experiment_name].data.append(datum)
-        for t in [time_offset_seconds, time_offset_seconds + duration_seconds]:
-            if t not in existing_experiment.timepoints:
-                existing_experiment.timepoints.append(t)
-        existing_experiment.timepoints.sort()
-        existing_experiment.duration = max(
-            existing_experiment.duration, time_offset_seconds + duration_seconds
-        )
-        self.update_limits()
-        self.mark_dirty()
+            self.update_limits()
+            self.mark_dirty()
 
     def remap_cellpose_indices(self) -> list[str]:
         """
@@ -806,6 +900,7 @@ class Project:
             mapping collides for their raw ids) - those are left unchanged rather than
             raising, so the caller can surface a warning.
         """
+        self.history.clear()
         mapping = resolve_stimulus_to_cellpose_mapping(self.cellpose_data)
         failed: list[str] = []
         for name, experiment in self.experiments.items():
@@ -855,12 +950,13 @@ class Project:
             )
             raise ValueError(f"Experiment '{experiment.name}' already exists")
         self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        for t in [0.0, experiment.duration]:
-            if t not in experiment.timepoints:
-                experiment.timepoints.append(t)
-        self.experiments[experiment.name] = experiment
-        self.update_limits()
-        self.mark_dirty()
+        with self._edit_experiments([experiment.name], "Add data group"):
+            for t in [0.0, experiment.duration]:
+                if t not in experiment.timepoints:
+                    experiment.timepoints.append(t)
+            self.experiments[experiment.name] = experiment
+            self.update_limits()
+            self.mark_dirty()
 
     def add_experimental_data(
         self,
@@ -914,16 +1010,17 @@ class Project:
         if experiment is None:
             raise KeyError(f"Experiment '{experiment_name}' does not exist")
 
-        experiment.data.append(data)
-        if isinstance(data, TraceData):
-            new_duration = float(data.traces.shape[1] * data.dt)
-            if new_duration > experiment.duration:
-                experiment.duration = new_duration
-                if new_duration not in experiment.timepoints:
-                    experiment.timepoints.append(new_duration)
-                experiment.timepoints.sort()
-        self.update_limits()
-        self.mark_dirty()
+        with self._edit_experiments([experiment_name], "Add dataset"):
+            experiment.data.append(data)
+            if isinstance(data, TraceData):
+                new_duration = float(data.traces.shape[1] * data.dt)
+                if new_duration > experiment.duration:
+                    experiment.duration = new_duration
+                    if new_duration not in experiment.timepoints:
+                        experiment.timepoints.append(new_duration)
+                    experiment.timepoints.sort()
+            self.update_limits()
+            self.mark_dirty()
 
     def pad_stim_arrays(
         self, total_time_seconds: float, only_stim_name: str | None = None
@@ -972,6 +1069,8 @@ class Project:
         """
         if n_neurons <= 0:
             return
+        if any(arr.values.shape[1] < n_neurons for arr in self.stim_arrays.values()):
+            self.history.clear()
         for name, stim_array in self.stim_arrays.items():
             current_n_neurons = int(stim_array.values.shape[1])
             if current_n_neurons >= n_neurons:
@@ -1003,6 +1102,8 @@ class Project:
         """
         if n_neurons <= 0:
             return
+        if any(arr.values.shape[1] != n_neurons for arr in self.stim_arrays.values()):
+            self.history.clear()
         for name, stim_array in self.stim_arrays.items():
             current_n_neurons = int(stim_array.values.shape[1])
             if current_n_neurons == n_neurons:
@@ -1040,6 +1141,7 @@ class Project:
         need the same project-wide consistency, not just a resize of the
         one array/dataset that triggered it.
         """
+        self.history.clear()
         old_to_new = {old_id: new_id for new_id, old_id in enumerate(kept_ids)}
         kept_ids_set = set(kept_ids)
 
@@ -1176,6 +1278,7 @@ class Project:
             raise ValueError(f"n_loops must be >= 1, got {n_loops}")
         if n_loops == 1:
             return
+        self.history.clear()
         for stim_array in self.stim_arrays.values():
             stim_array.values = np.tile(stim_array.values, (n_loops, 1))
         self.update_limits()

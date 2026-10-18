@@ -285,6 +285,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.logger.info("starting ProjectWorkspace")
         self.settings = settings if settings is not None else GuiSettings()
         self.project = Project()
+        self._unsubscribe_project_history: Callable[[], None] | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
         self.cmb_trace.setMinimumWidth(120)
@@ -1061,6 +1062,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         preserve_dynamic_input: bool = False,
     ) -> None:
         preserve_dynamic_input = preserve_dynamic_input and project is self.project
+        if project is not self.project or self._unsubscribe_project_history is None:
+            if self._unsubscribe_project_history is not None:
+                self._unsubscribe_project_history()
+            self._unsubscribe_project_history = project.history.subscribe(
+                self._project_history_changed
+            )
         self.project = project
         self._saved_vertical_views.clear()
         self._update_window_title()
@@ -1121,6 +1128,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 shown_channel=self.project.calcium_video_channels[1],
             )
         self.time_slider.set_current_time_ms(self.time_slider.t_ms)
+
+    def _project_history_changed(self, event: str) -> None:
+        if self._disposed:
+            return
+        if event in ("undo", "redo"):
+            self._update_data(keep_undo_history=True)
+            self._update_window_title()
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
         if imported is None:
@@ -1629,6 +1643,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             action = getattr(self, attr, None)
             if action is not None:
                 action.setEnabled(bool(enabled))
+        self.stim_editor.history_enabled = bool(enabled)
+        self.stim_editor._stim_values_updated()
 
     def _iter_menu_actions(self, menu: QtWidgets.QMenu) -> list[QtWidgets.QAction]:
         """Recursively collect every leaf action in ``menu``, including submenus'."""
@@ -3702,6 +3718,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._disposed:
             return
         self._disposed = True
+        if self._unsubscribe_project_history is not None:
+            self._unsubscribe_project_history()
+            self._unsubscribe_project_history = None
+        self.stim_editor.disconnect_history()
         self.set_active(False)
         self.syscon2_panel.shutdown()
         self.acquisition_controller.dispose()

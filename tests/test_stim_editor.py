@@ -20,6 +20,8 @@ from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.project import Project
+from neuroseq.project_history import ProjectCommand
+from neuroseq.project_history import ProjectHistory
 from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim import StimArray
@@ -30,6 +32,118 @@ from neuroseq.utils import InteractMode
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+
+
+def test_project_history_interleaves_arrays_and_imports_across_refreshes(
+    qtbot: QtBot,
+) -> None:
+    project = Project()
+    for name in ("a", "b"):
+        project.add_stim_array(
+            StimArray(
+                name,
+                neuroseq.stimulation.stim.StimType.Excitation,
+                np.zeros((10, 1)),
+                "mV",
+                0.001,
+            )
+        )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project, stim_to_select="a")
+    assert editor.current_stim_modifier is not None
+    modifier_a = editor.current_stim_modifier
+    editor.current_stim_modifier.do(slice(0, 1), slice(0, 2), 1.0)
+    project.add_experiment(Experiment("imported", 0.02, [], []))
+    editor.cmb_stim.setCurrentText("b")
+    assert editor.current_stim_modifier is not None
+    editor.current_stim_modifier.do(slice(0, 1), slice(2, 4), 2.0)
+    editor._apply_pad(0.03)
+    assert len(project.history) == 4
+    editor.set_project(project, keep_undo_history=False, stim_to_select="b")
+    assert len(project.history) == 4
+    editor.undo()  # undo padding, preserving both arrays' older edits
+    assert all(stim.values.shape == (10, 1) for stim in project.stim_arrays.values())
+    modifier_a.undo()  # undo b through a different array's modifier
+    assert not project.stim_arrays["b"].values.any()
+    assert project.stim_arrays["a"].values.any()
+    assert editor.cmb_stim.currentText() == "b"
+    np.testing.assert_array_equal(
+        editor.stim_widget.data_values, project.stim_arrays["b"].values
+    )
+    editor.undo()  # undo import, even though a different input is selected
+    assert not project.experiments
+    editor.undo()  # undo a
+    assert not project.stim_arrays["a"].values.any()
+    assert not editor.action_undo.isEnabled()
+    assert editor.action_redo.isEnabled()
+    for _ in range(4):
+        editor.redo()
+    assert "imported" in project.experiments
+    assert project.stim_arrays["a"].values[0, 0] == 1.0
+    assert project.stim_arrays["b"].values[2, 0] == 2.0
+    assert editor.cmb_stim.currentText() == "b"
+    np.testing.assert_array_equal(
+        editor.stim_widget.data_values, project.stim_arrays["b"].values
+    )
+    editor.close()
+    project.history.undo()  # commands do not need the editor for replay
+    project.history.undo()
+    assert not project.stim_arrays["b"].values.any()
+
+
+def test_project_data_undo_without_an_input_and_after_editor_closes(
+    qtbot: QtBot,
+) -> None:
+    project = Project()
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    project.add_experiment(Experiment("imported", 2.0, [], []))
+    assert editor.current_stim_modifier is None
+    assert editor.action_undo.isEnabled()
+    editor.undo()
+    assert not project.experiments
+    assert editor.action_redo.isEnabled()
+    editor.redo()
+    editor.history_enabled = False
+    editor.undo()
+    assert "imported" in project.experiments
+    editor.close()
+    project.history.undo()
+    assert not project.experiments
+
+
+def test_switching_projects_cannot_reuse_previous_project_history(qtbot: QtBot) -> None:
+    first, second = Project(), Project()
+    for project in (first, second):
+        project.add_stim_array(
+            StimArray(
+                "a",
+                neuroseq.stimulation.stim.StimType.Excitation,
+                np.zeros((10, 1)),
+                "mV",
+                0.001,
+            )
+        )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(first)
+    assert editor.current_stim_modifier is not None
+    editor.current_stim_modifier.do(slice(0, 1), slice(0, 2), 1.0)
+    editor.set_project(second, keep_undo_history=True)
+    assert not editor.action_undo.isEnabled()
+    assert editor.current_stim_modifier is not None
+    assert editor.current_stim_modifier.history is second.history
+    first.history.undo()
+    assert not first.stim_arrays["a"].values.any()
+    assert not second.stim_arrays["a"].values.any()
 
 
 class MockStimIntensityDialog:
@@ -1088,7 +1202,8 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
             np.zeros((2266, 10), dtype=np.float32),
             "mV",
             0.001,
-        )
+        ),
+        history=ProjectHistory(),
     )
     set_data_calls: list[np.ndarray] = []
     fake_stim_widget = SimpleNamespace(
@@ -1135,9 +1250,9 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
             "mV",
             0.001,
         ),
-        action_stack=["some_pre_resample_action"],
-        current_index=0,
+        history=ProjectHistory(),
     )
+    modifier.history.record_applied(ProjectCommand("edit", lambda: None, lambda: None))
     fake_stim_widget = SimpleNamespace(
         set_data=lambda stim_array: None,
         set_background_data=lambda stim_array: None,
@@ -1161,8 +1276,8 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
 
     StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
 
-    assert modifier.action_stack == []
-    assert modifier.current_index == -1
+    assert not modifier.history.can_undo()
+    assert not modifier.history.can_redo()
 
 
 def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
@@ -1940,7 +2055,7 @@ def test_edit_stim_duration_requires_confirmation(
         assert stim.values.shape == (expected_samples, 1)
         editor.undo()
         if not rename:
-            assert editor.current_stim_modifier is modifier
+            assert editor.current_stim_modifier.history is modifier.history
             editor.undo()
             np.testing.assert_array_equal(stim.values, values)
     else:

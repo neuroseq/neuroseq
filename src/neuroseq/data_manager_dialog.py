@@ -171,10 +171,9 @@ class DataManagerDialog(QtWidgets.QDialog):
         )
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            # Delete data groups (in reverse row order to maintain indices)
-            for _, group_key, _ in reversed(data_groups_to_delete):
-                del self.project.experiments[group_key]
-            self.project.mark_dirty()
+            self.project.remove_experiments(
+                [group_key for _, group_key, _ in data_groups_to_delete]
+            )
 
             # Refresh the table
             self._populate_table()
