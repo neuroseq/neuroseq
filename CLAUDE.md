@@ -99,7 +99,7 @@ io.py                         — .nseq archive persistence (ZIP + JSON + .npy b
 | `data.py`                         | Core dataclasses: `TraceData`, `SpikeData`, `SynapseData`, `Experiment`              |
 | `stim.py`                         | `StimArray`, `StimType` enum, draw profile types                                     |
 | `utils.py`                        | Cross-cutting helpers: Brian2 logging, decorators, synapse matrix construction       |
-| `example_projects.py`             | 7 built-in preconfigured projects (~1300 lines)                                      |
+| `example_projects/`               | Individual project factories grouped into `neurons/` and `networks/`                 |
 | `conftest.py` (tests/)            | Comprehensive pytest fixtures for Qt, Brian2, projects (~700 lines)                  |
 
 ### Visualization widgets

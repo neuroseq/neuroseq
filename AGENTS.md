@@ -6,6 +6,8 @@
 
 `visualization_support/` contains shared plot navigation, gridlines, selection regions, playback controls, trace/spatial view state, neuron selection, and brightness/contrast controls.
 
+`example_projects/` contains one project factory per file, grouped under `neurons/` and `networks/`. Its package entry point exports the existing factory names and registers projects in menu order; `_registry.py` contains the registration decorator.
+
 ## NeuroSeq Functionality Overview
 
 NeuroSeq is a Qt desktop application for designing neuronal stimulation sequences, running Brian2-based network simulations, importing experimental data, and comparing simulated and recorded activity in one workspace. The main window is assembled in `src/neuroseq/gui.py`; shared project state lives in `src/neuroseq/project.py`; the simulation/model layer lives in `src/neuroseq/b2_model.py`; canonical data structures live in `src/neuroseq/data.py`; and project serialization lives in `src/neuroseq/io.py`.
@@ -13,7 +15,7 @@ NeuroSeq is a Qt desktop application for designing neuronal stimulation sequence
 Key user-visible workflows:
 
 - Stimulation editing: users work primarily in the stimulation editor (`stim_editor.py`, `stim_widget.py`, `stim.py`). NeuroSeq supports multiple stim arrays per project, draw/erase/select interactions, amplitude and duration controls, padding/trimming, array metadata editing, and showing multiple arrays together.
-- Simulations and model editing: NeuroSeq can run and continue Brian2 simulations from the GUI, keep checkpoints, and load a default Hodgkin-Huxley-style example project. Model definitions include neuron groups, synapses, monitors, parameters, and initial values; editing paths are centered around `b2_model.py`, `model_editor.py`, and `example_projects.py`.
+- Simulations and model editing: NeuroSeq can run and continue Brian2 simulations from the GUI, keep checkpoints, and load a default Hodgkin-Huxley-style example project. Model definitions include neuron groups, synapses, monitors, parameters, and initial values; editing paths are centered around `b2_model.py`, `model_editor.py`, and `example_projects/`.
 - Data visualization and playback: trace, spike-raster, and synapse-heatmap views are first-class widgets (`trace_widget.py`, `spike_widget.py`, `heatmap_widget.py`) synchronized by the time slider (`time_slider_widget.py`) and shared pan/zoom controls. `data_widget.py` provides an extra generic viewer for comparing datasets.
 - Analysis and scripting: selected regions can be sent to the custom analysis pane/window (`custom_analysis_widget.py`). The embedded Python console (`console_widget.py`) exposes project/model/stim objects for inspection and scripted stimulus manipulation, but direct low-level Brian2 object mutation can desynchronize GUI state.
 - Experimental data import/export: supported flows include Suite2p, Cellpose, patch-clamp, Igor2, and SysCon2 import paths (`importer_*.py`, `*_import_dialog.py`) plus exporter flows such as Igor2 patch-clamp CSV and SysCon2 sequence export (`exporter_*.py`). There is also Cellpose synthetic test-data generation exposed from `__main__.py`.
