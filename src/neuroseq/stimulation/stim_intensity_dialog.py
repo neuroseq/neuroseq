@@ -7,7 +7,7 @@ from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
-from neuroseq.stimulation.stim_widget import StimType
+from neuroseq.visualization.stim_widget import StimType
 
 
 class StimIntensityDialog(QtWidgets.QDialog):

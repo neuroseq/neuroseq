@@ -102,7 +102,9 @@ io.py                         — .nseq archive persistence (ZIP + JSON + .npy b
 | `example_projects.py`             | 7 built-in preconfigured projects (~1300 lines)                                      |
 | `conftest.py` (tests/)            | Comprehensive pytest fixtures for Qt, Brian2, projects (~700 lines)                  |
 
-### Visualization widgets (all use fastplotlib for GPU-accelerated rendering)
+### Visualization widgets
+
+Visualization widgets live in `src/neuroseq/visualization/`. Interactive data views use fastplotlib for GPU-accelerated rendering; custom analysis uses Matplotlib.
 
 - `trace_widget.py` — stacked neuron voltage traces
 - `spike_widget.py` — spike raster scatter plot

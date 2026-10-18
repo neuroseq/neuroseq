@@ -22,7 +22,6 @@ from neuroseq.aoi_shapes import circle_polyline
 from neuroseq.aoi_shapes import square_corner_points
 from neuroseq.aoi_shapes import square_corners
 from neuroseq.aoi_shapes import square_polyline
-from neuroseq.fpl_widget import FullScreenFPLWidget
 from neuroseq.importers.importer_cellpose import AOIRole
 from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importers.importer_cellpose import CellposeImportResult
@@ -30,6 +29,7 @@ from neuroseq.importers.importer_cellpose import CircleAOI
 from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.fpl_widget import FullScreenFPLWidget
 
 
 class CameraState(TypedDict):

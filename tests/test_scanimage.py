@@ -197,7 +197,7 @@ def test_record_request_waits_for_poll_and_abort_cancels_it(connection):
 def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, recording):
     from pathlib import Path
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     widget = CalciumVideoWidget()
@@ -228,7 +228,7 @@ def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, rec
 def test_live_frame_of_other_shape_replaces_recorded_image(qtbot, recording):
     from pathlib import Path
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     widget = CalciumVideoWidget()
@@ -582,7 +582,7 @@ def test_standard_two_channel_run_has_compact_transport_and_metadata(
 
 
 def test_recorded_channel_uses_file_indices_through_symlink(qtbot, recording, tmp_path):
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     link = tmp_path / "linked"
@@ -902,7 +902,7 @@ def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
 def test_exported_imaging_keeps_the_recording_orientation(qtbot, tmp_path, suffix):
     from PIL import Image
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     raw = np.zeros((20, 30), dtype=np.uint16)
     raw[:4, :6] = 1000  # bright block at the top-left of the recording
@@ -931,7 +931,7 @@ def test_live_preview_and_recorded_playback_share_orientation(
     MATLAB sends img(:) column-major (encoding confirmed against the adapter in
     MATLAB R2025b); a transpose or an extra flip on either path breaks this.
     """
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     rows, cols = np.mgrid[0:12, 0:18]
     raw = (rows * 50 + cols).astype(np.float32)

@@ -10,8 +10,8 @@ import tifffile
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.save_imaging_dialog import SaveImagingDialog
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
 
 @pytest.fixture

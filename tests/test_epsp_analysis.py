@@ -4,8 +4,8 @@ import numpy as np
 from qtpy import QtWidgets
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.data import TraceData
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 
 epsp = importlib.import_module("neuroseq.resources.analysis_plugins.epsp_amplitudes")
 

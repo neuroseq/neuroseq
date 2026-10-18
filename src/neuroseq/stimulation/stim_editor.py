@@ -33,10 +33,10 @@ from neuroseq.stimulation.stim_timing import samples_to_seconds
 from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import stim_dt_matches
-from neuroseq.stimulation.stim_widget import StimWidget
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.utils import get_stim_type
+from neuroseq.visualization.stim_widget import StimWidget
 
 
 class DrawMode(Enum):

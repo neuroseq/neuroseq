@@ -14,11 +14,11 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.data import TraceData
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
-from neuroseq.stimulation.stim_widget import apply_cmap_alpha
-from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import get_cmap
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.stim_widget import apply_cmap_alpha
+from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 
 
 class _SelfRaisingDialog(QtWidgets.QDialog):

@@ -9,12 +9,12 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.project_workspace import ProjectWorkspace
 from neuroseq.resources.analysis_plugins._replay_metrics import save_learning_curves_csv
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 # Mirrors elise_learning_curves.CURVES_ATTR (the plugin loads via a file spec,
 # not as an importable module, so we reference the attribute name directly).

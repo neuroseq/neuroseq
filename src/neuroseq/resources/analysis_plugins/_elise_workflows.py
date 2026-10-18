@@ -14,9 +14,9 @@ from qtpy import QtWidgets
 from qtpy.compat import getsavefilename
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data import TraceData
 from neuroseq.project import Project
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 if TYPE_CHECKING:
     from neuroseq.gui import Gui

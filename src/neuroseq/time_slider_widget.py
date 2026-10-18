@@ -5,10 +5,10 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
-from neuroseq.data_widget import DataWidget
-from neuroseq.heatmap_widget import HeatmapWidget
-from neuroseq.timeseries_widget import TimeseriesWidget
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
+from neuroseq.visualization.data_widget import DataWidget
+from neuroseq.visualization.heatmap_widget import HeatmapWidget
+from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 
 
 class HandleTooltipSlider(QtWidgets.QSlider):

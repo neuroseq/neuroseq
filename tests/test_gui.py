@@ -20,9 +20,6 @@ import neuroseq
 import neuroseq.export.stimulus_export_dialog as stimulus_export_dialog_module
 import neuroseq.stimulation.stim
 import neuroseq.stimulation.stim_editor
-from neuroseq.custom_analysis_widget import CustomAnalysisType
-from neuroseq.custom_analysis_widget import CustomAnalysisWidget
-from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -45,6 +42,9 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_editor import DrawMode
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 # no obvious signal to wait for after the model is updated to know when the GUI is ready,
 # so for now we just wait for a fixed time

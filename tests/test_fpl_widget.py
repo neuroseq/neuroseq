@@ -9,7 +9,7 @@ from qtpy import QtWidgets
 from rendercanvas.qt import QRenderWidget
 
 from neuroseq import theme
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.visualization.fpl_widget import FPLWidget
 
 
 @pytest.mark.parametrize("close_plot", [True, False])
@@ -125,7 +125,9 @@ class _DummyFigure:
 def test_closing_canvas_does_not_reenter_the_qt_event_loop(monkeypatch, qtbot):
     events = []
     figure = _DummyFigure([])
-    monkeypatch.setattr("neuroseq.fpl_widget.fpl.Figure", lambda **kwargs: figure)
+    monkeypatch.setattr(
+        "neuroseq.visualization.fpl_widget.fpl.Figure", lambda **kwargs: figure
+    )
     monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
     widget = FPLWidget()
     qtbot.addWidget(widget)
@@ -147,7 +149,7 @@ def test_fpl_widget_uses_bitmap_present_method_for_headless_tests(
     calls: list[dict[str, object]] = []
     monkeypatch.setenv("NEUROSEQ_HEADLESS_TEST", "1")
     monkeypatch.setattr(
-        "neuroseq.fpl_widget.fpl.Figure",
+        "neuroseq.visualization.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
     monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
@@ -168,7 +170,7 @@ def test_fpl_widget_uses_screen_present_method_by_default(
     calls: list[dict[str, object]] = []
     monkeypatch.delenv("NEUROSEQ_HEADLESS_TEST", raising=False)
     monkeypatch.setattr(
-        "neuroseq.fpl_widget.fpl.Figure",
+        "neuroseq.visualization.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
     monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)

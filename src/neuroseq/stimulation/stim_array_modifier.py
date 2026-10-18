@@ -7,7 +7,7 @@ import numpy as np
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
-from neuroseq.stimulation.stim_widget import StimWidget
+from neuroseq.visualization.stim_widget import StimWidget
 
 
 class ReversibleAction:

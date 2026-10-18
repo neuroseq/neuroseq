@@ -16,17 +16,17 @@ from neuroseq import theme as theme_module
 from neuroseq.analysis_plugins import AnalysisPlugin
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.custom_analysis_widget import CustomAnalysisType
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.fpl_widget import FPLWidget
 from neuroseq.gridlines import GridLines
 from neuroseq.neuron_subset_dialog import NeuronSubsetDialog
 from neuroseq.region_of_interest import RegionOfInterest
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
+from neuroseq.visualization.fpl_widget import FPLWidget
 
 
 class Text(Graphic):

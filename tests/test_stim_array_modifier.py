@@ -11,7 +11,7 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_array_modifier import PadReversibleAction
 from neuroseq.stimulation.stim_array_modifier import StimArrayModifier
 from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
-from neuroseq.stimulation.stim_widget import StimWidget
+from neuroseq.visualization.stim_widget import StimWidget
 
 
 def test_timed_array_modifier(qtbot: QtBot) -> None:

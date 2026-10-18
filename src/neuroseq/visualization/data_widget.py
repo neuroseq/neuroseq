@@ -11,9 +11,9 @@ from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomControlle
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.heatmap_widget import HeatmapWidget
-from neuroseq.spike_widget import SpikeWidget
-from neuroseq.trace_widget import TraceWidget
+from neuroseq.visualization.heatmap_widget import HeatmapWidget
+from neuroseq.visualization.spike_widget import SpikeWidget
+from neuroseq.visualization.trace_widget import TraceWidget
 
 
 class DataWidget(QtWidgets.QWidget):

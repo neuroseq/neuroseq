@@ -8,8 +8,8 @@ from qtpy import QtWidgets
 
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
-from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 
 
 class SpikeWidget(TimeseriesWidget):

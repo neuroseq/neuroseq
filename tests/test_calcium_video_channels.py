@@ -9,7 +9,7 @@ import pytest
 import tifffile
 from pytestqt.qtbot import QtBot
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
 
 @pytest.fixture

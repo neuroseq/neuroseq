@@ -21,12 +21,12 @@ from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 
 if TYPE_CHECKING:
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
     from neuroseq.device_control.scanimage_connection import ScanImageConnection
     from neuroseq.export.syscon2_export_service import SysconExportSettings
     from neuroseq.gui_settings import GuiSettings
     from neuroseq.project import Project
     from neuroseq.stimulation.stim import StimArray
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
 
 class WorkspaceAcquisitionController(QtCore.QObject):

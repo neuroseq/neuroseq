@@ -4,8 +4,8 @@ from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.custom_analysis_widget import CustomAnalysisWidget
-from neuroseq.trace_widget import TraceWidget
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.visualization.trace_widget import TraceWidget
 
 
 def test_discover_analysis_plugins_contains_example_plugin() -> None:

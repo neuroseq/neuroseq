@@ -10,11 +10,11 @@ Plugin support is split across three core modules:
   - Discovers plugin modules from `src/neuroseq/resources/analysis_plugins`
   - Loads each plugin file dynamically
   - Builds `AnalysisPlugin` objects (`id`, `label`, `icon`, `render`)
-- `src/neuroseq/timeseries_widget.py`
+- `src/neuroseq/visualization/timeseries_widget.py`
   - Rebuilds right-click analysis menu on demand
   - Adds built-in analysis actions and plugin actions
   - Emits `custom_analysis_requested` with either a built-in `CustomAnalysisType` or an `AnalysisPlugin`
-- `src/neuroseq/custom_analysis_widget.py`
+- `src/neuroseq/visualization/custom_analysis_widget.py`
   - Executes built-in analysis logic
   - Executes plugin `render` callback for plugin analyses
   - Catches plugin exceptions, logs the plugin id, and shows a failure message in the plot

@@ -12,7 +12,7 @@ from neuroseq.brightness_contrast import auto_display_range
 from neuroseq.brightness_contrast import build_lut
 from neuroseq.brightness_contrast import luminance_histogram
 from neuroseq.importers.importer_cellpose import CellposeImportResult
-from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
 
 
 def test_identity_range_returns_image_unchanged() -> None:

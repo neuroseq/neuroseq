@@ -9,7 +9,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import SynapseData
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.visualization.fpl_widget import FPLWidget
 
 
 class HeatmapNormDialog(QtWidgets.QDialog):

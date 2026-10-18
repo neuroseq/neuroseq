@@ -10,8 +10,8 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.data import TraceData
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 
 
 def _load_plugin_module():

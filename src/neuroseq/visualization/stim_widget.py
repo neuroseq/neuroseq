@@ -22,8 +22,8 @@ from qtpy import QtWidgets
 
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
-from neuroseq.timeseries_widget import TimeseriesWidget
 from neuroseq.utils import get_cmap
+from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 
 
 class MinimumStimulusOverlay(fpl.Graphic):

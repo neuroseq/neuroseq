@@ -10,19 +10,19 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq.stimulation.stim
-import neuroseq.timeseries_widget
+import neuroseq.visualization.timeseries_widget
 from neuroseq import theme
 from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
 from neuroseq.region_of_interest import RegionOfInterest
-from neuroseq.spike_widget import SpikeWidget
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
-from neuroseq.stimulation.stim_widget import StimWidget
-from neuroseq.trace_widget import TraceNormDialog
-from neuroseq.trace_widget import TraceWidget
 from neuroseq.trace_widget_state import TraceWidgetState
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.spike_widget import SpikeWidget
+from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization.trace_widget import TraceNormDialog
+from neuroseq.visualization.trace_widget import TraceWidget
 
 
 def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None:
@@ -1749,7 +1749,7 @@ def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
 
     captured: dict = {}
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1786,7 +1786,7 @@ def test_trace_widget_pearson_correlation_prechecks_current_selection(
             return int(QtWidgets.QDialog.DialogCode.Rejected)
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1817,7 +1817,7 @@ def test_trace_widget_pearson_correlation_cancelled_dialog_emits_nothing(
             return int(QtWidgets.QDialog.DialogCode.Rejected)
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1851,7 +1851,9 @@ def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
         raise AssertionError("NeuronSubsetDialog should not open for SpikeData")
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _unexpected_dialog
+        neuroseq.visualization.timeseries_widget,
+        "NeuronSubsetDialog",
+        _unexpected_dialog,
     )
 
     controller = ConstrainedPanZoomController()

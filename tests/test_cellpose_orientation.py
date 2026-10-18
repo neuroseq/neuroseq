@@ -10,10 +10,6 @@ import numpy as np
 from PIL import Image
 from pytestqt.qtbot import QtBot
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
-from neuroseq.cell_overlay_widget import OverlayView
-from neuroseq.cell_overlay_widget import _pixel_at
-from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
@@ -22,6 +18,10 @@ from neuroseq.io import CELLPOSE_ORIENTATION
 from neuroseq.io import load_from_zip
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
+from neuroseq.visualization.cell_overlay_widget import OverlayView
+from neuroseq.visualization.cell_overlay_widget import _pixel_at
+from neuroseq.visualization.cell_overlay_widget import compute_cell_centroids
 from tests.test_exporter_syscon2 import _template_header
 
 # Saved and exported by NeuroSeq before #601; see make_fixture.py and
