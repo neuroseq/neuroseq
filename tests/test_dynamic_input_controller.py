@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 from typing import cast
 
-from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
-from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
+from neuroseq.stimulation.dynamic_input.dynamic_input_controller import (
+    DynamicInputController,
+)
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim_editor import StimEditor
 
 

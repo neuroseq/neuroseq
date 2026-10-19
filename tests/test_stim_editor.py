@@ -18,10 +18,12 @@ import neuroseq.stimulation.stim
 import neuroseq.stimulation.stim_editor
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.project import Project
 from neuroseq.project_history import ProjectCommand
 from neuroseq.project_history import ProjectHistory
+from neuroseq.stimulation.dynamic_input.dynamic_input_controller import (
+    DynamicInputController,
+)
 from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim import StimArray

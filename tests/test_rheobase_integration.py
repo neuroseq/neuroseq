@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from qtpy import QtWidgets
 
-from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
@@ -47,7 +47,7 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     # tail) so the probes run from the simulation head - this also exercises
     # the confirm-start-routine path.
     monkeypatch.setattr(
-        "neuroseq.dynamic_input.rheobase_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
         lambda *args, **kwargs: "continue",
     )
 

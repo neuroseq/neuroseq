@@ -6,13 +6,15 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 from neuroseq.project import Project
-from neuroseq.static_input.static_input_controller import StaticInputController
-from neuroseq.static_input.stim_pattern_dialog import StimPatternDialog
-from neuroseq.static_input.stim_patterns import generate_fuer_elise
-from neuroseq.static_input.stim_patterns import generate_per_neuron
-from neuroseq.static_input.stim_patterns import generate_ramp
-from neuroseq.static_input.stim_patterns import generate_sequential
-from neuroseq.static_input.stim_patterns import generate_simultaneous
+from neuroseq.stimulation.static_input.static_input_controller import (
+    StaticInputController,
+)
+from neuroseq.stimulation.static_input.stim_pattern_dialog import StimPatternDialog
+from neuroseq.stimulation.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.stimulation.static_input.stim_patterns import generate_per_neuron
+from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
+from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
+from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
 from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType

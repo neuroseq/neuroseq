@@ -6,9 +6,9 @@ import brian2.numpy_ as np
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input.rheobase import count_spikes
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
 from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.stimulation.dynamic_input.rheobase import count_spikes
 
 
 @dataclass(frozen=True)

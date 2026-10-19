@@ -9,8 +9,8 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
@@ -566,7 +566,7 @@ def test_rheobase_continue_preserves_existing_stimulus_and_catches_up_simulation
     _use_fixed_duration_strategy(dialog)
     editor.current_stim_modifier.stim_array.values[0, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.dynamic_input.rheobase_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
         lambda *args, **kwargs: "continue",
     )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
@@ -595,7 +595,7 @@ def test_rheobase_cancel_keeps_existing_input(qtbot, monkeypatch) -> None:
     _use_fixed_duration_strategy(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.dynamic_input.rheobase_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
         lambda *args, **kwargs: "cancel",
     )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)
@@ -612,7 +612,7 @@ def test_rheobase_clear_zeroes_existing_input_before_start(qtbot, monkeypatch) -
     _use_fixed_duration_strategy(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.dynamic_input.rheobase_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
         lambda *args, **kwargs: "clear",
     )
     monkeypatch.setattr(dialog, "_measure_spikes", lambda trace: 1)

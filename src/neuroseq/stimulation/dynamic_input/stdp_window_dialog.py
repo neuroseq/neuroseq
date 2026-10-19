@@ -16,23 +16,27 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.dynamic_input.dialog_helpers import _set_native_minimized_position
-from neuroseq.dynamic_input.dialog_helpers import _WheelToScrollFilter
-from neuroseq.dynamic_input.dialog_helpers import _wrap_in_scroll_area
-from neuroseq.dynamic_input.dialog_helpers import confirm_start_routine
-from neuroseq.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
-from neuroseq.dynamic_input.dynamic_input_blocks import run_to_sample
-from neuroseq.dynamic_input.dynamic_input_measurement import EPSPMeasurement
-from neuroseq.dynamic_input.dynamic_input_measurement import NoEpspDetected
-from neuroseq.dynamic_input.dynamic_input_measurement import measure_calcium_response
-from neuroseq.dynamic_input.dynamic_input_measurement import measure_epsp
-from neuroseq.dynamic_input.dynamic_input_routine import RoutineBackend
-from neuroseq.dynamic_input.dynamic_input_routine import SimulationHost
-from neuroseq.dynamic_input.dynamic_input_routine import backend_property
-from neuroseq.dynamic_input.stdp_window import classify_window
-from neuroseq.dynamic_input.stdp_window import delta_t_sweep
-from neuroseq.dynamic_input.stdp_window import interleave_by_magnitude
-from neuroseq.dynamic_input.stdp_window import percent_change
+from neuroseq.stimulation.dynamic_input.dialog_helpers import (
+    _set_native_minimized_position,
+)
+from neuroseq.stimulation.dynamic_input.dialog_helpers import _WheelToScrollFilter
+from neuroseq.stimulation.dynamic_input.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
+from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
+from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import EPSPMeasurement
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import NoEpspDetected
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
+    measure_calcium_response,
+)
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import measure_epsp
+from neuroseq.stimulation.dynamic_input.dynamic_input_routine import RoutineBackend
+from neuroseq.stimulation.dynamic_input.dynamic_input_routine import SimulationHost
+from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_property
+from neuroseq.stimulation.dynamic_input.stdp_window import classify_window
+from neuroseq.stimulation.dynamic_input.stdp_window import delta_t_sweep
+from neuroseq.stimulation.dynamic_input.stdp_window import interleave_by_magnitude
+from neuroseq.stimulation.dynamic_input.stdp_window import percent_change
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest

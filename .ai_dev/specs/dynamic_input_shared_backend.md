@@ -14,7 +14,7 @@ routines behave identically, with one real bug fix along the way (see
 
 ## Architecture
 
-### `src/neuroseq/dynamic_input_routine.py`
+### `src/neuroseq/stimulation/dynamic_input_routine.py`
 
 - `SimulationHost` (Protocol): what a backend needs from its dialog -
   `request_simulation(seconds)` and `append_block(block) -> int`.
@@ -35,7 +35,7 @@ routines behave identically, with one real bug fix along the way (see
   test assertions on those names kept working unchanged through the
   migration.
 
-### `src/neuroseq/dynamic_input_blocks.py`
+### `src/neuroseq/stimulation/dynamic_input_blocks.py`
 
 - `append_block(editor, stim, block) -> int`: trims `stim` back to the
   current simulation head (`editor.reset_stim_array()`) before writing
@@ -46,7 +46,7 @@ routines behave identically, with one real bug fix along the way (see
 - `run_to_sample(project, stim, stop_sample) -> float`: seconds to
   simulate forward to reach `stop_sample`.
 
-### `src/neuroseq/dynamic_input_measurement.py`
+### `src/neuroseq/stimulation/dynamic_input_measurement.py`
 
 - `EPSPMeasurement`, `NoEpspDetected` (a `ValueError` subclass).
 - `measure_spike_count(...)`, `measure_epsp(...)`: shared trace-windowing

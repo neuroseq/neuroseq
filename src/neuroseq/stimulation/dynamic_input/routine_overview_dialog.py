@@ -50,7 +50,7 @@ class _SelfRaisingDialog(QtWidgets.QDialog):
             self.raise_()
 
 
-_RESOURCES_DIR = Path(__file__).resolve().parent.parent / "resources"
+_RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
 
 
 @dataclass(frozen=True)

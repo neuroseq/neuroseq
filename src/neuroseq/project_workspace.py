@@ -34,7 +34,6 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_manager_dialog import DataManagerDialog
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
-from neuroseq.dynamic_input.dynamic_input_controller import DynamicInputController
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
 from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
@@ -58,7 +57,12 @@ from neuroseq.model_editor import ModelEditorDialog
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
-from neuroseq.static_input.static_input_controller import StaticInputController
+from neuroseq.stimulation.dynamic_input.dynamic_input_controller import (
+    DynamicInputController,
+)
+from neuroseq.stimulation.static_input.static_input_controller import (
+    StaticInputController,
+)
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.synthetic_data_dialog import SyntheticDataDialog

@@ -6,13 +6,13 @@ from typing import TYPE_CHECKING
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.static_input.stim_patterns import generate_fuer_elise
-from neuroseq.static_input.stim_patterns import generate_per_neuron
-from neuroseq.static_input.stim_patterns import generate_ramp
-from neuroseq.static_input.stim_patterns import generate_sequential
-from neuroseq.static_input.stim_patterns import generate_simultaneous
-from neuroseq.static_input.stim_patterns import is_finite_number
-from neuroseq.static_input.stim_patterns import parse_neuron_indices
+from neuroseq.stimulation.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.stimulation.static_input.stim_patterns import generate_per_neuron
+from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
+from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
+from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
+from neuroseq.stimulation.static_input.stim_patterns import is_finite_number
+from neuroseq.stimulation.static_input.stim_patterns import parse_neuron_indices
 from neuroseq.stimulation.stim import DrawStimType
 
 

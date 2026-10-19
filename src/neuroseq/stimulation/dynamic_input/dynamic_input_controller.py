@@ -5,11 +5,15 @@ from typing import Literal
 
 from qtpy import QtCore
 
-from neuroseq.dynamic_input.dynamic_input_routine import DynamicInputDialog
-from neuroseq.dynamic_input.rheobase_dialog import RheobaseDialog
-from neuroseq.dynamic_input.routine_overview_dialog import RoutineSelectorDialog
-from neuroseq.dynamic_input.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
-from neuroseq.dynamic_input.stdp_window_dialog import StdpWindowDialog
+from neuroseq.stimulation.dynamic_input.dynamic_input_routine import DynamicInputDialog
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
+from neuroseq.stimulation.dynamic_input.routine_overview_dialog import (
+    RoutineSelectorDialog,
+)
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningDialog,
+)
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowDialog
 
 if TYPE_CHECKING:
     from neuroseq.stimulation.stim_editor import StimEditor

@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING
 
 from qtpy import QtCore
 
-from neuroseq.static_input.stim_pattern_dialog import StimPatternContext
-from neuroseq.static_input.stim_pattern_dialog import StimPatternDialog
+from neuroseq.stimulation.static_input.stim_pattern_dialog import StimPatternContext
+from neuroseq.stimulation.static_input.stim_pattern_dialog import StimPatternDialog
 
 if TYPE_CHECKING:
     from neuroseq.stimulation.stim import StimArray
