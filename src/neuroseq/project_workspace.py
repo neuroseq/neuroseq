@@ -27,6 +27,7 @@ from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
 from neuroseq.background_jobs import ExternalSimWorker
+from neuroseq.background_jobs import SimulationGuard
 from neuroseq.background_jobs import wait_for_jobs
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.data import Experiment
@@ -1659,6 +1660,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 "External simulation dispatch ignored - another background job is running."
             )
             return
+        # External simulators are arbitrary code and may drive Brian2 (e.g.
+        # run_brian2_externally.py, the PyNN brian2 backend).
+        if not self._acquire_simulation_guard():
+            return
 
         cumulative_so_far = 0.0
         sim = getattr(self.project, "external_simulator", None)
@@ -1887,6 +1892,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 "another operation is already in progress"
             )
             return
+        if not self._acquire_simulation_guard():
+            self.dynamic_input_controller.dynamic_input_simulation_failed(
+                "another project is simulating"
+            )
+            return
 
         project = self.project
         padding_secs = self.settings.stim_padding_secs
@@ -1939,7 +1949,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 0, self.dynamic_input_controller.dynamic_input_simulation_finished
             )
 
-        self._dispatch_io_task(
+        if not self._dispatch_io_task(
             _brian2_task,
             "Preparing Brian2 simulation…",
             _on_brian2_finished,
@@ -1947,7 +1957,26 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             failure_prefix="Could not run simulation:",
             cancel_callback=_request_brian2_cancel,
             on_failure=self.dynamic_input_controller.dynamic_input_simulation_failed,
+        ):
+            SimulationGuard.release(self)
+
+    def _acquire_simulation_guard(self) -> bool:
+        """Take the application-wide simulation guard, or explain who holds it.
+
+        Released by ``_teardown_background_job`` on every job outcome and by
+        ``dispose``.
+        """
+        busy = SimulationGuard.acquire(self, self._tab_label_for(self.project))
+        if busy is None:
+            return True
+        QtWidgets.QMessageBox.information(
+            self,
+            "Simulation in progress",
+            f"Project '{busy}' is already simulating. Brian2's random seed and "
+            "code generation settings are shared by all open projects, so only "
+            "one simulation can run at a time. Wait for it to finish or cancel it.",
         )
+        return False
 
     def btn_do_external_simulation_clicked(self) -> None:
         if self.project.external_simulate_function is None:
@@ -2504,6 +2533,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             editable=False,
         )
         if not ok:
+            return
+        if SimulationGuard.held_by() is not None:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Brian2 backend",
+                "A simulation is running; change the backend once it has finished.",
+            )
             return
         self.logger.info(f"Setting Brian2 backend to {new_backend}")
         b2.prefs.codegen.target = new_backend
@@ -3637,6 +3673,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.progress_dialog.show()
 
     def _teardown_background_job(self) -> None:
+        SimulationGuard.release(self)
         self.unsetCursor()
         self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.WindowModal)
         self.progress_dialog.setAutoClose(True)
@@ -3851,6 +3888,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._disposed:
             return
         self._disposed = True
+        SimulationGuard.release(self)
         if self._unsubscribe_project_history is not None:
             self._unsubscribe_project_history()
             self._unsubscribe_project_history = None

@@ -7,6 +7,7 @@ import pytest
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.background_jobs import SimulationGuard
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.gui import Gui
@@ -474,3 +475,74 @@ def test_shared_syscon_connection_routes_replies_to_requesting_workspace(
     assert len(replies) == 2
     second.shutdown()
     devices.shutdown()
+
+
+def test_brian2_simulations_are_serialized_across_workspaces(
+    window, qtbot, monkeypatch, qmessagebox_calls
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    release = threading.Event()
+    runs = []
+    monkeypatch.setattr(
+        first.project, "run_simulation", lambda *args, **kwargs: release.wait(5)
+    )
+    monkeypatch.setattr(
+        second.project, "run_simulation", lambda *args, **kwargs: runs.append(1)
+    )
+    first._do_brian2_simulation_threaded(0.1)
+    assert first._background_job.busy
+    try:
+        second._do_brian2_simulation_threaded(0.1)
+        assert not second._background_job.busy
+        label = first._tab_label_for(first.project)
+        assert f"'{label}' is already simulating" in qmessagebox_calls[-1]["text"]
+        # External simulators may drive Brian2 too and take the same guard.
+        second.project.external_simulate_function = lambda *args, **kwargs: None
+        second._do_external_simulation(0.1)
+        assert not second._background_job.busy
+        # I/O stays per workspace.
+        assert second._dispatch_io_task(lambda report: None, "Saving", lambda _: None)
+        qtbot.waitUntil(lambda: not second._background_job.busy)
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not first._background_job.busy)
+    second._do_brian2_simulation_threaded(0.1)
+    qtbot.waitUntil(lambda: not second._background_job.busy)
+    assert runs == [1]
+    second.project.external_simulate_function = None
+
+
+def test_simulation_guard_is_released_on_failure_cancel_and_close(
+    window, qtbot, monkeypatch
+):
+    workspace = window.active_workspace
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("diverged")
+
+    monkeypatch.setattr(workspace.project, "run_simulation", fail)
+    workspace._do_brian2_simulation_threaded(0.1)
+    assert SimulationGuard.held_by() is workspace
+    qtbot.waitUntil(lambda: not workspace._background_job.busy)
+    assert SimulationGuard.held_by() is None
+
+    cancelled = threading.Event()
+    monkeypatch.setattr(
+        workspace.project, "run_simulation", lambda *a, **k: cancelled.wait(5)
+    )
+    monkeypatch.setattr(workspace.project, "request_cancel_simulation", cancelled.set)
+    workspace._do_brian2_simulation_threaded(0.1)
+    workspace._cancel_background_job()
+    qtbot.waitUntil(lambda: not workspace._background_job.busy)
+    assert SimulationGuard.held_by() is None
+
+    closing = threading.Event()
+    monkeypatch.setattr(
+        workspace.project, "run_simulation", lambda *a, **k: closing.wait(5)
+    )
+    monkeypatch.setattr(workspace.project, "request_cancel_simulation", closing.set)
+    workspace._do_brian2_simulation_threaded(0.1)
+    window._close_tab(0)
+    qtbot.waitUntil(lambda: workspace._disposed)
+    assert SimulationGuard.held_by() is None

@@ -82,6 +82,41 @@ def returns_to_main_thread[F: Callable[..., Any]](run: F) -> F:
     return wrapper  # type: ignore[return-value]
 
 
+class SimulationGuard:
+    """Process-wide owner token for simulations that touch Brian2 globals.
+
+    Brian2 keeps its random seed, code-generation preferences and device in
+    process-global state, so two workspaces simulating on worker threads at
+    once would corrupt each other's runs. A workspace acquires the guard
+    before dispatching such a simulation and releases it when the job ends or
+    the workspace closes. There is no queue: a refused start is reported.
+    """
+
+    _owner: object | None = None
+    _description = ""
+
+    @classmethod
+    def acquire(cls, owner: object, description: str) -> str | None:
+        """Take the guard for ``owner``; return the busy owner's description
+        if another owner holds it."""
+        if cls._owner is not None and cls._owner is not owner:
+            return cls._description
+        cls._owner = owner
+        cls._description = description
+        return None
+
+    @classmethod
+    def release(cls, owner: object) -> None:
+        """Release the guard if ``owner`` holds it; otherwise do nothing."""
+        if cls._owner is owner:
+            cls._owner = None
+            cls._description = ""
+
+    @classmethod
+    def held_by(cls) -> object | None:
+        return cls._owner
+
+
 class SimulationCancelledError(Exception):
     """Raised from a progress callback when the user clicks Cancel."""
 

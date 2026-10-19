@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     pass
 
 from neuroseq.b2_model import B2Model
+from neuroseq.background_jobs import SimulationGuard
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -206,6 +207,8 @@ def isolate_brian2_codegen_state(
     yield
     b2.prefs.codegen.target = "numpy"
     b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
+    # A workspace left open by a test must not refuse simulations in the next.
+    SimulationGuard._owner = None
 
 
 @pytest.fixture(autouse=True)
