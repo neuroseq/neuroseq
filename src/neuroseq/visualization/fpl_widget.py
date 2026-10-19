@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import weakref
 
 import fastplotlib as fpl
 import pygfx
@@ -40,20 +41,32 @@ class FPLWidget(QtWidgets.QWidget):
         # before Qt deletes the figure's native canvas children.
         figure_to_close: fpl.Figure | None = self.figure
         logger = self.logger
+        # Weak, so the destroyed connection does not keep this wrapper alive.
+        owner = weakref.ref(self)
 
         def close_figure() -> None:
+            # Also a destroyed slot during parent C++ destruction: nothing may
+            # escape from here, or PyQt aborts the process.
             nonlocal figure_to_close
             if figure_to_close is None:
                 return
             figure = figure_to_close
-            figure.canvas.set_update_mode("manual")
-            # Finish GPU work without pumping Qt events during teardown.
             try:
-                figure.renderer.device._poll_wait()
+                figure.canvas.set_update_mode("manual")
+                # Finish GPU work without pumping Qt events during teardown.
+                try:
+                    figure.renderer.device._poll_wait()
+                except Exception as exc:
+                    logger.debug("Could not poll GPU device on close (%s).", exc)
+                if hasattr(figure, "close"):
+                    figure.close()
             except Exception as exc:
-                logger.debug("Could not poll GPU device on close (%s).", exc)
-            figure.close()
-            figure_to_close = None
+                logger.debug("Could not close fastplotlib figure (%s).", exc)
+            finally:
+                figure_to_close = None
+                widget = owner()
+                if widget is not None:
+                    widget.figure = None  # type: ignore[assignment]
 
         self._close_figure = close_figure
         self.destroyed.connect(close_figure)

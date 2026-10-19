@@ -238,3 +238,33 @@ def test_wait_for_jobs_times_out_while_a_job_keeps_running(qtbot, job):
     qtbot.waitUntil(lambda: not job.busy)
     qtbot.wait(20)
     assert outcome == ["timeout"]
+
+
+def test_raising_completion_callback_is_reported_not_fatal(
+    qtbot, job, qmessagebox_calls
+):
+    idle = []
+    job.idle.connect(lambda: idle.append(True))
+
+    def on_finished(_result):
+        raise ValueError("bad result")
+
+    job.start(
+        BackgroundIOWorker(lambda report: "first"),
+        on_progress=lambda _: None,
+        on_finished=on_finished,
+        on_failed=pytest.fail,
+    )
+    qtbot.waitUntil(lambda: bool(idle))
+    assert not job.busy
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert "ValueError: bad result" in qmessagebox_calls[-1]["text"]
+    # The owner remains usable for the next job.
+    results = []
+    job.start(
+        BackgroundIOWorker(lambda report: "second"),
+        on_progress=lambda _: None,
+        on_finished=results.append,
+        on_failed=pytest.fail,
+    )
+    qtbot.waitUntil(lambda: results == ["second"])

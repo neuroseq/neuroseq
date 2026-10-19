@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import logging
 import threading
 from collections.abc import Callable
 from typing import Any
 
 from qtpy import QtCore
+from qtpy import QtWidgets
+
+logger = logging.getLogger(__name__)
 
 
 def wait_for_jobs(
@@ -373,6 +377,17 @@ class BackgroundJob(QtCore.QObject):
                 on_failed(value)
             elif kind == "cancelled" and on_cancelled is not None:
                 on_cancelled()
+        except Exception as exc:
+            # This runs from a Qt slot: an escaping exception aborts PyQt6
+            # (qFatal) when no sys.excepthook is installed.
+            logger.exception("Handling a background job's %s outcome failed", kind)
+            parent = self.parent()
+            QtWidgets.QMessageBox.critical(
+                parent if isinstance(parent, QtWidgets.QWidget) else None,
+                "Unexpected error",
+                "A background task ended, but handling its result failed:\n\n"
+                f"{type(exc).__name__}: {exc}",
+            )
         finally:
             self.idle.emit()
 

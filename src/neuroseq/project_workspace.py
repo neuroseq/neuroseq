@@ -1850,16 +1850,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         # _teardown_io_task resets the dialog and restores its default
         # auto-close/auto-reset/min-duration behaviour for the next user.
         self._teardown_io_task()
+        # BackgroundJob reports exceptions raised by completion callbacks.
         if on_success is not None:
-            try:
-                on_success(result)
-            except Exception as exc:
-                self.logger.exception(exc)
-                QtWidgets.QMessageBox.critical(
-                    self,
-                    "Post-IO error",
-                    f"Loading completed but a follow-up step failed: {exc}",
-                )
+            on_success(result)
 
     @QtCore.Slot(str)
     def _on_io_failed(self, message: str) -> None:
