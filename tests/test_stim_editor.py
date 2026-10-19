@@ -1236,14 +1236,12 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
     assert set_data_calls[0].shape == (2266, 10)
 
 
-def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> None:
-    """Regression: ReversibleAction (stim_array_modifier.py) records absolute
-    sample-index slices against the array's shape at the time of the edit.
-    After an in-place resample, the modifier's pre-resample undo stack still
-    references the OLD shape - undoing one would misapply old-shaped data
-    into the new, differently-shaped array. select_stim() must drop that
-    history, not just refresh the widget, for the same "same modifier,
-    shape changed under it" case."""
+def test_reselecting_same_stim_after_buffer_replacement_refreshes_and_keeps_history() -> (
+    None
+):
+    """Project.replace_stim_values records grid changes as undoable edits, and
+    ReversibleAction refuses stale grids itself, so select_stim() only has to
+    refresh the widget for a replaced buffer - not drop the shared history."""
     modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
@@ -1255,10 +1253,12 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
         history=ProjectHistory(),
     )
     modifier.history.record_applied(ProjectCommand("edit", lambda: None, lambda: None))
+    set_data_calls: list[np.ndarray] = []
     fake_stim_widget = SimpleNamespace(
-        set_data=lambda stim_array: None,
+        set_data=lambda stim_array: set_data_calls.append(stim_array.values),
         set_background_data=lambda stim_array: None,
-        data_values=np.zeros((1180, 10), dtype=np.float32),
+        # Same shape, different buffer (e.g. the SysCon2 "clear" fix).
+        data_values=np.zeros((2266, 10), dtype=np.float32),
     )
     fake_editor = SimpleNamespace(
         logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
@@ -1278,13 +1278,13 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
 
     StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
 
-    assert not modifier.history.can_undo()
-    assert not modifier.history.can_redo()
+    assert modifier.history.can_undo()
+    assert len(set_data_calls) == 1
+    assert set_data_calls[0] is modifier.stim_array.values
 
 
 def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
-    """The undo-history clear above must be specific to the in-place-resample
-    case - an ordinary switch to a genuinely different (and differently
+    """An ordinary switch to a genuinely different (and differently
     shaped) stim must leave that stim's own undo history untouched."""
     old_modifier = SimpleNamespace(
         stim_array=StimArray(

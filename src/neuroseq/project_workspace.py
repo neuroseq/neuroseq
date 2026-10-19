@@ -780,12 +780,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 data, analysis_type, neuron_slice, time_slice
             )
 
-    def _update_data(self, keep_undo_history: bool = False) -> None:
+    def _update_data(
+        self, keep_undo_history: bool = False, refresh_stim_editor: bool = True
+    ) -> None:
         if self.project.b2_model.network.t > 0:
             self.continue_simulation_action.setText("&Continue simulation")
         else:
             self.continue_simulation_action.setText("&Run simulation")
-        self.stim_editor.set_project(self.project, keep_undo_history)
+        if refresh_stim_editor:
+            self.stim_editor.set_project(self.project, keep_undo_history)
         self.update_limits()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
@@ -1233,7 +1236,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._disposed:
             return
         if event in ("undo", "redo"):
-            self._update_data(keep_undo_history=True)
+            # The stim editor rebuilds itself from its own history listener.
+            self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
 
     def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:

@@ -741,6 +741,10 @@ def test_stimulation_generator_dialog_clears_array_when_dt_fix_choice_is_clear(
     assert np.all(project.stim_arrays["stim"].values == 0.0)
     # Confirmation info message shown after fixing
     assert any(c["name"] == "information" for c in qmessagebox_calls)
+    # Clearing changes dt with the values, so undo must restore both together.
+    project.history.undo()
+    assert project.stim_arrays["stim"].dt == pytest.approx(0.001)
+    np.testing.assert_array_equal(project.stim_arrays["stim"].values, values)
 
 
 def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
@@ -782,10 +786,14 @@ def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
     assert stim.dt == pytest.approx(_SYSCON2_TTL_PULSE_QUANTUM_S)
     assert stim.values.shape == (5, 1)
     assert list(stim.values[:, 0]) == [0.0, 1.0, 1.0, 0.0, 0.0]
+    assert project.history.undo_label == "Resample stim to SysCon2 timing"
     # The pipeline must not stop after resampling -- it should reach the full sanity
     # check below, proving the other conditions are still evaluated on the new array.
     assert sanity_calls
     assert any(c["name"] == "information" for c in qmessagebox_calls)
+    project.history.undo()
+    assert stim.dt == pytest.approx(old_dt)
+    np.testing.assert_array_equal(stim.values, values)
 
 
 # ---------------------------------------------------------------------------

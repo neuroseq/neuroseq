@@ -806,12 +806,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             experiment.timepoints.sort()
         self.project.update_limits()
 
-    def _confirm_and_remap_trace_dt(
-        self,
-        target_trace: TraceData,
-        experiment_name: str,
-        new_dt: float,
-    ) -> bool:
+    def _confirm_trace_dt_remap(self, target_trace: TraceData, new_dt: float) -> bool:
         msg = (
             "Changing the trace data timestep will remap trace data "
             f"'{target_trace.name}' from "
@@ -826,9 +821,15 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.StandardButton.Yes
             | QtWidgets.QMessageBox.StandardButton.No,
         )
-        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-            return False
+        return answer == QtWidgets.QMessageBox.StandardButton.Yes
 
+    def _remap_trace_dt(
+        self,
+        target_trace: TraceData,
+        experiment_name: str,
+        new_dt: float,
+    ) -> None:
+        """Resample every row onto ``new_dt``, replacing (never writing into) buffers."""
         from neuroseq.importers.importer_patch_clamp_data import (
             resample_wave_zero_order_hold,
         )
@@ -854,7 +855,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             )
         target_trace.dt = float(new_dt)
         self._refresh_experiment_timing(experiment_name, target_trace)
-        return True
 
     def _run_spike_detection(
         self,
@@ -942,29 +942,32 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                 if target_trace is None:
                     raise ValueError("No target trace data selected")
 
-                if not stim_dt_matches(float(target_trace.dt), prepared_wave.target_dt):
-                    if not self._confirm_and_remap_trace_dt(
-                        target_trace,
-                        experiment_name,
-                        prepared_wave.target_dt,
-                    ):
-                        return
-                    target_trace = self._resolve_existing_trace_data(
-                        experiment_name,
-                        trace_name,
-                    )
-                    if target_trace is None:
-                        raise ValueError("No target trace data selected")
-
-                report = import_igor_wave_into_trace_data(
-                    target_trace,
-                    prepared_wave,
-                    neuron_id=int(self.existing_neuron_id_spin.value()),
-                    replace_existing=self.existing_replace_checkbox.isChecked(),
-                    extend_to_fit=self.existing_extend_checkbox.isChecked(),
+                remap_target = not stim_dt_matches(
+                    float(target_trace.dt), prepared_wave.target_dt
                 )
+                if remap_target and not self._confirm_trace_dt_remap(
+                    target_trace, prepared_wave.target_dt
+                ):
+                    return
+
+                # One undoable edit; a failure rolls the experiment back.
+                with self.project.edit_experiments(
+                    [experiment_name], "Import patch-clamp wave"
+                ):
+                    if remap_target:
+                        self._remap_trace_dt(
+                            target_trace, experiment_name, prepared_wave.target_dt
+                        )
+                    report = import_igor_wave_into_trace_data(
+                        target_trace,
+                        prepared_wave,
+                        neuron_id=int(self.existing_neuron_id_spin.value()),
+                        replace_existing=self.existing_replace_checkbox.isChecked(),
+                        extend_to_fit=self.existing_extend_checkbox.isChecked(),
+                    )
+                    self._refresh_experiment_timing(experiment_name, target_trace)
+                    self.project.mark_dirty()
                 report.target_experiment_name = experiment_name
-                self._refresh_experiment_timing(experiment_name, target_trace)
                 self.selected_experiment_name = experiment_name
                 self.selected_trace_name = trace_name
                 report_headline = (

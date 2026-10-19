@@ -120,7 +120,17 @@ def test_shared_data_history_refreshes_workspace_and_detaches_replaced_project(w
     workspace.stim_editor.action_undo.trigger()
     assert "imported" not in project.experiments
     assert workspace.cmb_trace.findText(data_name) == -1
+    rebuilds: list[object] = []
+    original_set_project = workspace.stim_editor.set_project
+
+    def counting_set_project(*args, **kwargs):
+        rebuilds.append(args)
+        return original_set_project(*args, **kwargs)
+
+    workspace.stim_editor.set_project = counting_set_project  # type: ignore[method-assign]
     workspace.stim_editor.action_redo.trigger()
+    del workspace.stim_editor.set_project
+    assert len(rebuilds) == 1  # one stim-editor rebuild per undo/redo
     assert "imported" in project.experiments
     assert workspace.cmb_trace.findText(data_name) >= 0
     replacement = _project()

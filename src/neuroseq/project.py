@@ -35,6 +35,7 @@ from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.project_history import ProjectCommand
 from neuroseq.project_history import ProjectHistory
+from neuroseq.project_history import StaleCommandError
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -269,12 +270,19 @@ class Project:
         if event != "clear":
             self.mark_dirty()
 
-    def _experiment_restorer(self, names: Sequence[str]) -> Callable[[], None]:
+    def _experiment_restorer(
+        self, names: Sequence[str]
+    ) -> Callable[[Mapping[str, Experiment | None] | None], None]:
         """Retain affected data versions without duplicating large NumPy buffers.
 
         The mutators using this helper replace array buffers (append_data does
         this too). They must never write into an existing buffer in place.
         Preserve object identity for callers holding an experiment or dataset.
+
+        ``restore(expected)`` refuses (raising :class:`StaleCommandError` before
+        changing anything) when a group's current object is not the one the
+        command left there, e.g. after a same-named group was added outside
+        the history.
         """
         order = list(self.experiments)
         states = {}
@@ -291,7 +299,13 @@ class Project:
                 [(datum, vars(datum).copy()) for datum in experiment.data],
             )
 
-        def restore() -> None:
+        def restore(expected: Mapping[str, Experiment | None] | None = None) -> None:
+            if expected is not None:
+                for name in names:
+                    if self.experiments.get(name) is not expected.get(name):
+                        raise StaleCommandError(
+                            f"Data group '{name}' was changed outside the undo history"
+                        )
             for name in names:
                 self.experiments.pop(name, None)
             for name, (experiment, saved, data_states) in states.items():
@@ -311,36 +325,38 @@ class Project:
         return restore
 
     @contextmanager
-    def _edit_experiments(self, names: Sequence[str], label: str) -> Iterator[None]:
+    def edit_experiments(self, names: Sequence[str], label: str) -> Iterator[None]:
+        """Record the edits made to the named data groups as one undoable command.
+
+        Edits inside the block must replace array buffers instead of writing
+        into them (see :meth:`_experiment_restorer`). An exception rolls the
+        groups back and records nothing.
+        """
+        names = list(dict.fromkeys(names))
         undo = self._experiment_restorer(names)
+        before = {name: self.experiments.get(name) for name in names}
         was_dirty = self.dirty
         try:
             yield
         except Exception:
-            undo()
+            undo(None)
             self.dirty = was_dirty
             raise
         else:
             redo = self._experiment_restorer(names)
-            self.history.record_applied(ProjectCommand(label, redo, undo))
+            after = {name: self.experiments.get(name) for name in names}
+            self.history.record_applied(
+                ProjectCommand(label, lambda: redo(before), lambda: undo(after))
+            )
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
         names = [name for name in dict.fromkeys(names) if name in self.experiments]
         if not names:
             return
-        with self._edit_experiments(names, "Delete data groups"):
+        with self.edit_experiments(names, "Delete data groups"):
             for name in names:
                 del self.experiments[name]
-            self.update_limits()
-            self.mark_dirty()
-
-    def replace_experiment(self, experiment: Experiment) -> None:
-        """Replace a data group while retaining the previous version for undo."""
-        if experiment.name not in self.experiments:
-            raise KeyError(experiment.name)
-        with self._edit_experiments([experiment.name], "Replace data group"):
-            self.experiments[experiment.name] = experiment
             self.update_limits()
             self.mark_dirty()
 
@@ -719,6 +735,44 @@ class Project:
         self.update_limits()
         self.mark_dirty()
 
+    def replace_stim_values(
+        self,
+        name: str,
+        values: np.ndarray,
+        dt: float | None = None,
+        label: str | None = None,
+    ) -> None:
+        """Replace a stim array's whole sample grid as one undoable edit.
+
+        Use this instead of assigning ``values``/``dt`` directly: slice-based
+        stimulation commands restore samples by index, so an unrecorded grid
+        change would make them write into the wrong samples. Swapping the whole
+        buffer (never writing into it) keeps every earlier command valid, because
+        undo restores exactly the grid those commands were recorded on.
+        """
+        stim_array = self.stim_arrays[name]
+        new_values = ensure_2d_stim_values(values)
+        old_values = stim_array.values
+        if new_values is old_values:
+            new_values = new_values.copy()
+        old_dt = validate_stim_dt_seconds(stim_array.dt)
+        new_dt = old_dt if dt is None else validate_stim_dt_seconds(dt)
+
+        def apply(applied_values: np.ndarray, applied_dt: float) -> None:
+            stim_array.values = applied_values
+            stim_array.dt = applied_dt
+            self.update_limits()
+
+        apply(new_values, new_dt)
+        self.history.record_applied(
+            ProjectCommand(
+                label or f"Replace input {name}",
+                lambda: apply(new_values, new_dt),
+                lambda: apply(old_values, old_dt),
+            )
+        )
+        self.mark_dirty()
+
     def rename_stim_array(self, name: str, new_name: str):
         self.history.clear()
         stim_array = self.stim_arrays.pop(name)
@@ -856,7 +910,7 @@ class Project:
         self.logger.info(
             f"Appending experimental data to experiment '{experiment_name}'"
         )
-        with self._edit_experiments([experiment_name], "Append experimental data"):
+        with self.edit_experiments([experiment_name], "Append experimental data"):
             existing_experiment = self.experiments[experiment_name]
             if time_offset_seconds is None:
                 time_offset_seconds = existing_experiment.duration
@@ -959,7 +1013,7 @@ class Project:
             )
             raise ValueError(f"Experiment '{experiment.name}' already exists")
         self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        with self._edit_experiments([experiment.name], "Add data group"):
+        with self.edit_experiments([experiment.name], "Add data group"):
             for t in [0.0, experiment.duration]:
                 if t not in experiment.timepoints:
                     experiment.timepoints.append(t)
@@ -1019,7 +1073,7 @@ class Project:
         if experiment is None:
             raise KeyError(f"Experiment '{experiment_name}' does not exist")
 
-        with self._edit_experiments([experiment_name], "Add dataset"):
+        with self.edit_experiments([experiment_name], "Add dataset"):
             experiment.data.append(data)
             if isinstance(data, TraceData):
                 new_duration = float(data.traces.shape[1] * data.dt)

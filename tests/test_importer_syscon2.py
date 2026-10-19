@@ -1420,6 +1420,46 @@ def test_syscon2_import_dialog_imports_into_project(
     assert stim_values[13, 1] == 0.8
 
 
+def test_syscon2_import_into_existing_array_is_one_undoable_edit(
+    tmp_path: Path, qtbot, monkeypatch
+) -> None:
+    """Undoing an earlier draw must not write onto the imported (resampled) grid."""
+    from neuroseq.stimulation.stim_array_modifier import StimArrayModifier
+
+    seq_path = tmp_path / "sample.seq"
+    seq_path.write_text(_sample_seq_text(), encoding="utf-8")
+    project = Project()
+    project.add_stim_array(
+        StimArray("stimulus", StimType.Excitation, np.zeros((5, 3)), "1", 0.001)
+    )
+    stim = project.stim_arrays["stimulus"]
+    modifier = StimArrayModifier(stim, None, project.history)  # type: ignore[arg-type]
+    modifier.do(slice(2, 3), slice(1, 3), 0.5)
+    drawn = stim.values
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    dialog = Syscon2ImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(seq_path))
+    dialog.tick_resolution_spin.setValue(500)
+    dialog._import_file()
+    imported = stim.values
+    assert imported is not drawn
+    assert project.history.undo_label == "Import SysCon2 sequence into stimulus"
+
+    project.history.undo()
+    assert stim.values is drawn and stim.dt == 0.001
+    project.history.undo()
+    assert not stim.values.any()
+    project.history.redo()
+    project.history.redo()
+    assert stim.values is imported
+    assert math.isclose(stim.dt, _SYSCON2_TTL_PULSE_QUANTUM_S, abs_tol=1e-12)
+
+
 @pytest.mark.parametrize("create_new", [False, True])
 def test_syscon2_import_preserves_other_stim_and_trace_data(
     tmp_path: Path, qtbot, monkeypatch, create_new: bool

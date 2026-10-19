@@ -20,6 +20,17 @@ class ProjectCommand:
     undo: Callable[[], None]
 
 
+class StaleCommandError(RuntimeError):
+    """Raised by a command whose target data changed outside the history.
+
+    The command must raise before changing any data. The history then drops
+    every retained command, because the remaining ones may be stale too.
+    """
+
+
+DEFAULT_MAX_COMMANDS = 100
+
+
 class ProjectHistory:
     """A chronological command stack; a new edit discards the redo branch.
 
@@ -27,9 +38,13 @@ class ProjectHistory:
     Commands should validate before changing data, or roll back partial changes
     themselves. Listeners run after the position changes, and cannot break replay.
     Bound-method listeners are weak so a project does not retain closed editors.
+    At most ``max_commands`` commands are retained; the oldest are dropped first.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, max_commands: int = DEFAULT_MAX_COMMANDS) -> None:
+        if max_commands < 1:
+            raise ValueError("max_commands must be at least 1")
+        self.max_commands = int(max_commands)
         self.action_stack: list[ProjectCommand] = []
         self.current_index = -1
         self._replaying = False
@@ -78,6 +93,10 @@ class ProjectHistory:
         del self.action_stack[self.current_index + 1 :]
         self.action_stack.append(command)
         self.current_index += 1
+        overflow = len(self.action_stack) - self.max_commands
+        if overflow > 0:
+            del self.action_stack[:overflow]
+            self.current_index -= overflow
         self._notify("execute")
 
     def can_undo(self) -> bool:
@@ -105,6 +124,9 @@ class ProjectHistory:
         try:
             self.action_stack[self.current_index].undo()
             self.current_index -= 1
+        except StaleCommandError:
+            self._discard_stale("undo")
+            return
         finally:
             self._replaying = False
         self._notify("undo")
@@ -118,9 +140,22 @@ class ProjectHistory:
         try:
             self.action_stack[self.current_index + 1].redo()
             self.current_index += 1
+        except StaleCommandError:
+            self._discard_stale("redo")
+            return
         finally:
             self._replaying = False
         self._notify("redo")
+
+    def _discard_stale(self, operation: str) -> None:
+        self._replaying = False
+        logging.getLogger(__name__).warning(
+            "Cannot %s: the affected data was changed outside the edit history. "
+            "The undo history has been cleared.",
+            operation,
+            exc_info=True,
+        )
+        self.clear()
 
     def clear(self) -> None:
         """Release retained data at a deliberate, non-undoable edit boundary."""

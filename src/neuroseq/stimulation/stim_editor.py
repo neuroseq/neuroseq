@@ -163,6 +163,15 @@ class StimEditor(QtWidgets.QWidget):
             self.set_project(
                 self.project, keep_undo_history=True, stim_to_select=selected
             )
+        elif (
+            event == "execute"
+            and self.current_stim_modifier is not None
+            and getattr(self.stim_widget, "data_values", None) is not None
+            and self.stim_widget.data_values
+            is not self.current_stim_modifier.stim_array.values
+        ):
+            # A project-level edit replaced the displayed input's buffer.
+            self.select_stim(self.cmb_stim.currentText())
         self._stim_values_updated()
 
     def set_project(
@@ -585,35 +594,18 @@ class StimEditor(QtWidgets.QWidget):
     def select_stim(self, stim_name: str) -> None:
         self.logger.debug(f"Selected stim: {stim_name}")
         target_modifier = self.stims_dict.get(stim_name)
-        # A fix that resamples a stim array to a new dt (see the SysCon2
-        # "Check Input Sanity" dialog) replaces stim_array.values with a
-        # differently-shaped array while leaving the same modifier selected
-        # - refresh the widget in that case too, not just on an actual
-        # selection change. Without this, stim_widget's graphic texture
-        # stays the old shape, and the next write into it (e.g. a later
-        # sanity fix in the same check) raises a numpy broadcast error.
+        # Project.replace_stim_values (e.g. the SysCon2 "Check Input Sanity"
+        # resample/clear fixes) swaps in a new buffer, possibly of another
+        # shape or dt, while leaving the same modifier selected - refresh the
+        # widget in that case too, not just on an actual selection change.
+        # Without this, stim_widget's graphic texture keeps showing the old
+        # buffer, and a later write into it can raise a broadcast error.
         displayed_values = getattr(self.stim_widget, "data_values", None)
         shape_changed = (
             target_modifier is not None
             and displayed_values is not None
-            and displayed_values.shape != target_modifier.stim_array.values.shape
+            and displayed_values is not target_modifier.stim_array.values
         )
-        # Distinct from shape_changed above: that's also true on an ordinary
-        # switch between two different (and differently-shaped) stims, where
-        # the target's own undo history is still perfectly valid. Only the
-        # in-place-resample case - same modifier already selected, shape
-        # changed under it - needs the history cleared: ReversibleAction
-        # records absolute sample-index slices against the OLD array shape
-        # (see its __init__), so undoing one after a resample would misapply
-        # old-shaped data into the new, differently-shaped array.
-        resampled_in_place = (
-            target_modifier is not None
-            and self.current_stim_modifier is target_modifier
-            and shape_changed
-        )
-        if resampled_in_place:
-            assert target_modifier is not None
-            target_modifier.history.clear()
         if target_modifier is not None and (
             self.current_stim_modifier != target_modifier or shape_changed
         ):

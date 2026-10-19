@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import logging
 from contextlib import suppress
 from pathlib import Path
@@ -27,6 +28,7 @@ from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
 from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
 from neuroseq.stimulation.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
@@ -643,21 +645,29 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                     )
                     if continue_with_remap != QtWidgets.QMessageBox.StandardButton.Yes:
                         return
-                    self.project.update_stim_array_properties(
-                        target_stim.name,
-                        n_neurons=int(target_stim.values.shape[1]),
-                        stim_type=target_stim.stim_type,
-                        units=target_stim.units,
-                        dt=prepared_wave.target_dt,
-                    )
-                    target_stim = self.project.stim_arrays[target_stim.name]
                     remapped_target_dt = True
+                # Stage on a copy: a failed import must leave the target untouched,
+                # and the project records the result as one undoable edit.
+                staged_stim = copy.copy(target_stim)
+                if remapped_target_dt:
+                    staged_stim.values = remap_stim_values_to_dt(
+                        target_stim.values,
+                        old_dt_seconds=target_stim.dt,
+                        new_dt_seconds=prepared_wave.target_dt,
+                    )
+                    staged_stim.dt = prepared_wave.target_dt
                 report = import_igor_wave_into_stim_array(
-                    target_stim,
+                    staged_stim,
                     prepared_wave,
                     neuron_index=self.neuron_index_spin.value(),
                     replace_existing=self.replace_checkbox.isChecked(),
                     extend_to_fit=self.extend_checkbox.isChecked(),
+                )
+                self.project.replace_stim_values(
+                    target_stim.name,
+                    staged_stim.values,
+                    staged_stim.dt,
+                    label=f"Import patch-clamp wave into {target_stim.name}",
                 )
                 self.selected_stim_name = target_stim.name
                 info_lines = [

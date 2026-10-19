@@ -202,7 +202,8 @@ def test_group_delete_replace_and_add_dataset_share_one_history() -> None:
     assert project.experiments["first"] is first
     replacement = _experiment("first")
     replacement.duration = 9.0
-    project.replace_experiment(replacement)
+    with project.edit_experiments(["first"], "Replace data group"):
+        project.experiments["first"] = replacement
     project.history.undo()
     assert project.experiments["first"] is first
     project.history.redo()
@@ -226,8 +227,6 @@ def test_group_delete_replace_and_add_dataset_share_one_history() -> None:
 def test_noop_or_invalid_data_changes_do_not_create_history_entries() -> None:
     project = Project()
     project.remove_experiments(["missing"])
-    with pytest.raises(KeyError):
-        project.replace_experiment(_experiment())
     with pytest.raises(KeyError):
         project.add_data_to_experiment("missing", _experiment().data[0])
     with pytest.raises(ValueError):
@@ -294,3 +293,112 @@ def test_nonundoable_neuron_changes_invalidate_old_stimulation_commands(
             StimArray("input", StimType.Excitation, np.zeros((5, 1)), "mV", 0.001)
         )
     assert not project.history.can_undo()
+
+
+def _stim_project(values: np.ndarray, dt: float = 0.001):
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+    from neuroseq.stimulation.stim_array_modifier import StimArrayModifier
+
+    project = Project()
+    project.add_stim_array(StimArray("input", StimType.Excitation, values, "mV", dt))
+    stim = project.stim_arrays["input"]
+    modifier = StimArrayModifier(stim, None, project.history)  # type: ignore[arg-type]
+    return project, stim, modifier
+
+
+def test_history_drops_oldest_commands_beyond_max_commands() -> None:
+    history = ProjectHistory(max_commands=3)
+    values: list[int] = []
+
+    def command(i: int) -> ProjectCommand:
+        return ProjectCommand(
+            str(i), lambda: values.append(i), lambda: values.remove(i)
+        )
+
+    for i in range(5):
+        history.execute(command(i))
+    assert len(history) == 3
+    assert [c.label for c in history.action_stack] == ["2", "3", "4"]
+    while history.can_undo():
+        history.undo()
+    assert values == [0, 1]
+    history.redo()
+    assert values == [0, 1, 2]
+    assert Project().history.max_commands == 100
+    with pytest.raises(ValueError):
+        ProjectHistory(max_commands=0)
+
+
+def test_replace_stim_values_is_undoable_and_keeps_earlier_draws_on_their_grid() -> (
+    None
+):
+    from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+
+    project, stim, modifier = _stim_project(np.zeros((10, 2), dtype=np.float32))
+    modifier.do(slice(0, 1), slice(6, 8), 1.0)
+    original = stim.values
+    resampled = remap_stim_values_to_dt(stim.values, 0.001, 0.0005)
+    project.dirty = False
+    project.replace_stim_values("input", resampled, 0.0005, label="Resample input")
+    assert project.dirty
+    assert stim.values is resampled and stim.dt == 0.0005
+    assert project.max_time_secs == pytest.approx(0.01)
+    assert project.history.undo_label == "Resample input"
+    project.history.undo()
+    assert stim.values is original and stim.dt == 0.001
+    project.history.undo()  # the draw is undone at the indices it was made at
+    assert not stim.values.any()
+    project.history.redo()
+    project.history.redo()
+    assert stim.values is resampled
+    assert stim.values[12:16, 0].tolist() == [1, 1, 1, 1]
+
+
+def test_replace_stim_values_never_shares_the_retained_buffer() -> None:
+    project, stim, _ = _stim_project(np.zeros((4, 1), dtype=np.float32))
+    original = stim.values
+    project.replace_stim_values("input", original)
+    assert stim.values is not original
+    stim.values[:] = 5  # in-place edit of the new buffer
+    project.history.undo()
+    assert stim.values is original and not original.any()
+
+
+def test_slice_command_refuses_a_grid_changed_outside_history(caplog) -> None:
+    project, stim, modifier = _stim_project(np.zeros((10, 1), dtype=np.float32))
+    modifier.do(slice(0, 1), slice(2, 4), 1.0)
+    # Out-of-band resample (e.g. a console script) the history knows nothing about.
+    stim.values, stim.dt = np.full((20, 1), 7, dtype=np.float32), 0.0005
+    with caplog.at_level("WARNING"):
+        project.history.undo()
+    assert "recorded on a (10, 1) grid" in caplog.text
+    assert np.all(stim.values == 7)
+    assert not project.history.can_undo()
+    assert not project.history.can_redo()
+
+
+def test_data_group_undo_refuses_to_pop_a_same_named_group_added_out_of_band(
+    caplog,
+) -> None:
+    project = Project()
+    old = _experiment("Rec")
+    project.add_experiment(old)
+    project.remove_experiments(["Rec"])
+    newer = _experiment("Rec")
+    project.experiments["Rec"] = newer  # bypasses the history
+    with caplog.at_level("WARNING"):
+        project.history.undo()
+    assert project.experiments["Rec"] is newer
+    assert "changed outside the edit history" in caplog.text
+    assert not project.history.can_undo()
+
+
+def test_edit_experiments_redo_also_checks_the_current_group() -> None:
+    project = Project()
+    project.add_experiment(_experiment("Rec"))
+    project.history.undo()
+    project.experiments["Rec"] = newer = _experiment("Rec")
+    project.history.redo()
+    assert project.experiments["Rec"] is newer
+    assert not project.history.can_redo()

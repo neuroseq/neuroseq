@@ -304,6 +304,67 @@ def test_trace_dialog_imports_into_existing_trace_data(
     assert qmessagebox_calls[-1]["name"] == "information"
 
 
+def test_trace_import_into_existing_trace_is_undoable_without_touching_old_buffers(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    original = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    trace = TraceData("Existing Trace", original, np.array([0, 5]), "mV", 0.001)
+    project = Project()
+    project.add_experiment(Experiment("Experiment A", 0.002, [], [trace]))
+    experiment = project.experiments["Experiment A"]
+
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.0005)  # remap the target onto the wave's dt
+    dialog.import_existing_radio.setChecked(True)
+    dialog.existing_experiment_combo.setCurrentText("Experiment A")
+    dialog.existing_trace_combo.setCurrentText("Existing Trace")
+    dialog.existing_neuron_id_spin.setValue(5)
+    dialog.existing_replace_checkbox.setChecked(True)
+    dialog.existing_extend_checkbox.setChecked(True)
+    dialog._import_file()
+
+    assert trace.dt == pytest.approx(0.0005)
+    np.testing.assert_allclose(trace.traces[1], [10.0, 20.0, 30.0, 40.0])
+    assert experiment.duration == pytest.approx(0.002)
+    assert project.history.undo_label == "Import patch-clamp wave"
+    project.history.undo()
+    assert trace.traces is original
+    np.testing.assert_array_equal(original, [[1.0, 2.0], [3.0, 4.0]])
+    assert trace.dt == pytest.approx(0.001)
+    project.history.redo()
+    np.testing.assert_allclose(trace.traces[1], [10.0, 20.0, 30.0, 40.0])
+
+
+def test_replacing_a_trace_row_builds_a_new_buffer() -> None:
+    from neuroseq.importers.importer_patch_clamp_data import (
+        import_igor_wave_into_trace_data,
+    )
+    from neuroseq.importers.importer_patch_clamp_data import (
+        prepare_igor_wave_for_neuroseq,
+    )
+
+    original = np.zeros((1, 3), dtype=np.float32)
+    trace = TraceData("t", original, np.array([0], dtype=np.uint32), "mV", 0.001)
+    wave = prepare_igor_wave_for_neuroseq(
+        IgorWave("w", np.ones(3, dtype=np.float32), 0.001, "mV", "s", "csv")
+    )
+    import_igor_wave_into_trace_data(trace, wave, neuron_id=0, extend_to_fit=False)
+    assert trace.traces is not original
+    assert not original.any()
+    np.testing.assert_array_equal(trace.traces, [[1, 1, 1]])
+
+
 def test_trace_dialog_loads_pxp_and_shows_wave_picker(
     tmp_path: Path,
     qtbot: QtBot,

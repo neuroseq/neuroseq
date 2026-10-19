@@ -766,7 +766,10 @@ def import_igor_wave_into_trace_data(
     new_row[0, :written_len] = imported_values[:written_len]
 
     if row_index >= 0:
-        trace_data.traces[row_index] = new_row[0]
+        # Build a new buffer: the project's undo history may retain the old one.
+        traces = trace_data.traces.copy()
+        traces[row_index] = new_row[0]
+        trace_data.traces = traces
     else:
         trace_data.traces = np.concatenate([trace_data.traces, new_row], axis=0)
         trace_data.indices = np.concatenate(

@@ -450,7 +450,12 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 self.selected_stim_name = new_name
             else:
                 assert stim_array is not None
-                stim_array.values, stim_array.dt = staged_stim.values, staged_stim.dt
+                self.project.replace_stim_values(
+                    stim_array.name,
+                    staged_stim.values,
+                    staged_stim.dt,
+                    label=f"Import SysCon2 sequence into {stim_array.name}",
+                )
             self.project.syscon2_export_template_text = self._header_template
             self.project.update_limits()
             self.project.mark_dirty()

@@ -226,8 +226,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         name = record["name"]
         if name in project.experiments:
             name = f"{name} ({result['run_id'][:8]})"
-        project.experiments[name] = Experiment(
-            name=name, duration=result["duration_s"], timepoints=[], data=[]
+        project.add_experiment(
+            Experiment(name=name, duration=result["duration_s"], timepoints=[], data=[])
         )
         record["experiment_name"] = name
         project.add_calcium_video(

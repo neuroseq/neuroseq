@@ -633,9 +633,12 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 return
 
             if dt_choice == self._DtFixChoice.CLEAR:
-                stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-                blank_values = np.zeros_like(stim_array.values)
-                self._replace_stim_values_preserving_undo(stim_name, blank_values)
+                self.project.replace_stim_values(
+                    stim_name,
+                    np.zeros_like(stim_array.values),
+                    _SYSCON2_TTL_PULSE_QUANTUM_S,
+                    label=f"Clear {stim_name} for SysCon2 timing",
+                )
                 parent_widget = self.parentWidget()
                 stim_editor = (
                     getattr(parent_widget, "stim_editor", None)
@@ -660,20 +663,20 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 return
 
             # RESAMPLE: unlike every other fix here, this changes the array's timepoint
-            # count, so it can't go through the undo-preserving replace path (which
-            # requires matching shape). Mutate the StimArray directly, then let
-            # Project.update_limits() re-derive dependent state (max_time_secs etc.) --
-            # deliberately NOT returning here, so the checks below re-validate the
-            # resampled pattern rather than trusting it's still clean.
+            # count, so it replaces the whole sample grid through the project (one
+            # undoable edit) -- deliberately NOT returning here, so the checks below
+            # re-validate the resampled pattern rather than trusting it's still clean.
             old_dt = stim_array.dt
             n_old = stim_array.values.shape[0]
             new_values, n_new = resample_stim_values_to_dt(
                 stim_array, new_dt=_SYSCON2_TTL_PULSE_QUANTUM_S
             )
-            stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-            stim_array.values = new_values
-            self.project.update_limits()
-            self.project.mark_dirty()
+            self.project.replace_stim_values(
+                stim_name,
+                new_values,
+                _SYSCON2_TTL_PULSE_QUANTUM_S,
+                label=f"Resample {stim_name} to SysCon2 timing",
+            )
             stim_array = self.project.stim_arrays[stim_name]
             parent_widget = self.parentWidget()
             stim_editor = (
@@ -1159,9 +1162,9 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                     raise ValueError(
                         "Automatic sanity fixes require matching input-array shape."
                     )
-                target.values[:, :] = new_values
-                self.project.update_limits()
-                self.project.mark_dirty()
+                self.project.replace_stim_values(
+                    stim_name, np.array(new_values, copy=True)
+                )
             return True
         except Exception as exc:
             self.logger.error("Failed to apply sanity fix: %s", exc, exc_info=True)

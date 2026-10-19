@@ -320,6 +320,10 @@ def test_patch_clamp_data_input_import_dialog_imports_into_existing_stim_array_o
     assert dialog.selected_stim_name == "stimulus"
     assert qmessagebox_calls[-1]["name"] == "information"
     assert "adjusted target input grid" in qmessagebox_calls[-1]["text"].lower()
+    # Remap + import is one undoable edit restoring the original grid.
+    project.history.undo()
+    assert stim_array.dt == pytest.approx(0.001)
+    np.testing.assert_array_equal(stim_array.values, np.zeros((2, 2)))
 
 
 def test_patch_clamp_data_input_import_dialog_loads_pxp_and_shows_wave_picker(

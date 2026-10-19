@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 import tifffile
 
+from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_engine_worker import EngineAdapter
 from neuroseq.gui_settings import GuiSettings
@@ -484,12 +485,23 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     result.update(run_id="one", status="completed")
     gui.scanimage_connection.run_id = None
     gui.scanimage_controls.channel_spin.setValue(2)
+    # A deleted group with the recording's name must not be resurrected over it.
+    old_group = Experiment(name="Test", duration=1.0, timepoints=[], data=[])
+    gui.project.add_experiment(old_group)
+    gui.project.remove_experiments(["Test"])
     gui._scanimage_recording_ready(result)
+    recorded = gui.project.experiments["Test"]
+    assert recorded is not old_group
+    assert gui.project.history.undo_label == "Add data group"
     assert gui.calcium_video_widget.recorded_channel == 2
     assert gui.project.calcium_scanimage_index == result
     assert len(gui.calcium_video_widget._frame_refs) == 4
     assert gui.cmb_video.count() == 1
     assert gui.cmb_video.currentText() == "Test"
+    gui.project.history.undo()
+    assert "Test" not in gui.project.experiments
+    gui.project.history.undo()
+    assert gui.project.experiments["Test"] is old_group
     gui._close_confirmed = True
     gui.close()
 

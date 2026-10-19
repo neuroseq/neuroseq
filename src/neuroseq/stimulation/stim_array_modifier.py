@@ -1,17 +1,25 @@
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from neuroseq.project import Project
 from neuroseq.project_history import ProjectCommand
 from neuroseq.project_history import ProjectHistory
+from neuroseq.project_history import StaleCommandError
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import stim_dt_matches
 from neuroseq.visualization.stim_widget import StimWidget
 
 
 class ReversibleAction:
-    """An action that can be done and undone on a (slice of a) numpy array."""
+    """An action that can be done and undone on a (slice of a) numpy array.
+
+    Samples are addressed by index, so the action only replays onto the grid
+    (shape and dt) it was recorded on; otherwise it refuses with a warning.
+    """
 
     def __init__(
         self,
@@ -22,6 +30,8 @@ class ReversibleAction:
     ) -> None:
         self.neuron_slice = neuron_slice
         self.time_slice = time_slice
+        self.grid_shape = tuple(stim_array.values.shape)
+        self.grid_dt = float(stim_array.dt)
         self.old_values = stim_array.values[time_slice, neuron_slice].copy()
         self.new_values = (
             new_values.copy() if isinstance(new_values, np.ndarray) else new_values
@@ -40,14 +50,21 @@ class ReversibleAction:
         values: np.ndarray | float,
     ) -> None:
         """Assign the new values to the StimArray and update the StimWidget accordingly."""
-        if (
-            self.time_slice.stop is not None
-            and self.time_slice.stop > stim_array.values.shape[0]
-        ) or (
-            self.neuron_slice.stop is not None
-            and self.neuron_slice.stop > stim_array.values.shape[1]
+        if tuple(stim_array.values.shape) != self.grid_shape or not stim_dt_matches(
+            stim_array.dt, self.grid_dt
         ):
-            return
+            logging.getLogger(__name__).warning(
+                "Skipping edit of input '%s': recorded on a %s grid at dt=%g s, "
+                "but the input is now %s at dt=%g s.",
+                stim_array.name,
+                self.grid_shape,
+                self.grid_dt,
+                tuple(stim_array.values.shape),
+                float(stim_array.dt),
+            )
+            raise StaleCommandError(
+                f"Input '{stim_array.name}' was resampled outside the undo history"
+            )
         stim_array.values[self.time_slice, self.neuron_slice] = values
         if stim_widget is not None:
             stim_widget.update_data_slice(self.neuron_slice, self.time_slice, values)
