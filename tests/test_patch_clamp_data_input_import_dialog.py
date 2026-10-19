@@ -14,8 +14,12 @@ from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
 from neuroseq.importers.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.importers.patch_clamp_data_input_import_dialog import DtMismatchChoice
 from neuroseq.importers.patch_clamp_data_input_import_dialog import (
     PatchClampDataInputImportDialog,
+)
+from neuroseq.importers.patch_clamp_data_input_import_dialog import (
+    ask_dt_mismatch_choice,
 )
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
@@ -46,7 +50,8 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
     assert not hasattr(dialog, "format_combo")
     dialog._browse_file()
     assert filters == [
-        "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
+        "Patch-clamp files (*.pxp *.ibw *.csv *.txt);;Packed Experiment (*.pxp);;"
+        "Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
     ]
     dialog.close()
 
@@ -284,9 +289,8 @@ def test_patch_clamp_data_input_import_dialog_imports_into_existing_stim_array_o
     csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.REMAP_TARGET,
     )
 
     project = Project()
@@ -877,9 +881,8 @@ def test_patch_clamp_data_input_import_dialog_aborts_import_on_remap_decline(
     )
 
     monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.No,
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.CANCEL,
     )
 
     dialog = PatchClampDataInputImportDialog(project)
@@ -915,3 +918,123 @@ def test_patch_clamp_data_input_import_dialog_no_remap_dialog_when_project_is_em
     assert project.stim_arrays["wave"].dt == pytest.approx(0.0005)
     question_calls = [c for c in qmessagebox_calls if c["name"] == "question"]
     assert not question_calls
+
+
+def _existing_stim_project() -> Project:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "stimulus",
+            StimType.External,
+            np.zeros((2, 2), dtype=np.float32),
+            "pA",
+            0.001,
+        )
+    )
+    return project
+
+
+def _load_into_existing(qtbot: QtBot, project: Project, csv_path: Path):
+    dialog = PatchClampDataInputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog.import_existing_radio.setChecked(True)
+    dialog.target_combo.setCurrentText("stimulus")
+    dialog.neuron_index_spin.setValue(1)
+    dialog.replace_checkbox.setChecked(True)
+    dialog.extend_checkbox.setChecked(True)
+    return dialog
+
+
+def test_input_import_can_resample_the_wave_onto_the_target_grid(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    choices: list[dict] = []
+
+    def choose(*args, **kwargs):
+        choices.append(kwargs)
+        return DtMismatchChoice.RESAMPLE_WAVE
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.ask_dt_mismatch_choice",
+        choose,
+    )
+    project = _existing_stim_project()
+    dialog = _load_into_existing(qtbot, project, csv_path)
+    dialog._import_file()
+
+    assert choices[0]["target_dt"] == pytest.approx(0.001)
+    assert choices[0]["wave_dt"] == pytest.approx(0.0005)
+    stim_array = project.stim_arrays["stimulus"]
+    assert stim_array.dt == pytest.approx(0.001)
+    np.testing.assert_allclose(stim_array.values[:, 1], [10.0, 30.0])
+    assert "resampled the wave" in qmessagebox_calls[-1]["text"].lower()
+    project.history.undo()
+    np.testing.assert_array_equal(stim_array.values, np.zeros((2, 2)))
+
+
+def test_failed_input_import_leaves_the_target_unremapped(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n1.0\n2.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.REMAP_TARGET,
+    )
+
+    def fail(*args, **kwargs):
+        raise ValueError("import failed")
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_input_import_dialog.import_igor_wave_into_stim_array",
+        fail,
+    )
+    project = _existing_stim_project()
+    original = project.stim_arrays["stimulus"].values
+    dialog = _load_into_existing(qtbot, project, csv_path)
+    dialog._import_file()
+
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert project.stim_arrays["stimulus"].values is original
+    assert project.stim_arrays["stimulus"].dt == pytest.approx(0.001)
+    assert not project.history.can_undo()
+
+
+@pytest.mark.parametrize(
+    ("button_prefix", "expected"),
+    [
+        (None, DtMismatchChoice.RESAMPLE_WAVE),  # the default button
+        ("Remap", DtMismatchChoice.REMAP_TARGET),
+        ("Cancel", DtMismatchChoice.CANCEL),
+    ],
+)
+def test_dt_mismatch_prompt_defaults_to_resampling_the_wave(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    button_prefix: str | None,
+    expected: DtMismatchChoice,
+) -> None:
+    def clicked(box: QtWidgets.QMessageBox):
+        if button_prefix is None:
+            return box.defaultButton()
+        return next(
+            b
+            for b in box.buttons()
+            if b.text().replace("&", "").startswith(button_prefix)
+        )
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "clickedButton", clicked)
+    choice = ask_dt_mismatch_choice(
+        None, target_label="input array 'x'", target_dt=0.001, wave_dt=0.00002
+    )
+    assert choice is expected

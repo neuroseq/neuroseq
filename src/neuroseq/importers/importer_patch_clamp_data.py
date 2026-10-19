@@ -20,6 +20,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 NEUROSEQ_IGOR_TARGET_DT_SECONDS = 0.001
+# File-dialog filter shared by the patch-clamp input and output importers; the
+# combined first entry is the default, so every supported format is visible.
+PATCH_CLAMP_FILE_FILTER = (
+    "Patch-clamp files (*.pxp *.ibw *.csv *.txt);;Packed Experiment (*.pxp);;"
+    "Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
+)
 _DT_TOLERANCE_SECONDS = 1e-9
 
 

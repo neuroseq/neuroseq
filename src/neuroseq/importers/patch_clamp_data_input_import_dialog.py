@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import logging
 from contextlib import suppress
+from enum import Enum
 from pathlib import Path
 from types import MethodType
 from typing import TYPE_CHECKING
@@ -15,6 +16,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
 from neuroseq.importers.importer_patch_clamp_data import (
     create_stim_array_from_igor_wave,
@@ -34,6 +36,53 @@ from neuroseq.stimulation.stim_timing import stim_dt_matches
 if TYPE_CHECKING:
     from neuroseq.project import Project
     from neuroseq.stimulation.stim import StimArray
+
+
+class DtMismatchChoice(Enum):
+    RESAMPLE_WAVE = "resample_wave"
+    REMAP_TARGET = "remap_target"
+    CANCEL = "cancel"
+
+
+def ask_dt_mismatch_choice(
+    parent: QtWidgets.QWidget | None,
+    *,
+    target_label: str,
+    target_dt: float,
+    wave_dt: float,
+) -> DtMismatchChoice:
+    """Ask how to import a wave into a target sampled at a different interval.
+
+    Resampling the wave is the default: remapping the target onto a fast
+    recording's grid (e.g. 50 kHz) can make it orders of magnitude larger.
+    """
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+    box.setWindowTitle("Different sample intervals")
+    box.setText(
+        f"The wave is sampled every {format_milliseconds(wave_dt * 1000.0)} ms, "
+        f"but {target_label} uses {format_milliseconds(target_dt * 1000.0)} ms."
+    )
+    box.setInformativeText(
+        "Resample the wave onto the target's grid (recommended), or remap the "
+        "whole target onto the wave's grid? Remapping may shift existing timing "
+        "by up to one sample and can make the target very large."
+    )
+    resample = box.addButton(
+        "Resample wave to target Δt", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+    )
+    remap = box.addButton(
+        "Remap target to wave Δt", QtWidgets.QMessageBox.ButtonRole.ActionRole
+    )
+    box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(resample)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is resample:
+        return DtMismatchChoice.RESAMPLE_WAVE
+    if clicked is remap:
+        return DtMismatchChoice.REMAP_TARGET
+    return DtMismatchChoice.CANCEL
 
 
 class PatchClampDataInputImportDialog(QtWidgets.QDialog):
@@ -333,7 +382,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
             self,
             "Select patch-clamp input",
             "",
-            "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)",
+            PATCH_CLAMP_FILE_FILTER,
         )
         if filename:
             self._load_file(filename)
@@ -550,9 +599,10 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
             and not stim_dt_matches(float(selected_stim.dt), source_dt)
         ):
             info_lines.append(
-                "The selected target input array will be remapped from "
-                f"{format_milliseconds(float(selected_stim.dt) * 1000.0)} ms to "
-                f"{format_milliseconds(source_dt * 1000.0)} ms before import."
+                "The selected target input array uses "
+                f"{format_milliseconds(float(selected_stim.dt) * 1000.0)} ms; you will be "
+                "asked whether to resample the wave onto that grid or remap the "
+                f"target to {format_milliseconds(source_dt * 1000.0)} ms."
             )
         self.info_label.setText("\n".join(info_lines))
 
@@ -631,21 +681,25 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                 if target_stim is None:
                     raise ValueError("No target input data entity selected")
                 remapped_target_dt = False
+                resampled_wave = False
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
-                    continue_with_remap = QtWidgets.QMessageBox.question(
+                    choice = ask_dt_mismatch_choice(
                         self,
-                        "Change input array timestep",
-                        "Changing the input timestep will remap input array "
-                        f"'{target_stim.name}' from "
-                        f"{format_milliseconds(float(target_stim.dt) * 1000.0)} ms "
-                        f"to {format_milliseconds(prepared_wave.target_dt * 1000.0)} ms. "
-                        "Input timing may shift by up to one sample. Continue?",
-                        QtWidgets.QMessageBox.StandardButton.Yes
-                        | QtWidgets.QMessageBox.StandardButton.No,
+                        target_label=f"input array '{target_stim.name}'",
+                        target_dt=float(target_stim.dt),
+                        wave_dt=prepared_wave.target_dt,
                     )
-                    if continue_with_remap != QtWidgets.QMessageBox.StandardButton.Yes:
+                    if choice is DtMismatchChoice.CANCEL:
                         return
-                    remapped_target_dt = True
+                    if choice is DtMismatchChoice.RESAMPLE_WAVE:
+                        prepared_wave = prepare_igor_wave_for_neuroseq(
+                            self.loaded_wave,
+                            source_dt_override=float(self.source_dt_spin.value()),
+                            target_dt=float(target_stim.dt),
+                        )
+                        resampled_wave = True
+                    else:
+                        remapped_target_dt = True
                 # Stage on a copy: a failed import must leave the target untouched,
                 # and the project records the result as one undoable edit.
                 staged_stim = copy.copy(target_stim)
@@ -683,6 +737,11 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                 if report.truncated_samples > 0:
                     info_lines.append(
                         f"Truncated imported samples: {report.truncated_samples}"
+                    )
+                if resampled_wave:
+                    info_lines.append(
+                        f"Resampled the wave from {report.source_dt:.9f} s to the "
+                        f"target grid ({report.target_dt:.9f} s)."
                     )
                 if remapped_target_dt:
                     info_lines.append(

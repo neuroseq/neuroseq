@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
 from types import MethodType
 from typing import TYPE_CHECKING
@@ -17,6 +16,7 @@ from qtpy.compat import getopenfilename
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
 from neuroseq.importers.importer_patch_clamp_data import (
     create_trace_data_from_igor_wave,
@@ -30,31 +30,23 @@ from neuroseq.importers.importer_patch_clamp_data import load_csv_trace_table
 from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
 from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
 from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
+from neuroseq.importers.patch_clamp_data_input_import_dialog import DtMismatchChoice
+from neuroseq.importers.patch_clamp_data_input_import_dialog import (
+    ask_dt_mismatch_choice,
+)
+from neuroseq.spike_detection import PATCH_CLAMP_MIN_SPIKE_INTERVAL_SECONDS
+from neuroseq.spike_detection import PATCH_CLAMP_PEAK_DISTANCE_SECONDS
+from neuroseq.spike_detection import PATCH_CLAMP_PEAK_HEIGHT_STD
+from neuroseq.spike_detection import PATCH_CLAMP_PEAK_PROMINENCE_STD
+from neuroseq.spike_detection import PATCH_CLAMP_PEAK_WIDTH_SECONDS
 from neuroseq.spike_detection import detect_spikes_voltage_trace
+from neuroseq.spike_detection import seconds_to_peak_samples
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import stim_dt_matches
 
 if TYPE_CHECKING:
     from neuroseq.importers.importer_patch_clamp_data import PreparedIgorWave
     from neuroseq.project import Project
-
-
-@dataclass
-class PeakDetectionParams:
-    peak_height: float
-    peak_prominence: float
-    min_interval: float
-    peak_distance: int
-    peak_width: int
-
-
-_SPIKE_DETECTION_DEFAULTS = PeakDetectionParams(
-    peak_height=3.0,
-    peak_prominence=0.5,
-    min_interval=0.001,
-    peak_distance=10,
-    peak_width=1,
-)
 
 
 class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
@@ -466,7 +458,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             self,
             "Select patch-clamp output",
             "",
-            "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)",
+            PATCH_CLAMP_FILE_FILTER,
         )
         if filename:
             self._load_file(filename)
@@ -710,9 +702,10 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             and not stim_dt_matches(float(selected_trace.dt), source_dt)
         ):
             info_lines.append(
-                "The selected target trace data will be remapped from "
-                f"{format_milliseconds(float(selected_trace.dt) * 1000.0)} ms to "
-                f"{format_milliseconds(source_dt * 1000.0)} ms before import."
+                "The selected target trace data uses "
+                f"{format_milliseconds(float(selected_trace.dt) * 1000.0)} ms; you will be "
+                "asked whether to resample the wave onto that grid or remap the "
+                f"target to {format_milliseconds(source_dt * 1000.0)} ms."
             )
         self.info_label.setText("\n".join(info_lines))
 
@@ -806,23 +799,6 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             experiment.timepoints.sort()
         self.project.update_limits()
 
-    def _confirm_trace_dt_remap(self, target_trace: TraceData, new_dt: float) -> bool:
-        msg = (
-            "Changing the trace data timestep will remap trace data "
-            f"'{target_trace.name}' from "
-            f"{format_milliseconds(float(target_trace.dt) * 1000.0)} ms "
-            f"to {format_milliseconds(new_dt * 1000.0)} ms. "
-            "Trace timing may shift by up to one sample. Continue?"
-        )
-        answer = QtWidgets.QMessageBox.question(
-            self,
-            "Change trace data timestep",
-            msg,
-            QtWidgets.QMessageBox.StandardButton.Yes
-            | QtWidgets.QMessageBox.StandardButton.No,
-        )
-        return answer == QtWidgets.QMessageBox.StandardButton.Yes
-
     def _remap_trace_dt(
         self,
         target_trace: TraceData,
@@ -863,16 +839,19 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         experiment_name: str,
         neuron_id: int,
     ) -> int:
+        dt = float(prepared_wave.target_dt)
         spike_data = detect_spikes_voltage_trace(
             prepared_wave.values,
             neuron_id=neuron_id,
-            dt=float(prepared_wave.target_dt),
+            dt=dt,
             detection_method="peak",
-            peak_height_threshold=_SPIKE_DETECTION_DEFAULTS.peak_height,
-            peak_prominence=_SPIKE_DETECTION_DEFAULTS.peak_prominence,
-            min_spike_interval=_SPIKE_DETECTION_DEFAULTS.min_interval,
-            peak_distance=_SPIKE_DETECTION_DEFAULTS.peak_distance,
-            peak_width=_SPIKE_DETECTION_DEFAULTS.peak_width,
+            peak_height_threshold=PATCH_CLAMP_PEAK_HEIGHT_STD,
+            peak_prominence=PATCH_CLAMP_PEAK_PROMINENCE_STD,
+            min_spike_interval=PATCH_CLAMP_MIN_SPIKE_INTERVAL_SECONDS,
+            peak_distance=seconds_to_peak_samples(
+                PATCH_CLAMP_PEAK_DISTANCE_SECONDS, dt
+            ),
+            peak_width=seconds_to_peak_samples(PATCH_CLAMP_PEAK_WIDTH_SECONDS, dt),
         )
         spike_data.name = "Igor Patch Clamp Spikes"
         self.project.add_data_to_experiment(experiment_name, spike_data)
@@ -942,13 +921,24 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                 if target_trace is None:
                     raise ValueError("No target trace data selected")
 
-                remap_target = not stim_dt_matches(
-                    float(target_trace.dt), prepared_wave.target_dt
-                )
-                if remap_target and not self._confirm_trace_dt_remap(
-                    target_trace, prepared_wave.target_dt
-                ):
-                    return
+                remap_target = False
+                if not stim_dt_matches(float(target_trace.dt), prepared_wave.target_dt):
+                    choice = ask_dt_mismatch_choice(
+                        self,
+                        target_label=f"trace data '{target_trace.name}'",
+                        target_dt=float(target_trace.dt),
+                        wave_dt=prepared_wave.target_dt,
+                    )
+                    if choice is DtMismatchChoice.CANCEL:
+                        return
+                    if choice is DtMismatchChoice.RESAMPLE_WAVE:
+                        prepared_wave = prepare_igor_wave_for_neuroseq(
+                            self.loaded_wave,
+                            source_dt_override=float(self.source_dt_spin.value()),
+                            target_dt=float(target_trace.dt),
+                        )
+                    else:
+                        remap_target = True
 
                 # One undoable edit; a failure rolls the experiment back.
                 with self.project.edit_experiments(

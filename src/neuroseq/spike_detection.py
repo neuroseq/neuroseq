@@ -8,8 +8,24 @@ import numpy.typing as npt
 from scipy.signal import find_peaks
 
 from neuroseq.data import SpikeData
+from neuroseq.stimulation.stim_timing import round_sample_position
 
 logger = logging.getLogger(__name__)
+
+# Peak-detection defaults for patch-clamp voltage traces. Times are in seconds
+# so they mean the same at any sampling rate; convert them with the trace's dt.
+PATCH_CLAMP_PEAK_HEIGHT_STD = 3.0
+PATCH_CLAMP_PEAK_PROMINENCE_STD = 0.5
+PATCH_CLAMP_MIN_SPIKE_INTERVAL_SECONDS = 0.001
+PATCH_CLAMP_PEAK_DISTANCE_SECONDS = 0.010
+PATCH_CLAMP_PEAK_WIDTH_SECONDS = 0.001
+
+
+def seconds_to_peak_samples(seconds: float, dt: float) -> int:
+    """Convert a peak-detection time to a whole number of samples (at least 1)."""
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+    return max(1, int(round_sample_position(float(seconds) / float(dt))))
 
 
 def detect_spikes_threshold(

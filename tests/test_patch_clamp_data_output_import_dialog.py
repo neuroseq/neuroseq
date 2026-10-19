@@ -15,6 +15,7 @@ from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
 from neuroseq.importers.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.importers.patch_clamp_data_input_import_dialog import DtMismatchChoice
 from neuroseq.importers.patch_clamp_data_output_import_dialog import (
     PatchClampDataOutputImportDialog,
 )
@@ -312,9 +313,8 @@ def test_trace_import_into_existing_trace_is_undoable_without_touching_old_buffe
     csv_path = tmp_path / "wave.csv"
     csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
     monkeypatch.setattr(
-        QtWidgets.QMessageBox,
-        "question",
-        lambda *args, **kwargs: QtWidgets.QMessageBox.StandardButton.Yes,
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.REMAP_TARGET,
     )
     original = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
     trace = TraceData("Existing Trace", original, np.array([0, 5]), "mV", 0.001)
@@ -786,7 +786,8 @@ def test_output_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) ->
     )
     dialog._browse_file()
     assert filters == [
-        "Packed Experiment (*.pxp);;Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
+        "Patch-clamp files (*.pxp *.ibw *.csv *.txt);;Packed Experiment (*.pxp);;"
+        "Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
     ]
 
 
@@ -801,3 +802,118 @@ def test_unsupported_output_format(
     assert qmessagebox_calls[-1]["name"] == "critical"
     assert "Unsupported" in qmessagebox_calls[-1]["text"]
     assert ".unsupported" in qmessagebox_calls[-1]["text"]
+
+
+def _existing_trace_dialog(qtbot: QtBot, project: Project, csv_path: Path):
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.0005)
+    dialog.import_existing_radio.setChecked(True)
+    dialog.existing_experiment_combo.setCurrentText("Experiment A")
+    dialog.existing_trace_combo.setCurrentText("Existing Trace")
+    dialog.existing_neuron_id_spin.setValue(5)
+    dialog.existing_replace_checkbox.setChecked(True)
+    dialog.existing_extend_checkbox.setChecked(True)
+    return dialog
+
+
+def _existing_trace_project() -> tuple[Project, TraceData]:
+    trace = TraceData(
+        "Existing Trace",
+        np.array([[1.0, 2.0]], dtype=np.float32),
+        np.array([0], dtype=np.uint32),
+        "mV",
+        0.001,
+    )
+    project = Project()
+    project.add_experiment(Experiment("Experiment A", 0.002, [], [trace]))
+    return project, trace
+
+
+def test_trace_import_can_resample_the_wave_onto_the_target_grid(
+    tmp_path: Path, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.RESAMPLE_WAVE,
+    )
+    project, trace = _existing_trace_project()
+    original = trace.traces
+    _existing_trace_dialog(qtbot, project, csv_path)._import_file()
+
+    assert trace.dt == pytest.approx(0.001)
+    np.testing.assert_allclose(trace.traces, [[1.0, 2.0], [10.0, 30.0]])
+    project.history.undo()
+    assert trace.traces is original
+
+
+def test_failed_trace_import_leaves_the_target_unremapped(
+    tmp_path: Path,
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.ask_dt_mismatch_choice",
+        lambda *args, **kwargs: DtMismatchChoice.REMAP_TARGET,
+    )
+
+    def fail(*args, **kwargs):
+        raise ValueError("import failed")
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.import_igor_wave_into_trace_data",
+        fail,
+    )
+    project, trace = _existing_trace_project()
+    original = trace.traces
+    project.history.clear()
+    _existing_trace_dialog(qtbot, project, csv_path)._import_file()
+
+    assert qmessagebox_calls[-1]["name"] == "critical"
+    assert trace.traces is original
+    assert trace.dt == pytest.approx(0.001)
+    assert not project.history.can_undo()
+
+
+def test_spike_detection_converts_time_defaults_with_the_wave_dt(
+    tmp_path: Path, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n1.0\n2.0\n3.0\n", encoding="utf-8")
+    calls: list[dict] = []
+
+    def detect(*args, **kwargs):
+        calls.append(kwargs)
+        return SpikeData("s", np.array([], dtype=np.int32), np.array([]))
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        detect,
+    )
+    dialog = PatchClampDataOutputImportDialog(Project())
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.source_dt_spin.setValue(0.00002)  # 50 kHz
+    dialog.new_experiment_name_edit.setText("Experiment A")
+    dialog.spike_detect_checkbox.setChecked(True)
+    dialog._import_file()
+
+    assert calls[0]["dt"] == pytest.approx(0.00002)
+    assert calls[0]["peak_distance"] == 500  # 10 ms
+    assert calls[0]["peak_width"] == 50  # 1 ms
+
+
+def test_seconds_to_peak_samples() -> None:
+    from neuroseq.spike_detection import seconds_to_peak_samples
+
+    assert seconds_to_peak_samples(0.010, 0.001) == 10
+    assert seconds_to_peak_samples(0.001, 0.001) == 1
+    assert seconds_to_peak_samples(0.001, 0.01) == 1  # never below one sample
+    with pytest.raises(ValueError):
+        seconds_to_peak_samples(0.001, 0.0)
