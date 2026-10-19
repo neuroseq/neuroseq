@@ -110,7 +110,8 @@ HELPER_PATH = (
 
 # pynn-brainscales CalibHXNeuronCoba targets (hardware units: dimensionless
 # voltages, microsecond time constants). Calix solves the per-neuron CapMem
-# codes on-chip. Shared with the PyNN example model.
+# codes on-chip. Used by the PyNN example model only: stimulus delivery uses
+# HXNeuron with the nightly calibration, which supports constant current.
 BSS2_NEURON_PARAMETERS: dict[str, float | int] = dict(
     v_rest=110.0,
     v_reset=100.0,
@@ -537,7 +538,9 @@ def build_run_arguments(plan: Plan, settings: Bss2Settings) -> dict[str, Any]:
         "n_neurons": plan.n_neurons,
         "duration_ms": float(bio_s_to_hw_ms(plan.duration_s, settings.speedup)),
         "record_v_neuron": int(settings.madc_neuron),
-        "neuron_parameters": dict(BSS2_NEURON_PARAMETERS),
+        # HXNeuron overrides in hardware units; empty = the chip's nightly
+        # calibration (see the helper's execute_run).
+        "neuron_parameters": {},
     }
     if isinstance(plan, ConstantCurrentPlan):
         arguments["mode"] = INPUT_CONSTANT_CURRENT

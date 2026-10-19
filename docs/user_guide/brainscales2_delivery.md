@@ -118,9 +118,12 @@ milliseconds. NeuroSeq works in biological seconds and converts with the
 
 **Deliver current stim array** shows a summary (neurons, segments or spikes,
 biological and hardware duration, recorded neuron) and asks for confirmation.
-While the run executes, the status line shows the helper's progress (the first
-run includes the on-chip calibration and can take minutes). A running BSS-2 run
-keeps the project tab from closing.
+While the run executes, the status line shows the helper's progress. The
+neurons are `HXNeuron`s configured from the chip's nightly calibration (as in
+the BrainScaleS-2 demos), which the helper loads once per connection with
+`pynn.helper.chip_from_nightly()`, falling back to the EBRAINS calibration
+download for the connected chip. A running BSS-2 run keeps the project tab
+from closing.
 
 When the run finishes, a data group named `BSS-2 <stim name> <date time>` is
 added (undoable with Edit → Undo) containing
@@ -153,17 +156,38 @@ together with the NeuroSeq version, host, Singularity version, connection
 state and the tab's settings, ready to paste into a message. The text in the
 log can also be selected and copied directly. **Clear** empties the log.
 
-## Assumptions to check on the real system
+## Verified against the EBRAINS container
 
-- The speed-up of 1000 and that `pynn.run` durations, spike times and MADC
-  sample times are in hardware milliseconds.
-- `Population.set(constant_current_enable=[...], constant_current_i_offset=[...])`
-  accepts per-neuron lists for `CalibHXNeuronCoba`, and parameters changed
-  between `APPEND` runs apply from the next segment on.
+Checked in `image_lab_latest.oci.sif` (Python 3.11, PyNN 0.12.3, neo 0.13.3):
+
+- `pynn.run(runtime, command)` with `RunCommand.APPEND`/`EXECUTE`; durations
+  are hardware milliseconds, as in the AdEx tutorial (0.1 + 0.6 + 0.3 ms).
+- `constant_current_enable`, `constant_current_i_offset` (and
+  `constant_current_type`) are `HXNeuron` parameters; `CalibHXNeuronCoba` does
+  not have them, so delivery uses `HXNeuron` on top of the nightly calibration
+  (`pynn.setup(initial_config=calib)`).
+- `HXNeuron` records `spikes`, `v`, `exc_synin`, `inh_synin`, `adaptation`;
+  `SpikeSourceArray`, `OneToOneConnector` and `StaticSynapse` exist.
+- `hxcomm.ManagedConnection().get_unique_identifier()` returns a list; the
+  first entry is the chip identifier.
+- The helper starts through NeuroSeq's launch command and answers `ping`.
+
+Without `squashfuse` on the host, Singularity unpacks the whole `.sif` on
+every start (about 2 minutes). Build an unpacked copy once and choose that
+folder as the container image instead:
+
+```bash
+singularity build --sandbox image_lab_latest_sandbox image_lab_latest.oci.sif
+```
+
+## Still to check on the hardware
+
+- Per-neuron lists in `Population.set(...)` apply from the next `APPEND`
+  segment on.
 - Recording `spikes` on the whole population and `v` on a one-neuron view in
-  the same run is supported; spikes are read from
+  the same run; spikes are read from
   `get_data("spikes").segments[-1].spiketrains`, the membrane from
   `get_data("v").segments[-1].irregularlysampledsignals[0]` (falling back to
   `analogsignals`).
-- The default `CalibHXNeuronCoba` parameters are the ones of the PyNN example
-  model; they are not tuned for constant-current input.
+- The calibrated `HXNeuron` defaults respond to `constant_current_i_offset` in
+  the 0–1022 range as expected (the demos use 0–1000).

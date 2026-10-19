@@ -258,7 +258,8 @@ def test_build_run_arguments_constant_current() -> None:
     assert arguments["n_neurons"] == 2
     assert arguments["duration_ms"] == pytest.approx(1.0)
     assert arguments["record_v_neuron"] == 1
-    assert arguments["neuron_parameters"] == bp.BSS2_NEURON_PARAMETERS
+    # Empty: the helper uses HXNeuron with the chip's nightly calibration.
+    assert arguments["neuron_parameters"] == {}
     segments = arguments["segments"]
     assert bp.decode_array(segments["durations_ms"]).tolist() == pytest.approx(
         [0.5, 0.5]

@@ -75,12 +75,15 @@ class _Pynn(types.ModuleType):
         super().__init__("pynn_brainscales.brainscales2")
         self.elapsed_ms = 0.0
         self.cells = types.SimpleNamespace(
-            CalibHXNeuronCoba=lambda **_kw: "neuron",
+            HXNeuron=lambda **_kw: "neuron",
             SpikeSourceArray=lambda spike_times: "source",
         )
         self.synapses = types.SimpleNamespace(StaticSynapse=lambda weight: weight)
 
-    def setup(self):
+        self.helper = types.SimpleNamespace(chip_from_nightly=lambda: "chip")
+
+    def setup(self, *, initial_config):
+        assert initial_config == "chip"
         self.elapsed_ms = 0.0
 
     def end(self):
@@ -118,7 +121,7 @@ class _ManagedConnection:
 
     def get_unique_identifier(self):
         has_token = "with-token" if os.environ.get("QUIGGELDY_TOKEN") else "no-token"
-        return f"fakechip_{os.environ.get('QUIGGELDY_IP')}_{has_token}"
+        return [f"fakechip_{os.environ.get('QUIGGELDY_IP')}_{has_token}"]
 
 
 def main() -> None:

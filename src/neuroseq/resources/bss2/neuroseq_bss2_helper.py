@@ -166,7 +166,14 @@ _REPORTED_VARIABLES = (
     "SYSTEMNAME",
     "SPACK_ENV",
 )
-_REPORTED_PACKAGES = ("pynn-brainscales", "dlens-vx-v3", "PyNN", "neo", "numpy")
+#: Distribution name -> import name (the BSS-2 stack ships without metadata).
+_REPORTED_PACKAGES = {
+    "pynn-brainscales": "pynn_brainscales",
+    "dlens-vx-v3": "dlens_vx_v3",
+    "PyNN": "pyNN",
+    "neo": "neo",
+    "numpy": "numpy",
+}
 
 
 def environment_report(environ: dict[str, str] | Any) -> dict[str, str]:
@@ -192,11 +199,15 @@ def environment_report(environ: dict[str, str] | Any) -> dict[str, str]:
 def package_versions() -> dict[str, str]:
     """Installed versions of the BSS-2 stack, without importing it."""
     versions = {}
-    for name in _REPORTED_PACKAGES:
+    for name, module in _REPORTED_PACKAGES.items():
         try:
             versions[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:
-            versions[name] = "not installed"
+            versions[name] = (
+                "importable (no version metadata)"
+                if _has_module(module)
+                else "not installed"
+            )
         except Exception as exc:  # broken metadata must not stop the helper
             versions[name] = f"unknown ({type(exc).__name__})"
     return versions
@@ -238,6 +249,13 @@ def collect_signal(signal: Any) -> tuple[np.ndarray, np.ndarray]:
 # ---- hardware access (exercised in tests with stubbed modules) -------------
 
 
+def first_identifier(identifier: Any) -> str:
+    """``get_unique_identifier()`` returns a list of identifiers; use the first."""
+    if isinstance(identifier, (list, tuple)):
+        return str(identifier[0]) if identifier else ""
+    return str(identifier)
+
+
 def query_identifier(progress: Progress) -> str:
     """Open a managed (quiggeldy) connection and ask for the chip identifier."""
     from dlens_vx_v3 import hxcomm
@@ -247,36 +265,74 @@ def query_identifier(progress: Progress) -> str:
         f"{os.environ.get('QUIGGELDY_IP', '?')}:{os.environ.get('QUIGGELDY_PORT', '?')}"
     )
     with hxcomm.ManagedConnection() as connection:
-        return str(connection.get_unique_identifier())
+        return first_identifier(connection.get_unique_identifier())
 
 
-def execute_run(spec: dict[str, Any], progress: Progress) -> dict[str, Any]:
-    """Build the network, deliver the input, and read back spikes and ``v``."""
+#: Fallback used by the EBRAINS demos when ``stable/latest`` is unavailable.
+EBRAINS_CALIBRATION_URL = (
+    "https://openproject.bioai.eu/data_calibration/hicann-dls-sr-hx/"
+    "{identifier}/stable/ebrains-stable/spiking_cocolist.pbin"
+)
+
+
+def load_calibration(pynn: Any, identifier: str | None, progress: Progress) -> Any:
+    """The chip's nightly calibration as a ``lola.Chip``.
+
+    ``pynn.helper.chip_from_nightly()`` reads the local copy or downloads
+    ``stable/latest``; if that fails, the EBRAINS demos' ``ebrains-stable``
+    copy is downloaded for ``identifier``.
+    """
+    progress("Loading the nightly calibration of the chip")
+    try:
+        return pynn.helper.chip_from_nightly()
+    except Exception as exc:
+        if not identifier:
+            raise
+        url = EBRAINS_CALIBRATION_URL.format(identifier=identifier)
+        progress(f"chip_from_nightly failed ({exc}); downloading {url}")
+        import urllib.request
+
+        with urllib.request.urlopen(url, timeout=60) as response:
+            data = response.read()
+        return pynn.helper.chip_from_portable_binary(data)
+
+
+def execute_run(
+    spec: dict[str, Any],
+    progress: Progress,
+    identifier: str | None = None,
+    calibration_cache: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the network, deliver the input, and read back spikes and ``v``.
+
+    Neurons are ``HXNeuron``s configured from the chip's nightly calibration
+    (as in the BrainScaleS-2 demos): only ``HXNeuron`` exposes
+    ``constant_current_enable``/``constant_current_i_offset``.
+    ``neuron_parameters`` are optional ``HXNeuron`` overrides in hardware units.
+    """
     progress("Importing pynn_brainscales")
     import pynn_brainscales.brainscales2 as pynn
 
     n = spec["n_neurons"]
     k = spec["record_v_neuron"]
+    cache = calibration_cache if calibration_cache is not None else {}
+    if "chip" not in cache:
+        cache["chip"] = load_calibration(pynn, identifier, progress)
     progress("Setting up the chip")
-    pynn.setup()
+    pynn.setup(initial_config=cache["chip"])
     try:
-        pop = pynn.Population(
-            n, pynn.cells.CalibHXNeuronCoba(**spec["neuron_parameters"])
-        )
+        pop = pynn.Population(n, pynn.cells.HXNeuron(**spec["neuron_parameters"]))
         pop.record(["spikes"])
         # The MADC digitises one membrane at a time.
         recorded = pop[k : k + 1]
         recorded.record(["v"])
         if spec["mode"] == INPUT_CONSTANT_CURRENT:
             durations = spec["durations_ms"]
-            progress(
-                f"Calibrating and executing {durations.size} constant-current "
-                "segment(s) (the first calibration can take minutes)"
-            )
+            progress(f"Executing {durations.size} constant-current segment(s)")
             for i, duration in enumerate(durations):
                 pop.set(
-                    constant_current_enable=spec["enable"][i].tolist(),
-                    constant_current_i_offset=spec["offset"][i].tolist(),
+                    constant_current_enable=[bool(v) for v in spec["enable"][i]],
+                    constant_current_i_offset=[int(v) for v in spec["offset"][i]],
                 )
                 last = i == durations.size - 1
                 command = pynn.RunCommand.EXECUTE if last else pynn.RunCommand.APPEND
@@ -297,10 +353,7 @@ def execute_run(spec: dict[str, Any], progress: Progress) -> dict[str, Any]:
                 synapse_type=pynn.synapses.StaticSynapse(weight=spec["weight"]),
                 receptor_type="excitatory",
             )
-            progress(
-                "Calibrating and executing the spike-input run (the first "
-                "calibration can take minutes)"
-            )
+            progress("Executing the spike-input run")
             pynn.run(spec["duration_ms"])
         progress("Reading back spikes and membrane voltage")
         spike_segment = pop.get_data("spikes").segments[-1]
@@ -343,6 +396,8 @@ class Helper:
     def __init__(self, emit: Callable[[dict[str, Any]], None]) -> None:
         self.emit = emit
         self.identifier: str | None = None
+        #: The nightly calibration is loaded once per helper session.
+        self.calibration: dict[str, Any] = {}
 
     def dispatch(self, request_id: Any, command: str, arguments: dict) -> dict:
         def progress(message: str) -> None:
@@ -370,7 +425,7 @@ class Helper:
             }
         if command == "run":
             spec = parse_run_arguments(arguments)
-            result = execute_run(spec, progress)
+            result = execute_run(spec, progress, self.identifier, self.calibration)
             result["identifier"] = self.identifier
             return result
         if command == "shutdown":

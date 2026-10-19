@@ -113,15 +113,27 @@ class FakePynn(types.ModuleType):
         self.irregular = True
         self._View = _View
         self.cells = types.SimpleNamespace(
-            CalibHXNeuronCoba=lambda **kw: ("CalibHXNeuronCoba", kw),
+            HXNeuron=lambda **kw: ("HXNeuron", kw),
             SpikeSourceArray=lambda spike_times: ("SpikeSourceArray", spike_times),
         )
         self.synapses = types.SimpleNamespace(
             StaticSynapse=lambda weight: ("StaticSynapse", weight)
         )
 
-    def setup(self):
-        self.log.append(("setup",))
+        self.nightly_fails = False
+        self.helper = types.SimpleNamespace(
+            chip_from_nightly=self._chip_from_nightly,
+            chip_from_portable_binary=lambda data: ("chip", "binary", data),
+        )
+
+    def _chip_from_nightly(self):
+        self.log.append(("chip_from_nightly",))
+        if self.nightly_fails:
+            raise RuntimeError("no nightly calibration")
+        return ("chip", "nightly")
+
+    def setup(self, *, initial_config):
+        self.log.append(("setup", initial_config))
 
     def end(self):
         self.log.append(("end",))
@@ -167,7 +179,8 @@ def fake_stack(monkeypatch: pytest.MonkeyPatch):
             log.append(("disconnect",))
 
         def get_unique_identifier(self):
-            return "hxcube7fpga3chip61_1"
+            # The real hxcomm returns a list of identifiers.
+            return ["hxcube7fpga3chip61_1"]
 
     dlens = types.ModuleType("dlens_vx_v3")
     dlens.hxcomm = types.SimpleNamespace(ManagedConnection=Connection)  # type: ignore[attr-defined]
@@ -266,9 +279,10 @@ def test_run_constant_current_appends_segments(helper, fake_stack) -> None:
         "constant_current_enable": [True, True],
         "constant_current_i_offset": [500, 250],
     }
-    assert ("record", "CalibHXNeuronCoba", ["spikes"]) in log
-    assert ("record", "CalibHXNeuronCoba[1:2]", ["v"]) in log
-    assert log[0] == ("setup",) and log[-1] == ("end",)
+    assert ("record", "HXNeuron", ["spikes"]) in log
+    assert ("record", "HXNeuron[1:2]", ["v"]) in log
+    assert log[0] == ("chip_from_nightly",)
+    assert log[1] == ("setup", ("chip", "nightly")) and log[-1] == ("end",)
     assert bp.decode_array(result["spikes"]["indices"]).tolist() == [0, 2, 2]
     assert bp.decode_array(result["spikes"]["times_ms"]).tolist() == [0.25, 0.5, 0.75]
     assert result["v"]["neuron"] == 1
@@ -291,7 +305,7 @@ def test_run_spike_input_builds_projection(helper, fake_stack) -> None:
     projection = next(entry for entry in log if entry[0] == "Projection")
     assert projection[1:] == (
         "SpikeSourceArray",
-        "CalibHXNeuronCoba",
+        "HXNeuron",
         "one-to-one",
         ("StaticSynapse", 20),
         "excitatory",
@@ -396,6 +410,62 @@ def test_package_versions_never_raise(helper, monkeypatch) -> None:
         raise helper.importlib.metadata.PackageNotFoundError(name)
 
     monkeypatch.setattr(helper.importlib.metadata, "version", broken)
+    monkeypatch.setattr(helper, "_has_module", lambda name: name == "neo")
     versions = helper.package_versions()
     assert versions["pynn-brainscales"] == "not installed"
+    assert versions["neo"] == "importable (no version metadata)"
     assert versions["numpy"] == "unknown (RuntimeError)"
+
+
+def test_first_identifier_accepts_lists_and_strings(helper) -> None:
+    assert helper.first_identifier(["chip_a", "chip_b"]) == "chip_a"
+    assert helper.first_identifier(("chip_a",)) == "chip_a"
+    assert helper.first_identifier([]) == ""
+    assert helper.first_identifier("chip_a") == "chip_a"
+
+
+def test_calibration_falls_back_to_ebrains_download(
+    helper, fake_stack, monkeypatch
+) -> None:
+    fake_stack.nightly_fails = True
+    opened: list[str] = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            return b"calib"
+
+    def urlopen(url, timeout):
+        opened.append(url)
+        return Response()
+
+    import urllib.request
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    progress: list[str] = []
+    chip = helper.load_calibration(fake_stack, "chip_x", progress.append)
+    assert chip == ("chip", "binary", b"calib")
+    assert opened == [
+        "https://openproject.bioai.eu/data_calibration/hicann-dls-sr-hx/"
+        "chip_x/stable/ebrains-stable/spiking_cocolist.pbin"
+    ]
+    assert any("chip_from_nightly failed" in line for line in progress)
+    with pytest.raises(RuntimeError, match="no nightly"):
+        helper.load_calibration(fake_stack, None, progress.append)
+
+
+def test_calibration_is_loaded_once_per_session(helper, fake_stack) -> None:
+    _serve(
+        helper,
+        [
+            {"id": 1, "command": "run", "arguments": _cc_arguments()},
+            {"id": 2, "command": "run", "arguments": _cc_arguments()},
+        ],
+    )
+    assert fake_stack.log.count(("chip_from_nightly",)) == 1
+    assert fake_stack.log.count(("setup", ("chip", "nightly"))) == 2
