@@ -161,6 +161,16 @@ def test_helper_exit_before_ready(qtbot, make_connection) -> None:
     assert "exit code 3" in blocker.args[0]
 
 
+def test_helper_fatal_error_is_in_the_status_line(qtbot, make_connection) -> None:
+    connection = make_connection("fatal")
+    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+        connection.connect_helper(config(), "")
+    first_line = blocker.args[0].splitlines()[0]
+    assert "exit code 255" in first_line
+    assert "FATAL:   could not open image" in first_line
+    assert connection.status == first_line
+
+
 def test_start_timeout(qtbot, make_connection) -> None:
     connection = make_connection("silent", start_timeout_ms=300)
     with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:

@@ -343,7 +343,10 @@ class Bss2Connection(QtCore.QObject):
             self._end_session("Disconnected.")
             return
         tail = self._stderr.strip().splitlines()[-5:]
-        reason = f"The BrainScaleS-2 helper exited unexpectedly (exit code {code})."
+        reason = f"The BrainScaleS-2 helper exited unexpectedly (exit code {code})"
+        # The last stderr line (e.g. Singularity's FATAL message) is usually
+        # the actual cause, so it goes into the status line itself.
+        reason += f": {tail[-1].strip()}" if tail else "."
         if tail:
             reason += "\n" + "\n".join(tail)
         self._end_session(reason)

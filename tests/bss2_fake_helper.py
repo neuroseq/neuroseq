@@ -3,7 +3,8 @@
 Launched by the tests with ``sys.executable`` instead of ``singularity``. The
 behaviour is chosen with ``FAKE_BSS2_MODE``:
 
-``ok`` (default), ``exit`` (dies before start-up), ``silent`` (never ready),
+``ok`` (default), ``exit`` (dies before start-up), ``fatal`` (Singularity-style
+FATAL message and exit code 255), ``silent`` (never ready),
 ``connect_error``, ``run_error``, ``crash_on_run`` (dies mid-run),
 ``slow_run`` (run never returns).
 """
@@ -123,6 +124,10 @@ class _ManagedConnection:
 def main() -> None:
     if MODE == "exit":
         sys.exit(3)
+    if MODE == "fatal":
+        sys.stderr.write("FATAL:   could not open image /containers/stable/latest\n")
+        sys.stderr.flush()
+        sys.exit(255)
     if MODE == "silent":
         time.sleep(60)
     # Like spack, chatter on both streams before the protocol starts; the

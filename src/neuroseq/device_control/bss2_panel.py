@@ -522,6 +522,16 @@ class Bss2Panel(QtWidgets.QWidget):
                 self, "BrainScaleS-2", "Choose the container image first."
             )
             return
+        if not os.path.exists(settings.container_image):
+            message = (
+                f"The container image {settings.container_image} does not exist "
+                "on this computer.\n\nPull the EBRAINS image (see the "
+                "BrainScaleS-2 user guide) and choose the .sif file with "
+                "Browse, or enter the path of an existing image."
+            )
+            self._log(message.replace("\n\n", " "))
+            QtWidgets.QMessageBox.warning(self, "BrainScaleS-2", message)
+            return
         token = self.token_edit.text().strip() or os.environ.get("QUIGGELDY_TOKEN", "")
         if not token:
             self._log("No EBRAINS token given; quiggeldy will likely refuse access.")

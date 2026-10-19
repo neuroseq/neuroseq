@@ -45,9 +45,11 @@ def _stim(values: np.ndarray | None = None) -> StimArray:
 
 
 @pytest.fixture()
-def panel(qtbot: QtBot, devices, tmp_config_dir) -> Iterator[Bss2Panel]:
+def panel(qtbot: QtBot, devices, tmp_config_dir, tmp_path) -> Iterator[Bss2Panel]:
+    image = tmp_path / "fake.sif"
+    image.write_bytes(b"")
     settings = GuiSettings()
-    settings.bss2_settings = {"container_image": "/fake.sif", "container_app": ""}
+    settings.bss2_settings = {"container_image": str(image), "container_app": ""}
     widget = Bss2Panel(devices.bss2_session(devices), settings=settings)
     qtbot.addWidget(widget)
     widget.set_project(Project())
@@ -339,7 +341,7 @@ def test_workspace_hosts_bss2_tab_and_blocks_close_during_run(
 
 
 def test_browse_image_and_busy_hardware(
-    qtbot, panel, mocker, qmessagebox_calls
+    qtbot, panel, mocker, qmessagebox_calls, tmp_path
 ) -> None:
     mocker.patch(
         "neuroseq.device_control.bss2_panel.getopenfilename",
@@ -349,7 +351,7 @@ def test_browse_image_and_busy_hardware(
     assert panel.image_edit.text() == "/images/lab.sif"
     assert panel._gui_settings.bss2_settings["container_image"] == "/images/lab.sif"
 
-    panel.image_edit.setText("/fake.sif")
+    panel.image_edit.setText(str(tmp_path / "fake.sif"))
     _connect(qtbot, panel)
     panel._session.run = lambda rid, args: False  # type: ignore[method-assign]
     mocker.patch(QUESTION, return_value=QtWidgets.QMessageBox.StandardButton.Yes)
@@ -387,3 +389,11 @@ def test_singularity_version_reports_missing_program(monkeypatch) -> None:
 
     monkeypatch.setattr(bss2_panel.shutil, "which", lambda _name: None)
     assert bss2_panel._singularity_version() == "not found on PATH"
+
+
+def test_connect_refuses_a_missing_image(qtbot, panel, qmessagebox_calls) -> None:
+    panel.image_edit.setText("/containers/stable/latest-missing")
+    panel.connect_hardware()
+    assert qmessagebox_calls and "does not exist" in qmessagebox_calls[0]["text"]
+    assert "does not exist" in panel.log_view.toPlainText()
+    assert panel._session.state == STATE_DISCONNECTED
