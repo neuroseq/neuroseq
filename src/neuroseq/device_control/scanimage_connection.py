@@ -25,6 +25,8 @@ class ScanImageConnection(QtCore.QObject):
     run_finished = QtCore.Signal(str)
     error = QtCore.Signal(str)
     connected_changed = QtCore.Signal(bool)
+    #: Live preview is one device-wide state shared by every workspace.
+    live_preview_changed = QtCore.Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -41,7 +43,7 @@ class ScanImageConnection(QtCore.QObject):
         self.connected = False
         self._closing = False
         self.channel = 1
-        self.live_preview = False
+        self._live_preview = False
         self._last_preview_request = float("-inf")
         self.run_id: str | None = None
         self._expected_frames: int | None = None
@@ -55,6 +57,17 @@ class ScanImageConnection(QtCore.QObject):
         self.deadline = QtCore.QTimer(self)
         self.deadline.setSingleShot(True)
         self.deadline.timeout.connect(self._timed_out)
+
+    @property
+    def live_preview(self) -> bool:
+        return self._live_preview
+
+    @live_preview.setter
+    def live_preview(self, live: bool) -> None:
+        live = bool(live)
+        if live != self._live_preview:
+            self._live_preview = live
+            self.live_preview_changed.emit(live)
 
     def connect_session(self, python: str, session: str) -> None:
         if self.process.state() != QtCore.QProcess.ProcessState.NotRunning:

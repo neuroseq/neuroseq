@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 from qtpy import QtCore
@@ -20,10 +21,18 @@ class ScanImageControls(QtWidgets.QWidget):
     channel_changed = QtCore.Signal(int)
 
     def __init__(
-        self, connection: ScanImageConnection, settings: GuiSettings, parent=None
+        self,
+        connection: ScanImageConnection,
+        settings: GuiSettings,
+        parent=None,
+        *,
+        owns_run: Callable[[str | None], bool] | None = None,
     ) -> None:
         super().__init__(parent)
         self.connection = connection
+        # Only the controls whose workspace started a run arm and act on its
+        # first-frame timeout; every workspace sees the shared connection.
+        self._owns_run = owns_run or (lambda run_id: run_id is not None)
         # Remembered across sessions in NeuroSeq's config file, like the Fiji path.
         self.settings = settings
         self._last_frame_at: float | None = None
@@ -89,10 +98,10 @@ class ScanImageControls(QtWidgets.QWidget):
         layout.addLayout(form)
         actions = QtWidgets.QHBoxLayout()
         self.live_check = QtWidgets.QCheckBox("Live view")
-        self.live_check.toggled.connect(self.live_changed.emit)
-        self.live_check.toggled.connect(
-            lambda checked: setattr(connection, "live_preview", checked)
-        )
+        self.live_check.setChecked(connection.live_preview)
+        # The checkbox edits the connection's shared preview state; every
+        # workspace's checkbox and video follow it via live_preview_changed.
+        self.live_check.toggled.connect(self._live_toggled)
         self.channel_spin = QtWidgets.QSpinBox()
         self.channel_spin.setRange(1, 32)
         self.channel_spin.valueChanged.connect(self._channel)
@@ -130,7 +139,8 @@ class ScanImageControls(QtWidgets.QWidget):
         connection.status_changed.connect(self._status)
         connection.frame_received.connect(self._frame)
         connection.error.connect(self.show_message)
-        self._connected(False)
+        connection.live_preview_changed.connect(self._live_preview_changed)
+        self._update_connected_ui(connection.connected)
         self._freshness_timer = QtCore.QTimer(self)
         self._freshness_timer.setInterval(1000)
         self._freshness_timer.timeout.connect(self._freshness)
@@ -144,9 +154,18 @@ class ScanImageControls(QtWidgets.QWidget):
             (self.connection.status_changed, self._status),
             (self.connection.frame_received, self._frame),
             (self.connection.error, self.show_message),
+            (self.connection.live_preview_changed, self._live_preview_changed),
         ):
             with contextlib.suppress(TypeError, RuntimeError):
                 signal.disconnect(slot)
+
+    def _live_toggled(self, checked: bool) -> None:
+        self.connection.live_preview = checked
+
+    def _live_preview_changed(self, live: bool) -> None:
+        with QtCore.QSignalBlocker(self.live_check):
+            self.live_check.setChecked(live)
+        self.live_changed.emit(live)
 
     def _browse_python(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -175,6 +194,12 @@ class ScanImageControls(QtWidgets.QWidget):
         self.connection.connect_session(python, self.session_edit.text().strip())
 
     def _connected(self, connected: bool) -> None:
+        self._update_connected_ui(connected)
+        if not connected:
+            self.connection.live_preview = False
+            self._waiting_since = None
+
+    def _update_connected_ui(self, connected: bool) -> None:
         self.connect_button.setEnabled(not connected)
         self.python_edit.setEnabled(not connected)
         self.session_edit.setEnabled(not connected)
@@ -185,9 +210,6 @@ class ScanImageControls(QtWidgets.QWidget):
             self.abort_button,
         ):
             widget.setEnabled(connected)
-        if not connected:
-            self.live_check.setChecked(False)
-            self._waiting_since = None
 
     def _channel(self, channel: int) -> None:
         self.connection.channel = channel
@@ -228,6 +250,7 @@ class ScanImageControls(QtWidgets.QWidget):
         if (
             run.get("state") == "waiting_for_first_frame"
             and run.get("id") == self.connection.run_id
+            and self._owns_run(run.get("id"))
         ):
             if self._waiting_since is None:
                 self._waiting_since = time.monotonic()
@@ -252,6 +275,8 @@ class ScanImageControls(QtWidgets.QWidget):
             and time.monotonic() - self._waiting_since > self.timeout_spin.value()
         ):
             self._waiting_since = None
+            if not self._owns_run(self.connection.run_id):
+                return
             self.connection.command("abort")
             self.status_label.setText("First-frame timeout; abort requested.")
 

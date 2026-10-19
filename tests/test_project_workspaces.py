@@ -546,3 +546,36 @@ def test_simulation_guard_is_released_on_failure_cancel_and_close(
     window._close_tab(0)
     qtbot.waitUntil(lambda: workspace._disposed)
     assert SimulationGuard.held_by() is None
+
+
+def test_first_frame_timeout_belongs_to_the_workspace_that_started_the_run(
+    window, mocker
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    connection = window.devices.scanimage
+    command = mocker.patch.object(connection, "command", return_value=True)
+    first._start_scanimage_recording(
+        {"run_id": "a", "name": "Run", "directory": "/x", "frames": 4}
+    )
+    connection.run_id = "a"
+    try:
+        connection.status_changed.emit(
+            {
+                "acq_state": "grab",
+                "run": {"id": "a", "state": "waiting_for_first_frame"},
+            }
+        )
+        assert first.scanimage_controls._waiting_since is not None
+        assert second.scanimage_controls._waiting_since is None
+        # Even a stale timer in another workspace must not abort this run.
+        second.scanimage_controls._waiting_since = -1e9
+        second.scanimage_controls._freshness()
+        assert all(call.args[0] != "abort" for call in command.call_args_list)
+        first.scanimage_controls._waiting_since = -1e9
+        first.scanimage_controls._freshness()
+        command.assert_called_with("abort")
+    finally:
+        connection.run_id = None
+        connection.live_preview = False
+        first.project.dirty = False

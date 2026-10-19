@@ -971,3 +971,52 @@ def test_live_preview_and_recorded_playback_share_orientation(
     widget.set_live(True)
     widget.show_live_frame(received[0])
     np.testing.assert_array_equal(widget.current_frame, recorded)
+
+
+def test_live_preview_is_shared_and_reflected_in_every_workspace(
+    qtbot, mocker, recording
+):
+    from neuroseq.gui import Gui
+    from neuroseq.project import Project
+
+    window = Gui()
+    qtbot.addWidget(window)
+    first = window.active_workspace
+    second = window._add_workspace(Project())
+    connection = window.devices.scanimage
+
+    def ready(run_id):
+        result = index_recording(recording[0])
+        result.update(run_id=run_id, status="completed")
+        first._scanimage_recording_ready(result)
+
+    second.scanimage_controls.live_check.setChecked(True)
+    assert connection.live_preview
+    assert first.scanimage_controls.live_check.isChecked()
+    assert first.calcium_video_widget._live and second.calcium_video_widget._live
+    third = window._add_workspace(Project())
+    assert third.scanimage_controls.live_check.isChecked()
+    assert third.calcium_video_widget._live
+
+    # A recording finishing in one tab keeps a preview another tab turned on.
+    mocker.patch.object(connection, "command", return_value=True)
+    first._start_scanimage_recording(
+        {"run_id": "a", "name": "A", "directory": "/x", "frames": 4}
+    )
+    ready("a")
+    assert connection.live_preview
+    assert second.scanimage_controls.live_check.isChecked()
+
+    # A preview the recording itself switched on is switched off afterwards.
+    first.scanimage_controls.live_check.setChecked(False)
+    assert not connection.live_preview and not second.calcium_video_widget._live
+    first._start_scanimage_recording(
+        {"run_id": "b", "name": "B", "directory": "/x", "frames": 4}
+    )
+    assert connection.live_preview and third.scanimage_controls.live_check.isChecked()
+    ready("b")
+    assert not connection.live_preview
+    assert not third.scanimage_controls.live_check.isChecked()
+    for workspace in window.workspaces:
+        workspace.project.dirty = False
+    window.close()

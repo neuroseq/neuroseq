@@ -56,11 +56,15 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._video_widgets = video_widgets
         self._show_video = show_video
         self.run_ids: set[str] = set()
+        # Runs for which this workspace switched the shared live preview on.
+        self._preview_enabled_for: set[str] = set()
         self._live_frames_connected = False
         self._disposed = False
         self.dialog = QtWidgets.QDialog(parent)
         self.dialog.setWindowTitle("Image acquisition")
-        self.controls = ScanImageControls(connection, settings, self.dialog)
+        self.controls = ScanImageControls(
+            connection, settings, self.dialog, owns_run=self.run_ids.__contains__
+        )
         QtWidgets.QVBoxLayout(self.dialog).addWidget(self.controls)
         self.controls.live_changed.connect(self.set_scanimage_live)
         self.controls.channel_changed.connect(self.set_scanimage_channel)
@@ -68,6 +72,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         connection.status_changed.connect(self.scanimage_status)
         connection.recording_ready.connect(self.scanimage_recording_ready)
         connection.run_finished.connect(self._forget_run)
+        if connection.live_preview:
+            # Opened while another workspace has the shared preview on.
+            video_widget.set_live(True)
         self.set_active(True)
 
     @property
@@ -104,6 +111,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
+        self._preview_enabled_for.discard(run_id)
 
     def start_scanimage_recording(self, arguments: dict) -> None:
         if self.connection.run_id is not None:
@@ -136,7 +144,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             project.imaging_acquisitions.append(record)
             project.mark_dirty()
             self.run_ids.add(arguments["run_id"])
-            self.controls.live_check.setChecked(True)
+            if not self.connection.live_preview:
+                self._preview_enabled_for.add(arguments["run_id"])
+                self.connection.live_preview = True
 
     def scanimage_status(self, status: dict) -> None:
         run = status.get("run", {})
@@ -177,7 +187,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def set_scanimage_channel(self, channel: int) -> None:
         index = self._project().calcium_scanimage_index
-        if index is not None and not self.controls.live_check.isChecked():
+        if index is not None and not self.connection.live_preview:
             channel = self.recorded_scanimage_channel(index, channel)
         for widget in self._video_widgets():
             widget.set_recorded_channel(channel)
@@ -199,6 +209,10 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if result["run_id"] not in self.run_ids:
             return
         self.run_ids.remove(result["run_id"])
+        # Only undo a preview this recording switched on; another workspace
+        # may have been watching the shared preview before.
+        preview_was_ours = result["run_id"] in self._preview_enabled_for
+        self._preview_enabled_for.discard(result["run_id"])
         project = self._project()
         record = next(
             r for r in project.imaging_acquisitions if r["run_id"] == result["run_id"]
@@ -225,7 +239,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.controls.show_message(f"Recording {name} added to the imaging data.")
         project.mark_dirty()
         project.update_limits()
-        self.controls.live_check.setChecked(False)
+        if preview_was_ours:
+            self.connection.live_preview = False
         self.recording_added.emit()
         # Movie availability does not imply extracted traces are ready. Do not
         # call SysCon2StimulationHost.acquisition_imported here.
