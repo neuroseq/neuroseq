@@ -94,7 +94,7 @@ Packages under `src/neuroseq/`:
 
 - `importers/` — importers and import dialogs (TIFF, Suite2p, Cellpose, patch clamp, SysCon2, ScanImage)
 - `export/` — Igor2 and SysCon2 exporters, export dialogs, power LUTs
-- `device_control/` — ScanImage and SysCon2 connections plus the SysCon2 "Stimulation setup" panel
+- `device_control/` — ScanImage, SysCon2 and BrainScaleS-2 connections plus the "Stimulation setup" pane (`stimulation_setup_widget.py`, one tab per target: the SysCon2/HOLO4D panel and the BrainScaleS-2 tab `bss2_panel.py`). BSS-2: `bss2_protocol.py` (Qt-free stim → segments/spikes, request/readback, launch command), `bss2_connection.py` (QProcess transport to `resources/bss2/neuroseq_bss2_helper.py`, which runs inside the EBRAINS container and must import only stdlib/numpy/the BSS-2 stack, never `neuroseq`)
 - `stimulation/` — `StimArray`, stim editor and dialogs; `static_input/` (drawn patterns) and `dynamic_input/` (closed-loop routines: STDP, rheobase)
 - `visualization/`, `visualization_support/` — plot widgets and their shared helpers (see below)
 - `llm/` — chat assistant backends, settings, and plugin-write dialog
@@ -110,7 +110,8 @@ dialog and its helpers sit together in one package rather than in global
 - **Pick the package by workflow.** Data coming into a project → `importers/`
   (`importer_<source>.py` holds the Qt-free parsing, `<source>_import_dialog.py`
   the GUI). Data leaving a project → `export/` (`exporter_<target>.py` + dialogs).
-  Talking to lab hardware/software (ScanImage, SysCon2/HOLO4D) → `device_control/`.
+  Talking to lab hardware/software (ScanImage, SysCon2/HOLO4D, BrainScaleS-2) →
+  `device_control/`.
   Designing stimuli → `stimulation/`: drawn/static patterns in
   `stimulation/static_input/`, closed-loop routines (rheobase, STDP) in
   `stimulation/dynamic_input/`. Plotting → `visualization/`. Model-specific support

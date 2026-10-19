@@ -66,6 +66,8 @@ Each widget can be shown or hidden in menu "View" by using the corresponding too
 
 In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor — turn it off when the per-pixel coordinate label gets in the way of dense plots, and back on when you need it for precise selection.
 
+**View → Show Stimulation setup** opens the stimulus-delivery pane, with one tab per target: **SysCon2 (HOLO4D)** for the holographic stimulation rig (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md)) and **BrainScaleS-2** for the neuromorphic chip (see [Deliver stimuli to BrainScaleS-2](brainscales2_delivery.md)).
+
 **View → Toggle Grid** turns the time/neuron grid overlays on or off for the stim editor. The grid spacing follows the stim array's `dt`, so it doubles as a sample ruler.
 
 ### Saving and loading
