@@ -2,6 +2,7 @@ function reply = neuroseq_scanimage(operation, payload)
 % NeuroSeq adapter for ScanImage Premium 2023.1.0, single-plane raster imaging.
 % The installed API is checked before controls become available.
 persistent run ownedFocus
+started = tic;
 if isempty(ownedFocus), ownedFocus = false; end
 if isempty(run), run = struct('id', '', 'state', 'idle', 'directory', ''); end
 args = jsondecode(payload);
@@ -80,14 +81,25 @@ switch operation
         assert(slices == 1, 'NeuroSeq:MultiplePlanes', 'Only single-plane acquisition is supported.');
         assert(~hSI.hRoiManager.mroiEnable, 'Multi-ROI acquisition is not supported.');
         assert(~hSI.hFastZ.enable, 'FastZ must be disabled.');
-        assert(~isempty(hSI.hChannels.channelSave), 'Select at least one saved channel in ScanImage.');
+        channels = [];
+        if isfield(args,'channels') && ~isempty(args.channels)
+            % Several channels in one recording; ScanImage's own selection
+            % is restored afterwards with the other settings.
+            channels = unique(double(args.channels(:)'));
+            available = hSI.hChannels.channelsAvailable;
+            assert(all(channels >= 1 & channels <= available & channels == fix(channels)), ...
+                'NeuroSeq:InvalidChannels', 'Saved channels must be between 1 and %d.', available);
+        end
+        assert(~isempty(channels) || ~isempty(hSI.hChannels.channelSave), ...
+            'Select at least one saved channel.');
         assert(args.frames >= 1 && args.frames == fix(args.frames), 'Invalid frame count.');
         assert(~exist(args.directory, 'dir'), 'Run directory already exists.');
         [ok, msg] = mkdir(args.directory); assert(ok, msg);
         % Retain settings until completion/abort and restore only once idle.
         old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
             hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
-            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop')};
+            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop'), ...
+            hSI.hChannels.channelSave};
         run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, 'old',{old});
         try
             hSI.hScan2D.logFilePath = args.directory;
@@ -96,6 +108,7 @@ switch operation
             hSI.extTrigEnable = logical(args.external_trigger);
             hSI.hStackManager.framesPerSlice = args.frames;
             hSI.hChannels.loggingEnable = true;
+            if ~isempty(channels), hSI.hChannels.channelSave = channels; end
             % Raw frames, one acquisition: averaging would drop frames and a
             % multi-acquisition loop could delay acqModeDone.
             if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = 1; end
@@ -134,6 +147,9 @@ publicRun = run;
 if isfield(publicRun,'old'), publicRun = rmfield(publicRun,'old'); end
 out = struct('acq_state',hSI.acqState, 'run',publicRun, 'fps',hSI.hRoiManager.scanFrameRate, ...
     'matlab_version',version, 'channels',hSI.hChannels.channelDisplay, 'files',{{}});
+% For the Image acquisition dialog's channel choice.
+out.channels_available = hSI.hChannels.channelsAvailable;
+out.saved_channels = hSI.hChannels.channelSave;
 out.can_abort = ownedFocus || any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}));
 out.settings = recording_settings(hSI);
 if isfield(run,'settings'), out.settings = run.settings; end
@@ -151,21 +167,86 @@ if ~isempty(run.directory) && strcmp(hSI.acqState,'idle')
     out.files = arrayfun(@(f) fullfile(f.folder,f.name), files, 'UniformOutput',false);
 end
 if strcmp(operation,'status') && isfield(args,'channel') && ~strcmp(hSI.acqState,'idle')
-    channels = hSI.hChannels.channelDisplay;
-    if isprop(hSI.hDisplay,'lastFrameChannels'), channels = hSI.hDisplay.lastFrameChannels; end
+    [images, channels, problem] = display_frames(hSI);
     idx = find(channels == args.channel, 1);
-    images = hSI.hDisplay.lastFrame;
-    if ~isempty(idx) && numel(images) >= idx && ~isempty(images{idx}) && ismatrix(images{idx})
+    if isempty(problem) && isempty(idx)
+        problem = sprintf('Channel %d is not displayed in ScanImage.', args.channel);
+    elseif isempty(problem) && (numel(images) < idx || isempty(images{idx}) || ~ismatrix(images{idx}))
+        problem = 'ScanImage has no frame of this channel yet.';
+    end
+    if ~isempty(problem)
+        out.preview_problem = problem;
+    else
         source = images{idx};
-        stride = max(1, ceil(max(size(source)) / 256));
-        img = single(source(1:stride:end, 1:stride:end));
-        out.frame = struct('shape',size(img), 'dtype','float32', 'order','F', ...
+        % Up to 512 pixels per side as recorded; larger frames are averaged
+        % in blocks rather than subsampled, which would add noise.
+        factor = max(1, ceil(max(size(source)) / 512));
+        if factor == 1 && isa(source, 'int16')
+            img = source; dtype = 'int16';
+        elseif factor == 1
+            img = single(source); dtype = 'float32';
+        else
+            rows = floor(size(source,1) / factor) * factor;
+            cols = floor(size(source,2) / factor) * factor;
+            blocks = reshape(single(source(1:rows,1:cols)), factor, rows/factor, factor, cols/factor);
+            img = reshape(mean(mean(blocks,1),3), rows/factor, cols/factor); dtype = 'float32';
+        end
+        out.frame = struct('shape',size(img), 'dtype',dtype, 'order','F', ...
             'data',matlab.net.base64encode(typecast(img(:),'uint8')));
-        if isprop(hSI.hDisplay,'lastFrameNumber'), out.frame.number = hSI.hDisplay.lastFrameNumber; end
-        if isprop(hSI.hDisplay,'lastFrameTimestamp'), out.frame.timestamp = hSI.hDisplay.lastFrameTimestamp; end
+        % ScanImage's display window for the channel, so the preview has
+        % the same contrast as the ScanImage window.
+        luts = hSI.hChannels.channelLUT;
+        if iscell(luts) && numel(luts) >= args.channel
+            out.frame.lut = double(luts{args.channel});
+        elseif isnumeric(luts) && size(luts,1) >= args.channel
+            out.frame.lut = double(luts(args.channel,:));
+        end
+        if isprop(hSI.hDisplay,'displayRollingAverageFactor')
+            out.frame.display_average = double(hSI.hDisplay.displayRollingAverageFactor);
+        end
+        number = read_display(hSI, 'lastFrameNumber');
+        if ~isempty(number), out.frame.number = number; end
+        timestamp = read_display(hSI, 'lastFrameTimestamp');
+        if ~isempty(timestamp), out.frame.timestamp = timestamp; end
     end
 end
+out.elapsed_ms = 1000 * toc(started);
 reply = jsonencode(out);
+end
+
+function [images, channels, problem] = display_frames(hSI)
+% The last displayed frames and their channels. Reading these can fail in
+% ScanImage 2023.1.0 itself (Display.get.lastFrameChannels raises "Brace
+% indexing is not supported" while its display holds no frames), so a failed
+% read skips the preview frame instead of failing the whole status reply.
+images = {}; problem = '';
+channels = hSI.hChannels.channelDisplay;
+if isprop(hSI.hDisplay,'lastFrameChannels')
+    try
+        channels = hSI.hDisplay.lastFrameChannels;
+    catch err
+        % Fall back to the displayed channels, in the same order.
+        problem = ['lastFrameChannels: ' err.message];
+    end
+end
+try
+    images = hSI.hDisplay.lastFrame;
+    if ~iscell(images), images = {images}; end
+    problem = '';  % the frames themselves are what the preview needs
+catch err
+    problem = ['ScanImage display frame not readable: ' err.message];
+end
+end
+
+function value = read_display(hSI, name)
+% A display property, or empty when it is missing or cannot be read.
+value = [];
+if isprop(hSI.hDisplay, name)
+    try
+        value = hSI.hDisplay.(name);
+    catch
+    end
+end
 end
 
 function value = optional_prop(obj, name)
@@ -186,6 +267,7 @@ if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
     hSI.hStackManager.framesPerSlice = old{5}; hSI.hChannels.loggingEnable = old{6};
     if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = old{7}; end
     if ~isempty(old{8}), hSI.acqsPerLoop = old{8}; end
+    if numel(old) >= 9, hSI.hChannels.channelSave = old{9}; end
     run = rmfield(run,'old');
 end
 end
