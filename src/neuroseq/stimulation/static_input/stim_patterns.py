@@ -5,8 +5,38 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from neuroseq.example_models.elise import _FUER_ELISE_INTRO
 from neuroseq.stimulation.stim import DrawStimType
+
+# Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
+# Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
+# (chord). Max pitch index is 12, so 13 visible neurons cover all pitches.
+# Source: sequence-learning/scripts/patterns/fuer_elise_original.txt
+FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
+    0,
+    1,
+    0,
+    1,
+    0,
+    4,
+    2,
+    3,
+    (5, 11),
+    (5, 10),
+    8,
+    7,
+    6,
+    5,
+    (4, 12),
+    (4, 10),
+    (4, 9),
+    7,
+    3,
+    4,
+    (5, 11),
+    (5, 10),
+    (5, 8),
+    5,
+]
 
 
 def _validate_common(
@@ -142,13 +172,13 @@ def generate_fuer_elise(
     )
     if pulse_repetitions < 1:
         raise ValueError("pulse_repetitions must be at least 1")
-    n_events = len(_FUER_ELISE_INTRO)
+    n_events = len(FUER_ELISE_INTRO)
     event_n = pulse_repetitions * (pulse_n + ipi_n)
     total_n = repeats * n_events * event_n
     values = np.zeros((total_n, n_neurons), dtype=float)
     for repeat_index in range(repeats):
         repeat_offset = repeat_index * n_events * event_n
-        for event_index, event in enumerate(_FUER_ELISE_INTRO):
+        for event_index, event in enumerate(FUER_ELISE_INTRO):
             pitches = event if isinstance(event, tuple) else (event,)
             for pulse_index in range(pulse_repetitions):
                 t0 = (

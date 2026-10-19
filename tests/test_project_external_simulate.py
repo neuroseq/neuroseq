@@ -162,6 +162,35 @@ def test_archive_load_supports_optional_backend_migration(
     assert not loaded.dirty
 
 
+def test_backend_migration_failure_keeps_simulator_loaded(
+    tmp_path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    project = Project()
+    project.external_simulate_path = "neuroseq:custom_backend"
+    archive = tmp_path / "custom_backend.nseq"
+    project.save(archive, _full_options())
+
+    def migrate_project(loaded: Project) -> None:
+        raise RuntimeError("boom")
+
+    backend = SimpleNamespace(
+        simulate=lambda *args, **kwargs: None, migrate_project=migrate_project
+    )
+    monkeypatch.setattr(
+        "neuroseq.project.importlib.import_module",
+        lambda name: SimpleNamespace(get_simulator=lambda: backend),
+    )
+
+    with caplog.at_level("ERROR"):
+        loaded = Project(archive)
+
+    assert loaded.external_simulator is backend
+    assert callable(loaded.external_simulate_function)
+    assert "backend migration failed" in caplog.text
+    assert "boom" in caplog.text
+    assert "Failed to resolve external_simulate_path" not in caplog.text
+
+
 def test_metadata_load_failure_does_not_break_load(tmp_path, monkeypatch):
     project = Project()
     project.external_simulate_path = "neuroseq:not_a_real_module"

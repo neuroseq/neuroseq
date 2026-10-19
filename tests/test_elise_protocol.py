@@ -9,9 +9,9 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.elise_support.replay_metrics import save_learning_curves_csv
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.project_workspace import ProjectWorkspace
-from neuroseq.resources.analysis_plugins._replay_metrics import save_learning_curves_csv
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
@@ -271,9 +271,7 @@ def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
 
 
 def test_elise_protocol_dialog_values(qtbot: QtBot) -> None:
-    from neuroseq.resources.analysis_plugins._elise_protocol_dialog import (
-        EliseProtocolDialog,
-    )
+    from neuroseq.elise_support.protocol_dialog import EliseProtocolDialog
 
     dlg = EliseProtocolDialog()
     qtbot.addWidget(dlg)
@@ -321,7 +319,7 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
     qtbot: QtBot, monkeypatch, mocker
 ) -> None:
     monkeypatch.setattr(
-        "neuroseq.resources.analysis_plugins._elise_workflows.getsavefilename",
+        "neuroseq.elise_support.workflows.getsavefilename",
         lambda *a, **k: ("", ""),
     )
     gui = ProjectWorkspace()
@@ -402,11 +400,11 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
             }
 
     monkeypatch.setattr(
-        "neuroseq.resources.analysis_plugins._elise_protocol_dialog.EliseProtocolDialog",
+        "neuroseq.elise_support.protocol_dialog.EliseProtocolDialog",
         _FakeDialog,
     )
     monkeypatch.setattr(
-        "neuroseq.resources.analysis_plugins._elise_workflows.getsavefilename",
+        "neuroseq.elise_support.workflows.getsavefilename",
         lambda *a, **k: ("", ""),
     )
 

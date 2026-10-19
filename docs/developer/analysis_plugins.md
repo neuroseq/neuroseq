@@ -27,11 +27,12 @@ See [`src/neuroseq/resources/analysis_plugins/mean_activity.py`](../../src/neuro
 
 ## Advanced Interactive Example
 
-The ELiSe plugins keep their supporting code in the same directory:
-`_replay_metrics.py` provides replay metrics and CSV export,
-`_elise_workflows.py` connects project data to the analysis windows, and
-`_elise_protocol_dialog.py` provides protocol settings. Their leading
-underscores exclude them from plugin discovery.
+The ELiSe plugins are thin wrappers; their supporting code is a regular
+package, `src/neuroseq/elise_support/`: `replay_metrics.py` provides replay
+metrics and CSV export, `workflows.py` connects project data to the analysis
+windows, and `protocol_dialog.py` provides protocol settings. Keep core code
+out of the plugin folder: it is scanned and executed on every right-click
+menu and is excluded from coverage.
 
 For an advanced plugin example with UI controls, see [`src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py`](../../src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py).
 

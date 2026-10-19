@@ -2,8 +2,8 @@ import numpy as np
 
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
+from neuroseq.elise_support import workflows as elise_workflows
 from neuroseq.project import Project
-from neuroseq.resources.analysis_plugins import _elise_workflows as elise_workflows
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 

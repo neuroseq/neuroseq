@@ -19,7 +19,7 @@ from neuroseq.project import Project
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 if TYPE_CHECKING:
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
 
 def replay_inputs(
@@ -41,15 +41,11 @@ def replay_inputs(
     return trace, np.asarray(stim.values), float(stim.dt)
 
 
-def analyse_replay(window: Gui) -> None:
+def analyse_replay(window: ProjectWorkspace) -> None:
     import neuroseq.resources.analysis_plugins.elise_target_mse as plugin_mod
+    from neuroseq.elise_support.replay_metrics import compute_performance_against_target
+    from neuroseq.elise_support.replay_metrics import save_replay_metrics_csv
     from neuroseq.example_models.elise import build_target_rate_pattern
-    from neuroseq.resources.analysis_plugins._replay_metrics import (
-        compute_performance_against_target,
-    )
-    from neuroseq.resources.analysis_plugins._replay_metrics import (
-        save_replay_metrics_csv,
-    )
 
     inputs = window._elise_replay_inputs()
     if inputs is None:
@@ -206,7 +202,7 @@ def protocol_inputs(
     return exc_values, inh_values, float(exc.dt)
 
 
-def update_stim_arrays(window: Gui, result: dict) -> None:
+def update_stim_arrays(window: ProjectWorkspace, result: dict) -> None:
     """Replace opsin_exc/opsin_inh with the protocol's full-timeline stims.
 
     The teaching pattern is present during training cycles and blank during
@@ -243,11 +239,9 @@ def update_stim_arrays(window: Gui, result: dict) -> None:
     window.stim_editor.set_project(window.project)
 
 
-def finish_protocol(window: Gui, result: dict) -> None:
+def finish_protocol(window: ProjectWorkspace, result: dict) -> None:
     import neuroseq.resources.analysis_plugins.elise_learning_curves as plugin_mod
-    from neuroseq.resources.analysis_plugins._replay_metrics import (
-        save_learning_curves_csv,
-    )
+    from neuroseq.elise_support.replay_metrics import save_learning_curves_csv
 
     # Rebuild the opsin stim arrays to the full protocol timeline (teaching
     # pattern during training, blank during teacher-off validation/replay)

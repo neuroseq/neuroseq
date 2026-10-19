@@ -17,9 +17,7 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
-from neuroseq.resources.analysis_plugins._replay_metrics import (
-    compute_performance_against_target,
-)
+from neuroseq.elise_support.replay_metrics import compute_performance_against_target
 
 PLUGIN_ID = "elise_target_mse"
 PLUGIN_NAME = "ELiSe target MSE (vs teaching pattern)"

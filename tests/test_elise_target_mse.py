@@ -6,13 +6,11 @@ import brian2.numpy_ as np
 import pytest
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.elise_support.replay_metrics import compute_performance_against_target
+from neuroseq.elise_support.replay_metrics import save_replay_metrics_csv
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.example_models.elise import _detect_pattern_cycle
 from neuroseq.example_models.elise import build_target_rate_pattern
-from neuroseq.resources.analysis_plugins._replay_metrics import (
-    compute_performance_against_target,
-)
-from neuroseq.resources.analysis_plugins._replay_metrics import save_replay_metrics_csv
 
 # ---------- compute_performance_against_target ----------
 

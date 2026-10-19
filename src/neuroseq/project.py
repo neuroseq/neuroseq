@@ -222,17 +222,26 @@ class Project:
             if self.external_simulate_path is not None:
                 try:
                     self.load_NN()
-                    migrate_project = getattr(
-                        self.external_simulator, "migrate_project", None
-                    )
-                    if callable(migrate_project):
-                        migrate_project(self)
                 except Exception as e:
                     self.logger.warning(
                         f"Failed to resolve external_simulate_path "
                         f"{self.external_simulate_path!r}: {e}"
                     )
                     self.external_simulate_function = None
+                else:
+                    migrate_project = getattr(
+                        self.external_simulator, "migrate_project", None
+                    )
+                    if callable(migrate_project):
+                        # A failing migration leaves the archive data as
+                        # stored but must not unload a working backend.
+                        try:
+                            migrate_project(self)
+                        except Exception:
+                            self.logger.exception(
+                                f"External simulation backend migration failed "
+                                f"for {self.external_simulate_path!r}"
+                            )
             for experiment in self.experiments.values():
                 self.max_time_secs = max(self.max_time_secs, experiment.duration)
             for stim_array in self.stim_arrays.values():

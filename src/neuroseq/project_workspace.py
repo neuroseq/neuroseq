@@ -18,7 +18,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-import neuroseq.resources.analysis_plugins._elise_workflows as elise_workflows
+import neuroseq.elise_support.workflows as elise_workflows
 from neuroseq import __version__
 from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
@@ -3414,10 +3414,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         return elise_workflows.protocol_inputs(self.project)
 
     def _run_elise_protocol(self) -> None:
+        from neuroseq.elise_support.protocol_dialog import EliseProtocolDialog
         from neuroseq.example_models.elise import run_protocol as elise_run_protocol
-        from neuroseq.resources.analysis_plugins._elise_protocol_dialog import (
-            EliseProtocolDialog,
-        )
 
         inputs = self._elise_protocol_inputs()
         if inputs is None:

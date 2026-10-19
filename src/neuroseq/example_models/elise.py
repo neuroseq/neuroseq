@@ -28,11 +28,12 @@ from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.elise_support.replay_metrics import compute_performance_against_target
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import ProgressCallback
-from neuroseq.resources.analysis_plugins._replay_metrics import (
-    compute_performance_against_target,
+from neuroseq.stimulation.static_input.stim_patterns import (
+    FUER_ELISE_INTRO as _FUER_ELISE_INTRO,
 )
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -943,7 +944,7 @@ class Elise(NN):
         Network state (voltages, rates, weights) carries across every phase —
         there is no reset between cycles, matching the paper. The metric is the
         shift-aligned MSE / Pearson correlation
-        (:func:`neuroseq.resources.analysis_plugins._replay_metrics.compute_performance_against_target`).
+        (:func:`neuroseq.elise_support.replay_metrics.compute_performance_against_target`).
 
         Parameters
         ----------
@@ -1295,36 +1296,8 @@ def get_simulator() -> Elise:
 _SIMULATOR = Elise()
 
 
-# Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
-# Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
-# (chord). Max pitch index is 12, so 13 visible neurons cover all pitches.
-# Source: sequence-learning/scripts/patterns/fuer_elise_original.txt
-_FUER_ELISE_INTRO: list[int | tuple[int, ...]] = [
-    0,
-    1,
-    0,
-    1,
-    0,
-    4,
-    2,
-    3,
-    (5, 11),
-    (5, 10),
-    8,
-    7,
-    6,
-    5,
-    (4, 12),
-    (4, 10),
-    (4, 9),
-    7,
-    3,
-    4,
-    (5, 11),
-    (5, 10),
-    (5, 8),
-    5,
-]
+# Beethoven "Für Elise" opening phrase (Kriener et al., 2024, Fig. 2); the
+# note sequence lives in the lightweight stim_patterns module (imported above).
 _FUER_ELISE_N_PITCHES = 13
 
 
