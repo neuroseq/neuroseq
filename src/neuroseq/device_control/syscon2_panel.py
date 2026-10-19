@@ -321,7 +321,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             "Open the stimulation export dialog and, once it generates a script, "
             "import it if connected. Import does not select, upload, or run it."
         )
-        self.btn_send_to_syscon2.clicked.connect(self._on_send_to_syscon2_clicked)
+        self.btn_send_to_syscon2.clicked.connect(self.open_generator_dialog)
         layout.addWidget(self.btn_send_to_syscon2)
 
         self.btn_export_current = QtWidgets.QPushButton(
@@ -945,7 +945,12 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
             self._import_sequence(path, None)
 
-    def _on_send_to_syscon2_clicked(self) -> None:
+    def open_generator_dialog(self, *, send_to_syscon: bool = True) -> None:
+        """Open the stimulation generator with the stored folder and settings.
+
+        Used by "Send to SysCon2" and the File > Export light input menu. The
+        menu passes ``send_to_syscon=False``: a file export must never upload
+        the generated sequence to connected hardware."""
         if self._project is None:
             QtWidgets.QMessageBox.warning(
                 self, "No project", "No active project to export a stimulus from."
@@ -962,7 +967,13 @@ class SysCon2Panel(QtWidgets.QWidget):
         if self._export_settings is not None:
             dialog.apply_settings(self._export_settings)
         dialog.target_power_spin.setValue(self.target_power_spin.value())
-        dialog.sequence_generated.connect(self._on_dialog_sequence_generated)
+        dialog.sequence_generated.connect(
+            lambda seq_path, overview_png_path, targets: (
+                self._on_dialog_sequence_generated(
+                    seq_path, overview_png_path, targets, send_to_syscon
+                )
+            )
+        )
         self._active_dialog = dialog
         try:
             dialog.exec()
@@ -995,7 +1006,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
             return
         if self._export_settings is None:
-            self._on_send_to_syscon2_clicked()
+            self.open_generator_dialog()
             return
         stim_array = (
             self._current_stim_provider()
@@ -1035,13 +1046,21 @@ class SysCon2Panel(QtWidgets.QWidget):
         seq_path: str,
         overview_png_path: str,
         targeted_stim_ids: frozenset[int],
+        send_to_syscon: bool = True,
     ) -> None:
         if self._active_dialog is not None:
             self._show_export_settings(self._active_dialog.export_settings())
         self._show_preview(overview_png_path)
         self._remember_preview(seq_path, overview_png_path)
         self.import_path_edit.setText(seq_path)
-        self._import_sequence(seq_path, targeted_stim_ids)
+        if send_to_syscon:
+            self._import_sequence(seq_path, targeted_stim_ids)
+        else:
+            self._preview_request = None
+            self.targets_changed.emit(frozenset())
+            self.preview_status_label.setText(
+                f"Generated/local file only; not imported: {seq_path}"
+            )
 
     def _import_sequence(self, seq_path: str, targets: frozenset[int] | None) -> None:
         self._preview_request = None
@@ -1087,24 +1106,6 @@ class SysCon2Panel(QtWidgets.QWidget):
             return None
 
         self._submit(name, task)
-
-    def show_generated_preview(
-        self,
-        seq_path: str,
-        png_path: str,
-        _targets: object,
-        settings: SysconExportSettings | None = None,
-    ) -> None:
-        if settings is not None:
-            self._show_export_settings(settings)
-        self._show_preview(png_path)
-        self._remember_preview(seq_path, png_path)
-        self.import_path_edit.setText(seq_path)
-        self._preview_request = None
-        self.targets_changed.emit(frozenset())
-        self.preview_status_label.setText(
-            f"Generated preview only; not imported: {seq_path}"
-        )
 
     def _on_host_block_sent(self, result: object) -> None:
         if not isinstance(result, SysconExportResult):

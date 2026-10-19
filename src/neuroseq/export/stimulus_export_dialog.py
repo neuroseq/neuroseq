@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import pathlib
 from collections.abc import Callable
-from collections.abc import Iterable
 from typing import Literal
 
 from qtpy import QtWidgets
@@ -16,8 +15,6 @@ from neuroseq.export.exporter_igor2 import export_igor2_ibw
 from neuroseq.export.exporter_igor2 import export_igor2_pxp
 from neuroseq.export.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.export.igor2_single_wave_export_dialog import Igor2SingleWaveExportDialog
-from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
-from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.project import Project
 
 logger = logging.getLogger(__name__)
@@ -51,11 +48,12 @@ def show_stimulus_export_dialog(
     *,
     parent: QtWidgets.QWidget | None = None,
     current_stim_name: str | None = None,
-    reserved_names: Callable[[], Iterable[str]] | None = None,
-    on_generated: Callable[[str, str, object, SysconExportSettings], None]
-    | None = None,
+    open_syscon2_generator: Callable[[], None] | None = None,
 ) -> None:
-    """Run the selected stimulus export workflow, including file writing and feedback."""
+    """Run the selected stimulus export workflow, including file writing and feedback.
+
+    SysCon2 export is delegated to ``open_syscon2_generator`` (the SysCon2
+    panel's generator dialog), which owns the export folder and settings."""
     if export_format in _FORMAT_CHOICES:
         title, choices = _FORMAT_CHOICES[export_format]
         selected, accepted = QtWidgets.QInputDialog.getItem(
@@ -70,18 +68,9 @@ def show_stimulus_export_dialog(
     elif export_format == "igor-pxp":
         _export_pxp(project, parent)
     elif export_format == "syscon2":
-        dialog = StimulationGeneratorDialog(
-            project, parent=parent, current_stim_name=current_stim_name
-        )
-        if reserved_names is not None:
-            dialog.reserved_names = reserved_names
-        if on_generated is not None:
-            dialog.sequence_generated.connect(
-                lambda seq, png, targets: on_generated(
-                    seq, png, targets, dialog.export_settings()
-                )
-            )
-        dialog.exec()
+        if open_syscon2_generator is None:
+            raise ValueError("SysCon2 export needs the SysCon2 panel's generator")
+        open_syscon2_generator()
     else:
         raise ValueError(f"Unknown stimulus export format: {export_format}")
 

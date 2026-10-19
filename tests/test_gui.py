@@ -18,6 +18,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
+import neuroseq.device_control.syscon2_panel as syscon2_panel_module
 import neuroseq.export.stimulus_export_dialog as stimulus_export_dialog_module
 import neuroseq.stimulation.stim
 import neuroseq.stimulation.stim_editor
@@ -3086,9 +3087,7 @@ def test_gui_stimulus_export_delegates_format_selection(monkeypatch, handler, mo
         neuroseq.project_workspace, "show_stimulus_export_dialog", entry_point
     )
     project = Project()
-    panel = SimpleNamespace(
-        _remote_sequence_names=Mock(), show_generated_preview=Mock()
-    )
+    panel = SimpleNamespace(open_generator_dialog=Mock())
     window = SimpleNamespace(
         project=project,
         cmb_stim=SimpleNamespace(currentText=lambda: "selected"),
@@ -3097,13 +3096,15 @@ def test_gui_stimulus_export_delegates_format_selection(monkeypatch, handler, mo
 
     getattr(ProjectWorkspace, handler)(window)
 
-    kwargs = dict(parent=window, current_stim_name="selected")
+    args, kwargs = entry_point.call_args
+    assert args == (project, mode)
+    assert kwargs.pop("parent") is window
+    assert kwargs.pop("current_stim_name") == "selected"
     if mode == "light":
-        kwargs.update(
-            reserved_names=panel._remote_sequence_names,
-            on_generated=panel.show_generated_preview,
-        )
-    entry_point.assert_called_once_with(project, mode, **kwargs)
+        # The menu export writes files only; it never uploads to SysCon2.
+        kwargs.pop("open_syscon2_generator")()
+        panel.open_generator_dialog.assert_called_once_with(send_to_syscon=False)
+    assert kwargs == {}
 
 
 def test_gui_export_igor2_single_wave_ibw_passes_unit_and_scaling(
@@ -4497,13 +4498,13 @@ def test_gui_export_dialog_opens_on_the_current_input_array(
     gui.stim_editor.cmb_stim.setCurrentText("second_stim")
     opened: list[str] = []
 
-    class RecordingDialog(stimulus_export_dialog_module.StimulationGeneratorDialog):
+    class RecordingDialog(syscon2_panel_module.StimulationGeneratorDialog):
         def exec(self) -> int:
             opened.append(self.stim_combo.currentText())
             return 0
 
     monkeypatch.setattr(
-        stimulus_export_dialog_module, "StimulationGeneratorDialog", RecordingDialog
+        syscon2_panel_module, "StimulationGeneratorDialog", RecordingDialog
     )
 
     monkeypatch.setattr(
@@ -4578,13 +4579,13 @@ def test_main_menu_export_updates_setup_preview_without_import(
     image.fill()
     image.save(str(path))
 
-    class ExportDialog(stimulus_export_dialog_module.StimulationGeneratorDialog):
+    class ExportDialog(syscon2_panel_module.StimulationGeneratorDialog):
         def exec(self):
             self.sequence_generated.emit("offline.seq", str(path), frozenset({1}))
             return 0
 
     monkeypatch.setattr(
-        stimulus_export_dialog_module, "StimulationGeneratorDialog", ExportDialog
+        syscon2_panel_module, "StimulationGeneratorDialog", ExportDialog
     )
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("SysCon2", True)
@@ -4593,4 +4594,46 @@ def test_main_menu_export_updates_setup_preview_without_import(
     assert not gui.syscon2_panel.preview_label.pixmap().isNull()
     assert "not imported" in gui.syscon2_panel.preview_status_label.text()
     assert gui.syscon2_panel.export_settings is not None
+    gui.close()
+
+
+def test_main_menu_export_uses_stored_folder_and_settings(qtbot, monkeypatch, tmp_path):
+    """The menu SysCon2 export opens the same generator as "Send to SysCon2":
+    last-used folder, remembered settings and target power, and it stores
+    the chosen folder for next time."""
+    from neuroseq.export.syscon2_export_service import SysconExportSettings
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.load_project(default_project())
+    panel = gui.syscon2_panel
+    stored = tmp_path / "stored"
+    chosen = tmp_path / "chosen"
+    monkeypatch.setattr(panel._settings, "syscon_export_directory", str(stored))
+    settings = SysconExportSettings(config_text="config", target_power_mw=12.0)
+    panel._show_export_settings(settings)
+    seen: dict[str, object] = {}
+
+    class RecordingDialog(syscon2_panel_module.StimulationGeneratorDialog):
+        def apply_settings(self, applied):
+            seen["settings"] = applied
+
+        def exec(self):
+            seen["folder"] = self.output_folder
+            seen["power"] = self.target_power_spin.value()
+            self.output_folder = chosen
+            return 0
+
+    monkeypatch.setattr(
+        syscon2_panel_module, "StimulationGeneratorDialog", RecordingDialog
+    )
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("SysCon2", True)
+    )
+
+    gui.btn_export_light_stimulus_clicked()
+
+    assert seen == {"settings": settings, "folder": stored, "power": 12.0}
+    assert panel._settings.syscon_export_directory == str(chosen)
+    gui._close_confirmed = True
     gui.close()

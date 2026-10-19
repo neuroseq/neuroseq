@@ -2495,8 +2495,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             "light",
             parent=self,
             current_stim_name=self.cmb_stim.currentText(),
-            reserved_names=self.syscon2_panel._remote_sequence_names,
-            on_generated=self.syscon2_panel.show_generated_preview,
+            open_syscon2_generator=lambda: self.syscon2_panel.open_generator_dialog(
+                send_to_syscon=False
+            ),
         )
 
     def choose_brian2_backend(self) -> None:

@@ -25,11 +25,10 @@ def test_format_selection_routes_to_export(monkeypatch, mode, selection, expecte
     syscon = Mock()
     monkeypatch.setattr(stimulus_export_dialog, "_export_single_wave", single)
     monkeypatch.setattr(stimulus_export_dialog, "_export_pxp", pxp)
-    monkeypatch.setattr(stimulus_export_dialog, "StimulationGeneratorDialog", syscon)
     project = Project()
 
     stimulus_export_dialog.show_stimulus_export_dialog(
-        project, mode, current_stim_name="selected"
+        project, mode, current_stim_name="selected", open_syscon2_generator=syscon
     )
 
     args = chooser.call_args.args
@@ -55,10 +54,7 @@ def test_format_selection_routes_to_export(monkeypatch, mode, selection, expecte
     elif expected == "pxp":
         pxp.assert_called_once_with(project, None)
     else:
-        syscon.assert_called_once_with(
-            project, parent=None, current_stim_name="selected"
-        )
-        syscon.return_value.exec.assert_called_once_with()
+        syscon.assert_called_once_with()
 
 
 @pytest.mark.parametrize("mode", ["patch-clamp", "light"])
@@ -68,52 +64,21 @@ def test_cancelled_format_selection_does_not_start_export(monkeypatch, mode):
     )
     exporters = [Mock(), Mock(), Mock()]
     for name, exporter in zip(
-        ("_export_single_wave", "_export_pxp", "StimulationGeneratorDialog"),
-        exporters,
-        strict=True,
+        ("_export_single_wave", "_export_pxp"), exporters[:2], strict=True
     ):
         monkeypatch.setattr(stimulus_export_dialog, name, exporter)
 
-    stimulus_export_dialog.show_stimulus_export_dialog(Project(), mode)
+    stimulus_export_dialog.show_stimulus_export_dialog(
+        Project(), mode, open_syscon2_generator=exporters[2]
+    )
 
     for exporter in exporters:
         exporter.assert_not_called()
 
 
-def test_syscon_export_forwards_preview_and_refreshes_reserved_names(monkeypatch):
-    dialog = Mock()
-    dialog.export_settings.return_value = settings = object()
-    dialog_class = Mock(return_value=dialog)
-    monkeypatch.setattr(
-        stimulus_export_dialog, "StimulationGeneratorDialog", dialog_class
-    )
-    names = {"existing"}
-
-    def reserved_names():
-        return names
-
-    preview = Mock()
-    project = Project()
-
-    stimulus_export_dialog.show_stimulus_export_dialog(
-        project,
-        "syscon2",
-        current_stim_name="selected",
-        reserved_names=reserved_names,
-        on_generated=preview,
-    )
-
-    dialog_class.assert_called_once_with(
-        project, parent=None, current_stim_name="selected"
-    )
-    names.add("new")
-    assert dialog.reserved_names() == {"existing", "new"}
-    callback = dialog.sequence_generated.connect.call_args.args[0]
-    callback("sequence.seq", "preview.png", frozenset({1}))
-    preview.assert_called_once_with(
-        "sequence.seq", "preview.png", frozenset({1}), settings
-    )
-    dialog.exec.assert_called_once_with()
+def test_syscon_export_requires_the_panel_generator():
+    with pytest.raises(ValueError, match="SysCon2"):
+        stimulus_export_dialog.show_stimulus_export_dialog(Project(), "syscon2")
 
 
 def test_cancelled_pxp_dialog_does_not_choose_file_or_export(monkeypatch):

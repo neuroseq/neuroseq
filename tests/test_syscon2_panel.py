@@ -268,9 +268,7 @@ def test_send_to_syscon2_opens_dialog_with_current_project(
         current_stim_name=None,
         output_folder=default_export_directory(),
     )
-    dialog_cls.return_value.sequence_generated.connect.assert_called_once_with(
-        panel._on_dialog_sequence_generated
-    )
+    dialog_cls.return_value.sequence_generated.connect.assert_called_once()
     dialog_cls.return_value.exec.assert_called_once()
 
 
@@ -440,11 +438,29 @@ def test_dialog_export_remembers_settings_and_preloads_next_dialog(
         "x.seq", "x.png", frozenset()
     )
 
-    panel._on_send_to_syscon2_clicked()
+    panel.open_generator_dialog()
     assert panel.export_settings == _settings()
 
-    panel._on_send_to_syscon2_clicked()
+    panel.open_generator_dialog()
     dialog.apply_settings.assert_called_once_with(_settings())
+
+
+@pytest.mark.parametrize("send_to_syscon", [True, False])
+def test_generator_dialog_imports_only_when_sending_to_syscon(
+    panel: SysCon2Panel, mocker, tmp_path, send_to_syscon: bool
+) -> None:
+    """The File > Export menu writes files only; it never uploads to SysCon2."""
+    panel.set_project(Project())
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    import_sequence = mocker.patch.object(panel, "_import_sequence")
+    mocker.patch.object(panel, "_show_preview")
+
+    panel.open_generator_dialog(send_to_syscon=send_to_syscon)
+    slot = dialog_cls.return_value.sequence_generated.connect.call_args.args[0]
+    slot(str(tmp_path / "x.seq"), str(tmp_path / "x.png"), frozenset({1}))
+
+    assert import_sequence.called is send_to_syscon
+    assert panel.import_path_edit.text() == str(tmp_path / "x.seq")
 
 
 def test_export_current_uses_remembered_settings_and_imports(
@@ -870,7 +886,7 @@ def test_generated_and_routine_exports_display_resizable_preview(
     source.fill(QtCore.Qt.GlobalColor.red)
     source.save(str(path))
     submit = mocker.patch.object(panel, "_submit")
-    panel.show_generated_preview("example.seq", str(path), frozenset({1}))
+    panel._on_dialog_sequence_generated("example.seq", str(path), frozenset({1}))
     panel.show()
     qtbot.waitExposed(panel)
     panel.btn_toggle_preview.click()
@@ -1004,11 +1020,11 @@ def test_export_dialog_starts_in_the_folder_used_last(
     dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
     dialog_cls.return_value.output_folder = tmp_path / "chosen"
 
-    widget._on_send_to_syscon2_clicked()
+    widget.open_generator_dialog()
     assert dialog_cls.call_args.kwargs["output_folder"] == default_export_directory()
     assert settings.syscon_export_directory == str(tmp_path / "chosen")
 
-    widget._on_send_to_syscon2_clicked()
+    widget.open_generator_dialog()
     assert dialog_cls.call_args.kwargs["output_folder"] == tmp_path / "chosen"
     widget.shutdown()
 
