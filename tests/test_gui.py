@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from types import MethodType
 from types import SimpleNamespace
 from typing import Any
 
@@ -60,64 +61,6 @@ def _wait_for_brian2_simulation(
     qtbot: QtBot, gui: ProjectWorkspace, timeout: int = 90000
 ) -> None:
     qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=timeout)
-
-
-@pytest.mark.parametrize(
-    ("method_name", "software", "inner_name"),
-    [
-        (
-            "btn_import_stimulus_light_clicked",
-            "SysCon2",
-            "btn_import_syscon2_seq_clicked",
-        ),
-    ],
-)
-def test_gui_pre_dialog_wrapper_calls_inner_handler_on_accept(
-    monkeypatch: MonkeyPatch,
-    method_name: str,
-    software: str,
-    inner_name: str,
-) -> None:
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args, **kwargs: (software, True),
-    )
-    called: list[bool] = []
-    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
-
-    getattr(ProjectWorkspace, method_name)(fake_gui)
-
-    assert called == [True]
-
-
-@pytest.mark.parametrize(
-    ("method_name", "software", "inner_name"),
-    [
-        (
-            "btn_import_stimulus_light_clicked",
-            "SysCon2",
-            "btn_import_syscon2_seq_clicked",
-        ),
-    ],
-)
-def test_gui_pre_dialog_wrapper_does_nothing_on_cancel(
-    monkeypatch: MonkeyPatch,
-    method_name: str,
-    software: str,
-    inner_name: str,
-) -> None:
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
-        lambda *args, **kwargs: (software, False),
-    )
-    called: list[bool] = []
-    fake_gui: Any = SimpleNamespace(**{inner_name: lambda: called.append(True)})
-
-    getattr(ProjectWorkspace, method_name)(fake_gui)
-
-    assert called == []
 
 
 @pytest.mark.parametrize(
@@ -3285,16 +3228,20 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     assert captured["scaling_factor"] == 3.0
 
 
+def _bind_import_helpers(fake_gui: Any) -> Any:
+    """Give a SimpleNamespace GUI double the real import-completion helpers."""
+    fake_gui._complete_import = MethodType(ProjectWorkspace._complete_import, fake_gui)
+    fake_gui._complete_stimulus_import = MethodType(
+        ProjectWorkspace._complete_stimulus_import, fake_gui
+    )
+    return fake_gui
+
+
 @pytest.mark.parametrize(
-    ("handler", "dialog_name", "options"),
+    ("handler", "dialog_name"),
     [
-        ("btn_import_syscon2_seq_clicked", "Syscon2ImportDialog", {}),
-        ("btn_import_igor2_wave_clicked", "PatchClampDataInputImportDialog", {}),
-        (
-            "btn_import_igor2_wave_clicked",
-            "PatchClampDataInputImportDialog",
-            {"csv_only": True},
-        ),
+        ("btn_import_syscon2_seq_clicked", "Syscon2ImportDialog"),
+        ("btn_import_patch_clamp_input_clicked", "PatchClampDataInputImportDialog"),
     ],
 )
 @pytest.mark.parametrize("with_path", [False, True])
@@ -3302,17 +3249,19 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
     ("accepted", "selection"), [(True, "imported"), (True, ""), (False, "imported")]
 )
 def test_stimulus_import_completion(
-    monkeypatch, tmp_path, handler, dialog_name, options, with_path, accepted, selection
+    monkeypatch, tmp_path, handler, dialog_name, with_path, accepted, selection
 ):
     from unittest.mock import Mock
     from unittest.mock import call
 
     events = Mock()
     project = SimpleNamespace(mark_dirty=events.mark_dirty)
-    window = SimpleNamespace(
-        project=project,
-        update_project=events.refresh,
-        cmb_stim=SimpleNamespace(setCurrentText=events.select),
+    window = _bind_import_helpers(
+        SimpleNamespace(
+            project=project,
+            update_project=events.refresh,
+            cmb_stim=SimpleNamespace(setCurrentText=events.select),
+        )
     )
     dialog = Mock(selected_stim_name=selection)
     dialog.load_file = events.load
@@ -3326,9 +3275,10 @@ def test_stimulus_import_completion(
     monkeypatch.setattr(neuroseq.project_workspace, dialog_name, factory)
     path = tmp_path / "stimulus.csv" if with_path else None
 
-    getattr(ProjectWorkspace, handler)(window, path=path, **options)
+    getattr(ProjectWorkspace, handler)(window, path=path)
 
-    factory.assert_called_once_with(project, parent=window, **options)
+    factory.assert_called_once_with(project, parent=window)
+    dialog.deleteLater.assert_called_once_with()
     expected = [call.load(str(path))] if with_path else []
     expected.append(call.execute())
     if accepted:
@@ -3348,6 +3298,9 @@ def test_gui_import_igor2_wave_updates_selected_stim(
             assert dialog_project is project
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
+
+        def deleteLater(self) -> None:
+            pass
 
         def exec(self) -> int:
             self.project.add_stim_array(
@@ -3396,7 +3349,8 @@ def test_gui_import_igor2_wave_updates_selected_stim(
         "PatchClampDataInputImportDialog",
         MockPatchClampDataInputImportDialog,
     )
-    ProjectWorkspace.btn_import_igor2_wave_clicked(fake_gui)
+    _bind_import_helpers(fake_gui)
+    ProjectWorkspace.btn_import_patch_clamp_input_clicked(fake_gui)
 
     assert fake_gui.cmb_stim.currentText() == "igor_wave"
     assert "igor_wave" in project.stim_arrays
@@ -3423,6 +3377,9 @@ def test_gui_import_igor2_trace_updates_selected_trace(
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
             self.selected_trace_name = "Igor Trace"
+
+        def deleteLater(self) -> None:
+            pass
 
         def exec(self) -> int:
             self.project.add_experiment(
@@ -3486,7 +3443,8 @@ def test_gui_import_igor2_trace_updates_selected_trace(
         "PatchClampDataOutputImportDialog",
         MockPatchClampDataOutputImportDialog,
     )
-    ProjectWorkspace.btn_import_igor2_trace_clicked(fake_gui)
+    _bind_import_helpers(fake_gui)
+    ProjectWorkspace.btn_import_patch_clamp_output_clicked(fake_gui)
 
     assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
     assert "Experiment A" in project.experiments
@@ -3524,6 +3482,9 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
             self.selected_trace_name = "Igor Trace"
+
+        def deleteLater(self) -> None:
+            pass
 
         def exec(self) -> int:
             trace_data = self.project.get_data("Experiment A :: Igor Trace", TraceData)
@@ -3587,7 +3548,8 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
         MockPatchClampDataOutputImportDialog,
     )
 
-    ProjectWorkspace.btn_import_igor2_trace_clicked(fake_gui)
+    _bind_import_helpers(fake_gui)
+    ProjectWorkspace.btn_import_patch_clamp_output_clicked(fake_gui)
 
     assert fake_gui.cmb_trace.currentText() == "Experiment A :: Igor Trace"
     assert captured_data[-1] is not None
@@ -3606,6 +3568,9 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         def __init__(self, dialog_project: Project, parent=None) -> None:
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
+
+        def deleteLater(self) -> None:
+            pass
 
         def exec(self) -> int:
             self.project.add_stim_array(
@@ -3687,7 +3652,8 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
         MockPatchClampDataInputImportDialog,
     )
 
-    ProjectWorkspace.btn_import_igor2_wave_clicked(fake_gui)
+    _bind_import_helpers(fake_gui)
+    ProjectWorkspace.btn_import_patch_clamp_input_clicked(fake_gui)
 
     assert fake_editor.current_stim_modifier is not None
     assert fake_editor.current_stim_modifier.stim_array.name == "igor_wave"
@@ -4628,29 +4594,3 @@ def test_main_menu_export_updates_setup_preview_without_import(
     assert "not imported" in gui.syscon2_panel.preview_status_label.text()
     assert gui.syscon2_panel.export_settings is not None
     gui.close()
-
-
-def test_patchclamp_input_opens_importer_directly(monkeypatch: MonkeyPatch) -> None:
-    def unexpected_chooser(*args, **kwargs):
-        pytest.fail("Input import must open directly without a format pre-dialog")
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", unexpected_chooser)
-    called = []
-    fake_gui: Any = SimpleNamespace(
-        btn_import_igor2_wave_clicked=lambda: called.append(True)
-    )
-    ProjectWorkspace.btn_import_stimulus_patchclamp_clicked(fake_gui)
-    assert called == [True]
-
-
-def test_patchclamp_output_opens_importer_directly(monkeypatch: MonkeyPatch) -> None:
-    def unexpected_chooser(*args, **kwargs):
-        pytest.fail("Output import must open directly without a format pre-dialog")
-
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", unexpected_chooser)
-    called = []
-    fake_gui: Any = SimpleNamespace(
-        btn_import_igor2_trace_clicked=lambda: called.append(True)
-    )
-    ProjectWorkspace.btn_import_trace_patchclamp_clicked(fake_gui)
-    assert called == [True]

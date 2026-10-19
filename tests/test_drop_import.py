@@ -37,8 +37,8 @@ def calls(
     for name in (
         "load_project",
         "btn_import_syscon2_seq_clicked",
-        "btn_import_igor2_wave_clicked",
-        "btn_import_igor2_trace_clicked",
+        "btn_import_patch_clamp_input_clicked",
+        "btn_import_patch_clamp_output_clicked",
         "btn_import_cellpose_data_clicked",
         "btn_import_tif_clicked",
         "_on_calcium_video_import_requested",
@@ -59,12 +59,12 @@ def test_file_types_go_to_their_import(gui: ProjectWorkspace, calls: list) -> No
         ("load_project", {"args": (Path("p.nseq"),)}),
         ("btn_import_syscon2_seq_clicked", {"args": (), "path": Path("s.seq")}),
         (
-            "btn_import_igor2_trace_clicked",
-            {"args": (), "csv_only": False, "path": Path("w.ibw")},
+            "btn_import_patch_clamp_output_clicked",
+            {"args": (), "path": Path("w.ibw")},
         ),
         (
-            "btn_import_igor2_trace_clicked",
-            {"args": (), "csv_only": True, "path": Path("t.csv")},
+            "btn_import_patch_clamp_output_clicked",
+            {"args": (), "path": Path("t.csv")},
         ),
     ]
 
@@ -74,10 +74,10 @@ def test_waves_dropped_on_the_input_array_become_inputs(
 ) -> None:
     gui.import_dropped_files([Path("w.pxp"), Path("t.txt")], target="input")
     assert [name for name, _ in calls] == [
-        "btn_import_igor2_wave_clicked",
-        "btn_import_igor2_wave_clicked",
+        "btn_import_patch_clamp_input_clicked",
+        "btn_import_patch_clamp_input_clicked",
     ]
-    assert calls[1][1]["csv_only"]
+    assert calls[1][1]["path"] == Path("t.txt")
 
 
 @pytest.mark.parametrize(
@@ -180,7 +180,7 @@ def test_dropping_on_a_panel(
     QtWidgets.QApplication.sendEvent(gui, drop)
     qtbot.waitUntil(lambda: bool(calls))
     assert calls == [
-        ("btn_import_igor2_wave_clicked", {"args": (), "csv_only": False, "path": path})
+        ("btn_import_patch_clamp_input_clicked", {"args": (), "path": path})
     ]
 
 

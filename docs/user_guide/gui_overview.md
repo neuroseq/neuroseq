@@ -17,8 +17,6 @@ All data import and export actions are grouped under two sub-menus:
   - `Export spikes` — publication-quality matplotlib raster (PNG/SVG/PDF, 300 DPI) of the currently selected `SpikeData`
   - `Export simulation results` — HDF5 snapshot of the full simulation
 
-Each import or export action that supports multiple third-party software packages opens a small pre-dialog first so you can choose the source/target software (e.g. Igor2, SysCon2).
-
 ### Dropping files
 
 Files can also be dragged from the file explorer onto the NeuroSeq window.

@@ -8,6 +8,7 @@ import pathlib
 import threading
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -90,6 +91,11 @@ from neuroseq.visualization_support.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 from neuroseq.workspace_acquisition_controller import WorkspaceAcquisitionController
 from neuroseq.workspace_devices import WorkspaceDevices
+
+if TYPE_CHECKING:
+    from neuroseq.importers.patch_clamp_data_output_import_dialog import (
+        PatchClampDataOutputImportDialog,
+    )
 
 
 class DetachedPanelWindow(QtWidgets.QWidget):
@@ -2312,63 +2318,66 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             )
             self._warn_if_cellpose_model_mismatch()
 
+    def _complete_import(
+        self,
+        dialog: Syscon2ImportDialog
+        | PatchClampDataInputImportDialog
+        | PatchClampDataOutputImportDialog,
+        path: pathlib.Path | None = None,
+    ) -> bool:
+        """Load an optional file into an import dialog, run it, and refresh the
+        GUI if it was accepted. The dialog is scheduled for deletion; its Python
+        attributes (selected names) stay readable for the caller."""
+        try:
+            if path is not None:
+                dialog.load_file(str(path))
+            if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+                return False
+            self.project.mark_dirty()
+            self.update_project(self.project)
+            return True
+        finally:
+            dialog.deleteLater()
+
     def _complete_stimulus_import(
         self,
         dialog: Syscon2ImportDialog | PatchClampDataInputImportDialog,
         path: pathlib.Path | None = None,
     ) -> None:
-        """Load an optional file and apply an accepted stimulus import to the GUI."""
-        if path is not None:
-            dialog.load_file(str(path))
-        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
-            return
-        self.project.mark_dirty()
-        self.update_project(self.project)
-        if dialog.selected_stim_name:
+        """Run a stimulus import dialog and select the imported stim array."""
+        if self._complete_import(dialog, path) and dialog.selected_stim_name:
             self.cmb_stim.setCurrentText(dialog.selected_stim_name)
 
     def btn_import_syscon2_seq_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
         dialog = Syscon2ImportDialog(self.project, parent=self)
-        ProjectWorkspace._complete_stimulus_import(self, dialog, path)
+        self._complete_stimulus_import(dialog, path)
 
-    def btn_import_igor2_wave_clicked(
-        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    def btn_import_patch_clamp_input_clicked(
+        self, *, path: pathlib.Path | None = None
     ) -> None:
-        dialog = (
-            PatchClampDataInputImportDialog(self.project, parent=self, csv_only=True)
-            if csv_only
-            else PatchClampDataInputImportDialog(self.project, parent=self)
-        )
-        ProjectWorkspace._complete_stimulus_import(self, dialog, path)
+        dialog = PatchClampDataInputImportDialog(self.project, parent=self)
+        self._complete_stimulus_import(dialog, path)
 
-    def btn_import_igor2_trace_clicked(
-        self, *, csv_only: bool = False, path: pathlib.Path | None = None
+    def btn_import_patch_clamp_output_clicked(
+        self, *, path: pathlib.Path | None = None
     ) -> None:
         from neuroseq.importers.patch_clamp_data_output_import_dialog import (
             PatchClampDataOutputImportDialog,
         )
 
-        dialog = (
-            PatchClampDataOutputImportDialog(self.project, parent=self, csv_only=True)
-            if csv_only
-            else PatchClampDataOutputImportDialog(self.project, parent=self)
+        dialog = PatchClampDataOutputImportDialog(self.project, parent=self)
+        if not self._complete_import(dialog, path) or not dialog.selected_trace_name:
+            return
+        combo_label = (
+            f"{dialog.selected_experiment_name} :: {dialog.selected_trace_name}"
         )
-        if path is not None:
-            dialog.load_file(str(path))
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            self.project.mark_dirty()
-            self.update_project(self.project)
-            if dialog.selected_trace_name:
-                combo_label = (
-                    f"{dialog.selected_experiment_name} :: {dialog.selected_trace_name}"
-                )
-                self.cmb_trace.setCurrentText(combo_label)
-                # update_project() clears the trace widget; if the combo label did
-                # not change (for example importing into the currently selected
-                # TraceData), currentTextChanged will not fire, so refresh explicitly.
-                self._apply_trace_selection(combo_label)
+        self.cmb_trace.setCurrentText(combo_label)
+        # update_project() clears the trace widget; if the combo label did not
+        # change (for example importing into the currently selected TraceData),
+        # currentTextChanged will not fire, so refresh explicitly.
+        self._apply_trace_selection(combo_label)
 
     def _delete_cellpose_data(self) -> None:
         """Remove stored cellpose data from both GUI and project."""
@@ -2469,31 +2478,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 f"Could not load simulate function from {path}: {e}",
             )
             self.logger.exception(e)
-
-    # Import stimulus wrappers
-
-    def btn_import_stimulus_light_clicked(self) -> None:
-        """Pre-dialog: choose software, then import a light stimulus waveform."""
-        software, ok = QtWidgets.QInputDialog.getItem(
-            self,
-            "Import light input",
-            "Import from:",
-            ["SysCon2"],
-            0,
-            False,
-        )
-        if not ok:
-            return
-        if software == "SysCon2":
-            self.btn_import_syscon2_seq_clicked()
-
-    def btn_import_stimulus_patchclamp_clicked(self) -> None:
-        """Open the patch-clamp input importer directly."""
-        self.btn_import_igor2_wave_clicked()
-
-    def btn_import_trace_patchclamp_clicked(self) -> None:
-        """Open the patch-clamp output importer directly."""
-        self.btn_import_igor2_trace_clicked()
 
     # Export wrappers
 
@@ -2791,14 +2775,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         assert import_stimulus_menu is not None
         add_action(
             "&Optogenetics",
-            self.btn_import_stimulus_light_clicked,
+            self.btn_import_syscon2_seq_clicked,
             import_stimulus_menu,
             None,
             icon="mdi6.file-import-outline",
         )
         add_action(
             "&Patch Clamp",
-            self.btn_import_stimulus_patchclamp_clicked,
+            self.btn_import_patch_clamp_input_clicked,
             import_stimulus_menu,
             None,
             icon="mdi6.waveform",
@@ -2822,10 +2806,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         add_action(
             "&Patch Clamp",
-            self.btn_import_trace_patchclamp_clicked,
+            self.btn_import_patch_clamp_output_clicked,
             import_trace_menu,
             None,
-            icon="mdi6.import",
+            icon="mdi6.waveform",
         )
 
         export_data_menu = menu.addMenu("E&xport")
@@ -3754,11 +3738,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             elif suffix == ".seq":
                 self.btn_import_syscon2_seq_clicked(path=path)
             elif suffix in {".ibw", ".pxp", ".csv", ".txt"}:
-                csv_only = suffix in {".csv", ".txt"}
                 if target == "input":
-                    self.btn_import_igor2_wave_clicked(csv_only=csv_only, path=path)
+                    self.btn_import_patch_clamp_input_clicked(path=path)
                 else:
-                    self.btn_import_igor2_trace_clicked(csv_only=csv_only, path=path)
+                    self.btn_import_patch_clamp_output_clicked(path=path)
             elif suffix not in DROP_IMAGE_SUFFIXES:
                 unsupported.append(path.name)
         if images:

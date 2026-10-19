@@ -50,19 +50,16 @@ if TYPE_CHECKING:
 
 
 class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
-    """Import Igor2/Sutter patch-clamp TRACE waves into project experiments."""
+    """Import patch-clamp output recordings into project experiments."""
 
     def __init__(
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
-        *,
-        csv_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
-        self.csv_only = csv_only
         self.loaded_wave: IgorWave | None = None
         self.csv_waves: list[IgorWave] = []
         self.file_path: str = ""
@@ -114,7 +111,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
 
         self.file_group = QtWidgets.QGroupBox("File Selection")
         file_layout = QtWidgets.QHBoxLayout(self.file_group)
-        self.file_label = QtWidgets.QLabel("No Igor wave selected")
+        self.file_label = QtWidgets.QLabel("No patch-clamp output selected")
         self.file_label.setStyleSheet("QLabel { color: gray; }")
         browse_button = QtWidgets.QPushButton("Browse…")
         browse_button.clicked.connect(self._browse_file)
@@ -147,7 +144,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         self.preview_text.setReadOnly(True)
         self.preview_text.setMaximumHeight(120)
         self.preview_text.setPlaceholderText(
-            "Preview appears here after selecting an Igor wave."
+            "Preview appears here after selecting a patch-clamp output."
         )
         preview_layout.addWidget(self.preview_text)
         self.wave_plot = MatplotlibWidget()
@@ -194,8 +191,8 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         )
         self.sampling_rate_label = QtWidgets.QLabel("Source sampling rate:")
         source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
-        self.sampling_rate_label.setVisible(self.csv_only)
-        self.sampling_rate_spin.setVisible(self.csv_only)
+        self.sampling_rate_label.setVisible(False)
+        self.sampling_rate_spin.setVisible(False)
         layout.addWidget(self.source_group)
 
         self.target_group = QtWidgets.QGroupBox("Import Target")
@@ -485,17 +482,17 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             else:
                 wave = load_igor_wave_file(filename)
         except Exception as exc:
-            self.logger.exception("Failed to load Igor wave %s", filename)
+            self.logger.exception("Failed to load patch-clamp output %s", filename)
             self.loaded_wave = None
             self.file_path = ""
-            self.file_label.setText("No Igor wave selected")
+            self.file_label.setText("No patch-clamp output selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
             self._update_preview()
             self._update_import_button_state()
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Could not load Igor wave:\n{exc}",
+                f"Could not load patch-clamp output:\n{exc}",
             )
             return
 
@@ -541,7 +538,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             self.loaded_wave = None
             self.loaded_pxp_waves = {}
             self.file_path = ""
-            self.file_label.setText("No Igor wave selected")
+            self.file_label.setText("No patch-clamp output selected")
             self.file_label.setStyleSheet("QLabel { color: gray; }")
             self.pxp_wave_list.clear()
             self.wave_picker_group.setVisible(False)
@@ -669,12 +666,12 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             self.preview_text.setPlainText("")
             if not self._experiments_with_trace_data():
                 self.info_label.setText(
-                    "Select an Igor wave to preview it. Only the new-trace import "
+                    "Select a patch-clamp output to preview it. Only the new-trace import "
                     "mode is currently available because the project has no trace "
                     "data yet."
                 )
             else:
-                self.info_label.setText("Select an Igor wave to preview it.")
+                self.info_label.setText("Select a patch-clamp output to preview it.")
             return
 
         self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
@@ -853,7 +850,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             ),
             peak_width=seconds_to_peak_samples(PATCH_CLAMP_PEAK_WIDTH_SECONDS, dt),
         )
-        spike_data.name = "Igor Patch Clamp Spikes"
+        spike_data.name = "Patch Clamp Spikes"
         self.project.add_data_to_experiment(experiment_name, spike_data)
         return int(len(spike_data.spike_times))
 
@@ -1019,11 +1016,11 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                 )
                 self.accept()
         except Exception as exc:
-            self.logger.exception("Failed to import Igor trace wave")
+            self.logger.exception("Failed to import patch-clamp output")
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",
-                f"Failed to import Igor trace wave:\n{exc}",
+                f"Failed to import patch-clamp output:\n{exc}",
             )
 
     def _import_csv_table(self) -> None:

@@ -83,7 +83,7 @@ def test_csv_input_sampling_rate(
     path = tmp_path / f"current{suffix}"
     path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
     project = Project()
-    dialog = PatchClampDataInputImportDialog(project, csv_only=True)
+    dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.sampling_rate_spin.setValue(rate)

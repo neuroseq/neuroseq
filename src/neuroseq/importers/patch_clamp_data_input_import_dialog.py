@@ -92,13 +92,10 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
-        *,
-        csv_only: bool = False,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
         self.project = project
-        self.csv_only = csv_only
         self.loaded_wave: IgorWave | None = None
         self.file_path: str = ""
         self.selected_stim_name: str = ""
@@ -227,8 +224,8 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
         )
         self.sampling_rate_label = QtWidgets.QLabel("Source sampling rate:")
         source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
-        self.sampling_rate_label.setVisible(self.csv_only)
-        self.sampling_rate_spin.setVisible(self.csv_only)
+        self.sampling_rate_label.setVisible(False)
+        self.sampling_rate_spin.setVisible(False)
         layout.addWidget(source_group)
 
         target_group = QtWidgets.QGroupBox("Import Target")
@@ -402,7 +399,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
         try:
             wave = load_igor_wave_file(filename)
         except Exception as exc:
-            self.logger.exception("Failed to load Igor wave %s", filename)
+            self.logger.exception("Failed to load patch-clamp input %s", filename)
             self.loaded_wave = None
             self.file_path = ""
             self.file_label.setText("No input waveform selected")
@@ -782,7 +779,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                 )
                 self.accept()
         except Exception as exc:
-            self.logger.exception("Failed to import Igor wave")
+            self.logger.exception("Failed to import patch-clamp input")
             QtWidgets.QMessageBox.critical(
                 self,
                 "Import Error",

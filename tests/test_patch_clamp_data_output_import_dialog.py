@@ -76,7 +76,7 @@ def test_csv_output_sampling_rate(
     path = tmp_path / "voltage.csv"
     path.write_text(header + "1\n2\n3\n4\n", encoding="utf-8")
     project = Project()
-    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("CSV recording")
@@ -104,7 +104,7 @@ def test_csv_table_imports_all_columns(
     path = tmp_path / f"recording{suffix}"
     path.write_text(header + "1,10\n2,20\n3,30\n4,40\n", encoding="utf-8")
     project = Project()
-    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_name_edit.setText("Table")
@@ -134,7 +134,7 @@ def test_csv_table_name_collision_does_not_partially_import(
     project.add_experiment(Experiment("Table", 0.002, [], [existing]))
     path = tmp_path / "recording.csv"
     path.write_text("cell_a,cell_b\n1,10\n2,20\n", encoding="utf-8")
-    dialog = PatchClampDataOutputImportDialog(project, csv_only=True)
+    dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog._load_file(str(path))
     dialog.new_experiment_combo.setCurrentText("Table")
@@ -655,7 +655,7 @@ def test_trace_dialog_optional_spike_detection_adds_spikedata(
 
     spike_data = _find_spike_data(project, "Experiment A")
     assert len(spike_data) == 1
-    assert spike_data[0].name == "Igor Patch Clamp Spikes"
+    assert spike_data[0].name == "Patch Clamp Spikes"
     assert any(
         isinstance(data, TraceData) for data in project.experiments["Experiment A"].data
     )
