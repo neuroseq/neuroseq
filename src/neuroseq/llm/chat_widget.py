@@ -3,7 +3,9 @@ from __future__ import annotations
 import html
 import json
 import logging
+import pathlib
 import threading
+from collections.abc import Callable
 
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -16,11 +18,29 @@ from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
 from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
+from neuroseq.llm.plugin_write_dialog import confirm_plugin_write
 from neuroseq.llm.read_access import READ_INSTRUCTIONS
 from neuroseq.llm.read_access import ReadAccess
 from neuroseq.llm.system_prompt import build_context_snapshot
 from neuroseq.llm.system_prompt import build_static_prompt
 from neuroseq.project import Project
+
+
+def _strip_code_fence(text: str) -> str:
+    """Remove a Markdown code fence (e.g. ```json ... ```) around a reply."""
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    _, _, body = stripped.partition("\n")
+    body = body.rstrip()
+    if body.endswith("```"):
+        body = body[:-3]
+    return body.strip()
+
+
+def _may_be_request(text: str) -> bool:
+    # Requests are JSON objects, optionally wrapped in a Markdown code fence.
+    return text.lstrip().startswith(("{", "`"))
 
 
 class _ChatWorker(QtCore.QThread):
@@ -66,7 +86,7 @@ class _ChatWorker(QtCore.QThread):
                         return
                     response += token
                     if deciding and response.strip():
-                        reading = response.lstrip().startswith("{")
+                        reading = _may_be_request(response)
                         deciding = False
                         if not reading:
                             self.token.emit(response)
@@ -76,7 +96,9 @@ class _ChatWorker(QtCore.QThread):
                     self.completed.emit()
                     return
                 try:
-                    payload = json.loads(response) if reading else None
+                    payload = (
+                        json.loads(_strip_code_fence(response)) if reading else None
+                    )
                 except ValueError:
                     payload = None
                 operation = (
@@ -128,6 +150,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._history: list[Message] = []
         self._worker: _ChatWorker | None = None
         self._read_access: ReadAccess | None = None
+        self._busy_check: Callable[[], bool] | None = None
         self._backend: LLMBackend | None = None
         self._backend_name = ""
         self._backend_model = ""
@@ -180,6 +203,15 @@ class ChatWidget(QtWidgets.QWidget):
 
     def set_project(self, project: Project | None) -> None:
         self._project = project
+
+    def set_busy_check(self, busy_check: Callable[[], bool] | None) -> None:
+        """Report whether the workspace runs a background job (e.g. a simulation)."""
+        self._busy_check = busy_check
+
+    def _confirm_plugin_write(
+        self, target: pathlib.Path, content: str, previous: str | None
+    ) -> bool:
+        return confirm_plugin_write(target, content, previous, parent=self)
 
     def reload_backend(self) -> None:
         settings = GuiSettings()
@@ -249,7 +281,11 @@ class ChatWidget(QtWidgets.QWidget):
             messages=messages,
             model=self._backend_model,
         )
-        self._read_access = ReadAccess(self._project)
+        self._read_access = ReadAccess(
+            self._project,
+            confirm_write=self._confirm_plugin_write,
+            is_busy=self._busy_check,
+        )
         self._worker.read_requested.connect(self._on_read_requested)
         self._worker.token.connect(self._on_token)
         self._worker.completed.connect(self._on_worker_finished)

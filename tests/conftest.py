@@ -121,6 +121,16 @@ def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(widget, "exec", lambda self: self.show())
 
 
+# keep tests away from the real per-user analysis plugin folder
+@pytest.fixture(autouse=True)
+def isolate_user_plugin_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> pathlib.Path:
+    directory = tmp_path_factory.mktemp("user_plugins") / "analysis_plugins"
+    monkeypatch.setenv("NEUROSEQ_USER_PLUGIN_DIR", str(directory))
+    return directory
+
+
 @pytest.fixture()
 def qmessagebox_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, str]]:
     # create a list to store any QMessageBox calls that are made

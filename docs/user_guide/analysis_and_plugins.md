@@ -41,6 +41,13 @@ NeuroSeq discovers plugins from this folder:
 
 Any `*.py` file in that folder is treated as a plugin module (except files starting with `_`).
 
+NeuroSeq also discovers plugins from a per-user folder outside the package
+(`<user data dir>/neuroseq/analysis_plugins`, e.g.
+`~/.local/share/neuroseq/analysis_plugins` on Linux, or the folder named by the
+`NEUROSEQ_USER_PLUGIN_DIR` environment variable). Plugins written by the chat
+assistant go there. A user plugin whose filename or `PLUGIN_ID` matches a
+built-in plugin is skipped with a warning.
+
 Plugins can be added and tested during the operation of NeuroSeq: no restarts are necessary.
 
 After placing or editing a plugin file, open the right-click analysis menu again: you should see the plugin of interest in the menu.

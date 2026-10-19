@@ -77,3 +77,59 @@ def test_custom_analysis_widget_runs_example_plugin(
     assert custom_analysis_widget.spike_times_ms is None
     assert custom_analysis_widget.spike_indices is None
     assert custom_analysis_widget.spike_neuron_indices is None
+
+
+USER_PLUGIN = """PLUGIN_ID = "{plugin_id}"
+PLUGIN_NAME = "User plugin"
+
+def render_analysis(widget, data, neuron_slice, time_slice):
+    pass
+"""
+
+
+def test_discover_includes_user_plugins_without_shadowing_builtins(
+    isolate_user_plugin_dir, caplog
+) -> None:
+    from neuroseq import analysis_plugins
+
+    isolate_user_plugin_dir.mkdir(parents=True, exist_ok=True)
+    (isolate_user_plugin_dir / "my_user_plugin.py").write_text(
+        USER_PLUGIN.format(plugin_id="my_user_plugin"), encoding="utf-8"
+    )
+    # Same filename as a built-in plugin.
+    (isolate_user_plugin_dir / "mean_activity.py").write_text(
+        USER_PLUGIN.format(plugin_id="shadow_by_name"), encoding="utf-8"
+    )
+    # Different filename but a built-in PLUGIN_ID.
+    (isolate_user_plugin_dir / "sneaky.py").write_text(
+        USER_PLUGIN.format(plugin_id="mean_activity"), encoding="utf-8"
+    )
+    (isolate_user_plugin_dir / "_private.py").write_text(
+        USER_PLUGIN.format(plugin_id="private"), encoding="utf-8"
+    )
+
+    with caplog.at_level("WARNING"):
+        plugins = analysis_plugins.discover_analysis_plugins()
+
+    ids = [plugin.id for plugin in plugins]
+    assert "my_user_plugin" in ids
+    assert "shadow_by_name" not in ids
+    assert "private" not in ids
+    assert ids.count("mean_activity") == 1
+    mean = next(p for p in plugins if p.id == "mean_activity")
+    assert mean.label != "User plugin"
+    assert "collides with a built-in plugin" in caplog.text
+
+
+def test_user_plugins_directory_env_override_and_default(monkeypatch, tmp_path):
+    from neuroseq import analysis_plugins
+
+    monkeypatch.setenv(analysis_plugins.USER_PLUGIN_DIR_ENV, str(tmp_path / "u"))
+    assert analysis_plugins.user_plugins_directory() == tmp_path / "u"
+    assert not (tmp_path / "u").exists()
+    assert analysis_plugins.user_plugins_directory(create=True).is_dir()
+
+    monkeypatch.delenv(analysis_plugins.USER_PLUGIN_DIR_ENV)
+    default = analysis_plugins.user_plugins_directory()
+    assert default.parts[-2:] == ("neuroseq", "analysis_plugins")
+    assert not default.is_relative_to(analysis_plugins._plugins_directory())

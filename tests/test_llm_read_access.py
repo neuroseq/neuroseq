@@ -138,23 +138,37 @@ def render_analysis(widget, data, neuron_slice, time_slice):
 """
 
 
-def test_write_plugin_create_update_and_discover(tmp_path, monkeypatch):
+class ConfirmStub:
+    def __init__(self, accept: bool) -> None:
+        self.accept = accept
+        self.calls: list[tuple[Path, str, str | None]] = []
+
+    def __call__(self, target: Path, content: str, previous: str | None) -> bool:
+        self.calls.append((target, content, previous))
+        return self.accept
+
+
+def _write_request(path="custom.py", content=PLUGIN_SOURCE, **extra):
+    return {"kind": "analysis_plugin", "path": path, "content": content, **extra}
+
+
+def test_write_plugin_create_update_and_discover(isolate_user_plugin_dir):
     from neuroseq import analysis_plugins
 
-    reader = ReadAccess(None, tmp_path)
-    write_request = {
-        "kind": "analysis_plugin",
-        "path": "custom.py",
-        "content": PLUGIN_SOURCE,
-    }
+    confirm = ConfirmStub(accept=True)
+    reader = ReadAccess(None, confirm_write=confirm)
+    write_request = _write_request()
     result = json.loads(reader.write_plugin(write_request))
-    target = tmp_path / "resources" / "analysis_plugins" / "custom.py"
-    assert result["saved"] == "resources/analysis_plugins/custom.py"
+    target = isolate_user_plugin_dir.resolve() / "custom.py"
+    assert result["saved"] == str(target)
     assert target.read_text(encoding="utf-8") == PLUGIN_SOURCE
-    monkeypatch.setattr(analysis_plugins, "_plugins_directory", lambda: target.parent)
-    assert [plugin.id for plugin in analysis_plugins.discover_analysis_plugins()] == [
-        "chat_test_plugin"
-    ]
+    assert confirm.calls == [(target, PLUGIN_SOURCE, None)]
+    ids = [plugin.id for plugin in analysis_plugins.discover_analysis_plugins()]
+    assert "chat_test_plugin" in ids
+    assert "mean_activity" in ids
+    # Nothing is written into the package plugin folder.
+    assert not (analysis_plugins._plugins_directory() / "custom.py").exists()
+
     updated = PLUGIN_SOURCE + "\n# Updated\n"
     write_request["content"] = updated
     assert "error" in json.loads(reader.write_plugin(write_request))
@@ -162,7 +176,128 @@ def test_write_plugin_create_update_and_discover(tmp_path, monkeypatch):
     write_request["overwrite"] = True
     assert "saved" in json.loads(reader.write_plugin(write_request))
     assert target.read_text(encoding="utf-8") == updated
+    # Overwrites hand the current file to the confirmation for a diff.
+    assert confirm.calls[-1] == (target, updated, PLUGIN_SOURCE)
     assert not list(target.parent.glob("*.tmp"))
+
+
+def test_declined_plugin_write_saves_nothing(isolate_user_plugin_dir):
+    confirm = ConfirmStub(accept=False)
+    result = json.loads(
+        ReadAccess(None, confirm_write=confirm).write_plugin(_write_request())
+    )
+    assert "declined" in result
+    assert "declined" in result["message"]
+    assert len(confirm.calls) == 1
+    assert not list(isolate_user_plugin_dir.glob("*"))
+
+
+def test_declined_overwrite_keeps_existing_plugin(isolate_user_plugin_dir):
+    isolate_user_plugin_dir.mkdir(parents=True, exist_ok=True)
+    target = isolate_user_plugin_dir / "custom.py"
+    target.write_text(PLUGIN_SOURCE, encoding="utf-8")
+    confirm = ConfirmStub(accept=False)
+    result = json.loads(
+        ReadAccess(None, confirm_write=confirm).write_plugin(
+            _write_request(content=PLUGIN_SOURCE + "# changed\n", overwrite=True)
+        )
+    )
+    assert "declined" in result
+    assert target.read_text(encoding="utf-8") == PLUGIN_SOURCE
+
+
+def test_default_confirmation_declines_without_explicit_accept(
+    isolate_user_plugin_dir, qtbot
+):
+    # With exec() patched to show(), the dialog never reports Accepted.
+    result = json.loads(ReadAccess(None).write_plugin(_write_request()))
+    assert "declined" in result
+    assert not (isolate_user_plugin_dir / "custom.py").exists()
+
+
+@pytest.mark.parametrize(
+    "filename",
+    ["_helper.py", "__init__.py", "_replay_metrics.py"],
+)
+def test_plugin_writes_reject_underscore_names(isolate_user_plugin_dir, filename):
+    confirm = ConfirmStub(accept=True)
+    result = ReadAccess(None, confirm_write=confirm).write_plugin(
+        _write_request(path=filename, overwrite=True)
+    )
+    assert "underscore" in json.loads(result)["error"]
+    assert confirm.calls == []
+
+
+@pytest.mark.parametrize("filename", ["mean_activity.py", "elise_target_mse.py"])
+def test_plugin_writes_reject_builtin_names(isolate_user_plugin_dir, filename):
+    confirm = ConfirmStub(accept=True)
+    result = ReadAccess(None, confirm_write=confirm).write_plugin(
+        _write_request(path=filename, overwrite=True)
+    )
+    assert "built-in" in json.loads(result)["error"]
+    assert confirm.calls == []
+    assert not (isolate_user_plugin_dir / filename).exists()
+
+
+def test_plugin_write_falls_back_when_hard_links_unsupported(
+    isolate_user_plugin_dir, monkeypatch
+):
+    from neuroseq.llm import read_access
+
+    def no_link(*args, **kwargs):
+        raise OSError("hard links not supported")
+
+    monkeypatch.setattr(read_access.os, "link", no_link)
+    reader = ReadAccess(None, confirm_write=ConfirmStub(accept=True))
+    assert "saved" in json.loads(reader.write_plugin(_write_request()))
+    target = isolate_user_plugin_dir / "custom.py"
+    assert target.read_text(encoding="utf-8") == PLUGIN_SOURCE
+    assert not list(isolate_user_plugin_dir.glob("*.tmp"))
+
+
+def test_plugin_write_rejects_change_during_confirmation(isolate_user_plugin_dir):
+    isolate_user_plugin_dir.mkdir(parents=True, exist_ok=True)
+    target = isolate_user_plugin_dir / "custom.py"
+    target.write_text(PLUGIN_SOURCE, encoding="utf-8")
+
+    def confirm(path, content, previous):
+        path.write_text("# replaced meanwhile\n", encoding="utf-8")
+        return True
+
+    result = ReadAccess(None, confirm_write=confirm).write_plugin(
+        _write_request(content=PLUGIN_SOURCE + "# new\n", overwrite=True)
+    )
+    assert "error" in json.loads(result)
+    assert target.read_text(encoding="utf-8") == "# replaced meanwhile\n"
+
+
+def test_plugin_write_preview_shows_code_or_diff(qtbot, tmp_path):
+    from neuroseq.llm.plugin_write_dialog import PluginWriteConfirmDialog
+    from neuroseq.llm.plugin_write_dialog import plugin_write_preview
+
+    target = tmp_path / "custom.py"
+    assert plugin_write_preview(target, PLUGIN_SOURCE, None) == PLUGIN_SOURCE
+    diff = plugin_write_preview(target, PLUGIN_SOURCE + "x = 1\n", PLUGIN_SOURCE)
+    assert diff.startswith(f"--- {target} (current)")
+    assert "+x = 1" in diff
+
+    dialog = PluginWriteConfirmDialog(target, PLUGIN_SOURCE + "x = 1\n", PLUGIN_SOURCE)
+    qtbot.addWidget(dialog)
+    assert dialog.code_view.isReadOnly()
+    assert "+x = 1" in dialog.code_view.toPlainText()
+    assert str(target) in dialog.message_label.text()
+    assert dialog.cancel_button.isDefault()
+
+
+def test_runtime_state_read_refused_while_background_job_runs():
+    project = Project()
+    busy = [True]
+    reader = ReadAccess(project, is_busy=lambda: busy[0])
+    result = json.loads(reader.execute({"kind": "project", "path": ["runtime_state"]}))
+    assert "background job" in result["error"]
+    busy[0] = False
+    result = json.loads(reader.execute({"kind": "project", "path": ["runtime_state"]}))
+    assert "error" not in result
 
 
 @pytest.mark.parametrize(
@@ -176,12 +311,25 @@ def test_write_plugin_create_update_and_discover(tmp_path, monkeypatch):
         "__init__.py",
     ],
 )
-def test_plugin_writes_reject_other_paths(tmp_path, filename):
-    result = ReadAccess(None, tmp_path).write_plugin(
-        {"kind": "analysis_plugin", "path": filename, "content": PLUGIN_SOURCE}
-    )
+def test_plugin_writes_reject_other_paths(tmp_path, isolate_user_plugin_dir, filename):
+    result = ReadAccess(
+        None, tmp_path, confirm_write=ConfirmStub(accept=True)
+    ).write_plugin(_write_request(path=filename))
     assert "error" in json.loads(result)
     assert not list(tmp_path.rglob("*.py"))
+    assert not list(isolate_user_plugin_dir.parent.rglob("*.py"))
+
+
+def test_plugin_writes_reject_symlinked_target(tmp_path, isolate_user_plugin_dir):
+    isolate_user_plugin_dir.mkdir(parents=True, exist_ok=True)
+    outside = tmp_path / "outside.py"
+    outside.write_text("# outside\n", encoding="utf-8")
+    (isolate_user_plugin_dir / "custom.py").symlink_to(outside)
+    result = ReadAccess(None, confirm_write=ConfirmStub(accept=True)).write_plugin(
+        _write_request(overwrite=True)
+    )
+    assert "error" in json.loads(result)
+    assert outside.read_text(encoding="utf-8") == "# outside\n"
 
 
 @pytest.mark.parametrize(
@@ -189,12 +337,55 @@ def test_plugin_writes_reject_other_paths(tmp_path, filename):
     ["def broken(", "print('must not run')", "x" * 200_001],
     ids=["invalid_syntax", "missing_render", "oversized"],
 )
-def test_plugin_writes_validate_before_saving(tmp_path, content):
-    result = ReadAccess(None, tmp_path).write_plugin(
-        {"kind": "analysis_plugin", "path": "custom.py", "content": content}
+def test_plugin_writes_validate_before_saving(isolate_user_plugin_dir, content):
+    confirm = ConfirmStub(accept=True)
+    result = ReadAccess(None, confirm_write=confirm).write_plugin(
+        _write_request(content=content)
     )
     assert "error" in json.loads(result)
-    assert not list(tmp_path.rglob("*.py"))
+    assert confirm.calls == []
+    assert not list(isolate_user_plugin_dir.parent.rglob("*.py"))
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        '```json\n{"neuroseq_read": {"kind": "source", "path": ""}}\n```',
+        '```\n{"neuroseq_read": {"kind": "source", "path": ""}}\n```\n',
+        '  {"neuroseq_read": {"kind": "source", "path": ""}}',
+    ],
+    ids=["json_fence", "bare_fence", "plain"],
+)
+def test_worker_accepts_code_fenced_requests(qtbot, reply):
+    backend = ScriptedBackend([[reply[:5], reply[5:]], ["Done."]])
+    worker = _ChatWorker(backend, [], "fake")
+    tokens = []
+    requests = []
+    worker.token.connect(tokens.append)
+
+    def receive(envelope):
+        requests.append(envelope)
+        worker.deliver_read("{}")
+
+    worker.read_requested.connect(receive)
+    with qtbot.waitSignal(worker.completed):
+        worker.start()
+    worker.wait()
+    assert requests == [
+        {"operation": "neuroseq_read", "request": {"kind": "source", "path": ""}}
+    ]
+    assert "".join(tokens) == "Done."
+
+
+def test_worker_streams_backtick_answer_that_is_not_a_request(qtbot):
+    backend = ScriptedBackend([["`x` is ", "a variable."]])
+    worker = _ChatWorker(backend, [], "fake")
+    tokens = []
+    worker.token.connect(tokens.append)
+    with qtbot.waitSignal(worker.completed):
+        worker.start()
+    worker.wait()
+    assert "".join(tokens) == "`x` is a variable."
 
 
 def test_worker_dispatches_plugin_writes(qtbot):
@@ -230,18 +421,22 @@ def test_worker_dispatches_plugin_writes(qtbot):
     assert "custom.py" in backend.calls[1][-1].content
 
 
-def test_chat_widget_saves_requested_plugin(qtbot, tmp_path, monkeypatch):
+def _plugin_chat_widget(qtbot, monkeypatch, accept):
     from neuroseq.llm import chat_widget
 
     monkeypatch.setattr(chat_widget.ChatWidget, "reload_backend", lambda self: None)
+    confirm = ConfirmStub(accept=accept)
     monkeypatch.setattr(
-        chat_widget, "ReadAccess", lambda project: ReadAccess(project, tmp_path)
+        chat_widget.ChatWidget,
+        "_confirm_plugin_write",
+        lambda self, *args: confirm(*args),
     )
     widget = chat_widget.ChatWidget()
     qtbot.addWidget(widget)
     widget._backend = ScriptedBackend(
         [
             [
+                "```json\n",
                 json.dumps(
                     {
                         "neuroseq_write": {
@@ -250,15 +445,54 @@ def test_chat_widget_saves_requested_plugin(qtbot, tmp_path, monkeypatch):
                             "content": PLUGIN_SOURCE,
                         }
                     }
-                )
+                ),
+                "\n```",
             ],
-            ["Saved from_chat.py."],
+            ["Done."],
         ]
     )
+    return widget, confirm
+
+
+def test_chat_widget_saves_confirmed_plugin(
+    qtbot, monkeypatch, isolate_user_plugin_dir
+):
+    widget, confirm = _plugin_chat_widget(qtbot, monkeypatch, accept=True)
     widget.input_edit.setPlainText("Create an analysis plugin")
     widget._on_send_clicked()
     qtbot.waitUntil(lambda: widget._worker is None)
-    assert (tmp_path / "resources" / "analysis_plugins" / "from_chat.py").read_text(
+    assert (isolate_user_plugin_dir / "from_chat.py").read_text(
         encoding="utf-8"
     ) == PLUGIN_SOURCE
-    assert widget._history[-1].content == "Saved from_chat.py."
+    assert len(confirm.calls) == 1
+    assert widget._history[-1].content == "Done."
+
+
+def test_chat_widget_reports_declined_plugin(
+    qtbot, monkeypatch, isolate_user_plugin_dir
+):
+    widget, confirm = _plugin_chat_widget(qtbot, monkeypatch, accept=False)
+    widget.input_edit.setPlainText("Create an analysis plugin")
+    widget._on_send_clicked()
+    qtbot.waitUntil(lambda: widget._worker is None)
+    assert not (isolate_user_plugin_dir / "from_chat.py").exists()
+    assert len(confirm.calls) == 1
+    # The model is told the user declined.
+    assert "declined" in widget._backend.calls[1][-1].content
+
+
+def test_chat_widget_passes_busy_check_to_read_access(qtbot, monkeypatch):
+    from neuroseq.llm import chat_widget
+
+    monkeypatch.setattr(chat_widget.ChatWidget, "reload_backend", lambda self: None)
+    widget = chat_widget.ChatWidget()
+    qtbot.addWidget(widget)
+    widget.set_project(Project())
+    widget.set_busy_check(lambda: True)
+    widget._backend = ScriptedBackend(
+        [['{"neuroseq_read": {"kind": "project", "path": ["runtime_state"]}}'], ["Ok"]]
+    )
+    widget.input_edit.setPlainText("State?")
+    widget._on_send_clicked()
+    qtbot.waitUntil(lambda: widget._worker is None)
+    assert "background job" in widget._backend.calls[1][-1].content

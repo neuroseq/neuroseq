@@ -68,13 +68,22 @@ reflect the project at the time of each request. Stop cancels further requests;
 files already saved remain on disk.
 
 To create an analysis plugin, ask the assistant, for example: "Create an
-analysis plugin that plots the mean trace across selected neurons." It can save
-Python files directly in `src/neuroseq/resources/analysis_plugins` (or the
-equivalent installed package folder). Updates to existing files require an
-explicit overwrite request. Python syntax is checked before saving; this does
-not verify scientific correctness or runtime behavior. Reopen the right-click
-analysis menu to discover the new plugin. Discovery imports the Python code.
-The package folder must be writable by your operating-system account.
+analysis plugin that plots the mean trace across selected neurons." Before
+anything is saved, NeuroSeq shows a confirmation dialog with the target path and
+the complete code (or, for an update, a diff against the current file). The file
+is written only if you click **Save plugin**; if you cancel, the assistant is told
+that you declined. Review the code before accepting: tool results can contain
+text from shared project files, so a malicious project could try to steer the
+assistant into proposing harmful code.
+
+Chat-authored plugins are saved only in your per-user plugin folder (for example
+`~/.local/share/neuroseq/analysis_plugins` on Linux; override with the
+`NEUROSEQ_USER_PLUGIN_DIR` environment variable), never in the NeuroSeq package.
+Names starting with `_` and names of built-in plugins are rejected, and only
+plugins already in your folder can be overwritten. Python syntax is checked
+before saving; this does not verify scientific correctness or runtime behavior.
+Reopen the right-click analysis menu to discover the new plugin. Discovery
+imports the Python code.
 
 ## Limitations
 

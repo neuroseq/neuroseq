@@ -381,6 +381,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.chat_widget = ChatWidget(parent=self)
         self.chat_widget.setVisible(False)
         self.chat_widget.request_settings_dialog.connect(self.open_llm_settings)
+        self.chat_widget.set_busy_check(self._background_job_busy)
         split_left_right.addWidget(self.chat_widget)
         self.syscon2_panel = SysCon2Panel(
             parent=self,
@@ -3225,12 +3226,17 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         # this widget's own detached window, not the original docked panel.
         return widget
 
+    def _background_job_busy(self) -> bool:
+        job = getattr(self, "_background_job", None)
+        return job is not None and job.busy
+
     def _build_fresh_chat_widget(self) -> ChatWidget:
         widget = ChatWidget(parent=None)
         widget.set_project(self.project)
         widget._history = list(self.chat_widget._history)
         widget._render_history()
         widget.request_settings_dialog.connect(self.open_llm_settings)
+        widget.set_busy_check(self._background_job_busy)
         return widget
 
     def _create_actions_settings(

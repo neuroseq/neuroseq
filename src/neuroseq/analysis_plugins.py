@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import logging
+import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
+
+from qtpy import QtCore
 
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
@@ -39,14 +42,49 @@ class AnalysisPlugin:
         return self.label
 
 
+#: Environment variable overriding the per-user plugin folder (used by tests).
+USER_PLUGIN_DIR_ENV = "NEUROSEQ_USER_PLUGIN_DIR"
+
+
 def _plugins_directory() -> Path:
+    """Built-in plugins shipped inside the package."""
     return Path(__file__).resolve().parent / "resources" / "analysis_plugins"
 
 
-def _load_plugin_module(plugin_file: Path) -> ModuleType | None:
+def user_plugins_directory(create: bool = False) -> Path:
+    """Per-user plugin folder (outside the package), e.g. for chat-authored plugins.
+
+    ``NEUROSEQ_USER_PLUGIN_DIR`` overrides the location. Otherwise the folder
+    lives under the platform's user data location (``.../neuroseq/analysis_plugins``).
+    """
+    override = os.environ.get(USER_PLUGIN_DIR_ENV)
+    if override:
+        directory = Path(override).expanduser()
+    else:
+        base = QtCore.QStandardPaths.writableLocation(
+            QtCore.QStandardPaths.StandardLocation.GenericDataLocation
+        )
+        root = Path(base) / "neuroseq" if base else Path.home() / ".neuroseq"
+        directory = root / "analysis_plugins"
+    if create:
+        directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def builtin_plugin_names() -> set[str]:
+    """Module stems in the built-in plugin folder, including helper modules."""
+    plugins_dir = _plugins_directory()
+    if not plugins_dir.is_dir():
+        return set()
+    return {path.stem for path in plugins_dir.glob("*.py")}
+
+
+def _load_plugin_module(
+    plugin_file: Path, namespace: str = "neuroseq.analysis_plugin"
+) -> ModuleType | None:
     logger = logging.getLogger(__name__)
     spec = importlib.util.spec_from_file_location(
-        f"neuroseq.analysis_plugin.{plugin_file.stem}",
+        f"{namespace}.{plugin_file.stem}",
         plugin_file,
     )
     if spec is None or spec.loader is None:
@@ -67,17 +105,41 @@ def _load_plugin_module(plugin_file: Path) -> ModuleType | None:
     return module
 
 
+def _plugin_files() -> list[tuple[Path, str]]:
+    """Built-in plugin files followed by non-shadowing user plugin files."""
+    logger = logging.getLogger(__name__)
+    files: list[tuple[Path, str]] = []
+    plugins_dir = _plugins_directory()
+    if plugins_dir.is_dir():
+        files.extend(
+            (path, "neuroseq.analysis_plugin")
+            for path in sorted(plugins_dir.glob("*.py"))
+            if not path.stem.startswith("_")
+        )
+    builtin_names = builtin_plugin_names()
+    user_dir = user_plugins_directory()
+    if user_dir.is_dir() and user_dir.resolve() != plugins_dir.resolve():
+        for path in sorted(user_dir.glob("*.py")):
+            if path.stem.startswith("_"):
+                continue
+            if path.stem in builtin_names:
+                logger.warning(
+                    f"Skipping user analysis plugin {path}: name collides with a "
+                    f"built-in plugin"
+                )
+                continue
+            files.append((path, "neuroseq.user_analysis_plugin"))
+    return files
+
+
 def discover_analysis_plugins() -> list[AnalysisPlugin]:
     logger = logging.getLogger(__name__)
     plugins: list[AnalysisPlugin] = []
-    plugins_dir = _plugins_directory()
-    if not plugins_dir.is_dir():
-        return plugins
+    builtin_ids: set[str] = set()
 
-    for plugin_file in sorted(plugins_dir.glob("*.py")):
-        if plugin_file.stem.startswith("_"):
-            continue
-        module = _load_plugin_module(plugin_file)
+    for plugin_file, namespace in _plugin_files():
+        is_user = namespace != "neuroseq.analysis_plugin"
+        module = _load_plugin_module(plugin_file, namespace)
         if module is None:
             continue
 
@@ -88,7 +150,15 @@ def discover_analysis_plugins() -> list[AnalysisPlugin]:
             )
             continue
 
-        plugin_id = getattr(module, "PLUGIN_ID", plugin_file.stem)
+        plugin_id = str(getattr(module, "PLUGIN_ID", plugin_file.stem))
+        if is_user and plugin_id in builtin_ids:
+            logger.warning(
+                f"Skipping user analysis plugin {plugin_file}: PLUGIN_ID "
+                f"{plugin_id!r} collides with a built-in plugin"
+            )
+            continue
+        if not is_user:
+            builtin_ids.add(plugin_id)
         plugin_label = getattr(module, "PLUGIN_NAME", plugin_file.stem)
         plugin_icon = getattr(module, "PLUGIN_ICON", "mdi6.puzzle")
         open_dialog = getattr(module, "open_analysis_dialog", None)
@@ -101,7 +171,7 @@ def discover_analysis_plugins() -> list[AnalysisPlugin]:
 
         plugins.append(
             AnalysisPlugin(
-                id=str(plugin_id),
+                id=plugin_id,
                 label=str(plugin_label),
                 icon=str(plugin_icon),
                 render=render,

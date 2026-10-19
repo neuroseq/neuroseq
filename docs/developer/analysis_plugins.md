@@ -8,6 +8,8 @@ Plugin support is split across three core modules:
 
 - `src/neuroseq/analysis_plugins.py`
   - Discovers plugin modules from `src/neuroseq/resources/analysis_plugins`
+    and from the per-user folder returned by `user_plugins_directory()`
+    (user plugins never shadow built-in filenames or `PLUGIN_ID`s)
   - Loads each plugin file dynamically
   - Builds `AnalysisPlugin` objects (`id`, `label`, `icon`, `render`)
 - `src/neuroseq/visualization/timeseries_widget.py`
