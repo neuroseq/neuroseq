@@ -11,6 +11,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
+from neuroseq.qt_helpers import SelfRaisingDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import get_cmap
@@ -23,35 +24,10 @@ from neuroseq.visualization_support.constrained_pan_zoom_controller import (
 from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 
 
-class _SelfRaisingDialog(QtWidgets.QDialog):
-    """A non-modal QDialog that raises itself above its siblings whenever it
-    is activated (clicked into focus).
-
-    Several window managers raise an entire transient-dialog chain as one
-    unit on click, rather than reordering siblings within it - so clicking
-    one of several sibling popups (all transient for the same parent
-    routine dialog: the parameters dialog, its plots window, and its
-    stim-pattern heatmap window) does not bring it in front of the others;
-    the whole group just moves together, at whatever relative order the
-    window manager already had. Explicitly re-raising on ActivationChange
-    bypasses that window-manager heuristic and enforces the expected
-    last-clicked-is-on-top order.
-    """
-
-    def changeEvent(self, event: QtCore.QEvent | None) -> None:
-        super().changeEvent(event)
-        if (
-            event is not None
-            and event.type() == QtCore.QEvent.Type.ActivationChange
-            and self.isActiveWindow()
-        ):
-            self.raise_()
-
-
-class TraceNormDialog(_SelfRaisingDialog):
+class TraceNormDialog(SelfRaisingDialog):
     """A dialog to set the normalization factor for the traces.
 
-    No Qt parent (see _SelfRaisingDialog's docstring): a parent sets
+    No Qt parent (see SelfRaisingDialog's docstring): a parent sets
     WM_TRANSIENT_FOR, and on X11/KWin a transient dialog can end up sharing
     its owner's "raise group" so clicking it never brings it above another
     sibling popup.

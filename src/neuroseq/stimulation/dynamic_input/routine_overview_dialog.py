@@ -23,32 +23,7 @@ from qtpy import QtWidgets
 from qtpy.QtSvg import QSvgRenderer
 
 from neuroseq import theme as theme_module
-
-
-class _SelfRaisingDialog(QtWidgets.QDialog):
-    """A non-modal QDialog that raises itself above its siblings whenever it
-    is activated (clicked into focus).
-
-    Several window managers raise an entire transient-dialog chain as one
-    unit on click, rather than reordering siblings within it - so clicking
-    one of several sibling popups (all transient for the same parent
-    routine dialog: the parameters dialog, its plots window, and its
-    stim-pattern heatmap window) does not bring it in front of the others;
-    the whole group just moves together, at whatever relative order the
-    window manager already had. Explicitly re-raising on ActivationChange
-    bypasses that window-manager heuristic and enforces the expected
-    last-clicked-is-on-top order.
-    """
-
-    def changeEvent(self, event: QtCore.QEvent | None) -> None:
-        super().changeEvent(event)
-        if (
-            event is not None
-            and event.type() == QtCore.QEvent.Type.ActivationChange
-            and self.isActiveWindow()
-        ):
-            self.raise_()
-
+from neuroseq.qt_helpers import SelfRaisingDialog
 
 _RESOURCES_DIR = Path(__file__).resolve().parents[2] / "resources"
 
@@ -187,7 +162,7 @@ class _SvgImageWidget(QtWidgets.QWidget):
         self._renderer.render(painter, rect)
 
 
-class RoutineSelectorDialog(_SelfRaisingDialog):
+class RoutineSelectorDialog(SelfRaisingDialog):
     """Pick a dynamic-input routine with its preview always shown below.
 
     A single window holds the routine dropdown and, beneath it, a live preview
@@ -196,7 +171,7 @@ class RoutineSelectorDialog(_SelfRaisingDialog):
     separate step. Emits :attr:`routine_chosen` with the selected routine name
     when the user clicks Continue; the caller opens the real routine dialog.
 
-    No Qt parent (see _SelfRaisingDialog's docstring): a parent sets
+    No Qt parent (see SelfRaisingDialog's docstring): a parent sets
     WM_TRANSIENT_FOR, and on X11/KWin a transient dialog can end up sharing
     its owner's "raise group" so clicking it never brings it above another
     sibling popup (e.g. a routine dialog still open from a previous choice).

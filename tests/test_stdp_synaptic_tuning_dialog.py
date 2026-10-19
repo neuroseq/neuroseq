@@ -478,7 +478,7 @@ def test_stdp_synaptic_tuning_positions_native_minimized_window_without_moving_r
         return True
 
     monkeypatch.setattr(
-        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog._set_native_minimized_position",
+        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog.set_native_minimized_position",
         record_placement,
     )
 

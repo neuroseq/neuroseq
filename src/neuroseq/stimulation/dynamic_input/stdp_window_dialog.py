@@ -16,11 +16,10 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.stimulation.dynamic_input.dialog_helpers import (
-    _set_native_minimized_position,
-)
-from neuroseq.stimulation.dynamic_input.dialog_helpers import _WheelToScrollFilter
-from neuroseq.stimulation.dynamic_input.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.qt_helpers import SelfRaisingDialog
+from neuroseq.qt_helpers import WheelToScrollFilter
+from neuroseq.qt_helpers import set_native_minimized_position
+from neuroseq.qt_helpers import wrap_in_scroll_area
 from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
@@ -41,32 +40,6 @@ from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
-
-
-class _SelfRaisingDialog(QtWidgets.QDialog):
-    """A non-modal QDialog that raises itself above its siblings whenever it
-    is activated (clicked into focus).
-
-    Several window managers raise an entire transient-dialog chain as one
-    unit on click, rather than reordering siblings within it - so clicking
-    one of several sibling popups (all transient for the same parent
-    routine dialog: the parameters dialog, its plots window, and its
-    stim-pattern heatmap window) does not bring it in front of the others;
-    the whole group just moves together, at whatever relative order the
-    window manager already had. Explicitly re-raising on ActivationChange
-    bypasses that window-manager heuristic and enforces the expected
-    last-clicked-is-on-top order.
-    """
-
-    def changeEvent(self, event: QtCore.QEvent | None) -> None:
-        super().changeEvent(event)
-        if (
-            event is not None
-            and event.type() == QtCore.QEvent.Type.ActivationChange
-            and self.isActiveWindow()
-        ):
-            self.raise_()
-
 
 # Backwards-compatible import for callers/tests that used the former local
 # exception name before measurement was shared between the routines.
@@ -315,7 +288,7 @@ class StdpWindowRunConfig:
     max_iterations: int = 0
 
 
-class StdpWindowDialog(_SelfRaisingDialog):
+class StdpWindowDialog(SelfRaisingDialog):
     """Sweep spike timing to measure the functional STDP timing window."""
 
     simulation_requested = QtCore.Signal(float)
@@ -524,7 +497,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         )
         self.parameters_scroll.setMinimumHeight(80)
         layout.addWidget(self.parameters_scroll, 1)
-        self._wheel_filter = _WheelToScrollFilter(self.parameters_scroll)
+        self._wheel_filter = WheelToScrollFilter(self.parameters_scroll)
         value_widgets: list[QtWidgets.QWidget] = list(
             self.parameters_panel.findChildren(QtWidgets.QAbstractSpinBox)
         )
@@ -554,7 +527,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         # chain of transient windows sharing one owner as a single "raise
         # group" - clicking one never brings it above a sibling in the same
         # chain.
-        self.plot_window = _SelfRaisingDialog()
+        self.plot_window = SelfRaisingDialog()
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -567,7 +540,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         grid = figure.add_gridspec(2, 1, height_ratios=(3, 2), hspace=0.18)
         self.window_axes = figure.add_subplot(grid[0, 0])
         self.trajectory_axes = figure.add_subplot(grid[1, 0])
-        plot_layout.addWidget(_wrap_in_scroll_area(self.window_plot, self.plot_window))
+        plot_layout.addWidget(wrap_in_scroll_area(self.window_plot, self.plot_window))
         self.plot_window.resize(720, 560)
 
         self.lbl_status = QtWidgets.QLabel("STDP window: waiting for baseline", self)
@@ -699,7 +672,7 @@ class StdpWindowDialog(_SelfRaisingDialog):
         margin = 12
         available = screen.availableGeometry()
         minimized_height = 32
-        _set_native_minimized_position(
+        set_native_minimized_position(
             int(self.winId()),
             available.left() + margin,
             available.bottom() - minimized_height - margin + 1,

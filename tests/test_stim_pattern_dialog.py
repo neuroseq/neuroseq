@@ -70,7 +70,7 @@ def _open_dialog(controller: StaticInputController) -> StimPatternDialog:
 
 
 def test_dialog_has_no_qt_parent(qtbot: QtBot) -> None:
-    """No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    """No Qt parent - see SelfRaisingDialog's docstring for why a shared
     WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front."""
     editor, _project, static_input = _make_editor(qtbot)
     dialog = _open_dialog(static_input)

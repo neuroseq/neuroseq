@@ -12,35 +12,11 @@ from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
 from neuroseq.llm.secrets import delete_api_key
 from neuroseq.llm.secrets import set_api_key
+from neuroseq.qt_helpers import SelfRaisingDialog
 
 
-class _SelfRaisingDialog(QtWidgets.QDialog):
-    """A non-modal QDialog that raises itself above its siblings whenever it
-    is activated (clicked into focus).
-
-    Several window managers raise an entire transient-dialog chain as one
-    unit on click, rather than reordering siblings within it - so clicking
-    one of several sibling popups (all transient for the same parent
-    routine dialog: the parameters dialog, its plots window, and its
-    stim-pattern heatmap window) does not bring it in front of the others;
-    the whole group just moves together, at whatever relative order the
-    window manager already had. Explicitly re-raising on ActivationChange
-    bypasses that window-manager heuristic and enforces the expected
-    last-clicked-is-on-top order.
-    """
-
-    def changeEvent(self, event: QtCore.QEvent | None) -> None:
-        super().changeEvent(event)
-        if (
-            event is not None
-            and event.type() == QtCore.QEvent.Type.ActivationChange
-            and self.isActiveWindow()
-        ):
-            self.raise_()
-
-
-class LLMSettingsDialog(_SelfRaisingDialog):
-    """Non-modal dialog, so no Qt parent (see _SelfRaisingDialog's
+class LLMSettingsDialog(SelfRaisingDialog):
+    """Non-modal dialog, so no Qt parent (see SelfRaisingDialog's
     docstring): a parent sets WM_TRANSIENT_FOR, and on X11/KWin a transient
     dialog can end up sharing its owner's "raise group" so clicking it
     never brings it above another sibling popup."""

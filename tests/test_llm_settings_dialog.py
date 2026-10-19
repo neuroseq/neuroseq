@@ -26,7 +26,7 @@ def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
 
 
 def test_dialog_has_no_qt_parent(qtbot: QtBot, monkeypatch) -> None:
-    """No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    """No Qt parent - see SelfRaisingDialog's docstring for why a shared
     WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front."""
     dialog = _make_dialog(qtbot, monkeypatch)
     assert dialog.parent() is None

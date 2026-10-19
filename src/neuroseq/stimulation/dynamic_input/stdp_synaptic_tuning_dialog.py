@@ -14,11 +14,10 @@ from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
 from neuroseq.data import TraceData
-from neuroseq.stimulation.dynamic_input.dialog_helpers import (
-    _set_native_minimized_position,
-)
-from neuroseq.stimulation.dynamic_input.dialog_helpers import _WheelToScrollFilter
-from neuroseq.stimulation.dynamic_input.dialog_helpers import _wrap_in_scroll_area
+from neuroseq.qt_helpers import SelfRaisingDialog
+from neuroseq.qt_helpers import WheelToScrollFilter
+from neuroseq.qt_helpers import set_native_minimized_position
+from neuroseq.qt_helpers import wrap_in_scroll_area
 from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
@@ -29,32 +28,6 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_routine import SimulationH
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_property
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
-
-
-class _SelfRaisingDialog(QtWidgets.QDialog):
-    """A non-modal QDialog that raises itself above its siblings whenever it
-    is activated (clicked into focus).
-
-    Several window managers raise an entire transient-dialog chain as one
-    unit on click, rather than reordering siblings within it - so clicking
-    one of several sibling popups (all transient for the same parent
-    routine dialog: the parameters dialog, its plots window, and its
-    stim-pattern heatmap window) does not bring it in front of the others;
-    the whole group just moves together, at whatever relative order the
-    window manager already had. Explicitly re-raising on ActivationChange
-    bypasses that window-manager heuristic and enforces the expected
-    last-clicked-is-on-top order.
-    """
-
-    def changeEvent(self, event: QtCore.QEvent | None) -> None:
-        super().changeEvent(event)
-        if (
-            event is not None
-            and event.type() == QtCore.QEvent.Type.ActivationChange
-            and self.isActiveWindow()
-        ):
-            self.raise_()
-
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -270,7 +243,7 @@ class StdpSynapticTuningRunConfig:
     n_neurons: int
 
 
-class StdpSynapticTuningDialog(_SelfRaisingDialog):
+class StdpSynapticTuningDialog(SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
@@ -453,7 +426,7 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         layout.addWidget(self.parameters_scroll, 1)
         # A wheel scroll over a value widget must scroll the panel, not silently
         # change the field, so route those events to the scroll area.
-        self._wheel_filter = _WheelToScrollFilter(self.parameters_scroll)
+        self._wheel_filter = WheelToScrollFilter(self.parameters_scroll)
         value_widgets: list[QtWidgets.QWidget] = list(
             self.parameters_panel.findChildren(QtWidgets.QAbstractSpinBox)
         )
@@ -477,7 +450,7 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         # a popup can stay stuck behind its sibling no matter which is
         # clicked. Each is still closed explicitly in closeEvent() below, so
         # nothing leaks by skipping Qt's parent-child ownership here.
-        self.plot_window = _SelfRaisingDialog()
+        self.plot_window = SelfRaisingDialog()
         self.plot_window.setWindowTitle("STDP synaptic tuning — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -496,7 +469,7 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         self.spn_tolerance.valueChanged.connect(lambda _value: self._update_plots())
         # Compatibility alias: both axes now share one tightly packed canvas.
         self.difference_plot = self.epsp_plot
-        plot_layout.addWidget(_wrap_in_scroll_area(self.epsp_plot, self.plot_window))
+        plot_layout.addWidget(wrap_in_scroll_area(self.epsp_plot, self.plot_window))
         self.plot_window.resize(720, 640)
 
         self.lbl_relative_difference = QtWidgets.QLabel(
@@ -633,7 +606,7 @@ class StdpSynapticTuningDialog(_SelfRaisingDialog):
         margin = 12
         available = screen.availableGeometry()
         minimized_height = 32
-        _set_native_minimized_position(
+        set_native_minimized_position(
             int(self.winId()),
             available.left() + margin,
             available.bottom() - minimized_height - margin + 1,
