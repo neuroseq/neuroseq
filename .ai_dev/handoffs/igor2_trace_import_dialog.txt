@@ -288,8 +288,8 @@ the common code cleanly.
     from neuroseq.importer_igor2 import prepare_igor_wave_for_neuroseq
     from neuroseq.importer_patchclamp import PeakDetectionParams
     from neuroseq.spike_detection import detect_spikes_voltage_trace
-    from neuroseq.stim_timing import format_milliseconds
-    from neuroseq.stim_timing import stim_dt_matches
+    from neuroseq.stimulation.stim_timing import format_milliseconds
+    from neuroseq.stimulation.stim_timing import stim_dt_matches
 
     if TYPE_CHECKING:
         from neuroseq.project import Project

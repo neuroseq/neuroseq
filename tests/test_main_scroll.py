@@ -101,9 +101,9 @@ def test_workspace_zoom_scales_size_and_font(qtbot: QtBot) -> None:
 
 
 def test_gui_zoom_control_resizes_workspace(qtbot: QtBot) -> None:
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     assert gui.zoom_control.field.text() == "100%"
     content = gui._main_scroll.widget()

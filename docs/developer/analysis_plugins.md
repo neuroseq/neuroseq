@@ -8,13 +8,15 @@ Plugin support is split across three core modules:
 
 - `src/neuroseq/analysis_plugins.py`
   - Discovers plugin modules from `src/neuroseq/resources/analysis_plugins`
+    and from the per-user folder returned by `user_plugins_directory()`
+    (user plugins never shadow built-in filenames or `PLUGIN_ID`s)
   - Loads each plugin file dynamically
   - Builds `AnalysisPlugin` objects (`id`, `label`, `icon`, `render`)
-- `src/neuroseq/timeseries_widget.py`
+- `src/neuroseq/visualization/timeseries_widget.py`
   - Rebuilds right-click analysis menu on demand
   - Adds built-in analysis actions and plugin actions
   - Emits `custom_analysis_requested` with either a built-in `CustomAnalysisType` or an `AnalysisPlugin`
-- `src/neuroseq/custom_analysis_widget.py`
+- `src/neuroseq/visualization/custom_analysis_widget.py`
   - Executes built-in analysis logic
   - Executes plugin `render` callback for plugin analyses
   - Catches plugin exceptions, logs the plugin id, and shows a failure message in the plot
@@ -26,6 +28,13 @@ A plugin is a Python file in: `src/neuroseq/resources/analysis_plugins`. It must
 See [`src/neuroseq/resources/analysis_plugins/mean_activity.py`](../../src/neuroseq/resources/analysis_plugins/mean_activity.py) for a working example plugin.
 
 ## Advanced Interactive Example
+
+The ELiSe plugins are thin wrappers; their supporting code is a regular
+package, `src/neuroseq/elise_support/`: `replay_metrics.py` provides replay
+metrics and CSV export, `workflows.py` connects project data to the analysis
+windows, and `protocol_dialog.py` provides protocol settings. Keep core code
+out of the plugin folder: it is scanned and executed on every right-click
+menu and is excluded from coverage.
 
 For an advanced plugin example with UI controls, see [`src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py`](../../src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py).
 

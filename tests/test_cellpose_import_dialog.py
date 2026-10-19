@@ -6,8 +6,8 @@ from PIL import Image
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
+from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 
 
 def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
@@ -351,11 +351,11 @@ def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, moc
     np.save(segmentation_path, segmentation)
 
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.getopenfilename",
+        "neuroseq.importers.cellpose_import_dialog.getopenfilename",
         return_value=(str(image_path), ""),
     )
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
         return_value=object(),
     )
     annotate = mocker.patch(
@@ -390,11 +390,11 @@ def test_annotate_mean_tiff_uses_selected_cellpose_model(
     np.save(segmentation_path, segmentation)
 
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.getopenfilename",
+        "neuroseq.importers.cellpose_import_dialog.getopenfilename",
         return_value=(str(image_path), ""),
     )
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
         return_value=object(),
     )
     annotate = mocker.patch(
@@ -427,11 +427,11 @@ def test_annotate_mean_tiff_accepts_a_png_snapshot(
     np.save(segmentation_path, segmentation)
 
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.getopenfilename",
+        "neuroseq.importers.cellpose_import_dialog.getopenfilename",
         return_value=(str(image_path), ""),
     )
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
         return_value=object(),
     )
     annotate = mocker.patch(
@@ -461,11 +461,11 @@ def test_annotate_multiframe_tiff_explains_averaging(
     Image.fromarray(np.zeros((6, 6), dtype=np.uint8)).save(image_path)
 
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.getopenfilename",
+        "neuroseq.importers.cellpose_import_dialog.getopenfilename",
         return_value=(str(image_path), ""),
     )
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
         return_value=object(),
     )
     mocker.patch("neuroseq.cellpose_annotation.tiff_frame_count", return_value=600)
@@ -526,8 +526,10 @@ def test_brightness_is_adjusted_before_segmentation(
 ) -> None:
     """Issue #611: with "Adjust brightness first", the chosen window is
     passed on to the segmentation; cancelling segments nothing."""
-    from neuroseq.brightness_contrast import DisplayRange
-    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+    from neuroseq.visualization_support.brightness_contrast import DisplayRange
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
 
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)
@@ -536,11 +538,11 @@ def test_brightness_is_adjusted_before_segmentation(
     segmentation_path = tmp_path / "mean_fluorescence_cpsam_seg.npy"
     np.save(segmentation_path, np.zeros((6, 6), dtype=np.int32))
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.getopenfilename",
+        "neuroseq.importers.cellpose_import_dialog.getopenfilename",
         return_value=(str(image_path), ""),
     )
     mocker.patch(
-        "neuroseq.cellpose_import_dialog.importlib.util.find_spec",
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
         return_value=object(),
     )
     annotate = mocker.patch(
@@ -571,8 +573,10 @@ def test_brightness_is_adjusted_before_segmentation(
 
 
 def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
-    from neuroseq.brightness_contrast import DisplayRange
-    from neuroseq.segmentation_brightness_dialog import SegmentationBrightnessDialog
+    from neuroseq.visualization_support.brightness_contrast import DisplayRange
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
 
     image = np.linspace(0, 4000, 64, dtype=np.float32).reshape(8, 8)
     dialog = SegmentationBrightnessDialog(image)

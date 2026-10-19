@@ -18,20 +18,20 @@ pytestmark = pytest.mark.skipif(
     reason="ELISE opsin kinetics tests require the private 'elise' package.",
 )
 
+from neuroseq.example_models.elise import _ELISE_G0_EXC  # noqa: E402
+from neuroseq.example_models.elise import _ELISE_G0_INH  # noqa: E402
+from neuroseq.example_models.elise import _ELISE_KIN_EXC  # noqa: E402
+from neuroseq.example_models.elise import _ELISE_KIN_INH  # noqa: E402
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_EXC_ACTIVE  # noqa: E402
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_EXC_REST  # noqa: E402
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_INH_ACTIVE  # noqa: E402
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_INH_REST  # noqa: E402
 from neuroseq.example_models.elise import DEFAULT_PARAMS  # noqa: E402
 from neuroseq.example_models.elise import Elise  # noqa: E402
-from neuroseq.example_models.elise import _step_kinetics  # noqa: E402
-from neuroseq.example_projects import _ELISE_G0_EXC  # noqa: E402
-from neuroseq.example_projects import _ELISE_G0_INH  # noqa: E402
-from neuroseq.example_projects import _ELISE_KIN_EXC  # noqa: E402
-from neuroseq.example_projects import _ELISE_KIN_INH  # noqa: E402
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_ACTIVE  # noqa: E402
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_REST  # noqa: E402
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_ACTIVE  # noqa: E402
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_REST  # noqa: E402
-from neuroseq.example_projects import (  # noqa: E402
+from neuroseq.example_models.elise import (  # noqa: E402
     _calibrate_phi_for_target_open_fraction,
 )
+from neuroseq.example_models.elise import _step_kinetics  # noqa: E402
 from neuroseq.example_projects import elise_project  # noqa: E402
 
 # ---------------------------------------------------------------------------

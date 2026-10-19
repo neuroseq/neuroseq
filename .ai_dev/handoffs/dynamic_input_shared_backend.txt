@@ -254,7 +254,7 @@ CHANGE 2 — src/neuroseq/dynamic_input_blocks.py (new, no Qt) — THE GAP FIX L
     import brian2.numpy_ as np
 
     from neuroseq.project import Project
-    from neuroseq.stim import StimArray
+    from neuroseq.stimulation.stim import StimArray
 
 
     class BlockEditor(Protocol):

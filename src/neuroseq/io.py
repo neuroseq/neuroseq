@@ -12,13 +12,13 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.importer_cellpose import AOIRole
-from neuroseq.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import CircleAOI
-from neuroseq.importer_cellpose import SquareAOI
-from neuroseq.stim import StimArray
-from neuroseq.stim_timing import ensure_2d_stim_values
+from neuroseq.importers.importer_cellpose import AOIRole
+from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CircleAOI
+from neuroseq.importers.importer_cellpose import SquareAOI
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim_timing import ensure_2d_stim_values
 
 # Cellpose images and masks were stored upside down before issue #601, to suit
 # a display quirk. Results saved since are marked with their orientation.

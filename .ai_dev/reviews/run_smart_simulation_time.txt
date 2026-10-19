@@ -143,7 +143,7 @@ MUST-FIX
             (pitch 5 active), not rest, so it must not be trimmed.
             """
             from neuroseq.example_projects import _build_fuer_elise_pattern
-            from neuroseq.stim_timing import DEFAULT_STIM_DT_SECONDS
+            from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
 
             project = Project()
             project.add_stim_array(

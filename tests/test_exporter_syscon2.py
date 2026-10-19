@@ -6,32 +6,36 @@ import brian2.numpy_ as np
 import pytest
 from PIL import Image
 
-from neuroseq.exporter_syscon2 import PulseOverrunViolation
-from neuroseq.exporter_syscon2 import _compute_cell_centroids
-from neuroseq.exporter_syscon2 import _compute_cell_stimulation_spots
-from neuroseq.exporter_syscon2 import _find_pulse_overrun_violations
-from neuroseq.exporter_syscon2 import _ScheduledEntityWindow
-from neuroseq.exporter_syscon2 import align_overlapping_pulses_to_shortest
-from neuroseq.exporter_syscon2 import align_stim_values_left_for_slm
-from neuroseq.exporter_syscon2 import check_syscon2_input_sanity
-from neuroseq.exporter_syscon2 import equalize_simultaneous_durations_to_min
-from neuroseq.exporter_syscon2 import find_initial_slm_load_violation
-from neuroseq.exporter_syscon2 import find_overlapping_pulse_group_violations
-from neuroseq.exporter_syscon2 import find_simultaneous_duration_violations
-from neuroseq.exporter_syscon2 import find_slm_gap_violations
-from neuroseq.exporter_syscon2 import find_slm_off_on_overlap_violations
-from neuroseq.exporter_syscon2 import generate_syscon2_sequence_text
-from neuroseq.exporter_syscon2 import generate_syscon2_timeline_overview_png
-from neuroseq.exporter_syscon2 import resample_stim_values_to_dt
-from neuroseq.exporter_syscon2 import shift_stim_values_right_for_initial_slm_load
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm
-from neuroseq.exporter_syscon2 import space_out_stim_values_for_slm_off_on_overlap
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_syscon2 import parse_syscon2_seq_text
-from neuroseq.importer_syscon2 import sequence_to_stim_values
-from neuroseq.power_lut import PowerLut
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.export.exporter_syscon2 import PulseOverrunViolation
+from neuroseq.export.exporter_syscon2 import _compute_cell_centroids
+from neuroseq.export.exporter_syscon2 import _compute_cell_stimulation_spots
+from neuroseq.export.exporter_syscon2 import _find_pulse_overrun_violations
+from neuroseq.export.exporter_syscon2 import _ScheduledEntityWindow
+from neuroseq.export.exporter_syscon2 import align_overlapping_pulses_to_shortest
+from neuroseq.export.exporter_syscon2 import align_stim_values_left_for_slm
+from neuroseq.export.exporter_syscon2 import check_syscon2_input_sanity
+from neuroseq.export.exporter_syscon2 import equalize_simultaneous_durations_to_min
+from neuroseq.export.exporter_syscon2 import find_initial_slm_load_violation
+from neuroseq.export.exporter_syscon2 import find_overlapping_pulse_group_violations
+from neuroseq.export.exporter_syscon2 import find_simultaneous_duration_violations
+from neuroseq.export.exporter_syscon2 import find_slm_gap_violations
+from neuroseq.export.exporter_syscon2 import find_slm_off_on_overlap_violations
+from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
+from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
+from neuroseq.export.exporter_syscon2 import resample_stim_values_to_dt
+from neuroseq.export.exporter_syscon2 import (
+    shift_stim_values_right_for_initial_slm_load,
+)
+from neuroseq.export.exporter_syscon2 import space_out_stim_values_for_slm
+from neuroseq.export.exporter_syscon2 import (
+    space_out_stim_values_for_slm_off_on_overlap,
+)
+from neuroseq.export.power_lut import PowerLut
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
+from neuroseq.importers.importer_syscon2 import sequence_to_stim_values
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 _TTL_QUANTUM_US = 520.8125
 _DT_S = 0.0005208125  # exact literal; avoids float rounding from _TTL_QUANTUM_US * 1e-6
@@ -393,7 +397,7 @@ def test_export_seq_starts_with_ttl_out_1_trigger_pulse() -> None:
         <= first_pulse.start_time_us
     )
     # An exported file is recognised as a Holo4D layout when re-imported.
-    from neuroseq.importer_syscon2 import _looks_like_holo4d_timeline_layout
+    from neuroseq.importers.importer_syscon2 import _looks_like_holo4d_timeline_layout
 
     assert _looks_like_holo4d_timeline_layout(sequence, tick_resolution_us=500)
 
@@ -1277,6 +1281,37 @@ def test_resample_stim_values_to_dt_preserves_total_duration_when_upsampling() -
     assert new_values[4, 0] == 1.0
 
 
+def test_resample_stim_values_to_dt_breaks_ties_consistently() -> None:
+    # An exact 2x upsample puts every other tick halfway between two samples;
+    # round-half-to-even used to alternate the tie direction and jitter pulse widths.
+    values = np.zeros((6, 1), dtype=np.float32)
+    values[1, 0] = 1.0
+    values[3, 0] = 1.0
+    stim_array = StimArray("stim", StimType.Excitation, values, "1", 0.002)
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.001)
+
+    assert n_new == 12
+    assert new_values[:, 0].tolist() == [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0]
+
+
+def test_resample_stim_values_to_dt_tolerates_float_error_at_sample_boundaries() -> (
+    None
+):
+    # 1 ms -> 100 us: tick 110 sits exactly on old sample 11 (110 * 1e-4 / 1e-3 is
+    # 11.000000000000002 in floats); 100 us -> 1 ms: 950 * 2e-5 / 1e-3 rounds to 19.
+    values = np.arange(20, dtype=np.float32)[:, np.newaxis]
+    upsampled, _ = resample_stim_values_to_dt(
+        StimArray("stim", StimType.Excitation, values, "1", 0.001), new_dt=0.0001
+    )
+    assert upsampled[110, 0] == 11
+    _, n_new = resample_stim_values_to_dt(
+        StimArray("s", StimType.Excitation, np.zeros((950, 1)), "1", 0.00002),
+        new_dt=0.001,
+    )
+    assert n_new == 19
+
+
 def test_resample_stim_values_to_dt_rejects_non_2d_input() -> None:
     stim_array = StimArray(
         name="stim",
@@ -1798,7 +1833,9 @@ def test_generate_syscon2_sequence_text_raises_when_segmentation_array_is_none()
 ):
     import numpy as _np
 
-    from neuroseq.importer_cellpose import CellposeImportResult as _CellposeImportResult
+    from neuroseq.importers.importer_cellpose import (
+        CellposeImportResult as _CellposeImportResult,
+    )
 
     no_seg = _CellposeImportResult(
         image_path=Path("dummy.png"),
@@ -1931,11 +1968,11 @@ def test_check_syscon2_input_sanity_computes_pulse_overrun_fix_values(
         neuron_index=0,
     )
     monkeypatch.setattr(
-        "neuroseq.exporter_syscon2._find_pulse_overrun_violations",
+        "neuroseq.export.exporter_syscon2._find_pulse_overrun_violations",
         lambda *a, **kw: [fake_violation],
     )
     monkeypatch.setattr(
-        "neuroseq.exporter_syscon2.generate_syscon2_sequence_text",
+        "neuroseq.export.exporter_syscon2.generate_syscon2_sequence_text",
         lambda *a, **kw: (_ for _ in ()).throw(
             ValueError("laser pulse end exceeds shape boundary")
         ),
@@ -2149,9 +2186,9 @@ def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None
 
 
 def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
-    from neuroseq.importer_syscon2 import original_stim_sidecar_path
-    from neuroseq.importer_syscon2 import parse_syscon2_seq_file
-    from neuroseq.importer_syscon2 import write_original_stim_sidecar
+    from neuroseq.importers.importer_syscon2 import original_stim_sidecar_path
+    from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_file
+    from neuroseq.importers.importer_syscon2 import write_original_stim_sidecar
 
     n_neurons = 5
     values = np.zeros((900, n_neurons), dtype=np.float32)

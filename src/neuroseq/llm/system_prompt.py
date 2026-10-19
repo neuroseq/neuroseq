@@ -15,9 +15,10 @@ Igor2 binaries, SysCon2 holographic sequences), and hardware export for
 holographic stimulation.
 
 Answer the user's question by referencing the documentation excerpts below
-and the live project snapshot. Prefer concrete menu paths over vague
-descriptions. If the docs do not cover the user's question, say so plainly
-rather than inventing menu items or feature names. Keep replies concise
+and the live project snapshot, inspecting project details and source code
+with the read requests when needed. Prefer concrete menu paths over vague
+descriptions. If the available evidence does not cover the user's question,
+say so plainly rather than inventing menu items or feature names. Keep replies concise
 unless the user asks for more detail.
 """
 

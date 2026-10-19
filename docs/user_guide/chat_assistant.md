@@ -55,10 +55,44 @@ Type a message and press **Send**; replies stream in token by token. Each
 new message includes a fresh snapshot of the current project so the model
 can answer questions about the loaded simulation and data.
 
+The assistant can request read-only details from the loaded project: model
+equations, parameters, initial conditions, synapses, monitors, runtime state,
+stimuli, experiments, and imaging metadata. Large arrays are read in pages of
+flattened values, with shape and units supplied where available. It can also
+list and read Python files within the installed `neuroseq` source package,
+including example projects. Files elsewhere on your computer are not accessible.
+
+Requested project data and source text are sent to your selected provider.
+With a hosted provider, this includes the requested experimental data. Reads
+reflect the project at the time of each request. Stop cancels further requests;
+files already saved remain on disk.
+
+To create an analysis plugin, ask the assistant, for example: "Create an
+analysis plugin that plots the mean trace across selected neurons." Before
+anything is saved, NeuroSeq shows a confirmation dialog with the target path and
+the complete code (or, for an update, a diff against the current file). The file
+is written only if you click **Save plugin**; if you cancel, the assistant is told
+that you declined. Review the code before accepting: tool results can contain
+text from shared project files, so a malicious project could try to steer the
+assistant into proposing harmful code.
+
+Chat-authored plugins are saved only in your per-user plugin folder (for example
+`~/.local/share/neuroseq/analysis_plugins` on Linux; override with the
+`NEUROSEQ_USER_PLUGIN_DIR` environment variable), never in the NeuroSeq package.
+Names starting with `_` and names of built-in plugins are rejected, and only
+plugins already in your folder can be overwritten. Python syntax is checked
+before saving; this does not verify scientific correctness or runtime behavior.
+Reopen the right-click analysis menu to discover the new plugin. Discovery
+imports the Python code.
+
 ## Limitations
 
-- No tool use: the assistant can read project context but cannot edit
-  the project or run actions on your behalf.
+- Project and source access is read-only except for Python files in the analysis
+  plugin folder. The assistant cannot directly execute Python or run simulations.
+- Inspection uses a JSON request protocol supported by all three backends;
+  reliability depends on the model following that protocol. Each turn allows
+  up to 12 read/write requests; ask a follow-up to continue. Data is read on demand rather
+  than sending the entire project and source tree in every prompt.
 - Conversations are not persisted across sessions.
 - Provider availability, model lists, and rate limits depend entirely on
   the chosen backend.

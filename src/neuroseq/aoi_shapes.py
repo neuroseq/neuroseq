@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from neuroseq.importer_cellpose import CircleAOI
-    from neuroseq.importer_cellpose import SquareAOI
+    from neuroseq.importers.importer_cellpose import CircleAOI
+    from neuroseq.importers.importer_cellpose import SquareAOI
 
 
 def square_corners(square: SquareAOI) -> list[tuple[float, float]]:

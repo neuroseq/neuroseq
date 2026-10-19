@@ -2,12 +2,12 @@
 
 NeuroSeq can import stimulation waveforms from Igor Pro / Sutter workflows into stimulation arrays.
 
-Open the dialog from `File → Import data → Import stimulus → Import patch clamp`. The pre-dialog asks for the source software — choose `Igor2` — and the file picker accepts `.ibw`, `.pxp`, and `.csv` files.
+Open the dialog from `File → Import data → Input → Patch Clamp`. The file picker accepts `.ibw`, `.pxp`, `.csv`, and `.txt` files.
 
 ## Supported input formats
 
-CSV recordings can also be imported through `File → Input data → Output → Patch Clamp`
-by choosing `CSV / Text (.csv, .txt)`. Both extensions use the same importer.
+CSV recordings can also be imported through `File → Import data → Output → Patch Clamp`
+by picking a `.csv` or `.txt` file. Both extensions use the same importer.
 Each column is a separate trace and each row is a sample.
 Comma, tab, and whitespace separators are detected automatically.
 An optional header row names the traces; without it, names use the filename and
@@ -26,13 +26,13 @@ cell_a,cell_b
 -63,-60
 ```
 
-For CSV patch-clamp input, choose `File → Input data → Input → Patch Clamp`,
-then `CSV / Text (.csv, .txt)`. Both extensions accept a single column with one numeric sample per row; an
+For CSV patch-clamp input, choose `File → Import data → Input → Patch Clamp`
+and pick a `.csv` or `.txt` file. Both extensions accept a single column with one numeric sample per row; an
 optional first row can contain the waveform name. Without a header, the file
 name supplies the waveform name. Set **Source sampling rate** in Hz and choose
 the input units before importing. The preview and imported duration use this
-sampling rate. By default, the waveform is resampled onto the 1 ms input grid;
-enable **Adjust NeuroSeq input grid to source/file grid** to preserve its timestep.
+sampling rate. All samples are preserved, and the input array uses the source
+sample interval (`dt = 1 / sampling rate`).
 
 - `.ibw`: a single Igor Binary Wave
 - `.pxp`: an Igor Packed Experiment containing one or more waves
@@ -64,7 +64,6 @@ After selecting a wave, the preview shows:
 - source format
 - source sample count
 - detected source sample interval (`dt`) when present
-- imported sample count on the currently selected NeuroSeq import grid
 - units and axis units
 - value range
 - optional Igor note text
@@ -72,13 +71,9 @@ After selecting a wave, the preview shows:
 For CSV files, set the source sampling rate in Hz before import. For Igor binary
 files, the source sample interval is read from the file.
 
-By default, NeuroSeq imports stimulation data onto its 1 ms timeline and uses zero-order-hold resampling when the source `dt` differs from `0.001 s`.
-
-If you enable `Adjust NeuroSeq stim grid to source/file grid`, NeuroSeq instead uses the selected source sample interval as the imported stimulation grid:
-
-- new stimulation arrays are created with that `dt`
-- existing stimulation arrays are remapped to that `dt` before import, after confirmation
-- when source and target `dt` match, the Igor wave is copied without timeline resampling
+Stimuli and recorded traces are imported at the source sample interval without
+resampling. Each new array or trace dataset stores its own `dt`, so different
+acquisition rates can coexist in one project and align by time in the plots.
 
 ## Import targets
 
@@ -91,7 +86,18 @@ The dialog offers two modes:
   - _Replace target neuron values instead of adding to them_ clears the destination column before writing. When unchecked, imported values are added sample-by-sample to the existing column.
   - Other neuron columns are always preserved.
 
-If the target stim array uses a different `dt` than the selected import grid, NeuroSeq asks for confirmation and remaps the target to the import grid before writing the wave.
+If an existing target stimulation array or trace dataset uses a different `dt`
+than the source, NeuroSeq asks how to proceed:
+
+- **Resample wave to target Δt** (default) — the wave is resampled onto the
+  target's grid; the target is unchanged.
+- **Remap target to wave Δt** — the whole target is remapped onto the wave's
+  grid. Existing timing may shift by up to one sample, and remapping onto a
+  fast recording's grid can make the target very large.
+- **Cancel** — nothing is imported.
+
+Other datasets keep their intervals. The import is recorded as one undoable
+edit.
 
 For packed experiments, the suggested stim name and units update automatically when you choose a different wave.
 

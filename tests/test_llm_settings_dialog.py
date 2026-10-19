@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pytestqt.qtbot import QtBot
 
-from neuroseq.llm_settings_dialog import LLMSettingsDialog
+from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 
 
 class _FakeSettings:
@@ -15,7 +15,7 @@ class _FakeSettings:
 
 def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
     monkeypatch.setattr(
-        "neuroseq.llm_settings_dialog.GuiSettings",
+        "neuroseq.llm.llm_settings_dialog.GuiSettings",
         _FakeSettings,
     )
     dialog = LLMSettingsDialog()
@@ -26,7 +26,7 @@ def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
 
 
 def test_dialog_has_no_qt_parent(qtbot: QtBot, monkeypatch) -> None:
-    """No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    """No Qt parent - see SelfRaisingDialog's docstring for why a shared
     WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front."""
     dialog = _make_dialog(qtbot, monkeypatch)
     assert dialog.parent() is None
@@ -63,7 +63,7 @@ def test_save_key_writes_to_secrets_module(qtbot: QtBot, monkeypatch) -> None:
     dialog = _make_dialog(qtbot, monkeypatch)
     dialog.provider_combo.setCurrentText("OpenAI")
     monkeypatch.setattr(
-        "neuroseq.llm_settings_dialog.set_api_key",
+        "neuroseq.llm.llm_settings_dialog.set_api_key",
         lambda provider, key: recorded.setdefault((provider, key), True),
     )
 
@@ -81,7 +81,7 @@ def test_save_key_warns_when_keyring_missing(
     dialog = _make_dialog(qtbot, monkeypatch)
     dialog.provider_combo.setCurrentText("OpenAI")
     monkeypatch.setattr(
-        "neuroseq.llm_settings_dialog.set_api_key",
+        "neuroseq.llm.llm_settings_dialog.set_api_key",
         lambda provider, key: False,
     )
 

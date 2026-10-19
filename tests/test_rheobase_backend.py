@@ -1,5 +1,5 @@
-from neuroseq.rheobase_dialog import RheobaseBackend
-from neuroseq.rheobase_dialog import RheobaseRunConfig
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseBackend
+from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseRunConfig
 
 
 class Host:

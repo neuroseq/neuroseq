@@ -3,9 +3,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from neuroseq import syscon2_export_service as service
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.export import syscon2_export_service as service
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 @pytest.fixture
@@ -138,7 +138,7 @@ def test_missing_lut_cannot_silently_discard_requested_power(
     [(), ((float("nan"), 1),), ((50, float("inf")),), ((101, 1),), ((20, -1),)],
 )
 def test_invalid_calibration_cannot_export(export_input, tmp_path, mocker, tuples):
-    from neuroseq.power_lut import PowerLut
+    from neuroseq.export.power_lut import PowerLut
 
     project, stim, _, _, generate = export_input
     mocker.patch.object(service, "_power_lut", return_value=PowerLut("bad", tuples))

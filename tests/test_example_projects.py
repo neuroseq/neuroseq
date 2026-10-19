@@ -19,6 +19,37 @@ project_generators = [
 ]
 
 
+def test_example_project_menu_preserves_sections_and_order() -> None:
+    assert [
+        (section, list(projects))
+        for section, projects in example_projects.example_projects.items()
+    ] == [
+        ("Basics", ["Getting Started Project", "non_linear"]),
+        (
+            "Single Neuron",
+            [
+                "Hodgkin-Huxley Neuron",
+                "Adaptive Exponential Integrate-and-Fire Neuron",
+                "Leaky-Integrate-and-Fire Neuron",
+            ],
+        ),
+        (
+            "Network",
+            [
+                "Network of Hodgkin-Huxley Neurons",
+                "Network of Hodgkin-Huxley Neurons with Predefined Synapses",
+                "Network of Hodgkin-Huxley Neurons with STDP",
+                "Two Hodgkin-Huxley Neurons with STDP",
+                "Locally Connected Network",
+                "ELISE Sequence Learning Network",
+                "Sinus Offset External Simulator",
+                "PyNN AdEx Neuromorphic Network",
+            ],
+        ),
+        ("Optogenetics", ["ChR2 in HEK293"]),
+    ]
+
+
 @pytest.mark.parametrize("project_generator", project_generators)
 def test_example_projects(project_generator, tmp_path: pathlib.Path) -> None:
     project = project_generator()

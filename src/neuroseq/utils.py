@@ -20,7 +20,7 @@ from qtpy import QtWidgets
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimType
 
 save_store_name = "___current-simulation-state-at-save-time___"
 

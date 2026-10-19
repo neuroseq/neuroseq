@@ -1,23 +1,37 @@
 # GUI Overview
 
+## Project tabs
+
+Every open project lives in its own tab. `New`, `Open Project`, opening an
+example project and dropping a `.nseq` file each open a new tab and leave the
+other tabs untouched; closing a tab with unsaved changes asks whether to save
+first. Menus and toolbars always act on the current tab. Only one simulation
+can run at a time across all tabs (Brian2's random seed and code-generation
+settings are shared), so starting a second one shows a notice instead.
+
 ## File menu
 
 All data import and export actions are grouped under two sub-menus:
 
 - `File → Import data`
-  - `Import stimulus → Import light stimulus` — SysCon2 `.seq` import
-  - `Import stimulus → Import patch clamp` — Igor2 `.ibw` / `.pxp` / `.csv` import (see [Importing Igor2 Waves](importing_igor2_waves.md))
-  - `Import trace → Import calcium imaging` — Suite2p fluorescence import
-  - `Import trace → Import patch clamp` — Igor2 patch-clamp trace import
-  - `Import cell segmentation` — Cellpose segmentation import
-- `File → Export data`
-  - `Export patch clamp stimulus` — Igor2 stimulus CSV/`.ibw` export for SutterPatch (see [Export stimuli for patch clamp recordings](export_patch_clamp_stimuli.md))
-  - `Export light stimulus` — SysCon2 `.seq` export for holographic hardware (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md))
-  - `Export traces` — publication-quality matplotlib figure (PNG/SVG/PDF, 300 DPI) of the currently selected `TraceData`
-  - `Export spikes` — publication-quality matplotlib raster (PNG/SVG/PDF, 300 DPI) of the currently selected `SpikeData`
-  - `Export simulation results` — HDF5 snapshot of the full simulation
+  - `Input → Optogenetics` — SysCon2 `.seq` import (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md))
+  - `Input → Patch Clamp` — Igor2 `.ibw` / `.pxp` or `.csv` / `.txt` input waveform import (see [Importing Igor2 Waves](importing_igor2_waves.md))
+  - `Output → Calcium Imaging (raw .tif)` — raw 2-photon TIFF through the Cellpose + Suite2p pipeline
+  - `Output → Calcium Imaging (Suite2p outputs)` — Suite2p fluorescence import
+  - `Output → Patch Clamp` — patch-clamp recording (trace) import
+- `File → Export`
+  - `Patch Clamp Input` — Igor2 stimulus CSV/`.ibw`/`.pxp` export for SutterPatch (see [Export stimuli for patch clamp recordings](export_patch_clamp_stimuli.md))
+  - `Optogenetic Input` — SysCon2 `.seq` (or Igor2) export for holographic hardware (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md)). This only writes files; to also import the sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel.
 
-Each import or export action that supports multiple third-party software packages opens a small pre-dialog first so you can choose the source/target software (e.g. Igor2, SysCon2).
+`File → Cell segmentation` imports or runs Cellpose segmentation, and
+`File → Manage Data` lists the imported and simulated data groups so they can
+be deleted.
+
+### Undo and redo
+
+Undo/redo covers input-array edits, deleting data groups in
+`File → Manage Data`, and imports into the project. The history belongs to the
+project tab and lasts for the session; it is not saved in the `.nseq` file.
 
 ### Dropping files
 
@@ -161,13 +175,13 @@ running, so you can scrub manually at any time.
 The **Settings** menu groups preferences that affect the rest of the
 application:
 
-| Setting                    | What it does                                                                                                                                                |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brian2 simulation backend  | Pick `cython` (default) or `numpy` (see [Simulations](simulations.md#choosing-a-brian2-backend)).                                                           |
-| Stimulus automatic padding | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
-| LLM assistant              | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
-| Synapse matrix RAM limit   | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |
-| Theme                      | Switch between a **Light**, **Dark** and **Retro light theme (beta)** (the default) appearance. The choice is remembered and re-applied on the next launch. |
+| Setting                   | What it does                                                                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](simulations.md#choosing-a-brian2-backend)).                                                           |
+| Input automatic padding   | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
+| LLM assistant             | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
+| Synapse matrix RAM limit  | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |
+| Theme                     | Switch between a **Light**, **Dark** and **Retro light theme (beta)** (the default) appearance. The choice is remembered and re-applied on the next launch. |
 
 The **Retro light theme (beta)** is the default on a fresh install. It is a
 skin in the spirit of the classic Winamp light skins: brushed-metal chrome

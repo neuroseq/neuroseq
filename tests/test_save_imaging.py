@@ -10,8 +10,8 @@ import tifffile
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
 from neuroseq.save_imaging_dialog import SaveImagingDialog
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
 
 @pytest.fixture
@@ -133,9 +133,9 @@ def test_saved_frames_share_one_grey_scale(qtbot: QtBot, tmp_path: Path) -> None
 
 
 def test_stimulation_marks_scale_with_the_image(qtbot: QtBot, tmp_path: Path) -> None:
-    from neuroseq.importer_cellpose import CellposeImportResult
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     size = 512
     segmentation = -np.ones((size, size), dtype=np.int32)

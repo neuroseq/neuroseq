@@ -1,9 +1,10 @@
 import numpy as np
+import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_dialog import EditStimDialog
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_dialog import EditStimDialog
 
 
 def test_edit_stim_dialog(qtbot: QtBot):
@@ -28,6 +29,7 @@ def test_edit_stim_dialog(qtbot: QtBot):
     assert dialog.n_neurons == 2
     assert dialog.units == "mV"
     assert dialog.dt == 0.001
+    assert float(dialog.txt_duration.text()) == 0.002
 
     # Change name to an existing name
     assert dialog.btn_save.isEnabled()
@@ -55,12 +57,26 @@ def test_edit_stim_dialog(qtbot: QtBot):
     assert dialog.stim_type == StimType.External
 
 
+@pytest.mark.parametrize("text", ["", "abc", "0", "-1", "nan", "inf"])
+def test_duration_requires_positive_finite_seconds(qtbot, text):
+    dialog = EditStimDialog(
+        StimArray("stim", StimType.Excitation, np.zeros((10, 1)), "1", 0.001), []
+    )
+    qtbot.addWidget(dialog)
+    dialog.txt_duration.setText(text)
+    assert not dialog.btn_save.isEnabled()
+    assert "duration" in dialog.lbl_error.text()
+    dialog.txt_duration.setText("0.125")
+    assert dialog.btn_save.isEnabled()
+    assert dialog.duration_seconds == 0.125
+
+
 def test_syscon_timestep_preset_preserves_exact_quantum(qtbot):
     import numpy as np
 
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
-    from neuroseq.stim_dialog import EditStimDialog
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+    from neuroseq.stimulation.stim_dialog import EditStimDialog
 
     dialog = EditStimDialog(
         StimArray("stim", StimType.Excitation, np.zeros((10, 2)), "1", 0.001), []

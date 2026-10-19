@@ -5,9 +5,14 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from neuroseq.example_projects import two_hh_neurons_with_plasticity
-from neuroseq.stdp_window_dialog import StdpWindowDialog
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowDialog
+
+# Real Hodgkin-Huxley sweeps run several Brian2 simulation segments using the
+# NumPy backend. Allow slower CI runners more than the default 60 seconds.
+pytestmark = pytest.mark.timeout(300)
 
 
 class _BrianEditor:
@@ -116,7 +121,7 @@ def test_stdp_window_closed_loop_measures_ltd_and_ltp_on_real_model(
     # what test_continue_preserves_existing_stimulus_in_continuous_mode
     # covers on a fast fake model.)
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.stdp_window_dialog.confirm_start_routine",
         lambda *args, **kwargs: "clear",
     )
 
@@ -165,7 +170,7 @@ def test_stdp_window_weight_readout_measures_ltd_and_ltp(qtbot, monkeypatch) -> 
     dialog = StdpWindowDialog(editor)  # type: ignore[arg-type]
     qtbot.addWidget(dialog)
     monkeypatch.setattr(
-        "neuroseq.stdp_window_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.stdp_window_dialog.confirm_start_routine",
         lambda *args, **kwargs: "continue",
     )
 

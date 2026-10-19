@@ -8,7 +8,7 @@ import time
 from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
-from neuroseq.gui import BackgroundIOWorker
+from neuroseq.background_jobs import BackgroundIOWorker
 
 
 class _ProgressReceiver(QtCore.QObject):

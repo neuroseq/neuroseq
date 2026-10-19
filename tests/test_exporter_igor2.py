@@ -7,14 +7,14 @@ from pathlib import Path
 import brian2.numpy_ as np
 import pytest
 
-from neuroseq.exporter_igor2 import _sanitize_igor_wave_name
-from neuroseq.exporter_igor2 import _write_ibw_v5
-from neuroseq.exporter_igor2 import export_igor2_csv
-from neuroseq.exporter_igor2 import export_igor2_ibw
-from neuroseq.exporter_igor2 import export_igor2_pxp
-from neuroseq.exporter_igor2 import generate_igor2_csv_text
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.export.exporter_igor2 import _sanitize_igor_wave_name
+from neuroseq.export.exporter_igor2 import _write_ibw_v5
+from neuroseq.export.exporter_igor2 import export_igor2_csv
+from neuroseq.export.exporter_igor2 import export_igor2_ibw
+from neuroseq.export.exporter_igor2 import export_igor2_pxp
+from neuroseq.export.exporter_igor2 import generate_igor2_csv_text
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def test_generate_igor2_csv_text_exports_single_neuron_column() -> None:

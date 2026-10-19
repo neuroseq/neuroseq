@@ -7,8 +7,8 @@ import brian2.numpy_ as np
 from neuroseq.llm.system_prompt import build_context_snapshot
 from neuroseq.llm.system_prompt import build_static_prompt
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def test_build_static_prompt_includes_each_doc_with_header(

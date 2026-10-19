@@ -14,9 +14,9 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 
-from neuroseq.importer_tif import TifPipelineParams
-from neuroseq.importer_tif import _masks_to_stat
-from neuroseq.importer_tif import _stat_to_masks
+from neuroseq.importers.importer_tif import TifPipelineParams
+from neuroseq.importers.importer_tif import _masks_to_stat
+from neuroseq.importers.importer_tif import _stat_to_masks
 
 
 def _make_mask_image(shape=(32, 32)) -> np.ndarray:
@@ -85,7 +85,7 @@ def test_tif_pipeline_params_defaults_target_jgcamp8m():
 
 def test_run_suite2p_pipeline_rejects_empty_tif_list():
     # ValueError check fires before suite2p import — no skip needed.
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     with pytest.raises(ValueError, match="at least one TIFF"):
         run_suite2p_pipeline([], _make_mask_image(), TifPipelineParams())
@@ -94,7 +94,7 @@ def test_run_suite2p_pipeline_rejects_empty_tif_list():
 def test_run_roi_average_pipeline_extracts_and_concatenates_traces(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     masks = np.array([[1, 1], [0, 2]], dtype=np.int32)
     first = np.array([[[2, 4], [99, 10]], [[6, 8], [99, 14]]], dtype=np.uint16)
@@ -115,9 +115,9 @@ def test_run_roi_average_pipeline_extracts_and_concatenates_traces(tmp_path):
 def test_roi_average_suppresses_frames_overlapping_stimulation(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
-    from neuroseq.stim import StimArray
-    from neuroseq.stim import StimType
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
 
     path = tmp_path / "stack.tif"
     stack = np.arange(1, 7, dtype=np.uint16)[:, None, None]
@@ -145,7 +145,7 @@ def test_roi_average_suppresses_frames_overlapping_stimulation(tmp_path):
 def test_run_roi_average_pipeline_rejects_mismatched_masks(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "stack.tif"
     tifffile.imwrite(
@@ -160,7 +160,7 @@ def test_run_roi_average_pipeline_rejects_mismatched_masks(tmp_path):
 def test_run_roi_average_pipeline_validates_inputs(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     valid_masks = np.ones((2, 2), dtype=np.int32)
     path = tmp_path / "stack.tif"
@@ -187,7 +187,7 @@ def test_run_roi_average_pipeline_validates_inputs(tmp_path):
 def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "stack.tif"
     path.touch()
@@ -211,7 +211,7 @@ def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
 def test_run_roi_average_pipeline_accepts_single_2d_image(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "image.tif"
     tifffile.imwrite(path, np.array([[1, 3], [5, 7]], dtype=np.uint8))
@@ -224,7 +224,7 @@ def test_run_roi_average_pipeline_accepts_single_2d_image(tmp_path):
 def test_run_roi_average_pipeline_uses_selected_interleaved_channel(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     masks = np.ones((2, 2), dtype=np.int32)
     stack = np.array(
@@ -250,7 +250,7 @@ def test_run_roi_average_pipeline_uses_selected_interleaved_channel(tmp_path):
 def test_run_roi_average_pipeline_uses_channel_axis(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     masks = np.ones((2, 2), dtype=np.int32)
     stack = np.zeros((3, 2, 2, 2), dtype=np.uint16)
@@ -269,8 +269,8 @@ def test_run_roi_average_pipeline_uses_channel_axis(tmp_path):
 def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import run_roi_average_pipeline
-    from neuroseq.tif_import_dialog import _cellpose_result_to_masks
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
 
     raw_masks = np.array([[1, 1], [0, 2], [0, 2]], dtype=np.int32)
     stack = np.array(
@@ -298,7 +298,7 @@ def test_run_suite2p_pipeline_accepts_none_masks_but_rejects_bad_ndim(monkeypatc
     import sys
     import types
 
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     bad_masks = np.zeros((4, 4, 4), dtype=np.int32)
     with pytest.raises(ValueError, match="masks must be 2D"):
@@ -329,7 +329,7 @@ def test_run_suite2p_pipeline_accepts_none_masks_but_rejects_bad_ndim(monkeypatc
 
 
 def test_cellpose_result_to_masks_round_trips_background_and_labels():
-    from neuroseq.tif_import_dialog import _cellpose_result_to_masks
+    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
 
     seg = np.array(
         [
@@ -358,7 +358,7 @@ def test_cellpose_result_to_masks_round_trips_background_and_labels():
 
 
 def test_load_masks_from_seg_file_unwraps_cellpose_dict(tmp_path: Path):
-    from neuroseq.tif_import_dialog import _load_masks_from_seg_file
+    from neuroseq.importers.tif_import_dialog import _load_masks_from_seg_file
 
     masks = _make_mask_image()
     seg_path = tmp_path / "image_seg.npy"
@@ -369,7 +369,7 @@ def test_load_masks_from_seg_file_unwraps_cellpose_dict(tmp_path: Path):
 
 
 def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
-    from neuroseq.tif_import_dialog import _load_masks_from_seg_file
+    from neuroseq.importers.tif_import_dialog import _load_masks_from_seg_file
 
     masks = _make_mask_image()
     seg_path = tmp_path / "plain.npy"
@@ -388,8 +388,8 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     import sys
     import types
 
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     Ly, Lx, nframes, n_neurons = 16, 16, 32, 3
     masks = _make_mask_image((Ly, Lx))
@@ -537,8 +537,8 @@ def test_run_suite2p_pipeline_detects_rois_without_masks(monkeypatch, tmp_path: 
     import sys
     import types
 
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     Ly, Lx, nframes = 16, 16, 32
     detected_stat = np.array(
@@ -702,8 +702,8 @@ def test_run_suite2p_pipeline_filters_mixed_fov_tiffs(monkeypatch, tmp_path: Pat
     import sys
     import types
 
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     Ly, Lx, nframes, n_neurons = 16, 16, 8, 3
     masks = _make_mask_image((Ly, Lx))
@@ -821,8 +821,8 @@ def test_run_suite2p_pipeline_rejects_mismatched_mask_shape(
     import sys
     import types
 
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.importer_tif import run_suite2p_pipeline
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.importer_tif import run_suite2p_pipeline
 
     masks = np.zeros((8, 8), dtype=np.int32)
 
@@ -949,7 +949,7 @@ def test_select_torch_device_prefers_available_gpu(
 ) -> None:
     import sys
 
-    from neuroseq.importer_tif import select_torch_device
+    from neuroseq.importers.importer_tif import select_torch_device
 
     monkeypatch.delenv("NEUROSEQ_FORCE_CPU", raising=False)
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=cuda, mps=mps))
@@ -960,7 +960,7 @@ def test_select_torch_device_prefers_available_gpu(
 def test_select_torch_device_force_cpu_env_overrides_gpu(monkeypatch) -> None:
     import sys
 
-    from neuroseq.importer_tif import select_torch_device
+    from neuroseq.importers.importer_tif import select_torch_device
 
     monkeypatch.setenv("NEUROSEQ_FORCE_CPU", "1")
     monkeypatch.setitem(sys.modules, "torch", _fake_torch(cuda=True, mps=True))
@@ -973,7 +973,7 @@ def test_run_with_cpu_fallback_retries_on_cpu(monkeypatch) -> None:
     import sys
     import types
 
-    from neuroseq.importer_tif import _run_with_cpu_fallback
+    from neuroseq.importers.importer_tif import _run_with_cpu_fallback
 
     # Fake torch whose device objects carry a ``.type`` (as the real ones do).
     torch_mod = _fake_module(
@@ -1001,7 +1001,7 @@ def test_run_with_cpu_fallback_reraises_on_cpu_failure(monkeypatch) -> None:
     import sys
     import types
 
-    from neuroseq.importer_tif import _run_with_cpu_fallback
+    from neuroseq.importers.importer_tif import _run_with_cpu_fallback
 
     # Hide torch so the CPU-reraise path must not import it (regression guard:
     # torch is absent in the conda-forge CI env).
@@ -1019,9 +1019,9 @@ def test_run_with_cpu_fallback_reraises_on_cpu_failure(monkeypatch) -> None:
 def test_roi_average_pipeline_stops_when_progress_raises_cancelled(tmp_path):
     import tifffile
 
-    from neuroseq.importer_tif import PipelineCancelled
-    from neuroseq.importer_tif import TifPipelineParams
-    from neuroseq.importer_tif import run_roi_average_pipeline
+    from neuroseq.importers.importer_tif import PipelineCancelled
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "a.tif"
     tifffile.imwrite(path, np.ones((4, 4, 4), dtype=np.uint16))

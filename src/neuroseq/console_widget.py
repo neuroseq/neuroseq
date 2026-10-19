@@ -24,7 +24,6 @@ SAMPLE_CODE = """\
 project                              # the active Project object
 project.stim_arrays                  # dict of StimArray objects
 project.experiments                  # dict of Experiment objects
-project.dt                           # canonical sample interval (s)
 
 # ── Input arrays ───────────────────────────────────────────────
 list(project.stim_arrays.keys())     # names of all input arrays

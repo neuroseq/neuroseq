@@ -7,11 +7,11 @@ import importlib.util
 import numpy as np
 import pytest
 
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_PHI_EXC_REST
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_ACTIVE
-from neuroseq.example_projects import _FUER_ELISE_PHI_INH_REST
-from neuroseq.example_projects import _build_fuer_elise_opsin_stims
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_EXC_ACTIVE
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_EXC_REST
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_INH_ACTIVE
+from neuroseq.example_models.elise import _FUER_ELISE_PHI_INH_REST
+from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.example_projects import example_projects
 from neuroseq.utils import detect_period
 

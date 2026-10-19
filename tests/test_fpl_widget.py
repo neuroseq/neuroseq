@@ -4,10 +4,32 @@ import pygfx
 import pytest
 from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 from qtpy import QtWidgets
+from rendercanvas.qt import QRenderWidget
 
 from neuroseq import theme
-from neuroseq.fpl_widget import FPLWidget
+from neuroseq.visualization.fpl_widget import FPLWidget
+
+
+@pytest.mark.parametrize("close_plot", [True, False])
+def test_closed_plot_is_unregistered_before_qt_deletes_canvas(qtbot, close_plot):
+    parent = QtWidgets.QWidget()
+    widget = FPLWidget(parent=parent)
+    canvas = widget.figure.canvas
+    native_canvas = canvas._subwidget
+    group = QRenderWidget._rc_canvas_group
+    assert native_canvas in group.get_canvases()
+
+    if close_plot:
+        widget.close()
+    # Keep the Python wrappers alive, as plot/controller references do, while
+    # Qt destroys the native widgets on a closed project tab.
+    parent.deleteLater()
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    assert canvas.get_closed()
+    assert native_canvas not in group.get_canvases(close_closed=True)
+    assert widget.figure is None
 
 
 def test_fpl_widget_apply_theme_updates_background(qtbot: QtBot) -> None:
@@ -101,6 +123,49 @@ class _DummyFigure:
         return
 
 
+def test_closing_canvas_does_not_reenter_the_qt_event_loop(monkeypatch, qtbot):
+    events = []
+    figure = _DummyFigure([])
+    monkeypatch.setattr(
+        "neuroseq.visualization.fpl_widget.fpl.Figure", lambda **kwargs: figure
+    )
+    monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
+    widget = FPLWidget()
+    qtbot.addWidget(widget)
+
+    def close_figure():
+        events.append("closed")
+
+    monkeypatch.setattr(figure, "close", close_figure)
+    QtCore.QTimer.singleShot(0, lambda: events.append("queued callback"))
+    widget.close()
+    assert events == ["closed"]
+    qtbot.waitUntil(lambda: events == ["closed", "queued callback"])
+
+
+def test_destroyed_cleanup_swallows_figure_errors(monkeypatch, qtbot, caplog):
+    class _BrokenCanvas(_DummyCanvas):
+        def set_update_mode(self, update_mode, **kwargs) -> None:
+            raise RuntimeError("wrapped C/C++ object has been deleted")
+
+    figure = _DummyFigure([])
+    figure.canvas = _BrokenCanvas()
+    monkeypatch.setattr(
+        "neuroseq.visualization.fpl_widget.fpl.Figure", lambda **kwargs: figure
+    )
+    monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
+    parent = QtWidgets.QWidget()
+    widget = FPLWidget(parent=parent)
+    with caplog.at_level("DEBUG", logger="neuroseq.visualization.fpl_widget"):
+        parent.deleteLater()
+        QtCore.QCoreApplication.sendPostedEvents(
+            None, QtCore.QEvent.Type.DeferredDelete
+        )
+    assert widget.figure is None
+    assert "Could not close fastplotlib figure" in caplog.text
+    widget._close_figure()  # idempotent once the figure is released
+
+
 def test_fpl_widget_uses_bitmap_present_method_for_headless_tests(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
@@ -108,7 +173,7 @@ def test_fpl_widget_uses_bitmap_present_method_for_headless_tests(
     calls: list[dict[str, object]] = []
     monkeypatch.setenv("NEUROSEQ_HEADLESS_TEST", "1")
     monkeypatch.setattr(
-        "neuroseq.fpl_widget.fpl.Figure",
+        "neuroseq.visualization.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
     monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)
@@ -129,7 +194,7 @@ def test_fpl_widget_uses_screen_present_method_by_default(
     calls: list[dict[str, object]] = []
     monkeypatch.delenv("NEUROSEQ_HEADLESS_TEST", raising=False)
     monkeypatch.setattr(
-        "neuroseq.fpl_widget.fpl.Figure",
+        "neuroseq.visualization.fpl_widget.fpl.Figure",
         lambda **kwargs: _DummyFigure(calls, **kwargs),
     )
     monkeypatch.setattr(FPLWidget, "_apply_fpl_theme", lambda self: None)

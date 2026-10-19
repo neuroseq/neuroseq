@@ -4,7 +4,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.neuron_subset_dialog import NeuronSubsetDialog
+from neuroseq.visualization_support.neuron_subset_dialog import NeuronSubsetDialog
 
 
 def _find_buttons(

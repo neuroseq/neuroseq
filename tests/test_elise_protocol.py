@@ -9,12 +9,12 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
-from neuroseq.custom_analysis_widget import CustomAnalysisWindow
-from neuroseq.example_projects import _build_fuer_elise_opsin_stims
-from neuroseq.gui import Gui
-from neuroseq.replay_metrics import save_learning_curves_csv
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.elise_support.replay_metrics import save_learning_curves_csv
+from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
+from neuroseq.project_workspace import ProjectWorkspace
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 # Mirrors elise_learning_curves.CURVES_ATTR (the plugin loads via a file spec,
 # not as an importable module, so we reference the attribute name directly).
@@ -224,7 +224,7 @@ def test_learning_curves_plugin_is_discovered() -> None:
 
 
 def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         assert hasattr(gui, "elise_protocol_action")
@@ -271,7 +271,7 @@ def test_elise_protocol_action_enables_for_elise_project(qtbot: QtBot) -> None:
 
 
 def test_elise_protocol_dialog_values(qtbot: QtBot) -> None:
-    from neuroseq.elise_protocol_dialog import EliseProtocolDialog
+    from neuroseq.elise_support.protocol_dialog import EliseProtocolDialog
 
     dlg = EliseProtocolDialog()
     qtbot.addWidget(dlg)
@@ -318,15 +318,18 @@ def _synthetic_result(experiment=None) -> dict:
 def test_on_protocol_finished_opens_window_and_imports_experiment(
     qtbot: QtBot, monkeypatch, mocker
 ) -> None:
-    monkeypatch.setattr("neuroseq.gui.getsavefilename", lambda *a, **k: ("", ""))
-    gui = Gui()
+    monkeypatch.setattr(
+        "neuroseq.elise_support.workflows.getsavefilename",
+        lambda *a, **k: ("", ""),
+    )
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         append = mocker.patch.object(gui, "_append_experimental_data")
         sentinel_exp = object()
         gui._on_elise_protocol_finished(_synthetic_result(experiment=sentinel_exp))
         # Slot tore the worker state down and produced an analysis window.
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
         windows = gui.findChildren(CustomAnalysisWindow)
         assert windows
         widget = windows[-1].analysis_widget
@@ -343,25 +346,23 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
 
 
 def test_on_protocol_failed_tears_down(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
-        gui._elise_protocol_worker = object()  # type: ignore[assignment]  # pretend a run is active
         gui._on_elise_protocol_failed("boom")
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
     finally:
         gui.close()
 
 
 def test_on_protocol_cancelled_and_progress(qtbot: QtBot) -> None:
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         gui._on_elise_protocol_progress(0.5)
         assert gui.progress_dialog.value() == 50
-        gui._elise_protocol_worker = object()  # type: ignore[assignment]  # pretend a run is active
         gui._on_elise_protocol_cancelled()
-        assert gui._elise_protocol_worker is None
+        assert gui._background_job.worker is None
     finally:
         gui.close()
 
@@ -399,11 +400,15 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
             }
 
     monkeypatch.setattr(
-        "neuroseq.elise_protocol_dialog.EliseProtocolDialog", _FakeDialog
+        "neuroseq.elise_support.protocol_dialog.EliseProtocolDialog",
+        _FakeDialog,
     )
-    monkeypatch.setattr("neuroseq.gui.getsavefilename", lambda *a, **k: ("", ""))
+    monkeypatch.setattr(
+        "neuroseq.elise_support.workflows.getsavefilename",
+        lambda *a, **k: ("", ""),
+    )
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     try:
         gui.project.external_simulate_path = "neuroseq:elise"
@@ -432,7 +437,7 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
 
         gui._run_elise_protocol()
         # Worker dispatched on a thread; wait for the finished slot to tear down.
-        qtbot.waitUntil(lambda: gui._elise_protocol_worker is None, timeout=60000)
+        qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=60000)
         assert gui.findChildren(CustomAnalysisWindow)
         # The stim arrays were rebuilt to the recorded full timeline.
         sa = gui.project.stim_arrays.get("opsin_exc")

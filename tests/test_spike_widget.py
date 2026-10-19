@@ -6,11 +6,13 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import SpikeData
-from neuroseq.spike_widget import SpikeWidget
-from neuroseq.trace_widget import TraceWidget
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.spike_widget import SpikeWidget
+from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 @pytest.mark.parametrize("selected", [False, True])

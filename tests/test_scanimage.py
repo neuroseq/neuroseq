@@ -10,10 +10,11 @@ import numpy as np
 import pytest
 import tifffile
 
+from neuroseq.data import Experiment
+from neuroseq.device_control.scanimage_connection import ScanImageConnection
+from neuroseq.device_control.scanimage_engine_worker import EngineAdapter
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.importer_scanimage import index_recording
-from neuroseq.scanimage_connection import ScanImageConnection
-from neuroseq.scanimage_engine_worker import EngineAdapter
+from neuroseq.importers.importer_scanimage import index_recording
 
 
 @pytest.fixture
@@ -85,6 +86,28 @@ def test_engine_does_not_expose_arbitrary_eval():
         EngineAdapter().dispatch("eval", {"code": "anything"})
 
 
+def test_engine_indexes_recording_with_relocated_worker(recording):
+    paths, _ = recording
+    result = EngineAdapter().dispatch("index", {"paths": paths})
+    assert result["channels"] == [1, 2]
+    assert len(result["frames"]["page"]) == 8
+
+
+def test_engine_connect_adds_existing_matlab_resources(mocker):
+    matlab = ModuleType("matlab")
+    engine = ModuleType("matlab.engine")
+    matlab.engine = engine
+    engine.find_matlab = mocker.Mock(return_value=("NeuroSeqScanImage",))
+    session = mocker.Mock()
+    session.neuroseq_scanimage.return_value = "{}"
+    engine.connect_matlab = mocker.Mock(return_value=session)
+    mocker.patch.dict(sys.modules, {"matlab": matlab, "matlab.engine": engine})
+    EngineAdapter().dispatch("connect", {"session": "NeuroSeqScanImage"})
+    resources = Path(session.addpath.call_args.args[0])
+    assert (resources / "neuroseq_scanimage.m").is_file()
+    assert (resources / "neuroseq_scanimage_event.m").is_file()
+
+
 @pytest.fixture
 def connection(qtbot, mocker):
     conn = ScanImageConnection()
@@ -154,9 +177,12 @@ def test_finalization_requires_matching_run_and_stable_files(
         connection._reply({"id": request, "result": status})
     assert connection._pending[1] == "index"
     ready = mocker.Mock()
+    finished = mocker.Mock()
     connection.recording_ready.connect(ready)
+    connection.run_finished.connect(finished)
     connection._reply({"id": 4, "result": index_recording(paths)})
     assert ready.call_args.args[0]["run_id"] == "our-run"
+    finished.assert_called_once_with("our-run")
     assert ready.call_args.args[0]["status"] == "completed"
     assert connection.run_id is None
 
@@ -176,7 +202,7 @@ def test_record_request_waits_for_poll_and_abort_cancels_it(connection):
 def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, recording):
     from pathlib import Path
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     widget = CalciumVideoWidget()
@@ -207,7 +233,7 @@ def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, rec
 def test_live_frame_of_other_shape_replaces_recorded_image(qtbot, recording):
     from pathlib import Path
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     widget = CalciumVideoWidget()
@@ -250,29 +276,30 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
-    gui = Gui()
-    qtbot.addWidget(gui)
+    window = Gui()
+    qtbot.addWidget(window)
+    gui = window.active_workspace
     original = gui.project
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
     )
     assert original.imaging_acquisitions[0]["status"] == "requested"
-    gui.update_project(Project())
+    other = window._add_workspace(Project())
     result = index_recording(recording[0])
     result.update(run_id="one", status="completed")
-    gui._scanimage_recording_ready(result)
+    window.devices.scanimage.recording_ready.emit(result)
     assert "Test" in original.experiments
-    assert not gui.project.imaging_acquisitions
+    assert not other.project.imaging_acquisitions
     assert original.calcium_video_paths
-    gui._close_confirmed = True
-    gui.close()
+    original.dirty = False
+    window.close()
 
 
 def test_controls_trigger_timeout_and_foreign_acquisition(
     qtbot, connection, mocker, tmp_config_dir
 ):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -281,7 +308,9 @@ def test_controls_trigger_timeout_and_foreign_acquisition(
     assert not panel.abort_button.isEnabled()
     assert not panel.record_button.isEnabled()
     connection.run_id = "run"
-    mocker.patch("neuroseq.scanimage_controls.time.monotonic", return_value=100)
+    mocker.patch(
+        "neuroseq.device_control.scanimage_controls.time.monotonic", return_value=100
+    )
     panel._status(
         {
             "acq_state": "grab",
@@ -298,19 +327,19 @@ def test_controls_trigger_timeout_and_foreign_acquisition(
 def test_controls_remember_python_and_folder_across_sessions(
     qtbot, connection, mocker, tmp_config_dir, tmp_path
 ):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     python = tmp_path / "python.exe"
     python.write_text("")
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
     mocker.patch(
-        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getOpenFileName",
+        "neuroseq.device_control.scanimage_controls.QtWidgets.QFileDialog.getOpenFileName",
         return_value=(str(python), ""),
     )
     panel._browse_python()
     mocker.patch(
-        "neuroseq.scanimage_controls.QtWidgets.QFileDialog.getExistingDirectory",
+        "neuroseq.device_control.scanimage_controls.QtWidgets.QFileDialog.getExistingDirectory",
         return_value=str(tmp_path),
     )
     panel._browse_directory()
@@ -333,7 +362,7 @@ def test_controls_remember_python_and_folder_across_sessions(
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
     from qtpy import QtCore
 
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -361,9 +390,12 @@ def test_record_failure_releases_run_and_timeout_stops_only_helper(connection, m
     connection.connected = True
     connection.command("record", {"run_id": "run"})
     error = mocker.Mock()
+    finished = mocker.Mock()
     connection.error.connect(error)
+    connection.run_finished.connect(finished)
     connection._reply({"id": 1, "error": "unsupported volume"})
     assert connection.run_id is None
+    finished.assert_called_once_with("run")
     error.assert_called_with("unsupported volume")
     kill = mocker.patch.object(connection.process, "kill")
     connection._timed_out()
@@ -391,7 +423,9 @@ def test_reconnect_releases_untracked_run_without_claiming_completion(
 ):
     connection.run_id = "lost"
     states = mocker.Mock()
+    finished = mocker.Mock()
     connection.status_changed.connect(states)
+    connection.run_finished.connect(finished)
     connection._send("connect")
     connection._reply(
         {
@@ -405,6 +439,7 @@ def test_reconnect_releases_untracked_run_without_claiming_completion(
     assert connection.connected
     assert connection.run_id is None
     assert states.call_args_list[0].args[0]["run"]["state"] == "interrupted"
+    finished.assert_called_once_with("lost")
 
 
 def test_completed_count_mismatch_does_not_attach_recording(
@@ -414,7 +449,9 @@ def test_completed_count_mismatch_does_not_attach_recording(
     connection._expected_frames = 100
     connection._last_status = {"run": {"id": "run", "state": "completed"}}
     connection._finalize_since = 0
-    mocker.patch("neuroseq.scanimage_connection.time.monotonic", return_value=100)
+    mocker.patch(
+        "neuroseq.device_control.scanimage_connection.time.monotonic", return_value=100
+    )
     ready = mocker.Mock()
     connection.recording_ready.connect(ready)
     connection._send("index")
@@ -424,16 +461,16 @@ def test_completed_count_mismatch_does_not_attach_recording(
 
 
 def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recording):
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
     )
     gui.scanimage_connection.run_id = "one"
-    gui._scanimage_status(
+    gui.acquisition_controller.scanimage_status(
         {
             "run": {"id": "one", "state": "recording"},
             "matlab_version": "2023a",
@@ -449,12 +486,23 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     result.update(run_id="one", status="completed")
     gui.scanimage_connection.run_id = None
     gui.scanimage_controls.channel_spin.setValue(2)
-    gui._scanimage_recording_ready(result)
+    # A deleted group with the recording's name must not be resurrected over it.
+    old_group = Experiment(name="Test", duration=1.0, timepoints=[], data=[])
+    gui.project.add_experiment(old_group)
+    gui.project.remove_experiments(["Test"])
+    gui.acquisition_controller.scanimage_recording_ready(result)
+    recorded = gui.project.experiments["Test"]
+    assert recorded is not old_group
+    assert gui.project.history.undo_label == "Add data group"
     assert gui.calcium_video_widget.recorded_channel == 2
     assert gui.project.calcium_scanimage_index == result
     assert len(gui.calcium_video_widget._frame_refs) == 4
     assert gui.cmb_video.count() == 1
     assert gui.cmb_video.currentText() == "Test"
+    gui.project.history.undo()
+    assert "Test" not in gui.project.experiments
+    gui.project.history.undo()
+    assert gui.project.experiments["Test"] is old_group
     gui._close_confirmed = True
     gui.close()
 
@@ -556,7 +604,7 @@ def test_standard_two_channel_run_has_compact_transport_and_metadata(
 
 
 def test_recorded_channel_uses_file_indices_through_symlink(qtbot, recording, tmp_path):
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     paths, _ = recording
     link = tmp_path / "linked"
@@ -592,7 +640,7 @@ def test_preview_is_opt_in_and_throttled_during_recording(connection, mocker):
     connection.live_preview = True
     connection.run_id = "recording"
     clock = mocker.patch(
-        "neuroseq.scanimage_connection.time.monotonic", return_value=10
+        "neuroseq.device_control.scanimage_connection.time.monotonic", return_value=10
     )
     assert poll_args() == {"channel": 1}
     clock.return_value = 10.2
@@ -611,27 +659,28 @@ def test_new_recording_preserves_imported_movie(
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
-    gui = Gui()
-    qtbot.addWidget(gui)
+    window = Gui()
+    qtbot.addWidget(window)
+    gui = window.active_workspace
     project = gui.project
     imported = Path(recording[0][0])
     project.add_calcium_video([imported], 20, name="Imported")
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
     )
     if switch_project:
-        gui.update_project(Project())
+        window._add_workspace(Project())
     result = index_recording(recording[0])
     result.update(run_id="new", status="completed")
-    gui._scanimage_recording_ready(result)
+    window.devices.scanimage.recording_ready.emit(result)
     assert [video["name"] for video in project.calcium_videos] == ["Imported", "New"]
     assert project.calcium_videos[0]["paths"] == [str(imported)]
     assert project.calcium_videos[0]["fps"] == 20
     assert project.calcium_scanimage_index == result
     assert project.imaging_acquisitions[0]["recording"] == result
     if switch_project:
-        gui.update_project(project)
+        window.project_tabs.setCurrentWidget(gui)
     assert [gui.cmb_video.itemText(i) for i in range(gui.cmb_video.count())] == [
         "Imported",
         "New",
@@ -646,8 +695,8 @@ def test_new_recording_preserves_imported_movie(
     assert gui.calcium_video_widget.recorded_channel == 1
     assert gui.scanimage_controls.channel_spin.value() == 1
     assert "was not saved" in gui.scanimage_controls.message_label.text()
-    gui._close_confirmed = True
-    gui.close()
+    project.dirty = False
+    window.close()
 
 
 def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocker):
@@ -661,21 +710,25 @@ def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocke
     assert states.call_args.args[0]["run"]["state"] == "unknown"
     assert "30 seconds" in states.call_args.args[0]["run"]["error"]
     assert connection.run_id == "owned"  # Reconnect can reconcile this run.
+    finished = mocker.Mock()
+    connection.run_finished.connect(finished)
+    connection._end_run()
+    finished.assert_called_once_with("owned")
 
 
 def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
+    from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
     from neuroseq.data import Experiment
-    from neuroseq.experiments_manager_dialog import ExperimentsManagerDialog
-    from neuroseq.gui import Gui
-    from neuroseq.import_experiment_dialog import ImportExperimentDialog
+    from neuroseq.data_manager_dialog import DataManagerDialog
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.experiments["Imaging"] = Experiment("Imaging", 10, [], [])
     gui.update_project(gui.project)
     for combo in (gui.cmb_trace, gui.cmb_spike, gui.cmb_synapse, gui.cmb_data):
         assert all("Imaging" not in combo.itemText(i) for i in range(combo.count()))
-    manager = ExperimentsManagerDialog(gui.project)
+    manager = DataManagerDialog(gui.project)
     qtbot.addWidget(manager)
     row = next(
         i
@@ -684,7 +737,7 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
     )
     manager.table.selectRow(row)
     assert manager.table.item(row, 2).text() == "0"
-    dialog = ImportExperimentDialog(Experiment("Import", 1, [], []), gui.project)
+    dialog = AddExperimentDataDialog(Experiment("Import", 1, [], []), gui.project)
     qtbot.addWidget(dialog)
     dialog.cmb_experiments.setCurrentText("Imaging")
     assert dialog.cmb_offset.count() == 0
@@ -745,13 +798,13 @@ def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording)
 def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     from qtpy import QtWidgets
 
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     # The Video tab must keep mirroring the Cell segmentation tab, so no
     # acquisition controls may be inserted above its canvas.
-    assert gui.scanimage_controls.window() is gui.scanimage_dialog
+    assert gui.scanimage_controls.window() is gui.acquisition_controller.dialog
     assert not gui.calcium_video_widget.isAncestorOf(gui.scanimage_controls)
     toolbar = gui.btn_design_dynamic_input.parentWidget()
     assert isinstance(toolbar, QtWidgets.QToolBar)
@@ -765,8 +818,8 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     ]
     assert not gui.cmb_video.isEnabled()
     gui.btn_image_acquisition.click()
-    assert gui.scanimage_dialog.isVisible()
-    assert not gui.scanimage_dialog.isModal()
+    assert gui.acquisition_controller.dialog.isVisible()
+    assert not gui.acquisition_controller.dialog.isModal()
     gui._close_confirmed = True
     gui.close()
 
@@ -774,10 +827,10 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
 def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
     from qtpy import QtCore
 
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
     from tests.test_spatial_footprint_widget import _cellpose_result
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
     qtbot.waitExposed(gui)
@@ -801,12 +854,12 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
 
 
 def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
-    from neuroseq.gui import Gui
     from neuroseq.project import Project
+    from neuroseq.project_workspace import ProjectWorkspace
     from neuroseq.save_load_options import SaveLoadOptions
 
     first, second = (Path(p) for p in recording[0])
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.project.add_calcium_video([first], 10)
     gui.project.add_calcium_video([second], 20)
@@ -834,9 +887,9 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
 def test_selecting_a_video_with_missing_files_keeps_the_current_one(
     qtbot, recording, qmessagebox_calls
 ):
-    from neuroseq.gui import Gui
+    from neuroseq.project_workspace import ProjectWorkspace
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     present = Path(recording[0][0])
     gui.project.add_calcium_video([Path("/missing/video.tif")], 10)
@@ -875,7 +928,7 @@ def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
 def test_exported_imaging_keeps_the_recording_orientation(qtbot, tmp_path, suffix):
     from PIL import Image
 
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     raw = np.zeros((20, 30), dtype=np.uint16)
     raw[:4, :6] = 1000  # bright block at the top-left of the recording
@@ -904,7 +957,7 @@ def test_live_preview_and_recorded_playback_share_orientation(
     MATLAB sends img(:) column-major (encoding confirmed against the adapter in
     MATLAB R2025b); a transpose or an extra flip on either path breaks this.
     """
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     rows, cols = np.mgrid[0:12, 0:18]
     raw = (rows * 50 + cols).astype(np.float32)
@@ -931,6 +984,55 @@ def test_live_preview_and_recorded_playback_share_orientation(
     widget.set_live(True)
     widget.show_live_frame(received[0])
     np.testing.assert_array_equal(widget.current_frame, recorded)
+
+
+def test_live_preview_is_shared_and_reflected_in_every_workspace(
+    qtbot, mocker, recording
+):
+    from neuroseq.gui import Gui
+    from neuroseq.project import Project
+
+    window = Gui()
+    qtbot.addWidget(window)
+    first = window.active_workspace
+    second = window._add_workspace(Project())
+    connection = window.devices.scanimage
+
+    def ready(run_id):
+        result = index_recording(recording[0])
+        result.update(run_id=run_id, status="completed")
+        first.acquisition_controller.scanimage_recording_ready(result)
+
+    second.scanimage_controls.live_check.setChecked(True)
+    assert connection.live_preview
+    assert first.scanimage_controls.live_check.isChecked()
+    assert first.calcium_video_widget._live and second.calcium_video_widget._live
+    third = window._add_workspace(Project())
+    assert third.scanimage_controls.live_check.isChecked()
+    assert third.calcium_video_widget._live
+
+    # A recording finishing in one tab keeps a preview another tab turned on.
+    mocker.patch.object(connection, "command", return_value=True)
+    first.acquisition_controller.start_scanimage_recording(
+        {"run_id": "a", "name": "A", "directory": "/x", "frames": 4}
+    )
+    ready("a")
+    assert connection.live_preview
+    assert second.scanimage_controls.live_check.isChecked()
+
+    # A preview the recording itself switched on is switched off afterwards.
+    first.scanimage_controls.live_check.setChecked(False)
+    assert not connection.live_preview and not second.calcium_video_widget._live
+    first.acquisition_controller.start_scanimage_recording(
+        {"run_id": "b", "name": "B", "directory": "/x", "frames": 4}
+    )
+    assert connection.live_preview and third.scanimage_controls.live_check.isChecked()
+    ready("b")
+    assert not connection.live_preview
+    assert not third.scanimage_controls.live_check.isChecked()
+    for workspace in window.workspaces:
+        workspace.project.dirty = False
+    window.close()
 
 
 def _int16_frame_reply(request_id: int, pixels: np.ndarray, **extra) -> dict:
@@ -990,7 +1092,7 @@ def test_live_preview_requests_the_next_frame_right_away(connection, qtbot):
 
 
 def test_live_frame_uses_the_scanimage_display_window(qtbot):
-    from neuroseq.calcium_video_widget import CalciumVideoWidget
+    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
     widget = CalciumVideoWidget()
     qtbot.addWidget(widget)
@@ -1005,7 +1107,7 @@ def test_live_frame_uses_the_scanimage_display_window(qtbot):
 
 
 def test_controls_show_the_measured_preview_rate(qtbot, connection, tmp_config_dir):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -1055,7 +1157,7 @@ def test_preview_averages_like_the_scanimage_display(connection, mocker):
 
 
 def test_controls_say_why_no_preview_frame_came(qtbot, connection, tmp_config_dir):
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -1076,7 +1178,7 @@ def test_record_saves_the_channels_ticked_in_the_dialog(
 ):
     """Several channels can be saved in one recording; the checkboxes start
     as ScanImage's own selection."""
-    from neuroseq.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)

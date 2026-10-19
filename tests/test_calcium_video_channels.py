@@ -9,7 +9,7 @@ import pytest
 import tifffile
 from pytestqt.qtbot import QtBot
 
-from neuroseq.calcium_video_widget import CalciumVideoWidget
+from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 
 
 @pytest.fixture
@@ -79,11 +79,11 @@ def test_channel_controls_emit_the_choice(
 def test_gui_keeps_the_channel_choice_per_video(
     qtbot: QtBot, two_channel_movie: Path, tmp_path: Path
 ) -> None:
-    from neuroseq.gui import Gui
     from neuroseq.project import Project
+    from neuroseq.project_workspace import ProjectWorkspace
     from neuroseq.save_load_options import SaveLoadOptions
 
-    gui = Gui()
+    gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     # A TIFF import with two channels shows its functional channel.
     gui.project.add_calcium_video(
@@ -106,7 +106,7 @@ def test_gui_keeps_the_channel_choice_per_video(
 
 def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) -> None:
     """Issue #596: the video shows each mapped cell's neuron id."""
-    from neuroseq.importer_cellpose import CellposeImportResult
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
 
     segmentation = -np.ones((4, 4), dtype=np.int32)
     segmentation[0:2, 0:2] = 0

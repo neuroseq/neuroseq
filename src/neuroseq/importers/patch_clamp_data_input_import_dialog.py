@@ -1,0 +1,795 @@
+from __future__ import annotations
+
+import copy
+import logging
+from contextlib import suppress
+from enum import Enum
+from pathlib import Path
+from types import MethodType
+from typing import TYPE_CHECKING
+
+import brian2.numpy_ as np
+from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
+from qtpy import QtCore
+from qtpy import QtGui
+from qtpy import QtWidgets
+from qtpy.compat import getopenfilename
+
+from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
+from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
+from neuroseq.importers.importer_patch_clamp_data import IgorWave
+from neuroseq.importers.importer_patch_clamp_data import (
+    create_stim_array_from_igor_wave,
+)
+from neuroseq.importers.importer_patch_clamp_data import (
+    import_igor_wave_into_stim_array,
+)
+from neuroseq.importers.importer_patch_clamp_data import is_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_pxp_file
+from neuroseq.importers.importer_patch_clamp_data import load_igor_wave_file
+from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+from neuroseq.stimulation.stim_timing import stim_dt_matches
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
+    from neuroseq.stimulation.stim import StimArray
+
+
+class DtMismatchChoice(Enum):
+    RESAMPLE_WAVE = "resample_wave"
+    REMAP_TARGET = "remap_target"
+    CANCEL = "cancel"
+
+
+def ask_dt_mismatch_choice(
+    parent: QtWidgets.QWidget | None,
+    *,
+    target_label: str,
+    target_dt: float,
+    wave_dt: float,
+) -> DtMismatchChoice:
+    """Ask how to import a wave into a target sampled at a different interval.
+
+    Resampling the wave is the default: remapping the target onto a fast
+    recording's grid (e.g. 50 kHz) can make it orders of magnitude larger.
+    """
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+    box.setWindowTitle("Different sample intervals")
+    box.setText(
+        f"The wave is sampled every {format_milliseconds(wave_dt * 1000.0)} ms, "
+        f"but {target_label} uses {format_milliseconds(target_dt * 1000.0)} ms."
+    )
+    box.setInformativeText(
+        "Resample the wave onto the target's grid (recommended), or remap the "
+        "whole target onto the wave's grid? Remapping may shift existing timing "
+        "by up to one sample and can make the target very large."
+    )
+    resample = box.addButton(
+        "Resample wave to target Δt", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+    )
+    remap = box.addButton(
+        "Remap target to wave Δt", QtWidgets.QMessageBox.ButtonRole.ActionRole
+    )
+    box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
+    box.setDefaultButton(resample)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is resample:
+        return DtMismatchChoice.RESAMPLE_WAVE
+    if clicked is remap:
+        return DtMismatchChoice.REMAP_TARGET
+    return DtMismatchChoice.CANCEL
+
+
+class PatchClampDataInputImportDialog(QtWidgets.QDialog):
+    """Dialog for importing patch-clamp input waveforms into NeuroSeq."""
+
+    def __init__(
+        self,
+        project: Project,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.logger = logging.getLogger(__name__)
+        self.project = project
+        self.loaded_wave: IgorWave | None = None
+        self.file_path: str = ""
+        self.selected_stim_name: str = ""
+        self._auto_stim_name = ""
+        self._auto_units = ""
+        self.loaded_pxp_waves: dict[str, IgorWave] = {}
+        self._imported_pxp_keys: set[str] = set()
+        self._had_successful_import: bool = False
+        self._setup_ui()
+
+    def _setup_ui(self) -> None:
+        self.setWindowTitle("Import patch clamp input")
+        self.setModal(True)
+        self.resize(860, 700)
+
+        root_layout = QtWidgets.QVBoxLayout(self)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        content_widget = QtWidgets.QWidget()
+        layout = QtWidgets.QVBoxLayout(content_widget)
+        self.scroll_area.setWidget(content_widget)
+        root_layout.addWidget(self.scroll_area)
+
+        convention = QtWidgets.QLabel(
+            "Patch-clamp convention:\n"
+            "Current Clamp (CC): the injected CURRENT is the input\n"
+            "Voltage Clamp (VC): the commanded VOLTAGE is the input"
+        )
+        convention.setWordWrap(True)
+        layout.addWidget(convention)
+
+        self.intro = QtWidgets.QLabel(
+            "Import patch-clamp input waveforms from .pxp, .ibw, .csv, or .txt files. "
+            "CSV and text files contain one numeric sample per row and an optional "
+            "name/header on the first row; set their source sampling rate below. "
+            "Packed experiments can contain many "
+            "waves; import as many as you need from the same file, then click Close "
+            "when done. Samples are imported at the source sample interval."
+        )
+        self.intro.setWordWrap(True)
+        layout.addWidget(self.intro)
+
+        file_group = QtWidgets.QGroupBox("File Selection")
+        file_layout = QtWidgets.QHBoxLayout(file_group)
+        self.file_label = QtWidgets.QLabel("No input waveform selected")
+        self.file_label.setStyleSheet("QLabel { color: gray; }")
+        browse_button = QtWidgets.QPushButton("Browse…")
+        browse_button.clicked.connect(self._browse_file)
+        file_layout.addWidget(self.file_label, stretch=1)
+        file_layout.addWidget(browse_button)
+        layout.addWidget(file_group)
+
+        self.wave_picker_group = QtWidgets.QGroupBox("Input Waveform Selection")
+        wave_picker_layout = QtWidgets.QVBoxLayout(self.wave_picker_group)
+        self.pxp_wave_list = QtWidgets.QListWidget()
+        self.pxp_wave_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.pxp_wave_list.currentItemChanged.connect(self._on_pxp_wave_selected)
+        wave_picker_layout.addWidget(self.pxp_wave_list)
+        self.wave_picker_group.setVisible(False)
+        layout.addWidget(self.wave_picker_group)
+
+        preview_group = QtWidgets.QGroupBox("Input Waveform Preview")
+        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        self.multi_sweep_info = QtWidgets.QLabel("")
+        self.multi_sweep_info.setWordWrap(True)
+        self.multi_sweep_info.setObjectName("multi_sweep_info")
+        self.multi_sweep_info.setStyleSheet(
+            "QLabel { color: #555; font-weight: bold; }"
+        )
+        self.multi_sweep_info.setVisible(False)
+        preview_layout.addWidget(self.multi_sweep_info)
+        self.preview_text = QtWidgets.QPlainTextEdit()
+        self.preview_text.setReadOnly(True)
+        self.preview_text.setMaximumHeight(120)
+        self.preview_text.setPlaceholderText(
+            "Preview appears here after selecting an input waveform."
+        )
+        preview_layout.addWidget(self.preview_text)
+        self.wave_plot = MatplotlibWidget()
+        self.wave_plot.setMinimumHeight(200)
+        self.wave_plot.setMaximumHeight(260)
+        self.wave_plot.setVisible(False)
+        original_draw_idle = self.wave_plot.canvas._draw_idle
+
+        def _safe_draw_idle(canvas) -> None:
+            try:
+                original_draw_idle()
+            except RuntimeError as exc:
+                if "deleted" not in str(exc).lower():
+                    raise
+
+        self.wave_plot.canvas._draw_idle = MethodType(
+            _safe_draw_idle,
+            self.wave_plot.canvas,
+        )
+        preview_layout.addWidget(self.wave_plot)
+        layout.addWidget(preview_group)
+
+        source_group = QtWidgets.QGroupBox("Source Input Settings")
+        source_layout = QtWidgets.QFormLayout(source_group)
+        self.source_dt_spin = QtWidgets.QDoubleSpinBox()
+        self.source_dt_spin.setDecimals(12)
+        self.source_dt_spin.setRange(0.000001, 3600.0)
+        self.source_dt_spin.setSingleStep(0.0001)
+        self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+        self.source_dt_spin.setSuffix(" s")
+        self.source_dt_spin.setReadOnly(True)
+        self.source_dt_spin.setButtonSymbols(
+            QtWidgets.QAbstractSpinBox.ButtonSymbols.NoButtons
+        )
+        self.source_dt_spin.valueChanged.connect(self._on_timing_settings_changed)
+        source_layout.addRow("Source sample interval:", self.source_dt_spin)
+        self.sampling_rate_spin = QtWidgets.QDoubleSpinBox()
+        self.sampling_rate_spin.setDecimals(6)
+        self.sampling_rate_spin.setRange(0.001, 1000000.0)
+        self.sampling_rate_spin.setValue(1000.0)
+        self.sampling_rate_spin.setSuffix(" Hz")
+        self.sampling_rate_spin.valueChanged.connect(
+            lambda rate: self.source_dt_spin.setValue(1.0 / rate)
+        )
+        self.sampling_rate_label = QtWidgets.QLabel("Source sampling rate:")
+        source_layout.addRow(self.sampling_rate_label, self.sampling_rate_spin)
+        self.sampling_rate_label.setVisible(False)
+        self.sampling_rate_spin.setVisible(False)
+        layout.addWidget(source_group)
+
+        target_group = QtWidgets.QGroupBox("Import Target")
+        target_layout = QtWidgets.QVBoxLayout(target_group)
+
+        self.create_new_radio = QtWidgets.QRadioButton("Create new input array")
+        self.import_existing_radio = QtWidgets.QRadioButton(
+            "Import into existing input array"
+        )
+        self.create_new_radio.setChecked(True)
+        self.create_new_radio.toggled.connect(self._update_mode_state)
+        self.import_existing_radio.toggled.connect(self._update_mode_state)
+        target_layout.addWidget(self.create_new_radio)
+        target_layout.addWidget(self.import_existing_radio)
+
+        self.new_target_group = QtWidgets.QGroupBox("New Input Array")
+        new_target_layout = QtWidgets.QFormLayout(self.new_target_group)
+        self.new_name_edit = QtWidgets.QLineEdit()
+        self.new_name_edit.textChanged.connect(self._update_import_button_state)
+        new_target_layout.addRow("Input name:", self.new_name_edit)
+        self.new_type_combo = QtWidgets.QComboBox()
+        self.new_type_combo.addItem("Excitatory", StimType.Excitation)
+        self.new_type_combo.addItem("Inhibitory", StimType.Inhibition)
+        self.new_type_combo.addItem("External", StimType.External)
+        self.new_type_combo.setCurrentIndex(2)
+        new_target_layout.addRow("Input type:", self.new_type_combo)
+        self.new_units_edit = QtWidgets.QLineEdit()
+        new_target_layout.addRow("Units:", self.new_units_edit)
+        target_layout.addWidget(self.new_target_group)
+
+        self.existing_target_group = QtWidgets.QGroupBox("Existing Input Array")
+        existing_target_layout = QtWidgets.QFormLayout(self.existing_target_group)
+        self.target_combo = QtWidgets.QComboBox()
+        self.target_combo.currentTextChanged.connect(self._on_target_changed)
+        existing_target_layout.addRow("Target input array:", self.target_combo)
+        self.neuron_index_spin = QtWidgets.QSpinBox()
+        self.neuron_index_spin.setRange(0, 0)
+        existing_target_layout.addRow("Target neuron index:", self.neuron_index_spin)
+        self.extend_checkbox = QtWidgets.QCheckBox(
+            "Extend target input array to fit imported duration"
+        )
+        self.extend_checkbox.setChecked(True)
+        existing_target_layout.addRow(self.extend_checkbox)
+        self.replace_checkbox = QtWidgets.QCheckBox(
+            "Replace target neuron values instead of adding to them"
+        )
+        self.replace_checkbox.setChecked(True)
+        existing_target_layout.addRow(self.replace_checkbox)
+        target_layout.addWidget(self.existing_target_group)
+        layout.addWidget(target_group)
+
+        self.last_import_label = QtWidgets.QLabel("")
+        self.last_import_label.setWordWrap(True)
+        self.last_import_label.setStyleSheet("QLabel { color: #2a7a2a; }")
+        layout.addWidget(self.last_import_label)
+
+        self.info_label = QtWidgets.QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setStyleSheet("QLabel { color: gray; }")
+        layout.addWidget(self.info_label)
+
+        button_layout = QtWidgets.QHBoxLayout()
+        button_layout.addStretch()
+        self.import_button = QtWidgets.QPushButton("Import")
+        self.import_button.setEnabled(False)
+        self.import_button.clicked.connect(self._import_file)
+        self.cancel_button = QtWidgets.QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.import_button)
+        button_layout.addWidget(self.cancel_button)
+        root_layout.addLayout(button_layout)
+
+        self._populate_target_stims()
+        self._update_mode_state()
+        self._update_preview()
+
+    def _on_timing_settings_changed(self) -> None:
+        with QtCore.QSignalBlocker(self.sampling_rate_spin):
+            self.sampling_rate_spin.setValue(1.0 / self.source_dt_spin.value())
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _populate_target_stims(self) -> None:
+        self.target_combo.clear()
+        stim_names = list(self.project.stim_arrays.keys())
+        if not stim_names:
+            self.target_combo.addItem("(No input arrays available)")
+            self.target_combo.setEnabled(False)
+            self.import_existing_radio.setEnabled(False)
+            self.create_new_radio.setChecked(True)
+            self.neuron_index_spin.setRange(0, 0)
+            self.neuron_index_spin.setValue(0)
+            return
+
+        self.target_combo.addItems(stim_names)
+        self.target_combo.setEnabled(True)
+        self.import_existing_radio.setEnabled(True)
+        self._on_target_changed(self.target_combo.currentText())
+
+    def _on_pxp_wave_selected(
+        self,
+        current: QtWidgets.QListWidgetItem | None,
+        _previous: QtWidgets.QListWidgetItem | None,
+    ) -> None:
+        if current is None:
+            self.loaded_wave = None
+        else:
+            path_key = current.text().removeprefix("✓ ")
+            self.loaded_wave = self.loaded_pxp_waves.get(path_key)
+            if self.loaded_wave is not None and self.loaded_wave.source_dt is not None:
+                self.source_dt_spin.setValue(float(self.loaded_wave.source_dt))
+            else:
+                self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+            previous_auto_name = self._auto_stim_name
+            self._auto_stim_name = self.loaded_wave.name if self.loaded_wave else ""
+            current_name = self.new_name_edit.text().strip()
+            if not current_name or current_name == previous_auto_name:
+                self.new_name_edit.setText(self._auto_stim_name)
+            previous_auto_units = self._auto_units
+            self._auto_units = (
+                (self.loaded_wave.units or "") if self.loaded_wave else ""
+            )
+            current_units = self.new_units_edit.text().strip()
+            if not current_units or current_units == previous_auto_units:
+                self.new_units_edit.setText(self._auto_units)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _selected_stim_array(self) -> StimArray | None:
+        target_name = self.target_combo.currentText()
+        if not target_name or target_name.startswith("("):
+            return None
+        return self.project.stim_arrays.get(target_name)
+
+    def _on_target_changed(self, target_name: str) -> None:
+        stim_array = self.project.stim_arrays.get(target_name)
+        if stim_array is None:
+            self.neuron_index_spin.setRange(0, 0)
+            self.neuron_index_spin.setValue(0)
+            self._update_import_button_state()
+            return
+        max_neuron_index = max(0, int(stim_array.values.shape[1]) - 1)
+        self.neuron_index_spin.setRange(0, max_neuron_index)
+        if self.neuron_index_spin.value() > max_neuron_index:
+            self.neuron_index_spin.setValue(max_neuron_index)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _browse_file(self) -> None:
+        filename, _ = getopenfilename(
+            self,
+            "Select patch-clamp input",
+            "",
+            PATCH_CLAMP_FILE_FILTER,
+        )
+        if filename:
+            self._load_file(filename)
+
+    def load_file(self, filename: str) -> None:
+        """Load ``filename`` as if it had been browsed for, e.g. a file
+        dropped onto the main window (issue #597)."""
+        self._load_file(filename)
+
+    def _load_file(self, filename: str) -> None:
+        self.loaded_pxp_waves = {}
+        self.pxp_wave_list.clear()
+        self.wave_picker_group.setVisible(False)
+        if is_pxp_file(filename):
+            self._load_pxp_file(filename)
+            return
+        try:
+            wave = load_igor_wave_file(filename)
+        except Exception as exc:
+            self.logger.exception("Failed to load patch-clamp input %s", filename)
+            self.loaded_wave = None
+            self.file_path = ""
+            self.file_label.setText("No input waveform selected")
+            self.file_label.setStyleSheet("QLabel { color: gray; }")
+            self._update_preview()
+            self._update_import_button_state()
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not load input waveform:\n{exc}",
+            )
+            return
+
+        previous_auto_name = self._auto_stim_name
+        self._auto_stim_name = wave.name
+        current_name = self.new_name_edit.text().strip()
+        if not current_name or current_name == previous_auto_name:
+            self.new_name_edit.setText(self._auto_stim_name)
+
+        previous_auto_units = self._auto_units
+        self._auto_units = wave.units or ""
+        current_units = self.new_units_edit.text().strip()
+        if not current_units or current_units == previous_auto_units:
+            self.new_units_edit.setText(self._auto_units)
+
+        self.loaded_wave = wave
+        is_csv = wave.source_format == "csv"
+        self.sampling_rate_label.setVisible(is_csv)
+        self.sampling_rate_spin.setVisible(is_csv)
+        self.file_path = filename
+        self.file_label.setText(filename)
+        self.file_label.setStyleSheet("QLabel { color: black; }")
+        if wave.source_dt is not None:
+            self.source_dt_spin.setValue(float(wave.source_dt))
+        else:
+            self.source_dt_spin.setValue(NEUROSEQ_IGOR_TARGET_DT_SECONDS)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _load_pxp_file(self, filename: str) -> None:
+        try:
+            report = load_igor_pxp_file(filename)
+        except Exception as exc:
+            self.logger.exception("Failed to load Igor packed experiment %s", filename)
+            self.loaded_wave = None
+            self.loaded_pxp_waves = {}
+            self.file_path = ""
+            self.file_label.setText("No input waveform selected")
+            self.file_label.setStyleSheet("QLabel { color: gray; }")
+            self.pxp_wave_list.clear()
+            self.wave_picker_group.setVisible(False)
+            self._update_preview()
+            self._update_import_button_state()
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Could not load input waveform collection:\n{exc}",
+            )
+            return
+
+        waves = report.waves
+        self.loaded_pxp_waves = waves
+        self._imported_pxp_keys = set()
+        self.last_import_label.setText("")
+        self.file_path = filename
+        self.file_label.setText(filename)
+        self.file_label.setStyleSheet("QLabel { color: black; }")
+
+        self.pxp_wave_list.clear()
+        for path_key in sorted(waves.keys()):
+            self.pxp_wave_list.addItem(path_key)
+        self.wave_picker_group.setVisible(True)
+        if report.skipped:
+            summary = (
+                f"{len(report.skipped)} record(s) in '{Path(filename).name}' could not "
+                "be parsed and were skipped. The other waves loaded normally. "
+                "Open the application log for details."
+            )
+            QtWidgets.QMessageBox.warning(self, "Some waves were skipped", summary)
+            for skipped in report.skipped:
+                self.logger.warning(
+                    "Skipped record #%d (%s): %s",
+                    skipped.record_index,
+                    skipped.record_type,
+                    skipped.reason,
+                )
+
+        if len(waves) == 1:
+            self.pxp_wave_list.setCurrentRow(0)
+        else:
+            self.loaded_wave = None
+            self._update_preview()
+            self._update_import_button_state()
+
+    def _build_preview_text(self, wave: IgorWave) -> str:
+        source_dt = float(self.source_dt_spin.value())
+        lines = [
+            f"Input name={wave.name}",
+            f"Source format={wave.source_format}",
+            f"Source samples={int(wave.values.size)}",
+            (
+                f"Detected source dt={wave.source_dt:.9f} s"
+                if wave.source_dt is not None
+                else "Detected source dt=(not stored in file)"
+            ),
+            f"Import source dt={source_dt:.9f} s",
+            f"Input units={wave.units or '(none)'}",
+            f"Axis units={wave.axis_units or '(none)'}",
+            f"Value range={float(np.min(wave.values)):.6g} .. {float(np.max(wave.values)):.6g}",
+        ]
+        if wave.note:
+            lines.extend(["", f"Input note={wave.note}"])
+        return "\n".join(lines)
+
+    def _update_multi_sweep_info(self) -> None:
+        wave = self.loaded_wave
+        if wave is None or wave.n_sweeps <= 1 or wave.samples_per_sweep is None:
+            self.multi_sweep_info.setVisible(False)
+            self.multi_sweep_info.setText("")
+            return
+        source_dt = float(self.source_dt_spin.value())
+        total_duration_s = float(wave.values.size) * source_dt
+        self.multi_sweep_info.setText(
+            f"Multi-sweep IBW: {wave.n_sweeps} sweeps × "
+            f"{wave.samples_per_sweep} source samples concatenated "
+            f"({wave.values.size} total source samples at "
+            f"{source_dt * 1000.0:g} ms = {total_duration_s:g} s). "
+            "Inter-sweep recording gaps are not preserved."
+        )
+        self.multi_sweep_info.setVisible(True)
+
+    def _update_mode_state(self) -> None:
+        create_new = self.create_new_radio.isChecked()
+        self.new_target_group.setEnabled(create_new)
+        self.existing_target_group.setEnabled(not create_new)
+        self._update_preview()
+        self._update_import_button_state()
+
+    def _update_wave_plot(self, wave: IgorWave | None) -> None:
+        fig = self.wave_plot.getFigure()
+        fig.clf()
+        if wave is None:
+            self.wave_plot.setVisible(False)
+            self.wave_plot.draw()
+            return
+
+        source_dt = float(self.source_dt_spin.value())
+        values = np.asarray(wave.values, dtype=float).ravel()
+        max_display_pts = 4000
+        step = max(1, len(values) // max_display_pts)
+        t = np.arange(0, len(values), step) * source_dt
+        y = values[::step]
+
+        ax = fig.add_subplot(111)
+        ax.plot(t, y, linewidth=0.8, color="#1f77b4")
+        ax.set_xlabel("Time (s)", fontsize=8)
+        ax.set_ylabel(wave.units or "a.u.", fontsize=8)
+        ax.set_title(wave.name, fontsize=9)
+        ax.tick_params(labelsize=7)
+        fig.tight_layout(pad=0.5)
+        self.wave_plot.setVisible(True)
+        self.wave_plot.draw()
+
+    def _cleanup_wave_plot(self) -> None:
+        canvas = self.wave_plot.canvas
+        canvas._draw_pending = False
+        canvas._is_drawing = False
+
+    def _update_preview(self) -> None:
+        self._update_wave_plot(self.loaded_wave)
+        self._update_multi_sweep_info()
+        if self.loaded_wave is None:
+            self.preview_text.setPlainText("")
+            if not self.project.stim_arrays:
+                self.info_label.setText(
+                    "Select an input waveform to preview it. Only the new-input import mode is "
+                    "currently available because the project has no input arrays yet."
+                )
+            else:
+                self.info_label.setText("Select an input waveform to preview it.")
+            return
+
+        self.preview_text.setPlainText(self._build_preview_text(self.loaded_wave))
+        source_dt = float(self.source_dt_spin.value())
+        info_lines = ["Samples are imported at the source sample interval."]
+        if self.loaded_wave.source_dt is None:
+            info_lines.append(
+                "The source file does not store the sample interval. Review the source sample interval before importing."
+            )
+        selected_stim = self._selected_stim_array()
+        if (
+            self.import_existing_radio.isChecked()
+            and selected_stim is not None
+            and not stim_dt_matches(float(selected_stim.dt), source_dt)
+        ):
+            info_lines.append(
+                "The selected target input array uses "
+                f"{format_milliseconds(float(selected_stim.dt) * 1000.0)} ms; you will be "
+                "asked whether to resample the wave onto that grid or remap the "
+                f"target to {format_milliseconds(source_dt * 1000.0)} ms."
+            )
+        self.info_label.setText("\n".join(info_lines))
+
+    def _update_import_button_state(self) -> None:
+        enabled = self.loaded_wave is not None
+        if enabled and self.loaded_pxp_waves:
+            current_item = self.pxp_wave_list.currentItem()
+            if current_item is not None:
+                raw_key = current_item.text().removeprefix("✓ ")
+                if raw_key in self._imported_pxp_keys:
+                    enabled = False
+        if enabled and self.create_new_radio.isChecked():
+            enabled = self.new_name_edit.text().strip() != ""
+        if enabled and self.import_existing_radio.isChecked():
+            target = self._selected_stim_array()
+            enabled = target is not None
+        self.import_button.setEnabled(enabled)
+
+    def _current_new_stim_type(self) -> StimType:
+        current_data = self.new_type_combo.currentData()
+        if isinstance(current_data, StimType):
+            return current_data
+        return StimType.External
+
+    def _promote_cancel_to_close(self) -> None:
+        """Promote Cancel to Close once the dialog has modified the project."""
+        if self.cancel_button.text() == "Close":
+            return
+        self.cancel_button.setText("Close")
+        with suppress(TypeError, RuntimeError):
+            self.cancel_button.clicked.disconnect(self.reject)
+        self.cancel_button.clicked.connect(self.accept)
+
+    def _import_file(self) -> None:
+        if self.loaded_wave is None:
+            return
+
+        try:
+            prepared_wave = prepare_igor_wave_for_neuroseq(
+                self.loaded_wave,
+                source_dt_override=float(self.source_dt_spin.value()),
+            )
+
+            if self.create_new_radio.isChecked():
+                stim_name = self.new_name_edit.text().strip()
+                if not stim_name:
+                    raise ValueError("Input name cannot be empty")
+                if stim_name in self.project.stim_arrays:
+                    raise ValueError(
+                        f"An input data entity named '{stim_name}' already exists"
+                    )
+                stim_array = create_stim_array_from_igor_wave(
+                    prepared_wave,
+                    stim_name=stim_name,
+                    stim_type=self._current_new_stim_type(),
+                    units=self.new_units_edit.text().strip(),
+                )
+                self.project.add_stim_array(stim_array)
+                self.selected_stim_name = stim_name
+                info_lines = [
+                    f"Imported '{prepared_wave.name}' into new input array '{stim_name}'.",
+                    f"Source samples: {prepared_wave.original_sample_count}",
+                    f"Imported samples: {prepared_wave.values.shape[0]}",
+                    "Target neuron count: 1",
+                ]
+                if (
+                    prepared_wave.n_sweeps > 1
+                    and prepared_wave.samples_per_sweep is not None
+                ):
+                    info_lines.append(
+                        f"Source input waveform contained {prepared_wave.n_sweeps} sweeps × "
+                        f"{prepared_wave.samples_per_sweep} samples, concatenated on import."
+                    )
+            else:
+                target_stim = self._selected_stim_array()
+                if target_stim is None:
+                    raise ValueError("No target input data entity selected")
+                remapped_target_dt = False
+                resampled_wave = False
+                if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):
+                    choice = ask_dt_mismatch_choice(
+                        self,
+                        target_label=f"input array '{target_stim.name}'",
+                        target_dt=float(target_stim.dt),
+                        wave_dt=prepared_wave.target_dt,
+                    )
+                    if choice is DtMismatchChoice.CANCEL:
+                        return
+                    if choice is DtMismatchChoice.RESAMPLE_WAVE:
+                        prepared_wave = prepare_igor_wave_for_neuroseq(
+                            self.loaded_wave,
+                            source_dt_override=float(self.source_dt_spin.value()),
+                            target_dt=float(target_stim.dt),
+                        )
+                        resampled_wave = True
+                    else:
+                        remapped_target_dt = True
+                # Stage on a copy: a failed import must leave the target untouched,
+                # and the project records the result as one undoable edit.
+                staged_stim = copy.copy(target_stim)
+                if remapped_target_dt:
+                    staged_stim.values = remap_stim_values_to_dt(
+                        target_stim.values,
+                        old_dt_seconds=target_stim.dt,
+                        new_dt_seconds=prepared_wave.target_dt,
+                    )
+                    staged_stim.dt = prepared_wave.target_dt
+                report = import_igor_wave_into_stim_array(
+                    staged_stim,
+                    prepared_wave,
+                    neuron_index=self.neuron_index_spin.value(),
+                    replace_existing=self.replace_checkbox.isChecked(),
+                    extend_to_fit=self.extend_checkbox.isChecked(),
+                )
+                self.project.replace_stim_values(
+                    target_stim.name,
+                    staged_stim.values,
+                    staged_stim.dt,
+                    label=f"Import patch-clamp wave into {target_stim.name}",
+                )
+                self.selected_stim_name = target_stim.name
+                info_lines = [
+                    f"Imported '{prepared_wave.name}' into '{target_stim.name}' neuron {report.target_neuron_index}.",
+                    f"Source samples: {report.source_samples}",
+                    f"Imported samples: {report.imported_samples}",
+                ]
+                if report.n_sweeps > 1 and report.samples_per_sweep is not None:
+                    info_lines.append(
+                        f"Source input waveform contained {report.n_sweeps} sweeps × "
+                        f"{report.samples_per_sweep} samples, concatenated on import."
+                    )
+                if report.truncated_samples > 0:
+                    info_lines.append(
+                        f"Truncated imported samples: {report.truncated_samples}"
+                    )
+                if resampled_wave:
+                    info_lines.append(
+                        f"Resampled the wave from {report.source_dt:.9f} s to the "
+                        f"target grid ({report.target_dt:.9f} s)."
+                    )
+                if remapped_target_dt:
+                    info_lines.append(
+                        f"Adjusted target input grid to {report.target_dt:.9f} s before import."
+                    )
+
+            is_pxp_session = bool(self.loaded_pxp_waves)
+
+            if is_pxp_session:
+                current_item = self.pxp_wave_list.currentItem()
+                if current_item is not None:
+                    path_key = current_item.text().removeprefix("✓ ")
+                    self._imported_pxp_keys.add(path_key)
+                    current_item.setText(f"✓ {path_key}")
+                    current_item.setFlags(
+                        current_item.flags() & ~QtCore.Qt.ItemFlag.ItemIsSelectable
+                    )
+
+                self.last_import_label.setText(info_lines[0])
+                self.pxp_wave_list.clearSelection()
+                self.pxp_wave_list.setCurrentItem(None)
+                self.loaded_wave = None
+                self.new_name_edit.clear()
+                self.new_units_edit.clear()
+                self._auto_stim_name = ""
+                self._auto_units = ""
+                self._populate_target_stims()
+
+                self._had_successful_import = True
+                self._promote_cancel_to_close()
+                self._update_preview()
+                self._update_import_button_state()
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Import Complete",
+                    "\n".join(info_lines),
+                )
+                self.accept()
+        except Exception as exc:
+            self.logger.exception("Failed to import patch-clamp input")
+            QtWidgets.QMessageBox.critical(
+                self,
+                "Import Error",
+                f"Failed to import patch-clamp input:\n{exc}",
+            )
+
+    def done(self, result: int) -> None:
+        self._cleanup_wave_plot()
+        super().done(result)
+
+    def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
+        self._cleanup_wave_plot()
+        super().closeEvent(event)

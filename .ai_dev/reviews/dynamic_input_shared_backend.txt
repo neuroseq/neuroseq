@@ -182,7 +182,7 @@ Fix both with patterns already partially established in this codebase:
       the backend can ask the dialog to append a block without knowing
       about `StimEditor`/Qt at all.
 
-1.  Extend `SimulationHost` in src/neuroseq/dynamic_input_routine.py:
+1.  Extend `SimulationHost` in src/neuroseq/stimulation/dynamic_input_routine.py:
 
         class SimulationHost(Protocol):
             def request_simulation(self, seconds: float) -> None: ...
@@ -210,7 +210,7 @@ Fix both with patterns already partially established in this codebase:
                                                                      # import if it
                                                                      # collides, e.g.
                                                                      # `from
-                                                                     # neuroseq.dynamic_input_blocks
+                                                                     # neuroseq.stimulation.dynamic_input_blocks
                                                                      # import append_block
                                                                      # as _append_block_impl`
             if self.chk_follow_input.isChecked():
@@ -226,7 +226,7 @@ Fix both with patterns already partially established in this codebase:
             return block_start
 
     (Watch the naming collision: the module already does
-    `from neuroseq.dynamic_input_blocks import append_block` - rename
+    `from neuroseq.stimulation.dynamic_input_blocks import append_block` - rename
     either the import or the new dialog method so they don't shadow each
     other; same applies in the other two dialogs.)
 
@@ -449,7 +449,7 @@ to change at all - this is probably the least churn option).
 VERIFICATION FOR ROUND 3
 ------------------------
 
-    ruff check src/neuroseq/dynamic_input_routine.py src/neuroseq/rheobase_dialog.py \
+    ruff check src/neuroseq/stimulation/dynamic_input_routine.py src/neuroseq/rheobase_dialog.py \
                src/neuroseq/stdp_synaptic_tuning_dialog.py src/neuroseq/stdp_window_dialog.py \
                tests/test_rheobase_backend.py <and the other two new backend test files>
     mypy --ignore-missing-imports <same src/ list>
@@ -812,7 +812,7 @@ E.  StdpWindowDialog's reset-mode branch in `_place_block` still does its
     required, just noting the consolidation goal wasn't fully reached
     there.
 
-F.  src/neuroseq/dynamic_input_routine.py has two small deviations from
+F.  src/neuroseq/stimulation/dynamic_input_routine.py has two small deviations from
     the handoff's literal text, both verified behaviorally equivalent:
     `begin()` additionally sets `self.awaiting_simulation = False`
     (harmless - already False on a fresh backend); `toggle_pause()`'s

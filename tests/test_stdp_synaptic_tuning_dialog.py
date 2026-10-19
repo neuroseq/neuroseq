@@ -9,11 +9,15 @@ from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.data import TraceData
-from neuroseq.stdp_synaptic_tuning_dialog import EPSPMeasurement
-from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_timing import seconds_to_samples_nearest
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    EPSPMeasurement,
+)
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningDialog,
+)
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
 
 class _FakeProject:
@@ -217,7 +221,7 @@ def test_stdp_synaptic_tuning_cancel_keeps_existing_input(qtbot, monkeypatch) ->
     qtbot.addWidget(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog.confirm_start_routine",
         lambda *args, **kwargs: "cancel",
     )
 
@@ -235,7 +239,7 @@ def test_stdp_synaptic_tuning_continue_after_existing_input(qtbot, monkeypatch) 
     qtbot.addWidget(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog.confirm_start_routine",
         lambda *args, **kwargs: "continue",
     )
     monkeypatch.setattr(
@@ -269,7 +273,7 @@ def test_stdp_synaptic_tuning_clear_zeroes_existing_input_before_start(
     qtbot.addWidget(dialog)
     editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog.confirm_start_routine",
+        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog.confirm_start_routine",
         lambda *args, **kwargs: "clear",
     )
     monkeypatch.setattr(
@@ -474,7 +478,7 @@ def test_stdp_synaptic_tuning_positions_native_minimized_window_without_moving_r
         return True
 
     monkeypatch.setattr(
-        "neuroseq.stdp_synaptic_tuning_dialog._set_native_minimized_position",
+        "neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog.set_native_minimized_position",
         record_placement,
     )
 

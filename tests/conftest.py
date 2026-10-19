@@ -16,6 +16,12 @@ if sys.platform.startswith("linux"):
     pathlib.Path("/tmp/mpl").mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl")
 
+# Select the requested Qt binding before fastplotlib chooses a GUI backend.
+# Otherwise installations containing both bindings can load PySide6 here even
+# when QT_API and pytest-qt request PyQt6, mixing incompatible Qt libraries.
+from qtpy import QtCore
+from qtpy import QtWidgets
+
 if os.environ.get("NEUROSEQ_HEADLESS_TEST", "").lower() in {"1", "true", "yes"}:
     from fastplotlib.layouts._figure import Figure
 
@@ -28,21 +34,20 @@ import brian2 as b2
 import brian2.numpy_ as np
 import pytest
 from numpy.typing import NDArray
-from qtpy import QtCore
-from qtpy import QtWidgets
 
 if TYPE_CHECKING:
     pass
 
 from neuroseq.b2_model import B2Model
+from neuroseq.background_jobs import SimulationGuard
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stimulation_generator_dialog import StimulationGeneratorDialog
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import init_brian2_logging
 
 b2.prefs.codegen.target = "numpy"
@@ -115,6 +120,16 @@ def patch_b2w_exec_show(monkeypatch: pytest.MonkeyPatch) -> None:
         QtWidgets.QMessageBox,
     ]:
         monkeypatch.setattr(widget, "exec", lambda self: self.show())
+
+
+# keep tests away from the real per-user analysis plugin folder
+@pytest.fixture(autouse=True)
+def isolate_user_plugin_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
+) -> pathlib.Path:
+    directory = tmp_path_factory.mktemp("user_plugins") / "analysis_plugins"
+    monkeypatch.setenv("NEUROSEQ_USER_PLUGIN_DIR", str(directory))
+    return directory
 
 
 @pytest.fixture()
@@ -192,6 +207,8 @@ def isolate_brian2_codegen_state(
     yield
     b2.prefs.codegen.target = "numpy"
     b2.prefs.codegen.runtime.cython.cache_dir = str(brian2_cython_cache_dir)
+    # A workspace left open by a test must not refuse simulations in the next.
+    SimulationGuard._owner = None
 
 
 @pytest.fixture(autouse=True)

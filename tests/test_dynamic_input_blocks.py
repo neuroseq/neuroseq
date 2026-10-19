@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from neuroseq.dynamic_input_blocks import RoutineArrayCursor
-from neuroseq.dynamic_input_blocks import run_to_sample
+from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
+from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
 
 
 class _Editor:

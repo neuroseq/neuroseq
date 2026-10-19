@@ -35,16 +35,16 @@ After picking the file, NeuroSeq shows the items it can pull in (stim
 arrays, experiments, segmentation) so you can opt in selectively. The
 current project's own data is left untouched.
 
-## Manage Experiments
+## Manage Data
 
-**Experiment → Manage Experiments** opens a dialog that lists every
-experiment in the project. From here you can:
+**File → Manage Data** opens the data manager dialog, which lists project
+data grouped by simulation run or recording. Each group corresponds to an
+`Experiment` in `Project.experiments`. From here you can:
 
-- rename or delete experiments,
+- inspect each group's name, duration, and number of datasets,
 - inspect which data objects (`TraceData`, `SpikeData`, `SynapseData`)
-  belong to each experiment and their dimensions,
-- mark which experiment is the "active" one — the active experiment is
-  what the trace/spike/synapse dropdowns show by default.
+  belong to each group and their dimensions,
+- delete selected groups and all the datasets they contain.
 
 ## Comparing simulated and recorded data
 

@@ -5,14 +5,14 @@ from pathlib import Path
 import numpy as np
 from pytestqt.qtbot import QtBot
 
-from neuroseq.brightness_contrast import BrightnessContrastDialog
-from neuroseq.brightness_contrast import DisplayRange
-from neuroseq.brightness_contrast import apply_display_range
-from neuroseq.brightness_contrast import auto_display_range
-from neuroseq.brightness_contrast import build_lut
-from neuroseq.brightness_contrast import luminance_histogram
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization_support.brightness_contrast import BrightnessContrastDialog
+from neuroseq.visualization_support.brightness_contrast import DisplayRange
+from neuroseq.visualization_support.brightness_contrast import apply_display_range
+from neuroseq.visualization_support.brightness_contrast import auto_display_range
+from neuroseq.visualization_support.brightness_contrast import build_lut
+from neuroseq.visualization_support.brightness_contrast import luminance_histogram
 
 
 def test_identity_range_returns_image_unchanged() -> None:
@@ -124,7 +124,9 @@ def test_footprint_panel_adjusts_fov_but_not_cell_colors(qtbot: QtBot) -> None:
 def test_display_range_is_stored_on_shared_data_and_synced_across_views(
     qtbot: QtBot,
 ) -> None:
-    from neuroseq.spatial_footprint_state import SpatialFootprintState
+    from neuroseq.visualization_support.spatial_footprint_state import (
+        SpatialFootprintState,
+    )
 
     state = SpatialFootprintState()
     first = SpatialFootprintWidget(state=state)

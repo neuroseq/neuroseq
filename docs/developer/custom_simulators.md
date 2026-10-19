@@ -69,6 +69,22 @@ For integration with the current project and GUI code, the module should expose 
 
 This keeps the current GUI and project logic simple while still allowing a class-based implementation internally.
 
+When restoring an archive, `Project` calls the backend instance's optional
+`migrate_project(project)` method after loading the simulator and project data.
+Backends can use this hook to upgrade their own legacy stimulus formats. The
+ELISE implementation keeps these conversions, its example project factory
+(`create_project()`), and teaching-pattern helpers in
+`src/neuroseq/example_models/elise.py`. The example menu registers a small
+wrapper in `example_projects/networks/elise_project.py` that delegates to this factory.
+
+Example project factories live in `src/neuroseq/example_projects/`, with one
+project per file under `neurons/` or `networks/`. The package's `__init__.py`
+exports the factories and imports them in their existing menu order.
+`_registry.py` provides the `register_example_project` decorator. New examples
+should define a decorated factory in the appropriate folder, import it in
+the package entry point, and add it to `__all__` so it is exported and appears
+in the example-project menu.
+
 ## Expected Data Flow
 
 The external simulator call path is:

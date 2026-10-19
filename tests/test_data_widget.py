@@ -4,9 +4,11 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
-from neuroseq.data_widget import DataWidget
-from neuroseq.trace_widget import TraceWidget
+from neuroseq.visualization.data_widget import DataWidget
+from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def test_data_widget(

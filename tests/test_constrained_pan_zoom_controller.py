@@ -5,7 +5,9 @@ from typing import Any
 import brian2 as b2
 import pygfx
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def test_set_limits_casts_quantity_to_float(monkeypatch) -> None:

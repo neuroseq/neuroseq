@@ -7,10 +7,10 @@ import pytest
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
+from neuroseq.export.igor2_pxp_stim_export_dialog import Igor2PxpStimExportDialog
 from neuroseq.project import Project
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 
 
 def _project_with_one_stim() -> Project:

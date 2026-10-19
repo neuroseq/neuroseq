@@ -5,17 +5,23 @@ from pytest import MonkeyPatch
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.project import Project
-from neuroseq.stim import DrawStimType
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_editor import StimEditor
-from neuroseq.stim_patterns import generate_fuer_elise
-from neuroseq.stim_patterns import generate_per_neuron
-from neuroseq.stim_patterns import generate_ramp
-from neuroseq.stim_patterns import generate_sequential
-from neuroseq.stim_patterns import generate_simultaneous
+from neuroseq.stimulation.static_input.static_input_controller import (
+    StaticInputController,
+)
+from neuroseq.stimulation.static_input.stim_pattern_dialog import StimPatternDialog
+from neuroseq.stimulation.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.stimulation.static_input.stim_patterns import generate_per_neuron
+from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
+from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
+from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_editor import StimEditor
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
 
 
 def _make_editor(
@@ -24,7 +30,7 @@ def _make_editor(
     length_samples: int = 500,
     n_neurons: int = 10,
     include_second_stim: bool = False,
-) -> tuple[StimEditor, Project]:
+) -> tuple[StimEditor, Project, StaticInputController]:
     project = Project()
     project.add_stim_array(
         StimArray(
@@ -49,32 +55,33 @@ def _make_editor(
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
     editor = StimEditor(controller, cmb_stim, toolbar)
+    static_input = StaticInputController(editor, editor)
     qtbot.addWidget(editor)
     editor.show()
     qtbot.waitUntil(lambda: editor.isVisible())
     editor.set_project(project, stim_to_select="a")
-    return editor, project
+    return editor, project, static_input
 
 
-def _open_dialog(editor: StimEditor) -> QtWidgets.QDialog:
-    editor.open_pattern_designer()
-    assert editor._pattern_dialog is not None
-    return editor._pattern_dialog
+def _open_dialog(controller: StaticInputController) -> StimPatternDialog:
+    controller.open_pattern_designer()
+    assert controller._pattern_dialog is not None
+    return controller._pattern_dialog
 
 
 def test_dialog_has_no_qt_parent(qtbot: QtBot) -> None:
-    """No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    """No Qt parent - see SelfRaisingDialog's docstring for why a shared
     WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front."""
-    editor, _project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, _project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
     assert dialog.parent() is None
 
 
 def test_dialog_apply_sequential_writes_pattern_and_advances_cursor(
     qtbot: QtBot,
 ) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_sequential.setChecked(True)
@@ -86,8 +93,8 @@ def test_dialog_apply_sequential_writes_pattern_and_advances_cursor(
 
 
 def test_dialog_apply_twice_stacks_two_patterns(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=2000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=2000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_sequential.setChecked(True)
@@ -114,8 +121,8 @@ def test_dialog_apply_twice_stacks_two_patterns(qtbot: QtBot) -> None:
 
 
 def test_dialog_apply_undo_redo(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.btn_apply.click()
     expected = generate_sequential(10, 100, 18, 1.0, 0.001)
@@ -126,8 +133,8 @@ def test_dialog_apply_undo_redo(qtbot: QtBot) -> None:
 
 
 def test_dialog_apply_with_padding_is_one_undo(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=100)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=100)
+    dialog = _open_dialog(static_input)
 
     original_length = project.stim_arrays["a"].values.shape[0]
     dialog.btn_apply.click()
@@ -143,8 +150,8 @@ def test_dialog_clear_button_clears_via_undoable_path(
     monkeypatch: MonkeyPatch,
     qtbot: QtBot,
 ) -> None:
-    editor, project = _make_editor(qtbot, length_samples=2000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=2000)
+    dialog = _open_dialog(static_input)
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
@@ -163,8 +170,8 @@ def test_dialog_clear_button_clears_via_undoable_path(
 
 
 def test_dialog_specific_neuron_constant_writes_only_that_column(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2")
@@ -190,8 +197,8 @@ def test_dialog_specific_neuron_constant_writes_only_that_column(qtbot: QtBot) -
 
 
 def test_dialog_specific_multiple_neurons_and_range(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("1, 4, 6-8")
@@ -227,8 +234,8 @@ def test_dialog_specific_neuron_does_not_erase_other_neurons_same_window(
     Applying a specific-neuron pattern must not clear a pre-existing
     stimulus on a different neuron in the same time window.
     """
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("1")
@@ -253,8 +260,8 @@ def test_dialog_specific_invalid_index_shows_warning_and_no_change(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2, 99")
@@ -267,8 +274,8 @@ def test_dialog_specific_invalid_index_shows_warning_and_no_change(
 
 
 def test_dialog_apply_ramp_multiple_neurons(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("0, 3-4")
@@ -287,8 +294,10 @@ def test_dialog_apply_ramp_multiple_neurons(qtbot: QtBot) -> None:
 
 
 def test_dialog_fuer_elise_clipped_to_six_neurons(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=4000, n_neurons=6)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(
+        qtbot, length_samples=4000, n_neurons=6
+    )
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_fuer_elise.setChecked(True)
@@ -303,8 +312,10 @@ def test_dialog_fuer_elise_clipped_to_six_neurons(qtbot: QtBot) -> None:
 def test_dialog_fuer_elise_has_independent_pulse_and_sequence_repeats(
     qtbot: QtBot,
 ) -> None:
-    editor, project = _make_editor(qtbot, length_samples=20_000, n_neurons=13)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(
+        qtbot, length_samples=20_000, n_neurons=13
+    )
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_fuer_elise.setChecked(True)
@@ -332,8 +343,8 @@ def test_dialog_fuer_elise_has_independent_pulse_and_sequence_repeats(
 
 
 def test_dialog_context_updates_when_user_switches_stim_array(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, include_second_stim=True)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, include_second_stim=True)
+    dialog = _open_dialog(static_input)
 
     assert dialog.lbl_stim_name.text() == "a"
     assert dialog.lbl_units.text() == "siemens"
@@ -350,8 +361,8 @@ def test_dialog_invalid_pulse_duration_shows_warning_and_no_change(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
 ) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.spin_pulse_ms.setValue(0.0)
     dialog.btn_apply.click()
@@ -362,8 +373,8 @@ def test_dialog_invalid_pulse_duration_shows_warning_and_no_change(
 
 
 def test_dialog_apply_ramp_all_neurons(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_ramp.setChecked(True)
@@ -380,8 +391,8 @@ def test_dialog_apply_ramp_all_neurons(qtbot: QtBot) -> None:
 
 
 def test_dialog_apply_ramp_specific_neuron(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2")
@@ -400,8 +411,8 @@ def test_dialog_apply_ramp_specific_neuron(qtbot: QtBot) -> None:
 
 
 def test_dialog_ramp_visible_in_both_scopes(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     assert dialog.radio_ramp.isVisible()
@@ -412,8 +423,8 @@ def test_dialog_ramp_visible_in_both_scopes(qtbot: QtBot) -> None:
 def test_dialog_sequential_visible_in_both_scopes(qtbot: QtBot) -> None:
     """Feature (#582): Sequential used to only be selectable for "All
     neurons" scope."""
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     assert dialog.radio_sequential.isVisible()
@@ -424,8 +435,8 @@ def test_dialog_sequential_visible_in_both_scopes(qtbot: QtBot) -> None:
 def test_dialog_apply_sequential_specific_neurons_writes_only_those_columns(
     qtbot: QtBot,
 ) -> None:
-    editor, project = _make_editor(qtbot, length_samples=1000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_specific.setChecked(True)
     # parse_neuron_indices sorts/dedupes the typed text (same as every other
@@ -444,8 +455,8 @@ def test_dialog_apply_sequential_specific_neurons_writes_only_those_columns(
 
 
 def test_dialog_sequential_shows_repeats_in_both_scopes(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_sequential.setChecked(True)
@@ -459,8 +470,8 @@ def test_dialog_sequential_shows_repeats_in_both_scopes(qtbot: QtBot) -> None:
 
 def test_dialog_sequential_repeats_replay_the_whole_sequence(qtbot: QtBot) -> None:
     """#586: Repeats on a sequential pattern plays the sequence N times."""
-    editor, project = _make_editor(qtbot, length_samples=4000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=4000)
+    dialog = _open_dialog(static_input)
 
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_sequential.setChecked(True)
@@ -475,51 +486,22 @@ def test_dialog_sequential_repeats_replay_the_whole_sequence(qtbot: QtBot) -> No
     assert dialog.spin_start_time_ms.value() == 3540.0
 
 
-def _second_project() -> Project:
-    project = Project()
-    project.add_stim_array(
-        StimArray(
-            "other",
-            StimType.Excitation,
-            np.zeros((500, 10), dtype=np.float32),
-            "nS",
-            0.001,
-        )
-    )
-    return project
-
-
-def test_dialog_values_are_confined_to_their_project(qtbot: QtBot) -> None:
-    """#587: values entered in one project must not show up in another, and
-    must come back when switching back."""
-    editor, first = _make_editor(qtbot)
-    second = _second_project()
-    dialog = _open_dialog(editor)
-    dialog.spin_pulse_ms.setValue(250.0)
-    dialog.spin_ipi_ms.setValue(75.0)
-    dialog.spin_magnitude.setValue(3.5)
-    dialog.spin_start_time_ms.setValue(400.0)
-
-    editor.set_project(second)
-    assert dialog.spin_pulse_ms.value() == 100.0
-    assert dialog.spin_ipi_ms.value() == 18.0
-    assert dialog.spin_magnitude.value() == 1.0
-    assert dialog.spin_start_time_ms.value() == 0.0
-    dialog.spin_pulse_ms.setValue(5.0)
-
-    editor.set_project(first)
-    assert dialog.spin_pulse_ms.value() == 250.0
-    assert dialog.spin_ipi_ms.value() == 75.0
-    assert dialog.spin_magnitude.value() == 3.5
-    assert dialog.spin_start_time_ms.value() == 400.0
-
-    editor.set_project(second)
-    assert dialog.spin_pulse_ms.value() == 5.0
+def test_separate_editors_keep_their_own_designer_values(qtbot: QtBot) -> None:
+    _, _, first = _make_editor(qtbot)
+    _, _, second = _make_editor(qtbot)
+    first_dialog = _open_dialog(first)
+    first_dialog.spin_pulse_ms.setValue(250.0)
+    second_dialog = _open_dialog(second)
+    assert second_dialog is not first_dialog
+    assert second_dialog.spin_pulse_ms.value() == 100.0
+    second_dialog.spin_pulse_ms.setValue(5.0)
+    assert _open_dialog(first).spin_pulse_ms.value() == 250.0
+    assert _open_dialog(second).spin_pulse_ms.value() == 5.0
 
 
 def test_dialog_values_survive_refreshing_the_same_project(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
     dialog.spin_pulse_ms.setValue(250.0)
 
     editor.set_project(project)
@@ -527,26 +509,41 @@ def test_dialog_values_survive_refreshing_the_same_project(qtbot: QtBot) -> None
     assert dialog.spin_pulse_ms.value() == 250.0
 
 
-def test_dialog_opened_after_switching_starts_from_the_project_state(
-    qtbot: QtBot,
-) -> None:
-    editor, first = _make_editor(qtbot)
-    second = _second_project()
-    second.static_input_state = {"pulse_ms": 42.0, "scope_specific": True}
+def test_designer_without_a_stimulation_array_stays_closed(qtbot: QtBot) -> None:
+    editor, _, static_input = _make_editor(qtbot)
+    editor.set_project(Project())
 
-    editor.set_project(second)
-    dialog = _open_dialog(editor)
+    static_input.open_pattern_designer()
 
-    assert dialog.spin_pulse_ms.value() == 42.0
-    assert dialog.radio_scope_specific.isChecked()
-    assert dialog.spin_ipi_ms.value() == 18.0
+    assert static_input._pattern_dialog is None
+
+
+def test_designer_is_disabled_for_an_empty_project(qtbot: QtBot) -> None:
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+
+    editor.set_project(Project())
+    assert not dialog.isEnabled()
+
+    editor.set_project(project)
+    assert dialog.isEnabled()
+    assert dialog.lbl_stim_name.text() == "a"
+
+
+def test_discarding_designer_releases_its_dialog(qtbot: QtBot) -> None:
+    _, _, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    static_input.discard_dialog()
+    static_input.discard_dialog()
+    assert not dialog.isVisible()
+    assert static_input._pattern_dialog is None
 
 
 def test_dialog_uses_the_same_pattern_names_in_both_scopes(qtbot: QtBot) -> None:
     """Issue #613: the same patterns have the same names whichever scope is
     chosen; only Für Elise, on fixed neurons, is for all neurons alone."""
-    editor, _ = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, _, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
 
     def shown() -> list[str]:
         return [b.text() for b in dialog._pattern_buttons if b.isVisibleTo(dialog)]
@@ -566,8 +563,8 @@ def test_dialog_uses_the_same_pattern_names_in_both_scopes(qtbot: QtBot) -> None
 
 
 def test_dialog_labels_say_what_each_value_means(qtbot: QtBot) -> None:
-    editor, _ = _make_editor(qtbot)
-    dialog = _open_dialog(editor)
+    editor, _, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
     dialog.radio_scope_all.setChecked(True)
 
     dialog.radio_sequential.setChecked(True)
@@ -594,8 +591,8 @@ def test_dialog_labels_say_what_each_value_means(qtbot: QtBot) -> None:
 
 def test_dialog_sequential_repeats_each_neurons_pulse(qtbot: QtBot) -> None:
     """Issue #613 (comment): pulses per neuron, as for Für Elise's notes."""
-    editor, project = _make_editor(qtbot, length_samples=3000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=3000)
+    dialog = _open_dialog(static_input)
     dialog.radio_scope_specific.setChecked(True)
     dialog.edit_neuron_indices.setText("2, 5")
     dialog.radio_sequential.setChecked(True)
@@ -614,8 +611,8 @@ def test_dialog_sequential_repeats_each_neurons_pulse(qtbot: QtBot) -> None:
 
 
 def test_dialog_linear_gradient_for_all_neurons(qtbot: QtBot) -> None:
-    editor, project = _make_editor(qtbot, length_samples=2000)
-    dialog = _open_dialog(editor)
+    editor, project, static_input = _make_editor(qtbot, length_samples=2000)
+    dialog = _open_dialog(static_input)
     dialog.radio_scope_all.setChecked(True)
     dialog.radio_linear.setChecked(True)
     dialog.spin_pulse_ms.setValue(10.0)

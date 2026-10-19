@@ -4,10 +4,10 @@ import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 
-from neuroseq.custom_analysis_widget import CustomAnalysisType
-from neuroseq.custom_analysis_widget import CustomAnalysisWidget
-from neuroseq.custom_analysis_widget import CustomAnalysisWindow
 from neuroseq.data import TraceData
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
+from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
 gui_delay_in_ms = 50
 

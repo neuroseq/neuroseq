@@ -10,13 +10,13 @@ machine path. The output is committed; do not regenerate it with newer code.
 
 from qtpy import QtWidgets
 
-from neuroseq.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
-from neuroseq.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.gui import Gui
-from neuroseq.importer_cellpose import AOIRole
-from neuroseq.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importer_cellpose import CircleAOI
-from neuroseq.importer_cellpose import SquareAOI
+from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
+from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.importer_cellpose import AOIRole
+from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importers.importer_cellpose import CircleAOI
+from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.save_load_options import SaveLoadOptions
 
 app = QtWidgets.QApplication([])

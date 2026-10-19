@@ -1,12 +1,18 @@
 import pytest
 
-from neuroseq.dynamic_input_measurement import EPSPMeasurement
-from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningBackend
-from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningDialog
-from neuroseq.stdp_synaptic_tuning_dialog import StdpSynapticTuningRunConfig
-from neuroseq.stdp_window_dialog import StdpWindowBackend
-from neuroseq.stdp_window_dialog import StdpWindowDialog
-from neuroseq.stdp_window_dialog import StdpWindowRunConfig
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import EPSPMeasurement
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningBackend,
+)
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningDialog,
+)
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningRunConfig,
+)
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowBackend
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowDialog
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowRunConfig
 
 
 class Host:

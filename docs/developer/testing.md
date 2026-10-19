@@ -2,16 +2,25 @@
 
 A proper development of the code implies the use of tests with the `pytest` framework. Tests are located in the `tests/` folder.
 
+Use the same environment that runs the application. For a uv checkout, install
+the development dependencies with `uv sync --group dev` and use `uv run` below.
+An activated Conda environment does not make these commands use Conda's Python;
+uv uses the project's `.venv` by default.
+
+For an installation directly into Conda, replace `uv run pytest` with
+`conda run -n neuroseq python -m pytest` (or `python -m pytest` after activation).
+See [environment selection](../getting_started/installation.md#using-uv-from-a-conda-shell).
+
 ## To run all tests
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ## To run a specific subset of tests
 
 ```bash
-pytest tests/test_gui.py
+uv run pytest tests/test_gui.py
 ```
 
 ## SysCon2 control

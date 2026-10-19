@@ -14,15 +14,138 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 import neuroseq
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
+import neuroseq.stimulation.stim
+import neuroseq.stimulation.stim_editor
+from neuroseq.data import Experiment
+from neuroseq.data import TraceData
 from neuroseq.project import Project
-from neuroseq.stim import DrawStim
-from neuroseq.stim import DrawStimType
-from neuroseq.stim import StimArray
-from neuroseq.stim_editor import DrawMode
-from neuroseq.stim_editor import SelectMode
-from neuroseq.stim_editor import StimEditor
+from neuroseq.project_history import ProjectCommand
+from neuroseq.project_history import ProjectHistory
+from neuroseq.stimulation.dynamic_input.dynamic_input_controller import (
+    DynamicInputController,
+)
+from neuroseq.stimulation.stim import DrawStim
+from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim_editor import DrawMode
+from neuroseq.stimulation.stim_editor import SelectMode
+from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.utils import InteractMode
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+
+
+def test_project_history_interleaves_arrays_and_imports_across_refreshes(
+    qtbot: QtBot,
+) -> None:
+    project = Project()
+    for name in ("a", "b"):
+        project.add_stim_array(
+            StimArray(
+                name,
+                neuroseq.stimulation.stim.StimType.Excitation,
+                np.zeros((10, 1)),
+                "mV",
+                0.001,
+            )
+        )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project, stim_to_select="a")
+    assert editor.current_stim_modifier is not None
+    modifier_a = editor.current_stim_modifier
+    editor.current_stim_modifier.do(slice(0, 1), slice(0, 2), 1.0)
+    project.add_experiment(Experiment("imported", 0.02, [], []))
+    editor.cmb_stim.setCurrentText("b")
+    assert editor.current_stim_modifier is not None
+    editor.current_stim_modifier.do(slice(0, 1), slice(2, 4), 2.0)
+    editor._apply_pad(0.03)
+    assert len(project.history) == 4
+    editor.set_project(project, keep_undo_history=False, stim_to_select="b")
+    assert len(project.history) == 4
+    editor.undo()  # undo padding, preserving both arrays' older edits
+    assert all(stim.values.shape == (10, 1) for stim in project.stim_arrays.values())
+    modifier_a.undo()  # undo b through a different array's modifier
+    assert not project.stim_arrays["b"].values.any()
+    assert project.stim_arrays["a"].values.any()
+    assert editor.cmb_stim.currentText() == "b"
+    np.testing.assert_array_equal(
+        editor.stim_widget.data_values, project.stim_arrays["b"].values
+    )
+    editor.undo()  # undo import, even though a different input is selected
+    assert not project.experiments
+    editor.undo()  # undo a
+    assert not project.stim_arrays["a"].values.any()
+    assert not editor.action_undo.isEnabled()
+    assert editor.action_redo.isEnabled()
+    for _ in range(4):
+        editor.redo()
+    assert "imported" in project.experiments
+    assert project.stim_arrays["a"].values[0, 0] == 1.0
+    assert project.stim_arrays["b"].values[2, 0] == 2.0
+    assert editor.cmb_stim.currentText() == "b"
+    np.testing.assert_array_equal(
+        editor.stim_widget.data_values, project.stim_arrays["b"].values
+    )
+    editor.close()
+    project.history.undo()  # commands do not need the editor for replay
+    project.history.undo()
+    assert not project.stim_arrays["b"].values.any()
+
+
+def test_project_data_undo_without_an_input_and_after_editor_closes(
+    qtbot: QtBot,
+) -> None:
+    project = Project()
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    project.add_experiment(Experiment("imported", 2.0, [], []))
+    assert editor.current_stim_modifier is None
+    assert editor.action_undo.isEnabled()
+    editor.undo()
+    assert not project.experiments
+    assert editor.action_redo.isEnabled()
+    editor.redo()
+    editor.history_enabled = False
+    editor.undo()
+    assert "imported" in project.experiments
+    editor.close()
+    project.history.undo()
+    assert not project.experiments
+
+
+def test_switching_projects_cannot_reuse_previous_project_history(qtbot: QtBot) -> None:
+    first, second = Project(), Project()
+    for project in (first, second):
+        project.add_stim_array(
+            StimArray(
+                "a",
+                neuroseq.stimulation.stim.StimType.Excitation,
+                np.zeros((10, 1)),
+                "mV",
+                0.001,
+            )
+        )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(first)
+    assert editor.current_stim_modifier is not None
+    editor.current_stim_modifier.do(slice(0, 1), slice(0, 2), 1.0)
+    editor.set_project(second, keep_undo_history=True)
+    assert not editor.action_undo.isEnabled()
+    assert editor.current_stim_modifier is not None
+    assert editor.current_stim_modifier.history is second.history
+    first.history.undo()
+    assert not first.stim_arrays["a"].values.any()
+    assert not second.stim_arrays["a"].values.any()
 
 
 class MockStimIntensityDialog:
@@ -175,9 +298,9 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
 
     moved to the top View toolbar (issue #535) -
     Gui._add_stim_design_buttons_to_view_toolbar and the Show all stim
-    arrays action reused directly in Gui._create_actions_view. They stay
-    registered on the "Actions" context menu, in the same order, but no
-    longer duplicate onto this left toolbar.
+    arrays action reused directly in Gui._create_actions_view.
+    Show all remains on the editor's context menu.
+    The main window supplies the static- and dynamic-input actions.
     """
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -194,7 +317,9 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
     assert toolbar_texts.isdisjoint(design_op_names)
 
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
-    assert [t for t in context_menu_texts if t in design_op_names] == design_op_names
+    assert [t for t in context_menu_texts if t in design_op_names] == [
+        "Show all input arrays",
+    ]
     assert stim_editor.action_show_all_stim_arrays.isChecked()
     stim_editor.close()
 
@@ -218,7 +343,7 @@ def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
     project.stim_arrays = {
         "a": StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((200, 4)),
             "mV",
             0.001,
@@ -371,7 +496,11 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
     project = Project()
     project.stim_arrays = {
         "a": StimArray(
-            "a", neuroseq.stim.StimType.Excitation, np.zeros((127, 17)), "mV", 0.001
+            "a",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((127, 17)),
+            "mV",
+            0.001,
         )
     }
     cmb_stim = QtWidgets.QComboBox()
@@ -412,7 +541,7 @@ def test_stim_editor_pad_and_trim(
     project.stim_arrays = {
         "a": StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.random.random_sample((500, 10)),
             "mV",
             0.001,
@@ -504,7 +633,9 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     values = np.zeros((1000, 4))
     values[900:950, 0] = 1.0  # non-zero tail that trimming would remove
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, values, "mV", 0.001
+        )
     }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -590,18 +721,22 @@ def test_trim_warns_when_cutting_into_simulated_trace(
 
 def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
+    dynamic_input = DynamicInputController(stim_editor)
     for routine, attr in (
-        (StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE, "_stdp_synaptic_tuning_dialog"),
-        (StimEditor.RHEOBASE_ROUTINE, "_rheobase_dialog"),
-        (StimEditor.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
+        (
+            DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE,
+            "_stdp_synaptic_tuning_dialog",
+        ),
+        (DynamicInputController.RHEOBASE_ROUTINE, "_rheobase_dialog"),
+        (DynamicInputController.STDP_WINDOW_ROUTINE, "_stdp_window_dialog"),
     ):
-        stim_editor.open_dynamic_input_designer()
-        selector = stim_editor._routine_selector_dialog
+        dynamic_input.open_dynamic_input_designer()
+        selector = dynamic_input._routine_selector_dialog
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
         qtbot.waitUntil(lambda s=selector: not s.isVisible())
-        dialog = getattr(stim_editor, attr)
+        dialog = getattr(dynamic_input, attr)
         assert dialog is not None
         assert dialog.btn_reset.text() == "Reset input array"
         dialog.close()
@@ -612,13 +747,16 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
 
 def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
     stim_editor, project = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
+    selector.cmb_routine.setCurrentText(
+        DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE
+    )
     selector._on_continue()
     qtbot.waitUntil(lambda: not selector.isVisible())
-    dialog = stim_editor._stdp_synaptic_tuning_dialog
+    dialog = dynamic_input._stdp_synaptic_tuning_dialog
     assert dialog is not None
 
     # No simulation yet, so the reset button trims the array to a single
@@ -647,7 +785,7 @@ def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:
 
 def test_reset_stim_array_trims_to_simulation_head(qtbot: QtBot):
     from neuroseq.example_projects import default_project
-    from neuroseq.stim_timing import seconds_to_samples_nearest
+    from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
     project = default_project()
     project.run_simulation(0.05)
@@ -741,7 +879,7 @@ def test_clear_stim_array_confirmation_parents_to_active_window(
     """The confirmation must be parented to whichever window is actually
     active, not to the StimEditor itself: it is also shown from a routine
     dialog's "Clear input array" button, and those dialogs are deliberately
-    created without a Qt parent (see StimEditor._show_routine_dialog's
+    created without a Qt parent (see DynamicInputController._show_routine_dialog's
     docstring) - a box parented to self would hand focus back to the main
     window once closed, leaving the parentless routine dialog behind it."""
     from neuroseq.example_projects import default_project
@@ -794,7 +932,9 @@ def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     values = np.zeros((1000, 4))
     values[900:950, 0] = 1.0  # non-zero content that pad + undo must preserve
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, values, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, values, "mV", 0.001
+        )
     }
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -834,6 +974,7 @@ def test_edit_stim_array_dt_change_requires_confirmation(
             self.n_neurons = stim_array.values.shape[1]
             self.units = stim_array.units
             self.dt = 0.002
+            self.duration_seconds = stim_array.values.shape[0] * stim_array.dt
 
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Accepted
@@ -842,12 +983,20 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.array([[1.0], [0.0], [0.0], [0.0], [0.0]], dtype=np.float32),
             "mV",
             0.001,
         )
     )
+    other_stim = StimArray(
+        "b", neuroseq.stimulation.stim.StimType.External, np.ones((10, 1)), "pA", 0.0005
+    )
+    project.add_stim_array(other_stim)
+    other_values = other_stim.values
+    trace = TraceData("calcium", np.array([[1, 2, 3]]), np.array([0]), "units", 1 / 30)
+    project.add_experiment(Experiment("exp", 0.1, [], [trace]))
+    original_traces = trace.traces
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     controller = ConstrainedPanZoomController()
@@ -857,7 +1006,9 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     qtbot.waitUntil(lambda: stim_editor.isVisible())
     stim_editor.set_project(project)
     stim_editor.draw_stim_length = 4
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
@@ -885,6 +1036,10 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     assert stim_editor.current_stim_modifier.stim_array.values[1, 0] == approx(0.0)
     assert stim_editor.current_stim_modifier.stim_array.values[2, 0] == approx(0.0)
     assert stim_editor.draw_stim_length == 2
+    assert other_stim.dt == 0.0005
+    assert other_stim.values is other_values
+    assert trace.dt == 1 / 30
+    assert trace.traces is original_traces
     stim_editor.close()
 
 
@@ -897,7 +1052,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     now carries the stim length through StimIntensityDialog too.
     """
     monkeypatch.setattr(
-        neuroseq.stim_editor,
+        neuroseq.stimulation.stim_editor,
         "StimIntensityDialog",
         MockStimIntensityDialog,
     )
@@ -905,7 +1060,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.0005208125,
@@ -953,7 +1108,7 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.001,
@@ -962,7 +1117,7 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     project.add_stim_array(
         StimArray(
             "b",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.002,
@@ -990,7 +1145,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     wide_modifier = SimpleNamespace(
         stim_array=StimArray(
             "wide",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 50), dtype=np.float32),
             "mV",
             0.001,
@@ -999,7 +1154,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
     single_modifier = SimpleNamespace(
         stim_array=StimArray(
             "single",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 1), dtype=np.float32),
             "mV",
             0.001,
@@ -1016,7 +1171,7 @@ def test_selecting_smaller_stim_refocuses_y_view() -> None:
         current_stim_modifier=wide_modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(
             focus_neuron_range=lambda start, stop: focused_ranges.append((start, stop))
@@ -1045,11 +1200,12 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
     modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((2266, 10), dtype=np.float32),
             "mV",
             0.001,
-        )
+        ),
+        history=ProjectHistory(),
     )
     set_data_calls: list[np.ndarray] = []
     fake_stim_widget = SimpleNamespace(
@@ -1064,7 +1220,7 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
         current_stim_modifier=modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1080,29 +1236,29 @@ def test_reselecting_same_stim_after_in_place_resample_refreshes_widget() -> Non
     assert set_data_calls[0].shape == (2266, 10)
 
 
-def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> None:
-    """Regression: ReversibleAction (stim_array_modifier.py) records absolute
-    sample-index slices against the array's shape at the time of the edit.
-    After an in-place resample, the modifier's pre-resample undo stack still
-    references the OLD shape - undoing one would misapply old-shaped data
-    into the new, differently-shaped array. select_stim() must drop that
-    history, not just refresh the widget, for the same "same modifier,
-    shape changed under it" case."""
+def test_reselecting_same_stim_after_buffer_replacement_refreshes_and_keeps_history() -> (
+    None
+):
+    """Project.replace_stim_values records grid changes as undoable edits, and
+    ReversibleAction refuses stale grids itself, so select_stim() only has to
+    refresh the widget for a replaced buffer - not drop the shared history."""
     modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((2266, 10), dtype=np.float32),
             "mV",
             0.001,
         ),
-        action_stack=["some_pre_resample_action"],
-        current_index=0,
+        history=ProjectHistory(),
     )
+    modifier.history.record_applied(ProjectCommand("edit", lambda: None, lambda: None))
+    set_data_calls: list[np.ndarray] = []
     fake_stim_widget = SimpleNamespace(
-        set_data=lambda stim_array: None,
+        set_data=lambda stim_array: set_data_calls.append(stim_array.values),
         set_background_data=lambda stim_array: None,
-        data_values=np.zeros((1180, 10), dtype=np.float32),
+        # Same shape, different buffer (e.g. the SysCon2 "clear" fix).
+        data_values=np.zeros((2266, 10), dtype=np.float32),
     )
     fake_editor = SimpleNamespace(
         logger=SimpleNamespace(debug=lambda *args, **kwargs: None),
@@ -1110,7 +1266,7 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
         current_stim_modifier=modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1122,18 +1278,18 @@ def test_reselecting_same_stim_after_in_place_resample_clears_undo_history() -> 
 
     StimEditor.select_stim(fake_editor, "a")  # type: ignore[arg-type]
 
-    assert modifier.action_stack == []
-    assert modifier.current_index == -1
+    assert modifier.history.can_undo()
+    assert len(set_data_calls) == 1
+    assert set_data_calls[0] is modifier.stim_array.values
 
 
 def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
-    """The undo-history clear above must be specific to the in-place-resample
-    case - an ordinary switch to a genuinely different (and differently
+    """An ordinary switch to a genuinely different (and differently
     shaped) stim must leave that stim's own undo history untouched."""
     old_modifier = SimpleNamespace(
         stim_array=StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((100, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1142,7 +1298,7 @@ def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
     new_modifier = SimpleNamespace(
         stim_array=StimArray(
             "b",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((50, 10), dtype=np.float32),
             "mV",
             0.001,
@@ -1161,7 +1317,7 @@ def test_switching_to_a_different_stim_keeps_its_own_undo_history() -> None:
         current_stim_modifier=old_modifier,
         draw_stim_length=4,
         draw_stim=DrawStim(DrawStimType.Constant, 1.0, 1.0),
-        stim_type=neuroseq.stim.StimType.Excitation,
+        stim_type=neuroseq.stimulation.stim.StimType.Excitation,
         stim_widget=fake_stim_widget,
         controller=SimpleNamespace(focus_neuron_range=lambda start, stop: None),
         set_mode=lambda mode: None,
@@ -1195,12 +1351,14 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Rejected
 
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     project = Project()
     project.add_stim_array(
         StimArray(
             "a",
-            neuroseq.stim.StimType.Excitation,
+            neuroseq.stimulation.stim.StimType.Excitation,
             np.zeros((10, 2), dtype=np.float32),
             "mV",
             0.002,
@@ -1225,7 +1383,7 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
 def test_stim_editor_mouse_click_draws_and_erases() -> None:
     stim_array = StimArray(
         "igor_wave",
-        neuroseq.stim.StimType.External,
+        neuroseq.stimulation.stim.StimType.External,
         np.zeros((6, 1), dtype=np.float32),
         "pA",
         0.001,
@@ -1268,7 +1426,7 @@ def test_stim_editor_mouse_click_draws_and_erases() -> None:
 def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> None:
     stim_array = StimArray(
         "igor_wave",
-        neuroseq.stim.StimType.External,
+        neuroseq.stimulation.stim.StimType.External,
         np.zeros((1, 1), dtype=np.float32),
         "pA",
         0.001,
@@ -1355,7 +1513,9 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
         def exec(self):
             return QtWidgets.QDialog.DialogCode.Rejected
 
-    monkeypatch.setattr(neuroseq.stim_editor, "EditStimDialog", MockEditStimDialog)
+    monkeypatch.setattr(
+        neuroseq.stimulation.stim_editor, "EditStimDialog", MockEditStimDialog
+    )
     project = Project()
     cmb_stim = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
@@ -1383,10 +1543,12 @@ def test_stim_editor_actions(
     selection_inverted = 2 - selection
     arr[2:7, 1:3] = selection
     project.stim_arrays = {
-        "a": StimArray("a", neuroseq.stim.StimType.Excitation, arr, "mV", 0.001)
+        "a": StimArray(
+            "a", neuroseq.stimulation.stim.StimType.Excitation, arr, "mV", 0.001
+        )
     }
     monkeypatch.setattr(
-        neuroseq.stim_editor,
+        neuroseq.stimulation.stim_editor,
         "StimIntensityDialog",
         MockStimIntensityDialog,
     )
@@ -1609,9 +1771,10 @@ def _routine_combo_items(selector: Any) -> list[str]:
 
 def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
 
-    selector = stim_editor._routine_selector_dialog
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
     assert selector.isVisible()
     assert selector.windowTitle() == "Design dynamic input"
@@ -1627,39 +1790,43 @@ def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -
     assert selector._axes.lines
 
     # Selecting a routine and clicking Continue opens the matching dialog.
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
+    selector.cmb_routine.setCurrentText(
+        DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE
+    )
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
     selector._on_continue()
-    assert stim_editor._stdp_synaptic_tuning_dialog is not None
-    assert stim_editor._stdp_synaptic_tuning_dialog.isVisible()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is not None
+    assert dynamic_input._stdp_synaptic_tuning_dialog.isVisible()
     stim_editor.close()
 
 
 def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     assert "rheobase" in selector.lbl_goal.text().lower()
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     assert "stdp" in selector.lbl_goal.text().lower()
     stim_editor.close()
 
 
 def test_open_dynamic_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
-    assert stim_editor._rheobase_dialog is None  # only opens on Continue
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
+    assert dynamic_input._rheobase_dialog is None  # only opens on Continue
     selector._on_continue()
 
-    assert stim_editor._rheobase_dialog is not None
-    assert stim_editor._rheobase_dialog.isVisible()
+    assert dynamic_input._rheobase_dialog is not None
+    assert dynamic_input._rheobase_dialog.isVisible()
     stim_editor.close()
 
 
@@ -1669,15 +1836,16 @@ def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
     get treated as a single "raise group" that can't be reordered by
     clicking any individual member - not even this dialog itself."""
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     selector._on_continue()
 
-    assert stim_editor._rheobase_dialog is not None
-    assert stim_editor._rheobase_dialog.parent() is None
+    assert dynamic_input._rheobase_dialog is not None
+    assert dynamic_input._rheobase_dialog.parent() is None
     stim_editor.close()
 
 
@@ -1685,30 +1853,32 @@ def test_open_dynamic_input_designer_opens_stdp_window_when_selected(
     qtbot: QtBot,
 ) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.STDP_WINDOW_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     selector._on_continue()
 
-    assert stim_editor._stdp_window_dialog is not None
-    assert stim_editor._stdp_window_dialog.isVisible()
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_window_dialog is None
+    assert dynamic_input._stdp_window_dialog is not None
+    assert dynamic_input._stdp_window_dialog.isVisible()
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
 
 
 def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None and selector.isVisible()
 
     selector.reject()  # user backs out of the selector
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
 
 
@@ -1716,49 +1886,51 @@ def test_discard_after_routine_selector_was_deleted(qtbot: QtBot) -> None:
     """Issues #595/#610: replacing the project after the selector closed (and
     Qt deleted it) must not touch the deleted dialog."""
     stim_editor, _ = _make_ramp_editor(qtbot)
-    stim_editor.open_dynamic_input_designer()
-    selector = stim_editor._routine_selector_dialog
+    dynamic_input = DynamicInputController(stim_editor)
+    dynamic_input.open_dynamic_input_designer()
+    selector = dynamic_input._routine_selector_dialog
     assert selector is not None
 
-    selector.cmb_routine.setCurrentText(StimEditor.RHEOBASE_ROUTINE)
+    selector.cmb_routine.setCurrentText(DynamicInputController.RHEOBASE_ROUTINE)
     selector._on_continue()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
-    assert stim_editor._routine_selector_dialog is None
+    assert dynamic_input._routine_selector_dialog is None
 
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._rheobase_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._rheobase_dialog is None
     stim_editor.close()
 
 
 def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> None:
     stim_editor, _ = _make_ramp_editor(qtbot)
+    dynamic_input = DynamicInputController(stim_editor)
 
     def _open(routine: str) -> None:
-        stim_editor.open_dynamic_input_designer()
-        selector = stim_editor._routine_selector_dialog
+        dynamic_input.open_dynamic_input_designer()
+        selector = dynamic_input._routine_selector_dialog
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
 
-    _open(StimEditor.STDP_SYNAPTIC_TUNING_ROUTINE)
-    assert stim_editor._stdp_synaptic_tuning_dialog is not None
-    _open(StimEditor.RHEOBASE_ROUTINE)
-    assert stim_editor._rheobase_dialog is not None
-    _open(StimEditor.STDP_WINDOW_ROUTINE)
-    assert stim_editor._stdp_window_dialog is not None
+    _open(DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE)
+    assert dynamic_input._stdp_synaptic_tuning_dialog is not None
+    _open(DynamicInputController.RHEOBASE_ROUTINE)
+    assert dynamic_input._rheobase_dialog is not None
+    _open(DynamicInputController.STDP_WINDOW_ROUTINE)
+    assert dynamic_input._stdp_window_dialog is not None
 
     # Replacing the project must not carry the previous designer state over.
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
-    assert stim_editor._routine_selector_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
+    assert dynamic_input._routine_selector_dialog is None
 
     # Discarding again is a no-op and must not raise.
-    stim_editor.discard_dynamic_input_dialogs()
-    assert stim_editor._stdp_synaptic_tuning_dialog is None
-    assert stim_editor._rheobase_dialog is None
-    assert stim_editor._stdp_window_dialog is None
+    dynamic_input.discard_dynamic_input_dialogs()
+    assert dynamic_input._stdp_synaptic_tuning_dialog is None
+    assert dynamic_input._rheobase_dialog is None
+    assert dynamic_input._stdp_window_dialog is None
     stim_editor.close()
     stim_editor.close()
 
@@ -1768,13 +1940,27 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     values = np.zeros((100, 2), dtype=np.float32)
     values[10:15, 0] = 1
     project.add_stim_array(
-        StimArray("target", neuroseq.stim.StimType.Excitation, values, "1", 0.001)
+        StimArray(
+            "target", neuroseq.stimulation.stim.StimType.Excitation, values, "1", 0.001
+        )
     )
+    other_stim = StimArray(
+        "other",
+        neuroseq.stimulation.stim.StimType.External,
+        np.ones((10, 2)),
+        "1",
+        0.002,
+    )
+    project.add_stim_array(other_stim)
+    other_values = other_stim.values
+    trace = TraceData("calcium", np.array([[1, 2, 3]]), np.array([0]), "units", 1 / 30)
+    project.add_experiment(Experiment("exp", 0.1, [], [trace]))
+    original_traces = trace.traces
     combo = QtWidgets.QComboBox()
     toolbar = QtWidgets.QToolBar()
     editor = StimEditor(ConstrainedPanZoomController(), combo, toolbar)
     qtbot.addWidget(editor)
-    editor.set_project(project)
+    editor.set_project(project, stim_to_select="target")
     question = mocker.patch.object(
         QtWidgets.QMessageBox,
         "question",
@@ -1786,10 +1972,127 @@ def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker)
     assert editor.prepare_syscon_timestep()
     stim = project.stim_arrays["target"]
     assert stim.dt == 0.0005208125
-    assert project.dt == stim.dt
+    assert other_stim.dt == 0.002
+    assert other_stim.values is other_values
+    assert trace.dt == 1 / 30
+    assert trace.traces is original_traces
     assert editor.stim_widget.data_values.shape == stim.values.shape
     assert editor.current_stim_modifier.stim_array is stim
     assert project.dirty
     question.reset_mock()
     assert editor.prepare_syscon_timestep()
     question.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "duration, expected_samples", [(0.004, 4), (0.014, 14), (0.017, 17), (0.0044, 4)]
+)
+@pytest.mark.parametrize("confirm", [False, True])
+@pytest.mark.parametrize("rename", [False, True])
+def test_edit_stim_duration_requires_confirmation(
+    qtbot, monkeypatch, duration, expected_samples, confirm, rename
+):
+    from neuroseq.stimulation.stim_dialog import EditStimDialog
+
+    project = Project()
+    values = np.arange(10, dtype=np.float32).reshape(-1, 1)
+    stim = StimArray(
+        "a", neuroseq.stimulation.stim.StimType.Excitation, values.copy(), "mV", 0.001
+    )
+    other = StimArray("b", stim.stim_type, values.copy(), "mV", 0.001)
+    project.add_stim_array(stim)
+    project.add_stim_array(other)
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project, stim_to_select="a")
+    modifier = editor.current_stim_modifier
+    modifier.do(slice(0, 1), slice(0, 1), 42.0)
+    before_resize = stim.values.copy()
+    project.dirty = False
+
+    def edit(dialog):
+        dialog.txt_duration.setText(str(duration))
+        if rename:
+            dialog.txt_name.setText("renamed")
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(EditStimDialog, "exec", edit)
+    questions = []
+
+    def question(*args):
+        questions.append(args)
+        return (
+            QtWidgets.QMessageBox.StandardButton.Yes
+            if confirm
+            else QtWidgets.QMessageBox.StandardButton.No
+        )
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "question", question)
+    editor.edit_stim_array()
+    assert len(questions) == 1
+    assert questions[0][1] == "Change input array duration"
+    assert "0.01 s" in questions[0][2]
+    assert (
+        "Trim" in questions[0][2]
+        if expected_samples < 10
+        else "Extend" in questions[0][2]
+    )
+    if confirm:
+        assert project.dirty
+        assert ("renamed" if rename else "a") in project.stim_arrays
+        assert stim.values.shape == (expected_samples, 1)
+        np.testing.assert_array_equal(
+            stim.values[: min(10, expected_samples)], before_resize[:expected_samples]
+        )
+        if expected_samples > 10:
+            assert np.all(stim.values[10:] == 0)
+        assert project.max_time_secs == approx(max(0.01, expected_samples * 0.001))
+        assert editor.action_undo.isEnabled()
+        editor.undo()
+        np.testing.assert_array_equal(stim.values, before_resize)
+        assert editor.action_redo.isEnabled()
+        editor.redo()
+        assert stim.values.shape == (expected_samples, 1)
+        editor.undo()
+        if not rename:
+            assert editor.current_stim_modifier.history is modifier.history
+            editor.undo()
+            np.testing.assert_array_equal(stim.values, values)
+    else:
+        assert not project.dirty
+        assert "a" in project.stim_arrays
+        assert "renamed" not in project.stim_arrays
+        np.testing.assert_array_equal(stim.values, before_resize)
+    np.testing.assert_array_equal(other.values, values)
+
+
+@pytest.mark.parametrize("action", ["pad_stim_array", "trim_stim_array"])
+def test_pad_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
+    qtbot, monkeypatch, action
+):
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "a",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((125, 1)),
+            "mV",
+            0.001,
+        )
+    )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project)
+    labels = []
+
+    def get_text(*args):
+        labels.append(args[2])
+        return "", False
+
+    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", get_text)
+    getattr(editor, action)()
+    assert "0.125 s (125 ms)" in labels[0]

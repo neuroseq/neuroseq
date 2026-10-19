@@ -9,19 +9,22 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-import neuroseq.timeseries_widget
+import neuroseq.stimulation.stim
+import neuroseq.visualization.timeseries_widget
 from neuroseq import theme
-from neuroseq.constrained_pan_zoom_controller import ConstrainedPanZoomController
 from neuroseq.data import TraceData
-from neuroseq.region_of_interest import RegionOfInterest
-from neuroseq.spike_widget import SpikeWidget
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
-from neuroseq.stim_widget import StimWidget
-from neuroseq.trace_widget import TraceNormDialog
-from neuroseq.trace_widget import TraceWidget
-from neuroseq.trace_widget_state import TraceWidgetState
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.spike_widget import SpikeWidget
+from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization.trace_widget import TraceNormDialog
+from neuroseq.visualization.trace_widget import TraceWidget
+from neuroseq.visualization_support.constrained_pan_zoom_controller import (
+    ConstrainedPanZoomController,
+)
+from neuroseq.visualization_support.region_of_interest import RegionOfInterest
+from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 
 
 def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None:
@@ -412,7 +415,7 @@ def test_trace_norm_dialog_is_modeless_and_reused(qtbot: QtBot) -> None:
     assert dialog is not None
     assert dialog.isVisible()
     assert not dialog.isModal()
-    # No Qt parent - see _SelfRaisingDialog's docstring for why a shared
+    # No Qt parent - see SelfRaisingDialog's docstring for why a shared
     # WM_TRANSIENT_FOR chain with a sibling popup breaks click-to-front.
     assert dialog.parent() is None
 
@@ -1748,7 +1751,7 @@ def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
 
     captured: dict = {}
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _AcceptedDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1785,7 +1788,7 @@ def test_trace_widget_pearson_correlation_prechecks_current_selection(
             return int(QtWidgets.QDialog.DialogCode.Rejected)
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _CapturingDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1816,7 +1819,7 @@ def test_trace_widget_pearson_correlation_cancelled_dialog_emits_nothing(
             return int(QtWidgets.QDialog.DialogCode.Rejected)
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
+        neuroseq.visualization.timeseries_widget, "NeuronSubsetDialog", _RejectedDialog
     )
 
     controller = ConstrainedPanZoomController()
@@ -1850,7 +1853,9 @@ def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
         raise AssertionError("NeuronSubsetDialog should not open for SpikeData")
 
     monkeypatch.setattr(
-        neuroseq.timeseries_widget, "NeuronSubsetDialog", _unexpected_dialog
+        neuroseq.visualization.timeseries_widget,
+        "NeuronSubsetDialog",
+        _unexpected_dialog,
     )
 
     controller = ConstrainedPanZoomController()
@@ -1963,7 +1968,9 @@ def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -
     values[600:700, 2] = 30.0
     trace_widget.set_stim_overlay_enabled(True)
     trace_widget.set_stim_overlay_data(
-        StimArray("stim", neuroseq.stim.StimType.Excitation, values, "mW", 0.001)
+        StimArray(
+            "stim", neuroseq.stimulation.stim.StimType.Excitation, values, "mW", 0.001
+        )
     )
 
     marks = trace_widget._stim_onset_graphic

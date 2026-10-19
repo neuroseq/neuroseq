@@ -18,7 +18,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.io import as_timed_array
-from neuroseq.stim import StimArray
+from neuroseq.stimulation.stim import StimArray
 from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import get_downsample_factor
 from neuroseq.utils import save_store_name

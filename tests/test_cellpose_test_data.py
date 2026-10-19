@@ -8,7 +8,7 @@ from PIL import Image
 
 from neuroseq.cellpose_test_data import generate_cellpose_test_grid
 from neuroseq.cellpose_test_data import save_cellpose_test_data
-from neuroseq.importer_cellpose import CellPoseImporter
+from neuroseq.importers.importer_cellpose import CellPoseImporter
 
 
 def test_generate_cellpose_test_grid_default() -> None:

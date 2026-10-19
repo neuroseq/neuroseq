@@ -270,7 +270,7 @@ CHANGES — src/neuroseq/stim_editor.py
 
 1.  ADD IMPORT near the existing stim-related imports at the top of the file:
 
-        from neuroseq.stim_loop_dialog import StimLoopDialog
+        from neuroseq.stimulation.stim_loop_dialog import StimLoopDialog
 
 2.  ADD `loop_stim_array` method on `StimEditor`. Place it directly after
     `trim_stim_array` (currently ends around line 320):

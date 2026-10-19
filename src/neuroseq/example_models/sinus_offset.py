@@ -7,8 +7,8 @@ import numpy as np
 from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
-from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import NN
+from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import ProgressCallback
 
 FlatParams = dict[str, ParamValue]

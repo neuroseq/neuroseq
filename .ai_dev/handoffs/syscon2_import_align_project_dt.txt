@@ -56,8 +56,8 @@ CHANGES — src/neuroseq/syscon2_import_dialog.py
 1.  ADD IMPORTS (top of file, after the existing `from neuroseq.importer_syscon2 ...`
     block):
 
-        from neuroseq.stim_timing import format_milliseconds
-        from neuroseq.stim_timing import stim_dt_matches
+        from neuroseq.stimulation.stim_timing import format_milliseconds
+        from neuroseq.stimulation.stim_timing import stim_dt_matches
 
 2.  MODIFY `_import_file` (currently at lines 255–303). Insert the dt-alignment block
     immediately after the early-return guards and before the `try:` that wraps

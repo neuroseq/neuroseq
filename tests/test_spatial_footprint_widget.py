@@ -13,28 +13,30 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.aoi_shapes import square_corners
-from neuroseq.cell_overlay_widget import STRIPED_CELL_ALPHA
-from neuroseq.cell_overlay_widget import STRIPED_CELL_GREY
-from neuroseq.cell_overlay_widget import STRIPED_CELL_WHITE
-from neuroseq.cell_overlay_widget import CellOverlayWidget
-from neuroseq.cell_overlay_widget import OverlayView
-from neuroseq.cell_overlay_widget import compute_segmentation_legend
-from neuroseq.importer_cellpose import AOIRole
-from neuroseq.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importer_cellpose import CellposeImportResult
-from neuroseq.importer_cellpose import CircleAOI
-from neuroseq.importer_cellpose import SquareAOI
-from neuroseq.importer_cellpose import clone_aoi_config
-from neuroseq.spatial_footprint_state import SpatialFootprintState
-from neuroseq.spatial_footprint_widget import ACTIVE_STIM_BRIGHTNESS_BOOST
-from neuroseq.spatial_footprint_widget import HOVERED_CELL_BRIGHTNESS_BOOST
-from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
-from neuroseq.spatial_footprint_widget import SELECTION_OUTLINE_RED
-from neuroseq.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
-from neuroseq.spatial_footprint_widget import SpatialFootprintWidget
-from neuroseq.stim import StimArray
-from neuroseq.stim import StimType
+from neuroseq.importers.importer_cellpose import AOIRole
+from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
+from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import CircleAOI
+from neuroseq.importers.importer_cellpose import SquareAOI
+from neuroseq.importers.importer_cellpose import clone_aoi_config
+from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
+from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_ALPHA
+from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_GREY
+from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_WHITE
+from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
+from neuroseq.visualization.cell_overlay_widget import OverlayView
+from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
+from neuroseq.visualization.spatial_footprint_widget import ACTIVE_STIM_BRIGHTNESS_BOOST
+from neuroseq.visualization.spatial_footprint_widget import (
+    HOVERED_CELL_BRIGHTNESS_BOOST,
+)
+from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
+from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RED
+from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
+from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 
 
 def _right_click_event() -> SimpleNamespace:

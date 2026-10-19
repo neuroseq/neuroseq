@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import numpy as np
 import pytest
 
-from neuroseq.stim import DrawStimType
-from neuroseq.stim_patterns import generate_fuer_elise
-from neuroseq.stim_patterns import generate_per_neuron
-from neuroseq.stim_patterns import generate_ramp
-from neuroseq.stim_patterns import generate_sequential
-from neuroseq.stim_patterns import generate_simultaneous
-from neuroseq.stim_patterns import parse_neuron_indices
+from neuroseq.stimulation.static_input.stim_patterns import generate_fuer_elise
+from neuroseq.stimulation.static_input.stim_patterns import generate_per_neuron
+from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
+from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
+from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
+from neuroseq.stimulation.static_input.stim_patterns import parse_neuron_indices
+from neuroseq.stimulation.stim import DrawStimType
 
 
 def test_sequential_default_matches_getting_started() -> None:
@@ -420,7 +423,7 @@ def test_generate_sequential_rejects_zero_repeats() -> None:
 
 
 def test_generate_sequential_pulses_per_neuron() -> None:
-    from neuroseq.stim_patterns import generate_sequential
+    from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
 
     values = generate_sequential(
         n_neurons=2,
@@ -432,3 +435,21 @@ def test_generate_sequential_pulses_per_neuron() -> None:
     )
     np.testing.assert_array_equal(values[:, 0], [1, 0, 1, 0, 0, 0, 0, 0])
     np.testing.assert_array_equal(values[:, 1], [0, 0, 0, 0, 1, 0, 1, 0])
+
+
+def test_stim_patterns_does_not_import_elise_simulator() -> None:
+    # Opening the static designer must not pull in the ELiSe model/simulator.
+    code = (
+        "import sys\n"
+        "import neuroseq.stimulation.static_input.stim_patterns\n"
+        "assert 'neuroseq.example_models.elise' not in sys.modules\n"
+        "assert 'elise' not in sys.modules\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_elise_model_reuses_stim_pattern_note_sequence() -> None:
+    from neuroseq.example_models import elise as elise_model
+    from neuroseq.stimulation.static_input import stim_patterns
+
+    assert elise_model._FUER_ELISE_INTRO is stim_patterns.FUER_ELISE_INTRO
