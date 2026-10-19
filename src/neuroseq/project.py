@@ -1045,11 +1045,10 @@ class Project:
             raise ValueError("Cannot create experiment with empty data list")
 
         # Calculate duration from the data
-        # All data should have the same duration, so we use the first one
-        from neuroseq.data import TraceData
-
+        # All data should have the same duration, so we use the first one.
+        # Traces are (neurons, samples): the duration comes from the samples.
         duration = (
-            len(data_list[0].traces) * data_list[0].dt
+            float(data_list[0].traces.shape[1]) * float(data_list[0].dt)
             if isinstance(data_list[0], TraceData)
             else 0.0
         )

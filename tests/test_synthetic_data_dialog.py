@@ -166,3 +166,27 @@ def test_generate_imaging_response(dialog, monkeypatch, mode):
     np.testing.assert_allclose(traces[1], 1000)
     np.testing.assert_array_equal(indices, [1, 0])
     assert dt == 0.001
+
+
+def test_add_experimental_data_duration_uses_sample_count() -> None:
+    project = Project()
+    traces = TraceData("t", np.zeros((3, 500)), np.arange(3), "mV", 0.002)
+    project.add_experimental_data("exp", [traces])
+    # 500 samples x 2 ms, not 3 neurons x 2 ms.
+    assert project.experiments["exp"].duration == pytest.approx(1.0)
+    assert project.max_time_secs == pytest.approx(1.0)
+
+
+def test_synthetic_patch_clamp_experiment_duration(dialog, monkeypatch):
+    source = TraceData("source", np.ones((2, 10000)), np.array([0, 1]), "mV", 0.0001)
+    monkeypatch.setattr(dialog.model, "get_data", lambda *args: source)
+    dialog.data_patch_clamp_combo.addItem("source")
+    dialog.data_patch_clamp_combo.setCurrentText("source")
+    dialog.patch_sampling_rate_spinbox.setValue(1000)
+    monkeypatch.setattr(
+        "neuroseq.synthetic_data_dialog.QtWidgets.QMessageBox.information",
+        lambda *args: None,
+    )
+    dialog._add_patch_clamp_to_project()
+    (experiment,) = dialog.model.experiments.values()
+    assert experiment.duration == pytest.approx(1.0)
