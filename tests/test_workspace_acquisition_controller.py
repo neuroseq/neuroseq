@@ -48,6 +48,7 @@ def test_live_subscription_and_disposal_are_idempotent(qtbot, tmp_config_dir):
     connection.frame_received.emit(frame)
     assert video.show_live_frame.call_count == 2
     assert not controller.dialog.isVisible()
-    assert connection.receivers(connection.status_changed) == status_receivers - 1
+    # Both the controller and its controls stop following the connection.
+    assert connection.receivers(connection.status_changed) == status_receivers - 2
     assert connection.receivers(connection.recording_ready) == ready_receivers - 1
     assert not connection._closing

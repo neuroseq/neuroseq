@@ -67,7 +67,18 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.controls.record_requested.connect(self.start_scanimage_recording)
         connection.status_changed.connect(self.scanimage_status)
         connection.recording_ready.connect(self.scanimage_recording_ready)
+        connection.run_finished.connect(self._forget_run)
         self.set_active(True)
+
+    @property
+    def acquisition_in_progress(self) -> bool:
+        """Whether a run started here is still being tracked by a live connection.
+
+        A run whose helper died stays tracked by the connection so a reconnect
+        can recover it, but nothing can progress while disconnected, so it
+        does not keep the workspace open.
+        """
+        return self.connection.connected and self.connection.run_id in self.run_ids
 
     def set_active(self, active: bool) -> None:
         """Only the visible workspace consumes shared live frames."""
@@ -85,9 +96,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return
         self.set_active(False)
         self._disposed = True
+        self.controls.dispose()
         self.dialog.close()
         self.connection.status_changed.disconnect(self.scanimage_status)
         self.connection.recording_ready.disconnect(self.scanimage_recording_ready)
+        self.connection.run_finished.disconnect(self._forget_run)
+
+    def _forget_run(self, run_id: str) -> None:
+        self.run_ids.discard(run_id)
 
     def start_scanimage_recording(self, arguments: dict) -> None:
         if self.connection.run_id is not None:

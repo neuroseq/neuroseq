@@ -18,6 +18,7 @@ from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
 from neuroseq.project_workspace import ProjectWorkspace
+from neuroseq.project_workspace import WorkspaceCloseGate
 from neuroseq.workspace_devices import WorkspaceDevices
 
 
@@ -124,6 +125,7 @@ class Gui(QtWidgets.QMainWindow):
         self.settings = GuiSettings()
         self.devices = WorkspaceDevices(self)
         self._closing_discarded: set[ProjectWorkspace] = set()
+        self._close_gate = WorkspaceCloseGate(self)
         self._disposed = False
         self._visible_workspace: ProjectWorkspace | None = None
         self.project_tabs = _ProjectTabs(self)
@@ -241,9 +243,17 @@ class Gui(QtWidgets.QMainWindow):
 
     def _close_tab(self, index: int) -> None:
         workspace = self.project_tabs.widget(index)
-        if not isinstance(workspace, ProjectWorkspace):
+        if isinstance(workspace, ProjectWorkspace):
+            self._close_workspace(workspace)
+
+    def _close_workspace(self, workspace: ProjectWorkspace) -> None:
+        if self.project_tabs.indexOf(workspace) < 0:
             return
         self.project_tabs.setCurrentWidget(workspace)
+        if not self._close_gate.ready(
+            [workspace], "Close tab", lambda: self._close_workspace(workspace)
+        ):
+            return
         workspace._prompt_save_before_action(
             "Close tab",
             "Closing this tab will discard its unsaved changes.\n\nSave the project first?",
@@ -251,9 +261,16 @@ class Gui(QtWidgets.QMainWindow):
         )
 
     def _remove_workspace(self, workspace: ProjectWorkspace) -> None:
-        index = self.project_tabs.indexOf(workspace)
-        if index < 0 or not workspace.stop_background_job():
+        if self.project_tabs.indexOf(workspace) < 0:
             return
+        # Work may have started while a save prompted by the close was running.
+        if not self._close_gate.ready(
+            [workspace], "Close tab", lambda: self._remove_workspace(workspace)
+        ):
+            return
+        if not workspace.stop_background_job():
+            return
+        index = self.project_tabs.indexOf(workspace)
         # Deactivate before disposal; changing the current tab must never call
         # set_active() on a workspace whose plots have already been closed.
         if self._visible_workspace is workspace:
@@ -271,6 +288,12 @@ class Gui(QtWidgets.QMainWindow):
             return
         if self._disposed:
             event.accept()
+            return
+        # Check every workspace before stopping any: a refused close must not
+        # have cancelled or dropped work in another tab.
+        if not self._close_gate.ready(self.workspaces, "Close NeuroSeq", self.close):
+            self._closing_discarded.clear()
+            event.ignore()
             return
         for workspace in self.workspaces:
             if not workspace.project.dirty or workspace in self._closing_discarded:
@@ -306,7 +329,8 @@ class Gui(QtWidgets.QMainWindow):
                     failed("")
                 return
             self._closing_discarded.add(workspace)
-        # Stop every job before destroying any workspace, including hidden ones.
+        # Jobs have already ended; this drains chats before destroying any
+        # workspace, including hidden ones.
         for workspace in self.workspaces:
             if not workspace.stop_background_job():
                 self._closing_discarded.clear()

@@ -27,6 +27,7 @@ from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
 from neuroseq.background_jobs import ExternalSimWorker
+from neuroseq.background_jobs import wait_for_jobs
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
@@ -251,6 +252,96 @@ DROP_TRACES = "Extract calcium traces"
 DROP_VIDEO = "Add as imaging data (video)"
 
 
+#: How long closing waits for cancelled background jobs to wind down.
+CLOSE_JOB_TIMEOUT_MS = 10000
+
+
+class WorkspaceCloseGate(QtCore.QObject):
+    """Decide, without stopping anything, whether workspaces may close now.
+
+    Closing first collects every workspace's close blockers (work that cannot
+    be cancelled safely) and refuses with one message listing them all. Only
+    when there are none does it cancel running jobs, wait for them to wind
+    down without blocking the GUI, and retry the close.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self._window = parent
+        self._waiter: QtCore.QObject | None = None
+
+    @property
+    def waiting(self) -> bool:
+        return self._waiter is not None
+
+    def ready(
+        self,
+        workspaces: Sequence[ProjectWorkspace],
+        title: str,
+        retry: Callable[[], object],
+    ) -> bool:
+        """Return True when ``workspaces`` can be stopped and disposed now.
+
+        Otherwise the close is refused: either blockers are reported, or
+        cancellable jobs are cancelled and ``retry`` runs once they have ended.
+        """
+        if self._waiter is not None:
+            return False
+        blockers = [
+            (workspace, reason)
+            for workspace in workspaces
+            for reason in workspace.close_blockers()
+        ]
+        if blockers:
+            if len(workspaces) > 1:
+                lines = [
+                    f"- {workspace._tab_label_for(workspace.project)}: {reason}"
+                    for workspace, reason in blockers
+                ]
+            else:
+                lines = [f"- {reason}" for _workspace, reason in blockers]
+            QtWidgets.QMessageBox.information(
+                self._window,
+                title,
+                "This cannot be closed yet:\n\n"
+                + "\n".join(lines)
+                + "\n\nNothing was stopped.",
+            )
+            return False
+        busy = [w for w in workspaces if w._background_job.busy]
+        if not busy:
+            return True
+        for workspace in busy:
+            workspace._cancel_background_job()
+
+        def _idle() -> None:
+            self._waiter = None
+            retry()
+
+        def _timed_out() -> None:
+            self._waiter = None
+            names = ", ".join(
+                f"'{w._tab_label_for(w.project)}'"
+                for w in busy
+                if w._background_job.busy
+            )
+            QtWidgets.QMessageBox.warning(
+                self._window,
+                title,
+                f"Background work in {names} is still stopping, so it stays "
+                "open. Close again once the work has finished.",
+            )
+
+        self._waiter = wait_for_jobs(
+            [w._background_job for w in busy],
+            on_idle=_idle,
+            on_timeout=_timed_out,
+            timeout_ms=CLOSE_JOB_TIMEOUT_MS,
+            parent=self,
+        )
+        return False
+
+
 class ProjectWorkspace(QtWidgets.QMainWindow):
     """Own one project's widgets, controllers, dialogs and background jobs.
 
@@ -285,6 +376,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.devices = devices if devices is not None else WorkspaceDevices(self)
         self._disposed = False
         self._background_job = BackgroundJob(self)
+        self._background_job_label = ""
+        self._close_gate = WorkspaceCloseGate(self)
         self.logger = logging.getLogger(__name__)
         self.logger.info("starting ProjectWorkspace")
         self.settings = settings if settings is not None else GuiSettings()
@@ -776,10 +869,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._create_new_project()
 
     def _prompt_save_before_close(self) -> bool:
-        """Return True when the current close event may continue immediately.
+        """Return True when the standalone window's close may continue now.
 
-        Skipped (returns True right away) when none of the open tabs have
-        unsaved changes - see ``Project.dirty``.
+        Skipped (returns True right away) when this workspace's project has
+        no unsaved changes - see ``Project.dirty``. Choosing Save returns
+        False and closes again once the save has completed.
         """
         if not self.project.dirty:
             self._close_confirmed = True
@@ -3510,6 +3604,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def _prepare_background_job(
         self, label: str, cancellable: bool, *, block_io: bool = False
     ) -> None:
+        self._background_job_label = label
         self.progress_dialog.setLabelText(label)
         self.progress_dialog.setRange(0, 100)
         self.progress_dialog.setAutoClose(False)
@@ -3533,6 +3628,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.elise_protocol_action.setEnabled(False)
 
     def _cancel_background_job(self) -> None:
+        if not self._background_job.busy or not self._background_job.cancellable:
+            return
         self._background_job.cancel()
         self.progress_dialog.setLabelText("Cancelling...")
         self.progress_dialog.setRange(0, 0)
@@ -3697,28 +3794,56 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         else:
             self._on_calcium_video_import_requested(paths=movies)
 
-    def stop_background_job(self) -> bool:
-        if self._scanimage_run_ids:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Acquisition in progress",
-                "Finish or abort this project's image acquisition before closing its workspace.",
+    def close_blockers(self) -> list[str]:
+        """Describe work that must finish before this workspace can close.
+
+        Non-destructive: nothing is cancelled or stopped. Cancellable
+        background jobs are not blockers; closing cancels them.
+        """
+        blockers = []
+        if self.acquisition_controller.acquisition_in_progress:
+            blockers.append(
+                "An image acquisition is in progress. Finish or abort it first."
             )
-            return False
+        if self.syscon2_panel.execution_in_progress:
+            blockers.append(
+                "A HOLO4D sequence upload or run is in progress. Wait for it to "
+                "finish or press Stop in the stimulation setup."
+            )
+        if self._background_job.busy and not self._background_job.cancellable:
+            label = self._background_job_label.rstrip(".…") or "A background task"
+            blockers.append(
+                f"{label} is running and cannot be cancelled. Wait for it to finish."
+            )
+        return blockers
+
+    def stop_background_job(self) -> bool:
+        """Stop remaining work synchronously before this workspace is disposed.
+
+        Callers first pass the close gate (see ``WorkspaceCloseGate``), so a
+        background job normally is no longer running here.
+        """
         for chat in self.findChildren(ChatWidget):
             if not chat.stop_worker():
-                self.logger.warning(
-                    "Chat is still stopping; keeping its workspace open."
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Close",
+                    "The chat is still stopping; this project stays open. "
+                    "Try again in a moment.",
                 )
                 return False
-        had_job = self._background_job.busy
-        if not self._background_job.stop(timeout_ms=10000):
-            self.logger.warning(
-                "Background job is still stopping; keeping its workspace open."
+        if not self._background_job.busy:
+            return True
+        self._cancel_background_job()
+        if not self._background_job.stop(timeout_ms=CLOSE_JOB_TIMEOUT_MS):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Close",
+                "A background job is still stopping; this project stays open. "
+                "Try again once it has finished.",
             )
             return False
-        if had_job:
-            self._teardown_background_job()
+        self._teardown_background_job()
         return True
 
     def dispose(self) -> None:
@@ -3751,6 +3876,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def closeEvent(self, event):
         if self._disposed:
             super().closeEvent(event)
+            return
+        if not self._close_gate.ready([self], "Close NeuroSeq", self.close):
+            self._close_confirmed = False
+            event.ignore()
             return
         if not self._close_confirmed and not self._prompt_save_before_close():
             event.ignore()

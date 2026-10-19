@@ -20,6 +20,9 @@ class ScanImageConnection(QtCore.QObject):
     status_changed = QtCore.Signal(object)
     frame_received = QtCore.Signal(object)
     recording_ready = QtCore.Signal(object)
+    #: Emitted with the run id whenever the connection stops tracking a run,
+    #: whatever its outcome (ready, failed, aborted, interrupted, ...).
+    run_finished = QtCore.Signal(str)
     error = QtCore.Signal(str)
     connected_changed = QtCore.Signal(bool)
 
@@ -117,7 +120,7 @@ class ScanImageConnection(QtCore.QObject):
                             "run": {"id": self.run_id, "state": "aborted"},
                         }
                     )
-                    self.run_id = None
+                    self._end_run()
                     return
                 self._send("abort")
             elif self._queued is not None:
@@ -175,7 +178,7 @@ class ScanImageConnection(QtCore.QObject):
                         },
                     }
                 )
-                self.run_id = None
+                self._end_run()
             if operation == "connect":
                 self.shutdown()
             return
@@ -193,7 +196,7 @@ class ScanImageConnection(QtCore.QObject):
                         "run": {"id": self.run_id, "state": "interrupted"},
                     }
                 )
-                self.run_id = None
+                self._end_run()
             self.connected = True
             self.connected_changed.emit(True)
             self.timer.start()
@@ -218,12 +221,13 @@ class ScanImageConnection(QtCore.QObject):
                         "run": {"id": self.run_id, "state": "finalization_failed"},
                     }
                 )
-                self.run_id = None
+                self._end_run()
                 return
             result["run_id"] = self.run_id
             result["status"] = self._last_status["run"]["state"]
             self.run_id = None
             self.recording_ready.emit(result)
+            self.run_finished.emit(result["run_id"])
             return
         if operation == "disconnect":
             self.shutdown()
@@ -256,7 +260,7 @@ class ScanImageConnection(QtCore.QObject):
                     "run": {"id": self.run_id, "state": "interrupted"},
                 }
             )
-            self.run_id = None
+            self._end_run()
         if (
             self.run_id
             and run.get("id") == self.run_id
@@ -291,8 +295,13 @@ class ScanImageConnection(QtCore.QObject):
                     "run": {"id": self.run_id, "state": "finalization_failed"},
                 }
             )
-            self.run_id = None
+            self._end_run()
         self._file_signature = signature
+
+    def _end_run(self) -> None:
+        run_id, self.run_id = self.run_id, None
+        if run_id is not None:
+            self.run_finished.emit(run_id)
 
     def _drain_stderr(self) -> None:
         self._stderr = (

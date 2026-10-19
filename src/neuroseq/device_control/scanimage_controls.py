@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import time
 import uuid
 from pathlib import Path
@@ -134,6 +135,18 @@ class ScanImageControls(QtWidgets.QWidget):
         self._freshness_timer.setInterval(1000)
         self._freshness_timer.timeout.connect(self._freshness)
         self._freshness_timer.start()
+
+    def dispose(self) -> None:
+        """Stop following the shared connection once the workspace closes."""
+        self._freshness_timer.stop()
+        for signal, slot in (
+            (self.connection.connected_changed, self._connected),
+            (self.connection.status_changed, self._status),
+            (self.connection.frame_received, self._frame),
+            (self.connection.error, self.show_message),
+        ):
+            with contextlib.suppress(TypeError, RuntimeError):
+                signal.disconnect(slot)
 
     def _browse_python(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(

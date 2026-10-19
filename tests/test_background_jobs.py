@@ -8,6 +8,7 @@ from qtpy import QtCore
 from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
+from neuroseq.background_jobs import wait_for_jobs
 
 
 @pytest.fixture
@@ -187,3 +188,53 @@ def test_shutdown_timeout_keeps_ownership(qtbot, job):
         release.set()
         qtbot.waitUntil(lambda: not job.busy)
     assert results == [True]
+
+
+def test_idle_follows_callbacks_and_wait_for_jobs_defers_to_event_loop(qtbot, job):
+    events = []
+    release = threading.Event()
+    job.idle.connect(lambda: events.append("idle"))
+    job.start(
+        BackgroundIOWorker(lambda report: release.wait(5)),
+        on_progress=lambda _: None,
+        on_finished=lambda _result: events.append("finished"),
+        on_failed=pytest.fail,
+        cancel=release.set,
+    )
+    assert job.cancellable
+    owner = QtCore.QObject()
+    wait_for_jobs(
+        [job],
+        on_idle=lambda: events.append("all idle"),
+        on_timeout=pytest.fail,
+        timeout_ms=5000,
+        parent=owner,
+    )
+    job.cancel()
+    qtbot.waitUntil(lambda: "all idle" in events)
+    assert events == ["finished", "idle", "all idle"]
+    assert not job.cancellable
+
+
+def test_wait_for_jobs_times_out_while_a_job_keeps_running(qtbot, job):
+    release = threading.Event()
+    outcome = []
+    job.start(
+        BackgroundIOWorker(lambda report: release.wait(5)),
+        on_progress=lambda _: None,
+        on_finished=lambda _result: None,
+        on_failed=pytest.fail,
+    )
+    owner = QtCore.QObject()
+    wait_for_jobs(
+        [job],
+        on_idle=lambda: outcome.append("idle"),
+        on_timeout=lambda: outcome.append("timeout"),
+        timeout_ms=20,
+        parent=owner,
+    )
+    qtbot.waitUntil(lambda: bool(outcome))
+    release.set()
+    qtbot.waitUntil(lambda: not job.busy)
+    qtbot.wait(20)
+    assert outcome == ["timeout"]

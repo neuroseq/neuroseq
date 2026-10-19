@@ -299,15 +299,126 @@ def test_failed_save_during_application_close_restores_the_window(window, monkey
     assert workspace.project.dirty and not workspace._disposed
 
 
-def test_recording_workspace_stays_open_until_its_acquisition_is_finalized(window):
+def test_recording_workspace_stays_open_until_its_acquisition_ends(
+    window, mocker, qmessagebox_calls
+):
     workspace = window.active_workspace
-    workspace._scanimage_run_ids.add("pending-run")
+    connection = window.devices.scanimage
+    mocker.patch.object(connection.process, "write")
+    connection.connected = True
     try:
+        workspace._start_scanimage_recording(
+            {"run_id": "pending-run", "name": "Run", "directory": "/x", "frames": 4}
+        )
+        assert workspace.acquisition_controller.acquisition_in_progress
         window._close_tab(0)
         assert not workspace._disposed
         assert window.active_workspace is workspace
+        assert "image acquisition" in qmessagebox_calls[-1]["text"]
+        # A failed run is reported only through status_changed; it must still
+        # release the workspace (it used to stay "in progress" forever).
+        connection._reply({"id": connection._serial, "error": "volume unsupported"})
+        assert connection.run_id is None
+        assert not workspace._scanimage_run_ids
+        assert workspace.project.imaging_acquisitions[0]["status"] == "failed"
+        workspace.project.dirty = False
+        window._close_tab(0)
+        assert workspace._disposed
     finally:
+        connection.connected = False
+
+
+def test_disconnected_unknown_run_does_not_block_closing(window, mocker):
+    workspace = window.active_workspace
+    connection = window.devices.scanimage
+    workspace._scanimage_run_ids.add("lost")
+    connection.run_id = "lost"
+    try:
+        # The helper died: the run stays reconcilable on reconnect, but
+        # nothing can progress while disconnected.
+        assert not workspace.close_blockers()
+    finally:
+        connection.run_id = None
         workspace._scanimage_run_ids.clear()
+
+
+def _start_job(workspace, *, cancellable=True, honour_cancel=True):
+    release = threading.Event()
+    results = []
+    assert workspace._dispatch_io_task(
+        lambda report: release.wait(5) and "done",
+        "Long operation...",
+        results.append,
+        cancel_callback=(
+            (release.set if honour_cancel else lambda: None) if cancellable else None
+        ),
+    )
+    return release, results
+
+
+def test_application_close_lists_all_blockers_and_stops_nothing(
+    window, qtbot, qmessagebox_calls
+):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    release, results = _start_job(first)
+    second.syscon2_panel._execution_phase = "running"
+    try:
+        assert not window.close()
+        assert len(qmessagebox_calls) == 1
+        text = qmessagebox_calls[0]["text"]
+        assert "HOLO4D" in text and "Nothing was stopped" in text
+        # The cancellable job in the other tab was not cancelled.
+        assert first._background_job.busy and not release.is_set()
+        assert not first._disposed and not second._disposed
+    finally:
+        second.syscon2_panel._execution_phase = "idle"
+        release.set()
+        qtbot.waitUntil(lambda: not first._background_job.busy)
+    assert results == ["done"]
+
+
+def test_uncancellable_job_blocks_tab_close(window, qtbot, qmessagebox_calls):
+    workspace = window.active_workspace
+    release, _results = _start_job(workspace, cancellable=False)
+    try:
+        window._close_tab(0)
+        assert not workspace._disposed
+        assert (
+            "Long operation is running and cannot be cancelled"
+            in (qmessagebox_calls[-1]["text"])
+        )
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: not workspace._background_job.busy)
+
+
+def test_application_close_cancels_jobs_then_closes_without_blocking(window, qtbot):
+    first = window.active_workspace
+    second = window._add_workspace(_project())
+    release, results = _start_job(first)
+    assert not window.close()  # returns at once; the job is still winding down
+    assert first.progress_dialog.labelText() == "Cancelling..."
+    qtbot.waitUntil(lambda: first._disposed and second._disposed)
+    # The job's outcome was delivered rather than dropped.
+    assert results == ["done"]
+
+
+def test_close_timeout_keeps_workspaces_open_and_says_so(
+    window, qtbot, monkeypatch, qmessagebox_calls
+):
+    monkeypatch.setattr("neuroseq.project_workspace.CLOSE_JOB_TIMEOUT_MS", 50)
+    workspace = window.active_workspace
+    release, _results = _start_job(workspace, honour_cancel=False)
+    try:
+        assert not window.close()
+        qtbot.waitUntil(lambda: bool(qmessagebox_calls))
+        assert "still stopping" in qmessagebox_calls[-1]["text"]
+        assert not workspace._disposed and workspace._background_job.busy
+    finally:
+        release.set()
+        qtbot.waitUntil(lambda: not workspace._background_job.busy)
+    assert not window._close_gate.waiting
 
 
 class _Manager(QtCore.QObject):

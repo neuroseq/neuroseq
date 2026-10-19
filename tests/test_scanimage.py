@@ -175,9 +175,12 @@ def test_finalization_requires_matching_run_and_stable_files(
         connection._reply({"id": request, "result": status})
     assert connection._pending[1] == "index"
     ready = mocker.Mock()
+    finished = mocker.Mock()
     connection.recording_ready.connect(ready)
+    connection.run_finished.connect(finished)
     connection._reply({"id": 4, "result": index_recording(paths)})
     assert ready.call_args.args[0]["run_id"] == "our-run"
+    finished.assert_called_once_with("our-run")
     assert ready.call_args.args[0]["status"] == "completed"
     assert connection.run_id is None
 
@@ -385,9 +388,12 @@ def test_record_failure_releases_run_and_timeout_stops_only_helper(connection, m
     connection.connected = True
     connection.command("record", {"run_id": "run"})
     error = mocker.Mock()
+    finished = mocker.Mock()
     connection.error.connect(error)
+    connection.run_finished.connect(finished)
     connection._reply({"id": 1, "error": "unsupported volume"})
     assert connection.run_id is None
+    finished.assert_called_once_with("run")
     error.assert_called_with("unsupported volume")
     kill = mocker.patch.object(connection.process, "kill")
     connection._timed_out()
@@ -415,7 +421,9 @@ def test_reconnect_releases_untracked_run_without_claiming_completion(
 ):
     connection.run_id = "lost"
     states = mocker.Mock()
+    finished = mocker.Mock()
     connection.status_changed.connect(states)
+    connection.run_finished.connect(finished)
     connection._send("connect")
     connection._reply(
         {
@@ -429,6 +437,7 @@ def test_reconnect_releases_untracked_run_without_claiming_completion(
     assert connection.connected
     assert connection.run_id is None
     assert states.call_args_list[0].args[0]["run"]["state"] == "interrupted"
+    finished.assert_called_once_with("lost")
 
 
 def test_completed_count_mismatch_does_not_attach_recording(
@@ -688,6 +697,10 @@ def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocke
     assert states.call_args.args[0]["run"]["state"] == "unknown"
     assert "30 seconds" in states.call_args.args[0]["run"]["error"]
     assert connection.run_id == "owned"  # Reconnect can reconcile this run.
+    finished = mocker.Mock()
+    connection.run_finished.connect(finished)
+    connection._end_run()
+    finished.assert_called_once_with("owned")
 
 
 def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):

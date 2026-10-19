@@ -11,6 +11,44 @@ from typing import Any
 from qtpy import QtCore
 
 
+def wait_for_jobs(
+    jobs: list[BackgroundJob],
+    *,
+    on_idle: Callable[[], None],
+    on_timeout: Callable[[], None],
+    timeout_ms: int,
+    parent: QtCore.QObject,
+) -> QtCore.QObject:
+    """Call ``on_idle`` once every job has ended, or ``on_timeout`` first.
+
+    Neither callback runs inside a job's completion callbacks: both are
+    deferred to the event loop so a caller may safely dispose the jobs' owners.
+    Returns the waiter; deleting it abandons the wait.
+    """
+    waiter = QtCore.QObject(parent)
+    timer = QtCore.QTimer(waiter)
+    timer.setSingleShot(True)
+
+    def _finish(callback: Callable[[], None]) -> None:
+        timer.stop()
+        for job in jobs:
+            with contextlib.suppress(TypeError, RuntimeError):
+                job.idle.disconnect(_check)
+        waiter.deleteLater()
+        QtCore.QTimer.singleShot(0, callback)
+
+    def _check() -> None:
+        if not any(job.busy for job in jobs):
+            _finish(on_idle)
+
+    for job in jobs:
+        job.idle.connect(_check)
+    timer.timeout.connect(lambda: _finish(on_timeout))
+    timer.start(timeout_ms)
+    _check()
+    return waiter
+
+
 def returns_to_main_thread[F: Callable[..., Any]](run: F) -> F:
     """Decorate a worker's ``run`` slot: once it returns, move the worker
     back to the main thread.
@@ -184,7 +222,10 @@ class BackgroundJob(QtCore.QObject):
     Workers retain their task-specific signals and cancellation contracts.
     Completion callbacks run on the main thread after the worker thread exits,
     with the owner idle so a callback can immediately dispatch the next job.
+    ``idle`` is emitted once a job has ended and its callbacks have returned.
     """
+
+    idle = QtCore.Signal()
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
@@ -202,6 +243,10 @@ class BackgroundJob(QtCore.QObject):
     @property
     def busy(self) -> bool:
         return self.worker_thread is not None
+
+    @property
+    def cancellable(self) -> bool:
+        return self._cancel is not None
 
     def start(
         self,
@@ -283,15 +328,18 @@ class BackgroundJob(QtCore.QObject):
         self._on_failed = None
         self._on_cancelled = None
         self._cancel = None
-        if not deliver or outcome is None:
-            return
-        kind, value = outcome
-        if kind == "finished" and on_finished is not None:
-            on_finished(value)
-        elif kind == "failed" and on_failed is not None:
-            on_failed(value)
-        elif kind == "cancelled" and on_cancelled is not None:
-            on_cancelled()
+        try:
+            if not deliver or outcome is None:
+                return
+            kind, value = outcome
+            if kind == "finished" and on_finished is not None:
+                on_finished(value)
+            elif kind == "failed" and on_failed is not None:
+                on_failed(value)
+            elif kind == "cancelled" and on_cancelled is not None:
+                on_cancelled()
+        finally:
+            self.idle.emit()
 
     def cancel(self) -> None:
         if self._cancel is not None:

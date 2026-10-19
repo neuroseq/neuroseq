@@ -258,6 +258,11 @@ class SysCon2Panel(QtWidgets.QWidget):
     def export_settings(self) -> SysconExportSettings | None:
         return self._export_settings
 
+    @property
+    def execution_in_progress(self) -> bool:
+        """Whether a HOLO4D upload, run or stop is still being tracked."""
+        return self._execution_phase != "idle"
+
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
         self._execution_cancel.set()
