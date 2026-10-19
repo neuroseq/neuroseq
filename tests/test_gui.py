@@ -4614,7 +4614,7 @@ def test_main_menu_export_updates_setup_preview_without_import(
 
 
 def test_main_menu_export_uses_stored_folder_and_settings(qtbot, monkeypatch, tmp_path):
-    """The menu SysCon2 export opens the same generator as "Send to SysCon2":
+    """The menu SysCon2 export opens the same generator as the panel's "Export with settings…":
     last-used folder, remembered settings and target power, and it stores
     the chosen folder for next time."""
     from neuroseq.export.syscon2_export_service import SysconExportSettings

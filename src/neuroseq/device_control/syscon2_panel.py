@@ -948,8 +948,8 @@ class SysCon2Panel(QtWidgets.QWidget):
     def open_generator_dialog(self, *, send_to_syscon: bool = True) -> None:
         """Open the stimulation generator with the stored folder and settings.
 
-        Used by "Send to SysCon2" and the File > Export light input menu. The
-        menu passes ``send_to_syscon=False``: a file export must never upload
+        Used by the panel's "Export with settings…" button and the
+        File > Export > Optogenetic Input menu. The menu passes ``send_to_syscon=False``: a file export must never upload
         the generated sequence to connected hardware."""
         if self._project is None:
             QtWidgets.QMessageBox.warning(

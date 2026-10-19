@@ -2,11 +2,11 @@
 
 This document explains how NeuroSeq works by scanning the repository code, especially:
 
-- `src/neuroseq/*.py`
+- `src/neuroseq/**/*.py`
 - `external_simulation_example/*.py`
 - `tests/test_*.py`
 
-Scan date: 2026-03-25.
+Scan date: 2026-03-25 (module paths and menus refreshed 2026-10-19).
 
 ## 1) What NeuroSeq is
 
@@ -16,7 +16,7 @@ NeuroSeq is a Qt desktop GUI around a Brian2 simulation model plus data import/e
 - define/edit stimulation arrays over time,
 - run and continue simulations,
 - inspect traces/spikes/synapse matrices,
-- import experimental data (Suite2p, Cellpose, patch-clamp),
+- import experimental data (raw TIFF, Suite2p, Cellpose, patch-clamp),
 - import SysCon2 `.seq` stimulation timelines into existing stim arrays,
 - save/load full projects,
 - run external simulation functions,
@@ -38,8 +38,9 @@ Runtime entrypoint:
 
 `gui.py` constructor:
 
-- Creates `GuiSettings`, `Project`, status bar with CPU/GPU/RAM monitor.
-- Builds central multi-pane UI:
+- Creates `GuiSettings`, status bar with CPU/GPU/RAM monitor (`ResourceMonitorLabel`), and the project tab bar.
+- Each project tab owns a complete `ProjectWorkspace` (`project_workspace.py`); opening a project or example opens a new tab, leaving other tabs untouched.
+- Each workspace builds its central multi-pane UI:
   - stimulation editor,
   - trace view,
   - spike view,
@@ -48,12 +49,12 @@ Runtime entrypoint:
   - custom analysis pane,
   - embedded Python console,
   - time slider.
-- Creates menus/toolbars and all action handlers.
+- Each workspace creates its menus/toolbars and all action handlers.
 - Loads default project if no file was passed.
 
 #### 2.1.1 Default startup state (no file passed)
 
-When NeuroSeq starts without a project filename, `Gui.__init__` loads `default_project()` ("Getting Started Project").
+When NeuroSeq starts without a project filename, the first tab loads `default_project()` ("Getting Started Project").
 
 What is shown by default:
 
@@ -71,14 +72,14 @@ Default theoretical model:
 
 ### 2.2 Project state in GUI
 
-`Gui` keeps one active `Project` object.
+Each `ProjectWorkspace` (one per tab) keeps one active `Project` object. Only one simulation runs at a time across all tabs, because Brian2's seed and code-generation settings are process-wide.
 
 - `update_project()` refreshes all widgets, comboboxes, and console namespace.
 - `update_limits()` pushes global time/neuron limits into the shared pan/zoom controller and time slider.
 
 ### 2.3 Simulation
 
-`Gui.btn_continue_simulation_clicked()`:
+`ProjectWorkspace.btn_continue_simulation_clicked()`:
 
 - asks for simulation duration,
 - calls `Project.run_simulation(...)`.
@@ -115,7 +116,7 @@ All time-driven widgets are synchronized by `TimeSliderWidget`.
 - `SynapseData(name, values[src,dst,time], timestamps)`
 - `Experiment(name, duration, timepoints, data[])`
 
-`stim.py` defines stimulation abstractions:
+`stimulation/stim.py` defines stimulation abstractions:
 
 - `StimType`: Excitation/Inhibition/External
 - `StimArray(name, stim_type, values[time,neuron], units, dt)`
@@ -199,22 +200,22 @@ NeuroSeq project files are zip archives (`.nseq`) with:
 
 ## 7) GUI and visualization internals
 
-### 7.1 Main window and actions (`gui.py`)
+### 7.1 Main window and actions (`gui.py`, `project_workspace.py`)
 
-`Gui` wires all actions:
+`Gui` is the application shell holding the project tabs; each tab's `ProjectWorkspace` wires all actions:
 
-- File: new/open/import/save/export/edit model + data imports.
+- File: new/open/open example/import from project/save, `Import data → Input` (Optogenetics, Patch Clamp) and `Import data → Output` (Calcium Imaging raw `.tif` / Suite2p outputs, Patch Clamp), `Export → Patch Clamp Input / Optogenetic Input`, edit model, synthetic data, `Manage Data`.
 - Simulate: run/continue/store checkpoint/restore checkpoint.
 - Playback: speed, play/pause, skip, stop.
 - View: show/hide panes, selection text toggles.
-- Settings: Brian2 backend, stim padding, synapse RAM limit.
+- Settings: Brian2 backend, input padding, LLM assistant, synapse/trace RAM limits, theme.
 - Experiment: stimulation script generator + external simulation integration.
 
-### 7.2 Shared plotting base (`fpl_widget.py`)
+### 7.2 Shared plotting base (`visualization/fpl_widget.py`)
 
 `FPLWidget` wraps fastplotlib figure/subplot creation and common cleanup.
 
-### 7.3 Timeseries base (`timeseries_widget.py`)
+### 7.3 Timeseries base (`visualization/timeseries_widget.py`)
 
 `TimeseriesWidget` adds:
 
@@ -227,44 +228,44 @@ NeuroSeq project files are zip archives (`.nseq`) with:
 
 ### 7.4 Specific viewers
 
-`trace_widget.py`:
+`visualization/trace_widget.py`:
 
 - stacked line plot per neuron,
 - normalization dialog (percent, center median, clip).
 
-`spike_widget.py`:
+`visualization/spike_widget.py`:
 
 - scatter plot spike raster (time vs neuron index).
 
-`heatmap_widget.py`:
+`visualization/heatmap_widget.py`:
 
 - time-indexed synapse matrix image,
 - optional subtraction against reference timestamp,
 - LUT/histogram panel.
 
-`data_widget.py`:
+`visualization/data_widget.py`:
 
 - stacked wrapper that selects trace/spike/heatmap viewer by incoming `Data` type.
 
 ### 7.5 Camera and timeline controls
 
-`constrained_pan_zoom_controller.py`:
+`visualization_support/constrained_pan_zoom_controller.py`:
 
 - clamps zoom/pan to valid data extents,
 - keeps optional x/y scrollbars synchronized,
 - updates gridline density visibility by zoom.
 
-`time_slider_widget.py`:
+`visualization/time_slider_widget.py`:
 
 - slider + timer-based playback loop,
 - adjustable relative speed,
 - broadcasts time updates to connected widgets.
 
-`gridlines.py` / `timeline.py` / `text.py` / `region_of_interest.py`:
+`visualization_support/gridlines.py` / `visualization_support/region_of_interest.py` (time marker and hover text are drawn inside `visualization/timeseries_widget.py`):
 
 - visual helper graphics for grid, current time marker, hover label, and selection rectangle.
 
-### 7.6 Custom analysis pane (`custom_analysis_widget.py`)
+### 7.6 Custom analysis pane (`visualization/custom_analysis_widget.py`)
 
 Offers quick histogram and 2D histogram analyses over selected neuron/time slices for trace or spike data.
 
@@ -276,7 +277,7 @@ Embedded Python REPL with namespace:
 
 After each command, emits update signal and refreshes project limits, enabling live model/stim edits.
 
-### 7.8 Resource monitor (`resource_monitor_label.py`)
+### 7.8 Resource monitor (`ResourceMonitorLabel` in `gui.py`)
 
 Periodic process stats in status bar:
 
@@ -285,7 +286,7 @@ Periodic process stats in status bar:
 
 ## 8) Stimulus editing subsystem
 
-### 8.1 Stim editor (`stim_editor.py`)
+### 8.1 Stim editor (`stimulation/stim_editor.py`)
 
 Core capabilities:
 
@@ -300,11 +301,11 @@ Core capabilities:
   - logarithmic,
   - random.
 
-### 8.2 Undo/redo (`stim_array_modifier.py`)
+### 8.2 Undo/redo (`stimulation/stim_array_modifier.py`)
 
-`StimArrayModifier` stores reversible slice actions with local undo/redo stack, and updates plot texture incrementally.
+`StimArrayModifier` stores reversible slice actions as commands in the project's shared `ProjectHistory` (`project_history.py`), and updates plot texture incrementally. The same session history also covers data-group deletion (File → Manage Data) and imports.
 
-### 8.3 Stim visuals (`stim_widget.py`)
+### 8.3 Stim visuals (`visualization/stim_widget.py`)
 
 Heatmap-like display of stim values with colormap depending on `StimType`.
 Supports background overlay of non-selected stim arrays.
@@ -323,24 +324,25 @@ Color/intensity interpretation:
 
 ### 8.4 Stim dialogs
 
-`stim_dialog.py`:
+`stimulation/stim_dialog.py`:
 
 - edit metadata (name/type/neurons/units).
 
-`stim_intensity_dialog.py`:
+`stimulation/stim_intensity_dialog.py`:
 
 - configure draw profile values with validation rules.
 
-### 8.5 Stimulation script generator (`stimulation_generator_dialog.py`)
+### 8.5 Stimulation script generator (`export/stimulation_generator_dialog.py`)
 
 Provides export dialog for hardware script generation.
 Current implementation status:
 
 #### Scope and outputs
 
+- Opened from `File → Export → Optogenetic Input` (choose `SysCon2`; writes files only) or from the Stimulation setup panel's `Export with settings…` button (also imports the generated sequence into a connected SysCon2).
 - Hardware type list currently only `HOLO4D`.
 - Output extension currently always `.seq`.
-- Exports are generated from selected stim array + imported Cellpose segmentation using `exporter_syscon2.py`.
+- Exports are generated from selected stim array + imported Cellpose segmentation using `export/exporter_syscon2.py`.
 - Generator writes three files per run:
   - `<script_name>.seq`,
   - `<script_name>_export_debug.csv`,
@@ -434,7 +436,7 @@ The stim array represents laser **TTL pulses** directly. Each sample is one SysC
 
 ### 9.1 Suite2p import
 
-`import_dialog.py` + `importer_suite2p.py`:
+`importers/suite2p_import_dialog.py` + `importers/importer_suite2p.py` (File → Import data → Output → Calcium Imaging (Suite2p outputs)):
 
 - reads `F/Fneu/spks/stat` from `.npy` or CSV,
 - supports folder auto-detection and per-file selection,
@@ -445,7 +447,7 @@ The stim array represents laser **TTL pulses** directly. Each sample is one SysC
 
 ### 9.2 Cellpose import
 
-`cellpose_import_dialog.py` + `importer_cellpose.py` + `cell_overlay_widget.py`:
+`importers/cellpose_import_dialog.py` + `importers/importer_cellpose.py` + `visualization/cell_overlay_widget.py`:
 
 - loads base image (PNG/TIFF stack mean-projection supported),
 - loads segmentation (CSV, cellpose dict NPY, or suite2p stat+iscell),
@@ -526,19 +528,17 @@ python -m neuroseq \
   --cellpose-preserve-radius-auto-gap
 ```
 
-### 9.3 Patch-clamp import
+### 9.3 Patch-clamp output import
 
-`patchclamp_import_dialog.py` + `importer_patchclamp.py`:
+`importers/patch_clamp_data_output_import_dialog.py` + `importers/importer_patch_clamp_data.py` (File → Import data → Output → Patch Clamp):
 
-- loads 1D or 2D patch-clamp traces from `.npy`,
-- mapping strategy for target stimulus/neuron IDs (linear/custom),
-- integrates with existing cellpose mapping,
-- runs peak-based spike detection with tunable parameters,
-- returns `TraceData` (`Patch Clamp Traces`) plus per-neuron `SpikeData` (`Patch Clamp Spikes`).
+- loads recorded traces from Igor2 `.pxp` / `.ibw` or `.csv` / `.txt` (one trace per column, shared source sampling rate),
+- creates new trace data or imports into existing trace data (extend / replace options); a different sample interval triggers the same Δt choice as input import (section 9.6),
+- runs peak-based spike detection with tunable parameters.
 
 ### 9.4 Import mode dialog
 
-`import_experiment_dialog.py` governs whether new imported data:
+`add_experiment_data_dialog.py` governs whether new imported data:
 
 - creates a new experiment, or
 - appends into existing experiment at selected timepoint,
@@ -546,9 +546,9 @@ python -m neuroseq \
 
 ### 9.5 SysCon2 `.seq` import (stimulation data)
 
-`syscon2_import_dialog.py` + `importer_syscon2.py`:
+`importers/syscon2_import_dialog.py` + `importers/importer_syscon2.py`:
 
-- GUI entrypoint is `File -> Import SysCon2 .seq File`; import is only enabled when at least one stim array exists in the project.
+- GUI entrypoint is `File → Import data → Input → Optogenetics`; the dialog can create a new input array or import into an existing one.
 - Parser accepts `.seq` files whose first non-empty line is either `nohash` or a 16-byte hash string (`AA-BB-...` format).
 - Header is parsed as `key=value` lines before the first object block; required keys are `version`, `scanmode`, `runs`, `invertedportcnt`, `AutoTriggerRulesEnabled`, `AutoTriggerRulesCount`, `timelinezoomfactor`, `timelineviewposx`, `timelineviewposy` (`DeviceSequenceID` is accepted when present and defaulted for compatibility when missing).
 - Object blocks must be `[index] ... [/index]`; malformed/mismatched block markers raise an import error.
@@ -580,19 +580,19 @@ python -m neuroseq \
 - Preview panel reports parsed header fields, object counts, timed-object counts, estimated grouped channels, and center-distance merged counts before import.
 - Completion dialog reports eligible objects, grouped channels, mapped/unmapped channels, generated timepoints, merged circular entities, and any truncation counters.
 
-### 9.6 Igor2 `.ibw` / Igor-style `.csv` import (stimulation data)
+### 9.6 Patch-clamp input import: Igor2 `.ibw` / `.pxp` and `.csv` / `.txt` (stimulation data)
 
-`igor_import_dialog.py` + `importer_igor2.py`:
+`importers/patch_clamp_data_input_import_dialog.py` + `importers/importer_patch_clamp_data.py`:
 
-- GUI entrypoint is `File → Import data → Import stimulus → Import patch clamp` (pre-dialog selects `Igor2`).
+- GUI entrypoint is `File → Import data → Input → Patch Clamp` (no source-software pre-dialog).
 - Import is available regardless of whether the project already has stim arrays:
   - if no stim arrays exist, only `Create new stim array` is available,
   - if stim arrays already exist, user can either create a new stim array or import into an existing one.
 - Supported file types are:
   - Igor Binary Wave `.ibw`,
   - Igor Packed Experiment `.pxp`,
-  - simple Igor-style `.csv`.
-- Current scope is one selected 1D wave per import action:
+  - simple Igor-style `.csv` / `.txt`.
+- Current scope is one selected 1D wave per import action (packed experiments stay open so several waves can be imported in turn):
   - `.ibw` and `.csv` provide a single wave directly,
   - `.pxp` files may contain many waves, but the dialog imports one selected wave at a time,
   - multidimensional Igor waves are rejected or skipped,
@@ -643,7 +643,6 @@ python -m neuroseq \
   - source sample count,
   - detected source `dt` if present in file metadata,
   - the source `dt` currently selected for import,
-  - estimated imported sample count on the NeuroSeq 1 ms grid,
   - wave units,
   - axis units,
   - value range (`min..max`),
@@ -656,20 +655,18 @@ python -m neuroseq \
 
 #### Timeline conversion model
 
-- NeuroSeq’s current stim editor/timeline assumes a 1 ms grid for correct editing/viewing behavior.
-- By default Igor import targets:
-  - `target_dt = 0.001 s`.
-- The dialog now also offers `Adjust NeuroSeq stim grid to source/file grid`:
-  - if enabled, `target_dt` becomes the currently selected source/file `dt`,
-  - new stim arrays are created on that grid,
-  - existing stim arrays are remapped to that grid before import after user confirmation.
-- If source `dt` already equals the selected target `dt`, sample values are copied directly.
-- If source `dt` differs from the selected target `dt`, importer resamples using zero-order hold:
+- There is no project-wide time grid: every stim array and dataset keeps its own `dt`.
+- Samples are imported at the source sample interval, so a new stim array is created on the source/file `dt`.
+- When importing into an existing stim array whose `dt` differs, a dialog offers:
+  - `Resample wave to target Δt` (default),
+  - `Remap target to wave Δt` (the whole target array is remapped; may shift existing timing by up to one sample and can make the target very large),
+  - `Cancel`.
+- If source `dt` already equals the target `dt`, sample values are copied directly.
+- When the wave is resampled onto a different target `dt`, the importer uses zero-order hold:
   - target timestamps are generated on the selected target grid,
   - each target sample takes the most recent source sample value,
   - this is intended for step-like command waveforms,
   - fine structure below the chosen target `dt` is intentionally collapsed in the NeuroSeq representation.
-- Estimated imported sample count is computed from total source duration and the selected target `dt`.
 
 #### Import target modes
 
@@ -687,7 +684,7 @@ The dialog offers two mutually exclusive modes.
   - `name` = dialog name field,
   - `stim_type` = dialog type selection,
   - `units` = dialog units field,
-  - `dt = 0.001`.
+  - `dt` = selected source `dt`.
 - Duplicate stim names are rejected before import.
 
 ##### B) Import into existing stim array
@@ -697,11 +694,8 @@ The dialog offers two mutually exclusive modes.
   - target neuron column,
   - whether to extend target duration,
   - whether to replace or add to existing values.
-- Existing-target import is only enabled when the selected target stim array also uses:
 - Import writes the 1D Igor wave into exactly one neuron column of the chosen target stim array.
-- If the selected target stim array uses a different `dt` than the chosen import target `dt`:
-  - the dialog asks for confirmation,
-  - the target stim array is remapped to the selected import grid before writing the Igor wave.
+- If the selected target stim array uses a different `dt` than the wave, the resample/remap/cancel choice above applies; the import is recorded as one undoable edit.
 - Time-axis behavior:
   - if `extend_to_fit=True`, target stim array grows to fit the imported duration,
   - otherwise overflow samples are truncated.
@@ -757,7 +751,7 @@ Provides a rich parameter-tree dialog for editing B2Model internals:
 
 It clones the model via `B2Model.from_dict(...)`, edits clone state, and on accept rebuilds if needed.
 
-## 12) Example projects (`example_projects.py`)
+## 12) Example projects (`example_projects/`)
 
 The GUI menu `File -> Open example project` shows only functions registered with `@register_example_project(...)`.
 
@@ -971,11 +965,11 @@ Stimulus:
 
 Notes:
 
-- Additional project-generating functions in `example_projects.py` are present but not registered, so they do not appear in the GUI example menu.
+- Additional project-generating functions in `example_projects/` are present but not registered, so they do not appear in the GUI example menu.
 
 ## 13) External simulation plugin interface
 
-`gui.py` can load external Python function `simulate(...)` via `runpy.run_path`.
+`ProjectWorkspace` (`project_workspace.py`) can load external Python function `simulate(...)` via `runpy.run_path`.
 
 Expected signature:
 
@@ -1023,57 +1017,79 @@ Important utilities:
 
 ## 16) Module-by-module quick index
 
-The following table maps each `src/neuroseq` file to primary functionality.
+The following table maps each `src/neuroseq` module or package to primary functionality.
 
-| Module                               | Primary responsibility                                                     |
-| ------------------------------------ | -------------------------------------------------------------------------- |
-| `__init__.py`                        | package version export                                                     |
-| `__main__.py`                        | CLI entrypoint, Cellpose test-data generation, and Qt app bootstrap        |
-| `b2_model.py`                        | Brian2 model definition/assembly/simulation/serialization                  |
-| `b2_units.py`                        | Brian2 quantity parsing/display helpers                                    |
-| `cell_overlay_widget.py`             | cellpose overlay visualization widget                                      |
-| `cellpose_import_dialog.py`          | GUI flow for cellpose image+seg import and mapping                         |
-| `cellpose_test_data.py`              | synthetic Cellpose grid TIFF + segmentation generator                      |
-| `console_widget.py`                  | embedded Python REPL bound to project                                      |
-| `constrained_pan_zoom_controller.py` | bounded camera + scrollbar sync                                            |
-| `custom_analysis_widget.py`          | histogram/hist2d analysis views                                            |
-| `data.py`                            | core dataclasses (`TraceData`, `SpikeData`, `SynapseData`, `Experiment`)   |
-| `data_widget.py`                     | polymorphic trace/spike/heatmap container                                  |
-| `example_projects.py`                | built-in preconfigured projects                                            |
-| `fpl_widget.py`                      | base fastplotlib Qt wrapper                                                |
-| `gridlines.py`                       | layered grid and stripes graphics                                          |
-| `gui.py`                             | main window/controller and action wiring                                   |
-| `gui_settings.py`                    | persistent app settings                                                    |
-| `heatmap_widget.py`                  | synapse matrix viewer over time                                            |
-| `import_dialog.py`                   | Suite2p/CSV import dialog                                                  |
-| `import_experiment_dialog.py`        | append-vs-new experiment import chooser                                    |
-| `importer_cellpose.py`               | cellpose loading, normalization, overlays, mapping payload                 |
-| `exporter_syscon2.py`                | SysCon2 `.seq` export generation from stim arrays + cellpose segmentation  |
-| `importer_patchclamp.py`             | patch-clamp conversion and spike extraction pipeline                       |
-| `importer_syscon2.py`                | SysCon2 `.seq` parser, center-distance grouping, and stim-array conversion |
-| `importer_suite2p.py`                | suite2p contrast/normalize/convert pipeline                                |
-| `io.py`                              | zip/json/npy persistence and typed reconstruction                          |
-| `model_editor.py`                    | parameter-tree model editing dialog                                        |
-| `patchclamp_import_dialog.py`        | patch-clamp import GUI and options                                         |
-| `pretty_print_enum.py`               | enum string formatting helpers                                             |
-| `project.py`                         | aggregate project state and orchestration                                  |
-| `region_of_interest.py`              | ROI graphics + text                                                        |
-| `resource_monitor_label.py`          | CPU/RAM/GPU status label                                                   |
-| `save_load_options.py`               | save/import include-options dialog                                         |
-| `spike_detection.py`                 | threshold and peak-based spike detection                                   |
-| `spike_widget.py`                    | spike raster plot widget                                                   |
-| `stim.py`                            | stimulation dataclasses/enums                                              |
-| `stim_array_modifier.py`             | undo/redo action engine for stim edits                                     |
-| `stim_dialog.py`                     | stim metadata editor dialog                                                |
-| `stim_editor.py`                     | interactive stim editing workstation                                       |
-| `stim_intensity_dialog.py`           | draw-intensity profile dialog                                              |
-| `stim_widget.py`                     | stim image plot and overlays                                               |
-| `stimulation_generator_dialog.py`    | hardware script export dialog                                              |
-| `syscon2_import_dialog.py`           | GUI preview/options flow for SysCon2 `.seq` stim import                    |
-| `synthetic_data_dialog.py`           | synthetic patch/imaging data generation                                    |
-| `text.py`                            | hover text graphic                                                         |
-| `time_slider_widget.py`              | playback/seek timeline controller                                          |
-| `timeline.py`                        | current-time vertical marker graphic                                       |
-| `timeseries_widget.py`               | shared timeseries interaction base class                                   |
-| `trace_widget.py`                    | trace line-stack viewer                                                    |
-| `utils.py`                           | cross-cutting helpers                                                      |
+| Module                                               | Primary responsibility                                                                                                                              |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__init__.py`                                        | package version export                                                                                                                              |
+| `__main__.py`                                        | CLI entrypoint, Cellpose test-data generation, and Qt app bootstrap                                                                                 |
+| `add_experiment_data_dialog.py`                      | append-vs-new experiment import chooser                                                                                                             |
+| `analysis_plugins.py`                                | analysis plugin discovery (built-in and per-user plugin folders)                                                                                    |
+| `aoi_shapes.py`                                      | geometry of AOI shapes                                                                                                                              |
+| `b2_model.py`                                        | Brian2 model definition/assembly/simulation/serialization                                                                                           |
+| `b2_units.py`                                        | Brian2 quantity parsing/display helpers                                                                                                             |
+| `background_jobs.py`                                 | workers and lifecycle for main-window background jobs                                                                                               |
+| `cellpose_annotation.py`                             | programmatic Cellpose annotation for mean-fluorescence images                                                                                       |
+| `cellpose_test_data.py`                              | synthetic Cellpose grid TIFF + segmentation generator                                                                                               |
+| `console_art.py`                                     | console wordmark and imagery                                                                                                                        |
+| `console_widget.py`                                  | embedded Python REPL bound to project                                                                                                               |
+| `data.py`                                            | core dataclasses (`TraceData`, `SpikeData`, `SynapseData`, `Experiment`)                                                                            |
+| `data_manager_dialog.py`                             | File → Manage Data: inspect and delete data groups (undoable)                                                                                       |
+| `external_tools.py`                                  | launch Fiji/ImageJ and Cellpose from the GUI                                                                                                        |
+| `fiji.py`                                            | locate and launch Fiji/ImageJ                                                                                                                       |
+| `gpu.py`                                             | PyTorch GPU-availability helpers for imaging imports                                                                                                |
+| `gui.py`                                             | application shell: project tabs, resource monitor                                                                                                   |
+| `gui_settings.py`                                    | persistent app settings                                                                                                                             |
+| `icon_manager.py`                                    | icon loading (`IconManager`)                                                                                                                        |
+| `io.py`                                              | zip/json/npy persistence and typed reconstruction                                                                                                   |
+| `main_scroll.py`                                     | whole-window scrolling with nested-scroll priority                                                                                                  |
+| `model_descriptions.py`                              | one-line descriptions for model fields and parameters                                                                                               |
+| `model_editor.py`                                    | parameter-tree model editing dialog                                                                                                                 |
+| `project.py`                                         | aggregate project state and orchestration                                                                                                           |
+| `project_history.py`                                 | session-local undo/redo shared by a project's data editors                                                                                          |
+| `project_workspace.py`                               | per-tab workspace: panes, menus/toolbars, action wiring                                                                                             |
+| `qt_helpers.py`                                      | shared generic Qt widgets and window helpers                                                                                                        |
+| `save_imaging_dialog.py`                             | options for saving imaging data shown in the Imaging tab                                                                                            |
+| `save_load_options.py`                               | save/import include-options dialog                                                                                                                  |
+| `spike_detection.py`                                 | threshold and peak-based spike detection                                                                                                            |
+| `startup_dialog.py`                                  | launch dialog: example, open, recent, or blank                                                                                                      |
+| `synthetic_data_dialog.py`                           | synthetic patch/imaging data generation                                                                                                             |
+| `theme.py`                                           | light/dark/retro themes                                                                                                                             |
+| `utils.py`                                           | cross-cutting helpers                                                                                                                               |
+| `workspace_acquisition_controller.py`                | workspace-local ScanImage acquisition and live-image lifecycle                                                                                      |
+| `workspace_devices.py`                               | shared device connections with per-workspace reply routing                                                                                          |
+| `device_control/`                                    | ScanImage connection/controls and SysCon2 client, protocol, connection manager, Stimulation setup panel, stimulation host                           |
+| `elise_support/`                                     | ELiSe protocol dialog, workflows, replay metrics                                                                                                    |
+| `example_projects/`                                  | built-in example project factories (`neurons/`, `networks/`, `_registry.py`)                                                                        |
+| `export/exporter_igor2.py`                           | Igor2 `.ibw`/`.csv`/`.pxp` stimulus export                                                                                                          |
+| `export/exporter_syscon2.py`                         | SysCon2 `.seq` export generation from stim arrays + cellpose segmentation                                                                           |
+| `export/igor2_pxp_stim_export_dialog.py`             | Igor2 `.pxp` (all arrays) export dialog                                                                                                             |
+| `export/igor2_single_wave_export_dialog.py`          | Igor2 single-wave export dialog                                                                                                                     |
+| `export/power_lut.py`                                | laser power look-up tables                                                                                                                          |
+| `export/stimulation_generator_dialog.py`             | hardware script export dialog                                                                                                                       |
+| `export/stimulus_export_dialog.py`                   | File → Export entry point (format chooser)                                                                                                          |
+| `export/syscon2_export_service.py`                   | Qt-free SysCon2 `.seq` export path shared by dialog, panel and host                                                                                 |
+| `importers/cellpose_import_dialog.py`                | GUI flow for cellpose image+seg import and mapping                                                                                                  |
+| `importers/importer_cellpose.py`                     | cellpose loading, normalization, overlays, mapping payload                                                                                          |
+| `importers/importer_patch_clamp_data.py`             | Igor2/CSV patch-clamp wave loading and conversion                                                                                                   |
+| `importers/importer_scanimage.py`                    | index ScanImage TIFF recordings without loading movies                                                                                              |
+| `importers/importer_suite2p.py`                      | suite2p contrast/normalize/convert pipeline                                                                                                         |
+| `importers/importer_syscon2.py`                      | SysCon2 `.seq` parser, center-distance grouping, and stim-array conversion                                                                          |
+| `importers/importer_tif.py`                          | Suite2p + Cellpose pipeline for raw 2-photon TIFF stacks                                                                                            |
+| `importers/patch_clamp_data_input_import_dialog.py`  | patch-clamp input (stimulus) import dialog                                                                                                          |
+| `importers/patch_clamp_data_output_import_dialog.py` | patch-clamp output (recording) import dialog with spike detection                                                                                   |
+| `importers/suite2p_import_dialog.py`                 | Suite2p/CSV import dialog                                                                                                                           |
+| `importers/syscon2_import_dialog.py`                 | GUI preview/options flow for SysCon2 `.seq` stim import                                                                                             |
+| `importers/tif_import_dialog.py`                     | raw TIFF import dialog (runs the pipeline as a background job)                                                                                      |
+| `llm/`                                               | chat assistant: backends (Anthropic, OpenAI, Ollama), chat widget, settings, read access, plugin-write confirmation                                 |
+| `stimulation/stim.py`                                | stimulation dataclasses/enums                                                                                                                       |
+| `stimulation/stim_array_modifier.py`                 | undoable stim edit commands                                                                                                                         |
+| `stimulation/stim_dialog.py`                         | stim metadata editor dialog                                                                                                                         |
+| `stimulation/stim_editor.py`                         | interactive stim editing workstation                                                                                                                |
+| `stimulation/stim_intensity_dialog.py`               | draw-intensity profile dialog                                                                                                                       |
+| `stimulation/stim_loop_dialog.py`                    | loop stim array dialog                                                                                                                              |
+| `stimulation/stim_timing.py`                         | stim sample-interval helpers (resampling, remapping)                                                                                                |
+| `stimulation/static_input/`                          | Design static input: pattern dialog, patterns, controller                                                                                           |
+| `stimulation/dynamic_input/`                         | Design dynamic input: routines (STDP window, STDP tuning, rheobase), controller, measurement                                                        |
+| `visualization/`                                     | plot widgets: trace, spike, heatmap, data, stim, custom analysis, spatial footprint, cell overlay, calcium video, time slider, timeseries/fpl bases |
+| `visualization_support/`                             | shared pan/zoom controller, gridlines, ROI, view state, Cellpose ids, neuron subset and brightness dialogs                                          |

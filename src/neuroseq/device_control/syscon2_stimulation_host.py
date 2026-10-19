@@ -104,7 +104,7 @@ class SysCon2StimulationHost(QtCore.QObject):
         settings = self._settings_provider()
         if settings is None:
             self.block_failed.emit(
-                "No export settings yet - run Send to SysCon2... once first."
+                "No export settings yet - run 'Export with settings…' once first."
             )
             return False
         if preserve_amplitude and settings.force_binary_intensity:

@@ -13,11 +13,8 @@ Patch-clamp electrophysiology imports are also covered here for completeness.
 
 ## Cellpose segmentation
 
-Open one of:
-
-- **File → Import data → Import cell segmentation** — full importer dialog.
-- **File → Import cell spatial footprints** — shortcut that opens the same
-  dialog directly from the top-level File menu.
+Open **File → Cell segmentation**. Dropping a TIFF or PNG on the Cell
+segmentation tab opens the same dialog and segments the image right away.
 
 ### Dialog sections
 
@@ -162,9 +159,18 @@ model or downsample the image before segmenting.
 When a GPU is unavailable, NeuroSeq shows a one-time hint after launching
 Cellpose and logs the same information before running the Suite2p pipeline.
 
+## Raw calcium imaging TIFFs
+
+**File → Import data → Output → Calcium Imaging (raw .tif)** extracts traces
+directly from one or more 2-photon TIFF stacks. Choose the Cellpose masks
+(those already loaded in the project, a `_seg.npy` file, or Suite2p
+auto-detection), the pipeline (Suite2p, or a simple ROI average) and the
+acquisition parameters, then **Run pipeline**. The pipeline runs in the
+background; the resulting traces are imported like Suite2p outputs.
+
 ## Suite2p calcium imaging
 
-**File → Import data → Import trace → Import calcium imaging** opens the
+**File → Import data → Output → Calcium Imaging (Suite2p outputs)** opens the
 Suite2p importer.
 
 - **File Selection** — point at a Suite2p output folder (the directory that
@@ -181,17 +187,21 @@ and appear in the **Neuron data** dropdown.
 
 ## Patch-clamp electrophysiology
 
-**File → Import data → Import trace → Import patch clamp** loads voltage
-traces recorded with Igor Pro / SutterPatch:
+**File → Import data → Output → Patch Clamp** loads recorded traces (voltage
+in current clamp, current in voltage clamp):
 
-- **Select `.npy` patchclamp file** — the converted patch-clamp recording.
-- **Data Preview** — shows the first few sweeps so you can confirm the data.
-- **Import Options** — which sweeps to pull in, sample-rate handling, and
-  channel selection.
-- **Peak Detection Parameters** — optional thresholding to derive a
-  `SpikeData` alongside the trace.
+- **File Selection** — an Igor2 `.ibw` / `.pxp` file, or a `.csv` / `.txt`
+  table with one trace per column. Packed experiments list their waves in a
+  **Wave Selection** panel; import as many as you need, then click **Close**.
+- **Wave Preview** and **Source Wave Settings** — check the wave and set the
+  source sampling rate where the file does not store it.
+- **Import Target** — create new trace data or add to existing trace data.
+  If the existing data uses a different sample interval, NeuroSeq offers to
+  resample the wave (default) or remap the target, as described in
+  [Importing Igor2 Waves](importing_igor2_waves.md#import-targets).
+- **Spike detection** — optional peak detection to derive a `SpikeData`
+  alongside the trace.
 
-For raw Igor Pro waves see
-[Importing Igor2 Waves](importing_igor2_waves.md). For stimulus-only patch
-clamp recordings use **Import data → Import stimulus → Import patch clamp**
-on the same menu.
+For patch-clamp input (command) waveforms use
+**File → Import data → Input → Patch Clamp**; see
+[Importing Igor2 Waves](importing_igor2_waves.md).

@@ -25,21 +25,21 @@ NeuroSeq supports a high-throughput all-optical pipeline that combines two-photo
   - **Excitatory opsin**: `rAAV9-Syn-ChrimsonR-tdTomato` (red-light cation channel, tdTomato co-expression for identification).
   - **Bidirectional opsin** (optional): `rAAV2-9-CaMKIIa_somBiPOLES-mCerulean` (ChrimsonR–GtACR2 tandem for depolarisation/hyperpolarisation in one construct, tagged with mCerulean).
 
-### Imaging acquisition (drives `importer_tif.py` defaults)
+### Imaging acquisition (drives `importers/importer_tif.py` defaults)
 
 - **Microscope**: RAPP HOLO-4D (Movable Objective Microscope + Ti:Sapphire laser + SLM holographic stimulation path).
 - **2-photon imaging laser**: tunable 660–1320 nm + fixed 1040 nm. **GCaMP excitation at 940 nm.**
 - **Detection**: 4 GaAsP PMTs (2 green, 2 red), plus Dodt contrast.
-- **Spontaneous Ca activity recording**: **27 000 frames over 15 minutes at 30 Hz** (this is where `DEFAULT_FS = 30.0` and `tau = 0.5 s` in `src/neuroseq/importer_tif.py` come from), 512×512 pixels, saved as multi-frame TIFF.
+- **Spontaneous Ca activity recording**: **27 000 frames over 15 minutes at 30 Hz** (this is where `DEFAULT_FS = 30.0` and `tau = 0.5 s` in `src/neuroseq/importers/importer_tif.py` come from), 512×512 pixels, saved as multi-frame TIFF.
 - **Pre-record acquisitions**: an anatomical Dodt snap (2048×2048) and a 41-slice 1 µm Z-stack for spatial registration.
 
-### Holographic stimulation (drives `.seq` export and `stim_editor.py` semantics)
+### Holographic stimulation (drives `.seq` export and `stimulation/stim_editor.py` semantics)
 
 - **2-photon stimulation lasers**: Carbide low-rep-rate / high-peak-pulse-power, two paths — fixed 1040 nm (up to ~40 W) and a tunable >/< 1000 nm path (~60 mW per output).
 - **ChrimsonR stimulation**: 1140 nm, 11 pulses × 16.6 ms at 10 Hz, power swept 23 → 60 mW per spot. Spiral illumination (≥16.6 ms minimum due to spiral period, 10 µm spiral diameter typical).
 - **BiPOLES reference (Vierock 2021)**: 1100 nm, 15 ms pulses at 10 Hz; AP probability curve saturates around 0.3 mW/µm².
 - **Heating budget**: holographic illumination can raise local temperature by 1–5 °C; protocols are bounded by power × number of simultaneous spots.
-- **Stimulation coordination software**: RAPP **SysCon** (driver for `.seq` exports — see `exporter_syscon2.py`, `importer_syscon2.py`); imaging via _ScanImage_; laser control via _Shortcut Chameleon_, _Carbide_, _Topas4_; power via _ThorLabs_.
+- **Stimulation coordination software**: RAPP **SysCon** (driver for `.seq` exports — see `export/exporter_syscon2.py`, `importers/importer_syscon2.py`); imaging via _ScanImage_; laser control via _Shortcut Chameleon_, _Carbide_, _Topas4_; power via _ThorLabs_.
 
 ### Analysis pipeline (mirrors what `importer_tif.py` automates inside neuroseq)
 
@@ -78,29 +78,45 @@ Pre-commit hooks use **ruff** (lint + format), **mypy**, **prettier**, and **nbs
 ```
 Project (project.py)          — top-level state container
 ├── B2Model (b2_model.py)     — Brian2 simulation engine (neurons, synapses, monitors, checkpoints)
-├── StimArray (stim.py)       — stimulation sequences
+├── StimArray (stimulation/stim.py) — stimulation sequences
 ├── Experiment (data.py)      — imported experimental data (traces, spikes, synapses)
 └── Cellpose info             — cell segmentation for hardware mapping
 
-gui.py                        — main window, menu/toolbar wiring, pane management
+gui.py                        — application shell; hosts one ProjectWorkspace per project tab
+project_workspace.py          — per-tab workspace: menus/toolbars, action wiring, pane management
+background_jobs.py            — worker threads and lifecycle for long-running main-window jobs
+project_history.py            — Qt-free session undo/redo shared by a project's data editors
+qt_helpers.py                 — shared generic Qt widgets / window helpers
 io.py                         — .nseq archive persistence (ZIP + JSON + .npy blobs)
 ```
 
+Packages under `src/neuroseq/`:
+
+- `importers/` — importers and import dialogs (TIFF, Suite2p, Cellpose, patch clamp, SysCon2, ScanImage)
+- `export/` — Igor2 and SysCon2 exporters, export dialogs, power LUTs
+- `device_control/` — ScanImage and SysCon2 connections plus the SysCon2 "Stimulation setup" panel
+- `stimulation/` — `StimArray`, stim editor and dialogs; `static_input/` (drawn patterns) and `dynamic_input/` (closed-loop routines: STDP, rheobase)
+- `visualization/`, `visualization_support/` — plot widgets and their shared helpers (see below)
+- `llm/` — chat assistant backends, settings, and plugin-write dialog
+- `elise_support/` — ELiSe protocol dialog, workflows, replay metrics
+- `example_projects/` — example project factories (see table below)
+
 ### Key source files
 
-| File                              | Purpose                                                                              |
-| --------------------------------- | ------------------------------------------------------------------------------------ |
-| `b2_model.py`                     | Brian2 network construction, parameter management, state checkpointing (~2100 lines) |
-| `gui.py`                          | Main window, all action wiring (~1300 lines)                                         |
-| `stim_editor.py`                  | Interactive 2D stim editing, undo/redo (~1200 lines)                                 |
-| `exporter_syscon2.py`             | Hardware script generation for HOLO4D (~3200 lines)                                  |
-| `stimulation_generator_dialog.py` | Export config GUI and sanity checks (~900 lines)                                     |
-| `model_editor.py`                 | Parameter-tree GUI for model editing (~1000 lines)                                   |
-| `data.py`                         | Core dataclasses: `TraceData`, `SpikeData`, `SynapseData`, `Experiment`              |
-| `stim.py`                         | `StimArray`, `StimType` enum, draw profile types                                     |
-| `utils.py`                        | Cross-cutting helpers: Brian2 logging, decorators, synapse matrix construction       |
-| `example_projects/`               | Individual project factories grouped into `neurons/` and `networks/`                 |
-| `conftest.py` (tests/)            | Comprehensive pytest fixtures for Qt, Brian2, projects (~700 lines)                  |
+| File                                     | Purpose                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------------------------------ |
+| `b2_model.py`                            | Brian2 network construction, parameter management, state checkpointing (~2700 lines) |
+| `gui.py`                                 | Main window shell and project tabs (~350 lines)                                      |
+| `project_workspace.py`                   | Per-tab workspace, menus, all action wiring (~3900 lines)                            |
+| `stimulation/stim_editor.py`             | Interactive 2D stim editing, undo/redo (~1600 lines)                                 |
+| `export/exporter_syscon2.py`             | Hardware script generation for HOLO4D (~4000 lines)                                  |
+| `export/stimulation_generator_dialog.py` | Export config GUI and sanity checks (~1300 lines)                                    |
+| `model_editor.py`                        | Parameter-tree GUI for model editing (~1200 lines)                                   |
+| `data.py`                                | Core dataclasses: `TraceData`, `SpikeData`, `SynapseData`, `Experiment`              |
+| `stimulation/stim.py`                    | `StimArray`, `StimType` enum, draw profile types                                     |
+| `utils.py`                               | Cross-cutting helpers: Brian2 logging, decorators, synapse matrix construction       |
+| `example_projects/`                      | Individual project factories grouped into `neurons/` and `networks/`                 |
+| `conftest.py` (tests/)                   | Comprehensive pytest fixtures for Qt, Brian2, projects (~900 lines)                  |
 
 ### Visualization widgets
 
@@ -117,11 +133,14 @@ Shared plot navigation, view state, selection, and brightness controls live in `
 
 ### Import pipelines
 
-- Suite2p fluorescence imaging: `importer_suite2p.py` + `import_dialog.py`
+All importers live in `src/neuroseq/importers/` (`cell_overlay_widget.py` is in `visualization/`):
+
+- Raw 2-photon TIFF (Cellpose + suite2p pipeline): `importer_tif.py` + `tif_import_dialog.py`
+- Suite2p fluorescence imaging: `importer_suite2p.py` + `suite2p_import_dialog.py`
 - Cellpose segmentation: `importer_cellpose.py` + `cellpose_import_dialog.py` + `cell_overlay_widget.py`
-- Patch-clamp electrophysiology: `importer_patchclamp.py` + `patchclamp_import_dialog.py`
+- Patch-clamp input/output (Igor2 `.ibw`/`.pxp`, `.csv`/`.txt`): `importer_patch_clamp_data.py` + `patch_clamp_data_input_import_dialog.py` / `patch_clamp_data_output_import_dialog.py`
 - SysCon2 holographic sequences: `importer_syscon2.py` + `syscon2_import_dialog.py`
-- Igor2 binary waveforms: `importer_igor2.py` + `igor_import_dialog.py`
+- ScanImage TIFF recordings (indexing without loading movies): `importer_scanimage.py`
 
 ## Code Style & Tooling
 

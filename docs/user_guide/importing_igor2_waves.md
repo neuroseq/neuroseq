@@ -2,12 +2,12 @@
 
 NeuroSeq can import stimulation waveforms from Igor Pro / Sutter workflows into stimulation arrays.
 
-Open the dialog from `File → Import data → Import stimulus → Import patch clamp`. The pre-dialog asks for the source software — choose `Igor2` — and the file picker accepts `.ibw`, `.pxp`, and `.csv` files.
+Open the dialog from `File → Import data → Input → Patch Clamp`. The file picker accepts `.ibw`, `.pxp`, `.csv`, and `.txt` files.
 
 ## Supported input formats
 
-CSV recordings can also be imported through `File → Input data → Output → Patch Clamp`
-by choosing `CSV / Text (.csv, .txt)`. Both extensions use the same importer.
+CSV recordings can also be imported through `File → Import data → Output → Patch Clamp`
+by picking a `.csv` or `.txt` file. Both extensions use the same importer.
 Each column is a separate trace and each row is a sample.
 Comma, tab, and whitespace separators are detected automatically.
 An optional header row names the traces; without it, names use the filename and
@@ -26,8 +26,8 @@ cell_a,cell_b
 -63,-60
 ```
 
-For CSV patch-clamp input, choose `File → Input data → Input → Patch Clamp`,
-then `CSV / Text (.csv, .txt)`. Both extensions accept a single column with one numeric sample per row; an
+For CSV patch-clamp input, choose `File → Import data → Input → Patch Clamp`
+and pick a `.csv` or `.txt` file. Both extensions accept a single column with one numeric sample per row; an
 optional first row can contain the waveform name. Without a header, the file
 name supplies the waveform name. Set **Source sampling rate** in Hz and choose
 the input units before importing. The preview and imported duration use this
@@ -87,8 +87,17 @@ The dialog offers two modes:
   - Other neuron columns are always preserved.
 
 If an existing target stimulation array or trace dataset uses a different `dt`
-than the source, NeuroSeq asks for confirmation and resamples that target to the
-source interval before writing the wave. Other datasets keep their intervals.
+than the source, NeuroSeq asks how to proceed:
+
+- **Resample wave to target Δt** (default) — the wave is resampled onto the
+  target's grid; the target is unchanged.
+- **Remap target to wave Δt** — the whole target is remapped onto the wave's
+  grid. Existing timing may shift by up to one sample, and remapping onto a
+  fast recording's grid can make the target very large.
+- **Cancel** — nothing is imported.
+
+Other datasets keep their intervals. The import is recorded as one undoable
+edit.
 
 For packed experiments, the suggested stim name and units update automatically when you choose a different wave.
 

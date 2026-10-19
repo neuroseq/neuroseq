@@ -117,7 +117,7 @@ the corrected values back to the stim array via _Apply fixes_.
 
 ## Exporting
 
-1. Open **File → Export data → Export light stimulus** (or the toolbar button) and choose `SysCon2` in the pre-dialog.
+1. Open **File → Export → Optogenetic Input** and choose `SysCon2` in the pre-dialog. This writes the files only; to also import the generated sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel instead.
 2. Select the stim array and Cellpose segmentation.
 3. Choose laser wavelength (`940 nm`, `1030 nm`, or `1100 nm` digital; default `940 nm`).
 4. Optionally set a **Target power** and load a power LUT (see below).
@@ -183,8 +183,8 @@ neuroseq --generate-cellpose-test-data ./cellpose_1300.tif \
 
 ## Importing a `.seq` file
 
-Use **File → Import stimulus → Import light stimulus → SysCon2** to reconstruct a
-sequence in an existing input array. Browsing and cancelling do not change the
+Use **File → Import data → Input → Optogenetics** to reconstruct a
+sequence in a new or existing input array. Browsing and cancelling do not change the
 project. Import applies the file's header as the session's export template only
 after conversion succeeds. The imported input uses 520.8125 µs samples. If an
 existing target input uses a different interval, only that input is resampled
