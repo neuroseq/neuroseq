@@ -1281,6 +1281,37 @@ def test_resample_stim_values_to_dt_preserves_total_duration_when_upsampling() -
     assert new_values[4, 0] == 1.0
 
 
+def test_resample_stim_values_to_dt_breaks_ties_consistently() -> None:
+    # An exact 2x upsample puts every other tick halfway between two samples;
+    # round-half-to-even used to alternate the tie direction and jitter pulse widths.
+    values = np.zeros((6, 1), dtype=np.float32)
+    values[1, 0] = 1.0
+    values[3, 0] = 1.0
+    stim_array = StimArray("stim", StimType.Excitation, values, "1", 0.002)
+
+    new_values, n_new = resample_stim_values_to_dt(stim_array, new_dt=0.001)
+
+    assert n_new == 12
+    assert new_values[:, 0].tolist() == [0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0]
+
+
+def test_resample_stim_values_to_dt_tolerates_float_error_at_sample_boundaries() -> (
+    None
+):
+    # 1 ms -> 100 us: tick 110 sits exactly on old sample 11 (110 * 1e-4 / 1e-3 is
+    # 11.000000000000002 in floats); 100 us -> 1 ms: 950 * 2e-5 / 1e-3 rounds to 19.
+    values = np.arange(20, dtype=np.float32)[:, np.newaxis]
+    upsampled, _ = resample_stim_values_to_dt(
+        StimArray("stim", StimType.Excitation, values, "1", 0.001), new_dt=0.0001
+    )
+    assert upsampled[110, 0] == 11
+    _, n_new = resample_stim_values_to_dt(
+        StimArray("s", StimType.Excitation, np.zeros((950, 1)), "1", 0.00002),
+        new_dt=0.001,
+    )
+    assert n_new == 19
+
+
 def test_resample_stim_values_to_dt_rejects_non_2d_input() -> None:
     stim_array = StimArray(
         name="stim",

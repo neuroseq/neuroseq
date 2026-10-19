@@ -18,6 +18,8 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim_timing import ceil_sample_position
+from neuroseq.stimulation.stim_timing import round_sample_position
 
 _BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
 _HEADER_HASH_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){15}$")
@@ -2522,6 +2524,15 @@ def resample_stim_values_to_dt(
     trigger/intensity pulses -- interpolating between "off" and "on" would invent fractional
     intermediate values that don't correspond to a real hardware state.
 
+    This deliberately differs from the zero-order hold used everywhere else
+    (:func:`neuroseq.stimulation.stim_timing.resample_zero_order_hold`): it is an explicit
+    "fit onto the SysCon2 tick" fix, so it minimises the absolute timing error of every
+    edge (at most half a source sample, early or late, instead of up to one tick late) and
+    keeps the programmed protocol duration closest to the original (rounded, not padded up
+    to whole ticks). A tick exactly halfway between two samples takes the earlier one
+    (the sample still being held, as in a zero-order hold), so e.g. an exact 2x upsample
+    reproduces every pulse exactly; float-tolerant rounding keeps ties consistent.
+
     Returns:
       (new_values, new_n_timepoints)
     """
@@ -2539,11 +2550,10 @@ def resample_stim_values_to_dt(
             np.zeros((0, stim_array.values.shape[1]), dtype=np.float32),
             0,
         )
-    duration_s = n_old * old_dt
-    n_new = max(1, int(round(duration_s / new_dt)))
-    new_sample_times = np.arange(n_new) * new_dt
+    n_new = max(1, int(round_sample_position(n_old * old_dt / new_dt)))
+    new_sample_positions = np.arange(n_new, dtype=np.float64) * new_dt / old_dt
     nearest_old_idx = np.clip(
-        np.round(new_sample_times / old_dt).astype(np.intp), 0, n_old - 1
+        ceil_sample_position(new_sample_positions - 0.5).astype(np.intp), 0, n_old - 1
     )
     new_values = np.array(
         stim_array.values[nearest_old_idx], dtype=np.float32, copy=True

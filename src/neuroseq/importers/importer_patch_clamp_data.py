@@ -11,6 +11,8 @@ import brian2.numpy_ as np
 
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import resample_zero_order_hold
+from neuroseq.stimulation.stim_timing import zero_order_hold_sample_count
 
 if TYPE_CHECKING:
     from neuroseq.data import TraceData
@@ -543,8 +545,10 @@ def estimate_resampled_sample_count(
         raise ValueError("Igor waves must contain at least one sample")
     if source_dt <= 0 or target_dt <= 0:
         raise ValueError("Sampling intervals must be positive")
-    total_duration = float(sample_count) * float(source_dt)
-    return max(1, int(np.ceil(total_duration / float(target_dt))))
+    return max(
+        1,
+        zero_order_hold_sample_count(sample_count, float(source_dt), float(target_dt)),
+    )
 
 
 def resample_wave_zero_order_hold(
@@ -561,15 +565,7 @@ def resample_wave_zero_order_hold(
     if abs(float(source_dt) - float(target_dt)) <= _DT_TOLERANCE_SECONDS:
         return source_values.copy()
 
-    target_sample_count = estimate_resampled_sample_count(
-        int(source_values.size),
-        float(source_dt),
-        target_dt=float(target_dt),
-    )
-    target_times = np.arange(target_sample_count, dtype=np.float64) * float(target_dt)
-    source_indices = np.floor(target_times / float(source_dt)).astype(np.int64)
-    source_indices = np.clip(source_indices, 0, source_values.size - 1)
-    return source_values[source_indices].astype(np.float32, copy=False)
+    return resample_zero_order_hold(source_values, float(source_dt), float(target_dt))
 
 
 def prepare_igor_wave_for_neuroseq(

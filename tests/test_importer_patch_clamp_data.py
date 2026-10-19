@@ -958,3 +958,19 @@ def test_load_igor_pxp_file_keeps_working_file_strictly_clean() -> None:
 
     assert report.waves
     assert report.skipped == []
+
+
+def test_wave_resampling_uses_exact_zero_order_hold_boundaries() -> None:
+    from neuroseq.importers.importer_patch_clamp_data import (
+        estimate_resampled_sample_count,
+    )
+    from neuroseq.importers.importer_patch_clamp_data import (
+        resample_wave_zero_order_hold,
+    )
+
+    assert estimate_resampled_sample_count(950, 0.00002, target_dt=0.001) == 19
+    values = np.arange(200, dtype=np.float32)
+    resampled = resample_wave_zero_order_hold(values, source_dt=0.0001, target_dt=0.001)
+    assert resampled.shape == (20,)
+    assert resampled.dtype == np.float32
+    assert resampled[11] == 110
