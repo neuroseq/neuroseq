@@ -1106,6 +1106,22 @@ def test_closing_the_main_window_closes_static_input_designer(qtbot: QtBot) -> N
     assert gui.static_input_controller._pattern_dialog is None
 
 
+def test_replacing_the_project_discards_static_input_designer(qtbot: QtBot) -> None:
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.update_project(default_project())
+    gui.static_input_controller.open_pattern_designer()
+    dialog = gui.static_input_controller._pattern_dialog
+    assert dialog is not None
+
+    gui.update_project(default_project())
+
+    assert not dialog.isVisible()
+    assert gui.static_input_controller._pattern_dialog is None
+    gui._close_confirmed = True
+    gui.close()
+
+
 def test_closing_the_main_window_closes_dynamic_input_routine_dialogs(
     qtbot: QtBot,
 ) -> None:

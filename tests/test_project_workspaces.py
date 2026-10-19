@@ -318,7 +318,7 @@ def test_recording_workspace_stays_open_until_its_acquisition_ends(
     mocker.patch.object(connection.process, "write")
     connection.connected = True
     try:
-        workspace._start_scanimage_recording(
+        workspace.acquisition_controller.start_scanimage_recording(
             {"run_id": "pending-run", "name": "Run", "directory": "/x", "frames": 4}
         )
         assert workspace.acquisition_controller.acquisition_in_progress
@@ -330,7 +330,7 @@ def test_recording_workspace_stays_open_until_its_acquisition_ends(
         # release the workspace (it used to stay "in progress" forever).
         connection._reply({"id": connection._serial, "error": "volume unsupported"})
         assert connection.run_id is None
-        assert not workspace._scanimage_run_ids
+        assert not workspace.acquisition_controller.run_ids
         assert workspace.project.imaging_acquisitions[0]["status"] == "failed"
         workspace.project.dirty = False
         window._close_tab(0)
@@ -342,7 +342,7 @@ def test_recording_workspace_stays_open_until_its_acquisition_ends(
 def test_disconnected_unknown_run_does_not_block_closing(window, mocker):
     workspace = window.active_workspace
     connection = window.devices.scanimage
-    workspace._scanimage_run_ids.add("lost")
+    workspace.acquisition_controller.run_ids.add("lost")
     connection.run_id = "lost"
     try:
         # The helper died: the run stays reconcilable on reconnect, but
@@ -350,7 +350,7 @@ def test_disconnected_unknown_run_does_not_block_closing(window, mocker):
         assert not workspace.close_blockers()
     finally:
         connection.run_id = None
-        workspace._scanimage_run_ids.clear()
+        workspace.acquisition_controller.run_ids.clear()
 
 
 def _start_job(workspace, *, cancellable=True, honour_cancel=True):
@@ -565,7 +565,7 @@ def test_first_frame_timeout_belongs_to_the_workspace_that_started_the_run(
     second = window._add_workspace(_project())
     connection = window.devices.scanimage
     command = mocker.patch.object(connection, "command", return_value=True)
-    first._start_scanimage_recording(
+    first.acquisition_controller.start_scanimage_recording(
         {"run_id": "a", "name": "Run", "directory": "/x", "frames": 4}
     )
     connection.run_id = "a"

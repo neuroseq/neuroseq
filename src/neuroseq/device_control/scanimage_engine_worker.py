@@ -7,6 +7,7 @@ reserved for protocol replies. No arbitrary MATLAB evaluation is exposed.
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import io
 import json
@@ -16,8 +17,9 @@ from pathlib import Path
 from typing import Any
 
 
+@functools.cache
 def _load_importer():
-    """Load the Qt-free indexer without importing the NeuroSeq package."""
+    """Load the Qt-free indexer without importing the NeuroSeq package (once)."""
     path = Path(__file__).resolve().parents[1] / "importers" / "importer_scanimage.py"
     spec = importlib.util.spec_from_file_location("importer_scanimage", path)
     if spec is None or spec.loader is None:

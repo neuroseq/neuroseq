@@ -280,7 +280,7 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     gui = window.active_workspace
     original = gui.project
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
     )
     assert original.imaging_acquisitions[0]["status"] == "requested"
@@ -465,11 +465,11 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
     )
     gui.scanimage_connection.run_id = "one"
-    gui._scanimage_status(
+    gui.acquisition_controller.scanimage_status(
         {
             "run": {"id": "one", "state": "recording"},
             "matlab_version": "2023a",
@@ -489,7 +489,7 @@ def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recordin
     old_group = Experiment(name="Test", duration=1.0, timepoints=[], data=[])
     gui.project.add_experiment(old_group)
     gui.project.remove_experiments(["Test"])
-    gui._scanimage_recording_ready(result)
+    gui.acquisition_controller.scanimage_recording_ready(result)
     recorded = gui.project.experiments["Test"]
     assert recorded is not old_group
     assert gui.project.history.undo_label == "Add data group"
@@ -665,7 +665,7 @@ def test_new_recording_preserves_imported_movie(
     imported = Path(recording[0][0])
     project.add_calcium_video([imported], 20, name="Imported")
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
-    gui._start_scanimage_recording(
+    gui.acquisition_controller.start_scanimage_recording(
         {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
     )
     if switch_project:
@@ -803,7 +803,7 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     qtbot.addWidget(gui)
     # The Video tab must keep mirroring the Cell segmentation tab, so no
     # acquisition controls may be inserted above its canvas.
-    assert gui.scanimage_controls.window() is gui.scanimage_dialog
+    assert gui.scanimage_controls.window() is gui.acquisition_controller.dialog
     assert not gui.calcium_video_widget.isAncestorOf(gui.scanimage_controls)
     toolbar = gui.btn_design_dynamic_input.parentWidget()
     assert isinstance(toolbar, QtWidgets.QToolBar)
@@ -817,8 +817,8 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
     ]
     assert not gui.cmb_video.isEnabled()
     gui.btn_image_acquisition.click()
-    assert gui.scanimage_dialog.isVisible()
-    assert not gui.scanimage_dialog.isModal()
+    assert gui.acquisition_controller.dialog.isVisible()
+    assert not gui.acquisition_controller.dialog.isModal()
     gui._close_confirmed = True
     gui.close()
 
@@ -1000,7 +1000,7 @@ def test_live_preview_is_shared_and_reflected_in_every_workspace(
     def ready(run_id):
         result = index_recording(recording[0])
         result.update(run_id=run_id, status="completed")
-        first._scanimage_recording_ready(result)
+        first.acquisition_controller.scanimage_recording_ready(result)
 
     second.scanimage_controls.live_check.setChecked(True)
     assert connection.live_preview
@@ -1012,7 +1012,7 @@ def test_live_preview_is_shared_and_reflected_in_every_workspace(
 
     # A recording finishing in one tab keeps a preview another tab turned on.
     mocker.patch.object(connection, "command", return_value=True)
-    first._start_scanimage_recording(
+    first.acquisition_controller.start_scanimage_recording(
         {"run_id": "a", "name": "A", "directory": "/x", "frames": 4}
     )
     ready("a")
@@ -1022,7 +1022,7 @@ def test_live_preview_is_shared_and_reflected_in_every_workspace(
     # A preview the recording itself switched on is switched off afterwards.
     first.scanimage_controls.live_check.setChecked(False)
     assert not connection.live_preview and not second.calcium_video_widget._live
-    first._start_scanimage_recording(
+    first.acquisition_controller.start_scanimage_recording(
         {"run_id": "b", "name": "B", "directory": "/x", "frames": 4}
     )
     assert connection.live_preview and third.scanimage_controls.live_check.isChecked()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -11,7 +12,9 @@ from neuroseq.project_history import StaleCommandError
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import stim_dt_matches
-from neuroseq.visualization.stim_widget import StimWidget
+
+if TYPE_CHECKING:
+    from neuroseq.visualization.stim_widget import StimWidget
 
 
 class ReversibleAction:

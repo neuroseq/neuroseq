@@ -4,7 +4,7 @@
 
 `src/neuroseq/` contains the installable package and most application code. GUI entry lives in `__main__.py`; visualization widgets and their plotting base classes live in `visualization/`, including `stim_widget.py`. Stimulation editing logic remains in `stimulation/`, import code in `importers/`, and export code in `export/`. Other shared modules, widgets, and dialogs remain directly under `src/neuroseq/`, using names like `*_widget.py` and `*_dialog.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds MkDocs content, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `example_data/`, and `notebooks/` are supporting material, not core package code.
 
-`visualization_support/` contains shared plot navigation, gridlines, selection regions, playback controls, trace/spatial view state, neuron selection, and brightness/contrast controls.
+`visualization_support/` contains shared plot navigation, gridlines, selection regions, trace/spatial view state, Cellpose id helpers, neuron selection, and brightness/contrast controls. It must not import `visualization/` (enforced by `tests/test_import_layering.py`); the playback time slider lives in `visualization/`.
 
 `example_projects/` contains one project factory per file, grouped under `neurons/` and `networks/`. Its package entry point exports the existing factory names and registers projects in menu order; `_registry.py` contains the registration decorator.
 

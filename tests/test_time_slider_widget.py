@@ -9,11 +9,11 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.visualization.heatmap_widget import HeatmapWidget
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.stim_widget import StimWidget
+from neuroseq.visualization.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
-from neuroseq.visualization_support.time_slider_widget import TimeSliderWidget
 
 
 def test_time_slider_widget(

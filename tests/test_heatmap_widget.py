@@ -8,7 +8,7 @@ from pytestqt.qtbot import QtBot
 
 from neuroseq.visualization.heatmap_widget import HeatmapNormDialog
 from neuroseq.visualization.heatmap_widget import HeatmapWidget
-from neuroseq.visualization_support.time_slider_widget import TimeSliderWidget
+from neuroseq.visualization.time_slider_widget import TimeSliderWidget
 
 
 def test_heatmap_widget_no_data(qtbot: QtBot) -> None:

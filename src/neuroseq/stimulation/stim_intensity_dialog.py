@@ -4,10 +4,10 @@ from qtpy import QtWidgets
 
 from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import snap_milliseconds_to_dt
-from neuroseq.visualization.stim_widget import StimType
 
 
 class StimIntensityDialog(QtWidgets.QDialog):

@@ -15,7 +15,6 @@ import pygfx
 from matplotlib.path import Path as MplPath
 from qtpy import QtCore
 from qtpy import QtWidgets
-from scipy import ndimage
 
 from neuroseq.aoi_shapes import circle_handles
 from neuroseq.aoi_shapes import circle_polyline
@@ -24,7 +23,6 @@ from neuroseq.aoi_shapes import square_corners
 from neuroseq.aoi_shapes import square_polyline
 from neuroseq.importers.importer_cellpose import AOIRole
 from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
-from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import CircleAOI
 from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
@@ -124,53 +122,12 @@ def compute_segmentation_legend(
     ]
 
 
-def cellpose_to_stim_id(
-    cellpose_id: int, cellpose_data: CellposeImportResult | None
-) -> int | None:
-    mapping = (
-        cellpose_data.stimulus_to_cellpose_mapping
-        if cellpose_data is not None
-        else None
-    )
-    if not mapping:
-        return cellpose_id
-    return {value: key for key, value in mapping.items()}.get(cellpose_id)
-
-
-def stim_id_to_cellpose_id(
-    stim_id: int | None, cellpose_data: CellposeImportResult | None
-) -> int | None:
-    if stim_id is None:
-        return None
-    mapping = (
-        cellpose_data.stimulus_to_cellpose_mapping
-        if cellpose_data is not None
-        else None
-    )
-    if not mapping:
-        return stim_id
-    return mapping.get(stim_id)
-
-
 def _pixel_at(world_x: float, world_y: float) -> tuple[int, int]:
     """Return the (column, row) of the image pixel under a world position.
 
     Pixel centres sit at integer world coordinates, so round to the nearest.
     """
     return int(np.floor(world_x + 0.5)), int(np.floor(world_y + 0.5))
-
-
-def compute_cell_centroids(
-    segmentation: np.ndarray,
-) -> dict[int, tuple[float, float]]:
-    """Return cell centroids as (column, row) image/world coordinates."""
-    centroids: dict[int, tuple[float, float]] = {}
-    for cell_id in np.unique(segmentation):
-        if cell_id < 0:
-            continue
-        row, col = ndimage.center_of_mass(segmentation == cell_id)
-        centroids[int(cell_id)] = (float(col), float(row))
-    return centroids
 
 
 class OverlayView(FullScreenFPLWidget):

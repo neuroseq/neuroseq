@@ -81,13 +81,13 @@ from neuroseq.visualization.data_widget import DataWidget
 from neuroseq.visualization.heatmap_widget import HeatmapWidget
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.visualization.spike_widget import SpikeWidget
+from neuroseq.visualization.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
 from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
-from neuroseq.visualization_support.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
 from neuroseq.workspace_acquisition_controller import WorkspaceAcquisitionController
 from neuroseq.workspace_devices import WorkspaceDevices
@@ -459,9 +459,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
         # Compatibility handles for integrations using the workspace directly.
         self.scanimage_connection = self.acquisition_controller.connection
-        self.scanimage_dialog = self.acquisition_controller.dialog
         self.scanimage_controls = self.acquisition_controller.controls
-        self._scanimage_run_ids = self.acquisition_controller.run_ids
         self._create_menus_and_toolbars()
         self.setWindowIcon(qta.icon("fa6s.brain"))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
@@ -1094,10 +1092,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
     def btn_manage_data_clicked(self) -> None:
         dialog = DataManagerDialog(self.project, parent=self)
+        # Each deletion refreshes the GUI; closing the dialog changes nothing,
+        # so no extra refresh (it would reset the saved vertical views).
         dialog.data_changed.connect(lambda: self.update_project(self.project))
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
-            # Update the GUI with changes made in the dialog
-            self.update_project(self.project)
+        dialog.exec()
 
     def load_project(
         self, project: str | pathlib.Path | Project, new_tab: bool = True
@@ -1209,12 +1207,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.project, keep_undo_history=preserve_dynamic_input
         )
         # A replaced project must not inherit the previous run's Design dynamic
-        # input state (plots, log, EPSP history); drop the cached dialog so it
-        # is rebuilt fresh on next open.
+        # input state (plots, log, EPSP history) or static pattern designer;
+        # drop the cached dialogs so they are rebuilt fresh on next open.
         if preserve_dynamic_input:
             self.dynamic_input_controller.refresh()
         else:
             self.dynamic_input_controller.discard_dynamic_input_dialogs()
+            self.static_input_controller.discard_dialog()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
@@ -2200,15 +2199,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._update_combo_boxes()
         self.update_limits()
 
-    def _start_scanimage_recording(self, arguments: dict) -> None:
-        return self.acquisition_controller.start_scanimage_recording(arguments)
-
-    def _scanimage_status(self, status: dict) -> None:
-        return self.acquisition_controller.scanimage_status(status)
-
-    def _open_image_acquisition_dialog(self) -> None:
-        return self.acquisition_controller.open_image_acquisition_dialog()
-
     def _refresh_video_selector(self) -> None:
         if not hasattr(self, "cmb_video"):
             return
@@ -2252,17 +2242,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
 
-    def _set_scanimage_live(self, live: bool) -> None:
-        return self.acquisition_controller.set_scanimage_live(live)
-
-    def _set_scanimage_channel(self, channel: int) -> None:
-        return self.acquisition_controller.set_scanimage_channel(channel)
-
     def _recorded_scanimage_channel(self, index: dict | None, channel: int) -> int:
         return self.acquisition_controller.recorded_scanimage_channel(index, channel)
-
-    def _scanimage_recording_ready(self, result: dict) -> None:
-        return self.acquisition_controller.scanimage_recording_ready(result)
 
     def btn_open_fiji_clicked(self) -> None:
         from neuroseq.external_tools import launch_fiji
@@ -3059,7 +3040,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             "Connect to ScanImage to preview and record imaging"
         )
         icons.set_widget_icon(self.btn_image_acquisition, "mdi6.microscope")
-        self.btn_image_acquisition.clicked.connect(self._open_image_acquisition_dialog)
+        self.btn_image_acquisition.clicked.connect(
+            self.acquisition_controller.open_image_acquisition_dialog
+        )
         toolbar.addWidget(self.btn_image_acquisition)
         self.cmb_video = QtWidgets.QComboBox()
         self.cmb_video.setMinimumWidth(160)

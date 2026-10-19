@@ -194,12 +194,10 @@ class Gui(QtWidgets.QMainWindow):
         self._refresh_title(workspace)
         return workspace
 
-    def load_project(
-        self, project: pathlib.Path | str | Project, new_tab: bool = True
-    ) -> None:
+    def load_project(self, project: pathlib.Path | str | Project) -> None:
         # The workspace performs file loading asynchronously and requests a new
         # workspace only once it has a complete Project object.
-        self.active_workspace.load_project(project, new_tab=new_tab)
+        self.active_workspace.load_project(project)
 
     def _activate_workspace(self, _index: int) -> None:
         if self.project_tabs.currentWidget() is self._visible_workspace:

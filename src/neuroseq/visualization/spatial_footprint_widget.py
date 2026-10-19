@@ -11,12 +11,12 @@ from scipy.ndimage import binary_erosion
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
-from neuroseq.visualization.cell_overlay_widget import cellpose_to_stim_id
 from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.visualization.fpl_widget import FPLWidget
 from neuroseq.visualization_support.brightness_contrast import BrightnessContrastDialog
 from neuroseq.visualization_support.brightness_contrast import DisplayRange
 from neuroseq.visualization_support.brightness_contrast import apply_display_range
+from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 
 SELECTION_OUTLINE_RED = (0.9, 0.15, 0.15)
