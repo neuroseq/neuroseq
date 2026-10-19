@@ -135,6 +135,24 @@ added (undoable with Edit → Undo) containing
 **Stop** terminates the helper. A run already sent to the chip cannot be
 recalled; its results are discarded and you have to reconnect.
 
+## Debug log
+
+The **Debug log** box at the bottom of the tab records every step with a
+timestamp: the exact `singularity exec …` launch command and the variables
+NeuroSeq passes into the container, the helper process start and exit code,
+everything the container prints while its software environment activates,
+the helper's Python/package versions and quiggeldy settings, and (with
+**Show protocol traffic** on) every message exchanged with the helper, with
+arrays summarised by type and shape.
+
+The EBRAINS token never appears in the log: NeuroSeq and the helper only
+report whether it was given and how many characters it has.
+
+To report a connection problem, click **Copy log**. It copies the log
+together with the NeuroSeq version, host, Singularity version, connection
+state and the tab's settings, ready to paste into a message. The text in the
+log can also be selected and copied directly. **Clear** empties the log.
+
 ## Assumptions to check on the real system
 
 - The speed-up of 1000 and that `pynn.run` durations, spike times and MADC

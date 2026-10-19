@@ -13,15 +13,20 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
+import subprocess
 import urllib.request
 from collections.abc import Callable
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq import __version__ as NEUROSEQ_VERSION
 from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.data import SpikeData
@@ -50,7 +55,7 @@ _SPIKE_SOURCES = [
 ]
 _STARTING_STATES = (STATE_STARTING, STATE_CONNECTING)
 _SETUP_DOWNLOAD_TIMEOUT_S = 10.0
-_MAX_LOG_LINES = 500
+_MAX_LOG_LINES = 5000
 
 
 def fetch_text(url: str) -> str:
@@ -128,6 +133,7 @@ class Bss2Panel(QtWidgets.QWidget):
         layout.addWidget(self._build_connection_group())
         layout.addWidget(self._build_input_group())
         layout.addWidget(self._build_delivery_group())
+        layout.addWidget(self._build_debug_group())
         layout.addStretch(1)
         scroll.setWidget(content)
         outer.addWidget(scroll)
@@ -228,6 +234,9 @@ class Bss2Panel(QtWidgets.QWidget):
         form.addRow(row)
         self.status_label = QtWidgets.QLabel("Disconnected")
         self.status_label.setWordWrap(True)
+        self.status_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
         form.addRow("Status", self.status_label)
         self.identifier_label = QtWidgets.QLabel("–")
         self.identifier_label.setTextInteractionFlags(
@@ -324,11 +333,43 @@ class Bss2Panel(QtWidgets.QWidget):
         row.addWidget(self.btn_stop)
         row.addStretch(1)
         layout.addLayout(row)
+        return group
+
+    def _build_debug_group(self) -> QtWidgets.QGroupBox:
+        group = QtWidgets.QGroupBox("Debug log")
+        layout = QtWidgets.QVBoxLayout(group)
+        row = QtWidgets.QHBoxLayout()
+        self.chk_protocol_trace = QtWidgets.QCheckBox("Show protocol traffic")
+        self.chk_protocol_trace.setChecked(True)
+        self.chk_protocol_trace.setToolTip(
+            "Also log the launch command, every message exchanged with the "
+            "container helper and the helper process lifecycle. The EBRAINS "
+            "token is never shown."
+        )
+        self.btn_copy_log = QtWidgets.QPushButton("Copy log")
+        self.btn_copy_log.setToolTip(
+            "Copy the log, with NeuroSeq/host/settings details, to the clipboard."
+        )
+        self.btn_copy_log.clicked.connect(self.copy_log)
+        self.btn_clear_log = QtWidgets.QPushButton("Clear")
+        self.btn_clear_log.clicked.connect(self.clear_log)
+        row.addWidget(self.chk_protocol_trace)
+        row.addStretch(1)
+        row.addWidget(self.btn_copy_log)
+        row.addWidget(self.btn_clear_log)
+        layout.addLayout(row)
         self.log_view = QtWidgets.QPlainTextEdit()
         self.log_view.setReadOnly(True)
+        self.log_view.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+            | QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard
+        )
+        self.log_view.setLineWrapMode(QtWidgets.QPlainTextEdit.LineWrapMode.NoWrap)
+        self.log_view.setFont(
+            QtGui.QFontDatabase.systemFont(QtGui.QFontDatabase.SystemFont.FixedFont)
+        )
         self.log_view.setMaximumBlockCount(_MAX_LOG_LINES)
-        self.log_view.setMinimumHeight(80)
-        self.log_view.setMaximumHeight(160)
+        self.log_view.setMinimumHeight(160)
         layout.addWidget(self.log_view)
         return group
 
@@ -469,6 +510,7 @@ class Bss2Panel(QtWidgets.QWidget):
         self._session.connected.connect(self._on_connected)
         self._session.disconnected.connect(self._on_disconnected)
         self._session.log_message.connect(self._log)
+        self._session.debug_message.connect(self._debug)
         self._session.run_progress.connect(self._on_run_progress)
         self._session.run_finished.connect(self._on_run_finished)
         self._session.run_failed.connect(self._on_run_failed)
@@ -527,9 +569,17 @@ class Bss2Panel(QtWidgets.QWidget):
         from_data = self.spike_source_combo.currentData() == bp.SPIKE_SOURCE_EXPERIMENT
         self.current_box.setVisible(not spikes)
         self.spike_box.setVisible(spikes)
-        for widget in (self.threshold_spin, self.event_ms_spin):
+        stim_widgets: tuple[QtWidgets.QWidget, ...] = (
+            self.threshold_spin,
+            self.event_ms_spin,
+        )
+        data_widgets: tuple[QtWidgets.QWidget, ...] = (
+            self.experiment_combo,
+            self.dataset_combo,
+        )
+        for widget in stim_widgets:
             widget.setEnabled(not from_data)
-        for widget in (self.experiment_combo, self.dataset_combo):
+        for widget in data_widgets:
             widget.setEnabled(from_data)
         self._save_settings()
 
@@ -673,4 +723,49 @@ class Bss2Panel(QtWidgets.QWidget):
 
     def _log(self, text: str) -> None:
         if text:
-            self.log_view.appendPlainText(text)
+            stamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            for line in text.splitlines() or [""]:
+                self.log_view.appendPlainText(f"{stamp}  {line}")
+
+    def _debug(self, text: str) -> None:
+        if self.chk_protocol_trace.isChecked():
+            self._log(text)
+
+    def clear_log(self) -> None:
+        self.log_view.clear()
+
+    def debug_report(self) -> str:
+        """The log with context (versions, host, settings); never the token."""
+        token_given = bool(
+            self.token_edit.text().strip() or os.environ.get("QUIGGELDY_TOKEN")
+        )
+        header = bp.debug_report_header(
+            self.current_settings(),
+            token_given=token_given,
+            neuroseq_version=NEUROSEQ_VERSION,
+            singularity_version=_singularity_version(),
+            connection_state=self._session.state,
+            identifier=self._session.identifier,
+        )
+        return "\n".join([*header, self.log_view.toPlainText()])
+
+    def copy_log(self) -> None:
+        clipboard = QtWidgets.QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self.debug_report())
+        self._log("Debug log copied to the clipboard.")
+
+
+def _singularity_version() -> str:
+    for program in ("singularity", "apptainer"):
+        path = shutil.which(program)
+        if path is None:
+            continue
+        try:
+            completed = subprocess.run(
+                [path, "--version"], capture_output=True, text=True, timeout=5
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"{path} (version unknown: {exc})"
+        return f"{path}: {completed.stdout.strip() or completed.stderr.strip()}"
+    return "not found on PATH"

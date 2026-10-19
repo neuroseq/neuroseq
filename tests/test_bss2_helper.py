@@ -372,3 +372,30 @@ def test_collect_signal_rejects_mismatched_lengths(helper) -> None:
     with pytest.raises(ValueError, match="differ"):
         helper.collect_signal(signal)
     assert helper.collect_spikes([])[0].size == 0
+
+
+def test_environment_report_masks_the_token(helper) -> None:
+    report = helper.environment_report(
+        {"QUIGGELDY_IP": "h", "QUIGGELDY_TOKEN": "abcdef", "SYSTEMNAME": "lab"}
+    )
+    assert report["QUIGGELDY_IP"] == "h" and report["SYSTEMNAME"] == "lab"
+    assert report["QUIGGELDY_TOKEN_STATUS"] == "set (6 characters)"
+    assert "abcdef" not in str(report) and "QUIGGELDY_TOKEN" not in report
+    assert report["QUIGGELDY_PORT"] == "<unset>"
+    assert helper.environment_report({})["QUIGGELDY_TOKEN_STATUS"] == "unset"
+    assert (
+        helper.environment_report({"QUIGGELDY_TOKEN": ""})["QUIGGELDY_TOKEN_STATUS"]
+        == "empty"
+    )
+
+
+def test_package_versions_never_raise(helper, monkeypatch) -> None:
+    def broken(name):
+        if name == "numpy":
+            raise RuntimeError("bad metadata")
+        raise helper.importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(helper.importlib.metadata, "version", broken)
+    versions = helper.package_versions()
+    assert versions["pynn-brainscales"] == "not installed"
+    assert versions["numpy"] == "unknown (RuntimeError)"

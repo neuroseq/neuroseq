@@ -18,6 +18,7 @@ is never read into, or written out of, a protocol message.
 from __future__ import annotations
 
 import base64
+import importlib.metadata
 import importlib.util
 import json
 import os
@@ -154,6 +155,51 @@ def configure_quiggeldy(
     if not environ.get("QUIGGELDY_IP"):
         warnings.append("No quiggeldy host configured.")
     return warnings
+
+
+_REPORTED_VARIABLES = (
+    "QUIGGELDY_ENABLED",
+    "QUIGGELDY_IP",
+    "QUIGGELDY_PORT",
+    "QUIGGELDY_USER_NO_MUNGE",
+    "QUIGGELDY_TOKEN",
+    "SYSTEMNAME",
+    "SPACK_ENV",
+)
+_REPORTED_PACKAGES = ("pynn-brainscales", "dlens-vx-v3", "PyNN", "neo", "numpy")
+
+
+def environment_report(environ: dict[str, str] | Any) -> dict[str, str]:
+    """Debug view of the variables hxcomm uses; the token is never revealed."""
+    report = {}
+    for name in _REPORTED_VARIABLES:
+        value = environ.get(name)
+        if name == "QUIGGELDY_TOKEN":
+            # A separate key, so log scrubbing of "QUIGGELDY_TOKEN=..." cannot
+            # hide whether the token arrived.
+            if value is None:
+                status = "unset"
+            elif not value:
+                status = "empty"
+            else:
+                status = f"set ({len(value)} characters)"
+            report["QUIGGELDY_TOKEN_STATUS"] = status
+        else:
+            report[name] = "<unset>" if value is None else value
+    return report
+
+
+def package_versions() -> dict[str, str]:
+    """Installed versions of the BSS-2 stack, without importing it."""
+    versions = {}
+    for name in _REPORTED_PACKAGES:
+        try:
+            versions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            versions[name] = "not installed"
+        except Exception as exc:  # broken metadata must not stop the helper
+            versions[name] = f"unknown ({type(exc).__name__})"
+    return versions
 
 
 def _magnitude(quantity: Any, unit: str) -> np.ndarray:
@@ -311,6 +357,11 @@ class Helper:
         if command == "connect":
             for warning in configure_quiggeldy(arguments, os.environ):
                 progress(warning)
+            report = environment_report(os.environ)
+            progress(
+                "Connection environment: "
+                + ", ".join(f"{key}={value}" for key, value in report.items())
+            )
             self.identifier = query_identifier(progress)
             expected = str(arguments.get("identifier") or "")
             return {
@@ -342,6 +393,13 @@ def serve(lines: Iterable[str], out: IO[str]) -> None:
                 "protocol": PROTOCOL_VERSION,
                 "python": platform.python_version(),
                 "numpy": np.__version__,
+            },
+            "debug": {
+                "python_executable": sys.executable,
+                "hostname": platform.node(),
+                "platform": platform.platform(),
+                "packages": package_versions(),
+                "environment": environment_report(os.environ),
             },
         }
     )

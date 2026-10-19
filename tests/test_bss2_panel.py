@@ -356,3 +356,34 @@ def test_browse_image_and_busy_hardware(
     panel.deliver()
     assert "busy" in qmessagebox_calls[-1]["text"]
     assert not panel.run_in_progress
+
+
+def test_debug_log_traces_connection_and_copies_with_context(qtbot, panel) -> None:
+    _connect(qtbot, panel)
+    log = panel.log_view.toPlainText()
+    assert "Launch: " in log and "Helper process started" in log
+    assert '→ {"id": 1, "command": "connect"' in log
+    assert '← {"id": null, "event": "ready"' in log
+    assert TOKEN not in log
+    panel.copy_log()
+    copied = QtWidgets.QApplication.clipboard().text()
+    assert copied.startswith("=== NeuroSeq BrainScaleS-2 debug log ===")
+    assert "token:       given" in copied and "Launch: " in copied
+    assert TOKEN not in copied
+    panel.clear_log()
+    assert panel.log_view.toPlainText() == ""
+
+
+def test_debug_log_can_hide_protocol_traffic(qtbot, panel) -> None:
+    panel.chk_protocol_trace.setChecked(False)
+    _connect(qtbot, panel)
+    log = panel.log_view.toPlainText()
+    assert "Launch: " not in log and "→ " not in log
+    assert "Connected to" in log  # status lines are always logged
+
+
+def test_singularity_version_reports_missing_program(monkeypatch) -> None:
+    from neuroseq.device_control import bss2_panel
+
+    monkeypatch.setattr(bss2_panel.shutil, "which", lambda _name: None)
+    assert bss2_panel._singularity_version() == "not found on PATH"

@@ -21,8 +21,10 @@ from qtpy import QtCore
 
 from neuroseq.device_control.bss2_protocol import LaunchCommand
 from neuroseq.device_control.bss2_protocol import LaunchConfig
+from neuroseq.device_control.bss2_protocol import describe_launch
 from neuroseq.device_control.bss2_protocol import helper_launch_command
 from neuroseq.device_control.bss2_protocol import scrub_secrets
+from neuroseq.device_control.bss2_protocol import summarize_message
 
 STATE_DISCONNECTED = "disconnected"
 STATE_STARTING = "starting"
@@ -50,6 +52,9 @@ class Bss2Connection(QtCore.QObject):
     run_failed = QtCore.Signal(str, str)
     #: Scrubbed helper diagnostics (stderr, stray stdout).
     log_message = QtCore.Signal(str)
+    #: Scrubbed connection trace: launch command, protocol traffic, process
+    #: lifecycle. For the debug log; never contains the token.
+    debug_message = QtCore.Signal(str)
 
     def __init__(
         self,
@@ -102,10 +107,13 @@ class Bss2Connection(QtCore.QObject):
         try:
             command = self.launcher(config, token)
         except (OSError, ValueError) as exc:
+            self._debug(f"Launch command could not be built: {exc}")
             self._set_status(f"Cannot start the helper: {exc}")
             self.disconnected.emit(str(exc))
             return False
         self._secrets = [token] if token else []
+        for line in describe_launch(command):
+            self._debug(line)
         self._buffer.clear()
         self._stderr = ""
         self._pending.clear()
@@ -127,6 +135,9 @@ class Bss2Connection(QtCore.QObject):
         process.readyReadStandardError.connect(self._read_stderr)
         process.finished.connect(self._process_finished)
         process.errorOccurred.connect(self._process_error)
+        process.started.connect(
+            lambda: self._debug(f"Helper process started (pid {process.processId()})")
+        )
         self._process = process
         self.state = STATE_STARTING
         self._set_status(
@@ -188,6 +199,7 @@ class Bss2Connection(QtCore.QObject):
         self._serial += 1
         self._pending[self._serial] = (command, run_id)
         message = {"id": self._serial, "command": command, "arguments": arguments}
+        self._debug("→ " + summarize_message(message))
         self._process.write((json.dumps(message) + "\n").encode())
 
     def _read_stdout(self) -> None:
@@ -229,6 +241,7 @@ class Bss2Connection(QtCore.QObject):
                 self.log_message.emit(line)
 
     def _handle(self, message: dict[str, Any]) -> None:
+        self._debug("← " + summarize_message(message))
         if message.get("event") == "ready":
             self.state = STATE_CONNECTING
             host = self._connect_arguments.get("host") or "?"
@@ -287,9 +300,15 @@ class Bss2Connection(QtCore.QObject):
 
     def _timed_out(self) -> None:
         seconds = self._deadline.interval() / 1000
+        self._debug(f"Timed out after {seconds:g} s waiting for {self._waiting_for}")
         self._abort(f"No answer from {self._waiting_for} within {seconds:g} s.")
 
     def _process_error(self, error: QtCore.QProcess.ProcessError) -> None:
+        if self._process is not None:
+            self._debug(
+                f"Process error {getattr(error, 'name', error)}: "
+                f"{self._process.errorString()}"
+            )
         if error == QtCore.QProcess.ProcessError.FailedToStart and self._process:
             self._abort(
                 f"Could not start {self._process.program()}: "
@@ -314,11 +333,15 @@ class Bss2Connection(QtCore.QObject):
     def _process_finished(self, *_args: object) -> None:
         if self._process is None:
             return
+        process = self._process
+        code = process.exitCode()
+        self._debug(
+            f"Helper exited: code {code}, "
+            f"{getattr(process.exitStatus(), 'name', process.exitStatus())}"
+        )
         if self._closing:
             self._end_session("Disconnected.")
             return
-        process = self._process
-        code = process.exitCode()
         tail = self._stderr.strip().splitlines()[-5:]
         reason = f"The BrainScaleS-2 helper exited unexpectedly (exit code {code})."
         if tail:
@@ -340,6 +363,9 @@ class Bss2Connection(QtCore.QObject):
             self.run_failed.emit(run_id, reason)
         self._set_status(reason.splitlines()[0] if reason else "Disconnected")
         self.disconnected.emit(reason)
+
+    def _debug(self, text: str) -> None:
+        self.debug_message.emit(scrub_secrets(text, self._secrets))
 
     def _set_status(self, text: str) -> None:
         self.status = text

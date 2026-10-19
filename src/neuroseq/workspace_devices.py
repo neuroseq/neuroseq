@@ -88,6 +88,7 @@ class Bss2Session(QtCore.QObject):
     connected = QtCore.Signal(str)
     disconnected = QtCore.Signal(str)
     log_message = QtCore.Signal(str)
+    debug_message = QtCore.Signal(str)
     run_progress = QtCore.Signal(str)
     run_finished = QtCore.Signal(str, object)
     run_failed = QtCore.Signal(str, str)
@@ -102,6 +103,7 @@ class Bss2Session(QtCore.QObject):
             (connection.connected, self.connected.emit),
             (connection.disconnected, self.disconnected.emit),
             (connection.log_message, self.log_message.emit),
+            (connection.debug_message, self.debug_message.emit),
             (connection.run_progress, self._progress),
             (connection.run_finished, self._finished),
             (connection.run_failed, self._failed),

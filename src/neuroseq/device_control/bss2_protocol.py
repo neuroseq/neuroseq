@@ -54,6 +54,7 @@ import csv
 import getpass
 import hashlib
 import io
+import json
 import os
 import re
 import shlex
@@ -753,6 +754,82 @@ def helper_launch_command(config: LaunchConfig, token: str) -> LaunchCommand:
 
 
 _TOKEN_LIKE = re.compile(r"eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+")
+
+
+_ENCODED_ARRAY_KEYS = {"dtype", "shape", "data"}
+
+
+def summarize_message(message: Any, limit: int = 4000) -> str:
+    """Compact JSON of a protocol message for the debug log.
+
+    Encoded arrays are shown as ``<array dtype shape>`` instead of base64.
+    """
+
+    def compact(value: Any) -> Any:
+        if isinstance(value, dict):
+            if value.keys() >= _ENCODED_ARRAY_KEYS:
+                return f"<array {value.get('dtype')} {value.get('shape')}>"
+            return {key: compact(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [compact(item) for item in value]
+        return value
+
+    text = json.dumps(compact(message), default=str)
+    if len(text) > limit:
+        text = text[:limit] + f"… ({len(text) - limit} more characters)"
+    return text
+
+
+def describe_launch(command: LaunchCommand) -> list[str]:
+    """Debug lines for a helper launch; the token's value is never shown."""
+    lines = ["Launch: " + shlex.join([command.program, *command.arguments])]
+    plain = {
+        key: value
+        for key, value in command.environment.items()
+        if not key.startswith("SINGULARITYENV_")
+    }
+    for key, value in plain.items():
+        if key == "QUIGGELDY_TOKEN":
+            lines.append(
+                f"  env QUIGGELDY_TOKEN (value hidden): {len(value)} characters"
+            )
+        else:
+            lines.append(f"  env {key}={value}")
+    if "QUIGGELDY_TOKEN" not in plain:
+        lines.append("  env QUIGGELDY_TOKEN not set by NeuroSeq")
+    if any(key.startswith("SINGULARITYENV_") for key in command.environment):
+        lines.append("  (each also exported with the SINGULARITYENV_ prefix)")
+    return lines
+
+
+def debug_report_header(
+    settings: Bss2Settings,
+    *,
+    token_given: bool,
+    neuroseq_version: str,
+    singularity_version: str,
+    connection_state: str,
+    identifier: str | None,
+) -> list[str]:
+    """Context lines prepended when the debug log is copied (no token)."""
+    import platform
+
+    lines = [
+        "=== NeuroSeq BrainScaleS-2 debug log ===",
+        f"copied:      {datetime.now().isoformat(timespec='seconds')}",
+        f"neuroseq:    {neuroseq_version}",
+        f"host:        {platform.node()} ({platform.platform()})",
+        f"python:      {platform.python_version()}",
+        f"singularity: {singularity_version}",
+        f"user:        {current_username()}",
+        f"state:       {connection_state}"
+        + (f" (identifier {identifier})" if identifier else ""),
+        f"token:       {'given' if token_given else 'not given'}",
+        "settings:",
+    ]
+    lines += [f"  {key} = {value}" for key, value in settings.to_dict().items()]
+    lines.append("=== log ===")
+    return lines
 
 
 def scrub_secrets(text: str, secrets: Iterable[str] = ()) -> str:

@@ -436,3 +436,48 @@ def test_scrub_secrets() -> None:
     assert "eyJa.bcd.efg" not in scrubbed
     assert "xyz" not in scrubbed
     assert scrubbed.endswith("other")
+
+
+def test_summarize_message_replaces_arrays_and_truncates() -> None:
+    message = {
+        "id": 3,
+        "command": "run",
+        "arguments": {"segments": {"offset": bp.encode_array(np.ones((2, 3)), "<u2")}},
+    }
+    text = bp.summarize_message(message)
+    assert "<array <u2 [2, 3]>" in text and "data" not in text
+    long = bp.summarize_message({"x": "y" * 50}, limit=20)
+    assert long.startswith('{"x": "yyyyyyyyyyyy') and "more characters" in long
+
+
+def test_describe_launch_hides_the_token_even_after_scrubbing() -> None:
+    config = bp.LaunchConfig(
+        container_image="/img.sif", container_app="", host="h", port=1, user="u"
+    )
+    token = "secret-token-value"
+    lines = bp.describe_launch(bp.helper_launch_command(config, token))
+    text = "\n".join(lines)
+    assert token not in text
+    assert lines[0].startswith("Launch: singularity exec --bind ")
+    assert f"QUIGGELDY_TOKEN (value hidden): {len(token)} characters" in text
+    # Debug lines are scrubbed before display; the length note must survive.
+    assert "value hidden" in bp.scrub_secrets(text, [token])
+    assert "QUIGGELDY_IP=h" in text and "SINGULARITYENV_ prefix" in text
+    no_token = "\n".join(bp.describe_launch(bp.helper_launch_command(config, "")))
+    assert "QUIGGELDY_TOKEN not set by NeuroSeq" in no_token
+
+
+def test_debug_report_header_lists_context_but_not_the_token() -> None:
+    lines = bp.debug_report_header(
+        Bss2Settings(container_image="/img.sif"),
+        token_given=True,
+        neuroseq_version="9.9",
+        singularity_version="singularity 4.0",
+        connection_state="connected",
+        identifier="chip_x",
+    )
+    text = "\n".join(lines)
+    assert "neuroseq:    9.9" in text and "singularity 4.0" in text
+    assert "connected (identifier chip_x)" in text and "token:       given" in text
+    assert "container_image = /img.sif" in text
+    assert lines[-1] == "=== log ==="
