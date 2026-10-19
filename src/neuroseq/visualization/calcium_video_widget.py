@@ -300,7 +300,9 @@ class CalciumVideoWidget(FPLWidget):
             return
         self.empty_state_widget.hide()
         self.widget.show()
-        self.current_frame = self._to_rgb(frame["pixels"])
+        # ScanImage's display window for the channel, when it sends one, so
+        # the preview has the contrast of the ScanImage window.
+        self.current_frame = self._to_rgb(frame["pixels"], frame.get("lut"))
         # Arrival time is not stimulation time. Never draw planned stimulation
         # crosses on live frames without a measured synchronization mapping.
         self._set_crosses(set())

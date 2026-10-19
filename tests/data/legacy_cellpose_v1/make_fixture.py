@@ -11,7 +11,6 @@ import pathlib
 import numpy as np
 from PIL import Image
 
-from neuroseq.cell_overlay_widget import compute_cell_centroids
 from neuroseq.export.exporter_syscon2 import generate_syscon2_sequence_text
 from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importers.importer_cellpose import CellPoseImporter
@@ -22,6 +21,7 @@ from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from neuroseq.visualization_support.cellpose_ids import compute_cell_centroids
 from tests.test_exporter_syscon2 import _template_header
 
 here = pathlib.Path(__file__).parent

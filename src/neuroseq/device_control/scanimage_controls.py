@@ -8,6 +8,7 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -38,6 +39,7 @@ class ScanImageControls(QtWidgets.QWidget):
         self._last_frame_at: float | None = None
         self._waiting_since: float | None = None
         self._last_frame_number = None
+        self._frame_timing: dict | None = None
         layout = QtWidgets.QVBoxLayout(self)
         connection_row = QtWidgets.QHBoxLayout()
         self.python_edit = QtWidgets.QLineEdit(settings.scanimage_python_path)
@@ -83,6 +85,20 @@ class ScanImageControls(QtWidgets.QWidget):
         self.frames_spin.setRange(1, 10000000)
         self.frames_spin.setValue(300)
         form.addRow("Frames", self.frames_spin)
+        # One checkbox per ScanImage channel, filled in once connected.
+        self.save_channels_widget = QtWidgets.QWidget()
+        self._save_channels_layout = QtWidgets.QHBoxLayout(self.save_channels_widget)
+        self._save_channels_layout.setContentsMargins(0, 0, 0, 0)
+        self.save_channel_checks: list[QtWidgets.QCheckBox] = []
+        self._save_channels_hint = QtWidgets.QLabel("Connect to choose")
+        self._save_channels_layout.addWidget(self._save_channels_hint)
+        self._save_channels_layout.addStretch(1)
+        self._save_channels_chosen = False
+        self.save_channels_widget.setToolTip(
+            "Channels saved in the recording; several channels are saved "
+            "together. Starts as set in ScanImage, which keeps its own choice."
+        )
+        form.addRow("Save channels", self.save_channels_widget)
         self.external_check = QtWidgets.QCheckBox(
             "Wait for external acquisition trigger"
         )
@@ -105,6 +121,16 @@ class ScanImageControls(QtWidgets.QWidget):
         self.channel_spin = QtWidgets.QSpinBox()
         self.channel_spin.setRange(1, 32)
         self.channel_spin.valueChanged.connect(self._channel)
+        self.average_spin = QtWidgets.QSpinBox()
+        self.average_spin.setRange(0, 50)
+        self.average_spin.setSpecialValueText("as ScanImage")
+        self.average_spin.setToolTip(
+            "Average the last frames of the preview, like ScanImage's display "
+            "rolling average. Recordings are not affected."
+        )
+        self.average_spin.valueChanged.connect(
+            lambda value: setattr(connection, "preview_average", value or None)
+        )
         self.preview_button = QtWidgets.QPushButton("Preview (Focus)")
         self.preview_button.clicked.connect(self._preview)
         self.record_button = QtWidgets.QPushButton("Record / Arm")
@@ -115,6 +141,8 @@ class ScanImageControls(QtWidgets.QWidget):
             self.live_check,
             QtWidgets.QLabel("Channel"),
             self.channel_spin,
+            QtWidgets.QLabel("Average"),
+            self.average_spin,
             self.preview_button,
             self.record_button,
             self.abort_button,
@@ -220,10 +248,47 @@ class ScanImageControls(QtWidgets.QWidget):
             self.live_check.setChecked(True)
             self._last_frame_number = None
 
+    def saved_channels(self) -> list[int]:
+        return [
+            number
+            for number, check in enumerate(self.save_channel_checks, start=1)
+            if check.isChecked()
+        ]
+
+    def _show_save_channels(self, status: dict) -> None:
+        available = status.get("channels_available")
+        if not isinstance(available, int) or available < 1:
+            return
+        if len(self.save_channel_checks) != available:
+            for check in self.save_channel_checks:
+                check.deleteLater()
+            self.save_channel_checks = []
+            self._save_channels_hint.hide()
+            for number in range(1, available + 1):
+                check = QtWidgets.QCheckBox(str(number))
+                check.toggled.connect(self._save_channels_toggled)
+                self._save_channels_layout.insertWidget(number - 1, check)
+                self.save_channel_checks.append(check)
+        if not self._save_channels_chosen:
+            # Follow ScanImage's selection until the user picks channels here.
+            saved = status.get("saved_channels", [])
+            saved = {int(saved)} if isinstance(saved, int) else {int(c) for c in saved}
+            for number, check in enumerate(self.save_channel_checks, start=1):
+                check.blockSignals(True)
+                check.setChecked(number in saved)
+                check.blockSignals(False)
+
+    def _save_channels_toggled(self, _checked: bool) -> None:
+        self._save_channels_chosen = True
+
     def _record(self) -> None:
         directory = Path(self.directory_edit.text().strip())
         if not self.directory_edit.text().strip() or not directory.is_dir():
             self.show_message("Select an existing recording folder on this PC.")
+            return
+        channels = self.saved_channels()
+        if self.save_channel_checks and not channels:
+            self.show_message("Tick at least one channel to save.")
             return
         run_id = uuid.uuid4().hex
         self.settings.scanimage_recording_directory = str(directory)
@@ -234,15 +299,19 @@ class ScanImageControls(QtWidgets.QWidget):
                 "frames": self.frames_spin.value(),
                 "external_trigger": self.external_check.isChecked(),
                 "name": self.name_edit.text().strip() or "Acquisition",
+                **({"channels": channels} if channels else {}),
             }
         )
 
     def _status(self, status: dict) -> None:
+        self._show_save_channels(status)
         state = status.get("acq_state", "unknown")
         run = status.get("run", {})
-        self.status_label.setText(
-            f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"
-        )
+        text = f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"
+        if status.get("preview_problem"):
+            # Why no preview frame came, e.g. a display read ScanImage rejected.
+            text += f"\nNo preview frame: {status['preview_problem']}"
+        self.status_label.setText(text)
         idle = state == "idle"
         for widget in (self.record_button, self.preview_button, self.disconnect_button):
             widget.setEnabled(idle and self.connection.run_id is None)
@@ -262,14 +331,29 @@ class ScanImageControls(QtWidgets.QWidget):
         if number is None or number != self._last_frame_number:
             self._last_frame_at = time.monotonic()
             self._last_frame_number = number
+        self._frame_timing = frame
         self._freshness()
 
     def _freshness(self) -> None:
         if self._last_frame_at is not None:
             age = time.monotonic() - self._last_frame_at
-            self.frame_label.setText(
-                f"Preview frame {self._last_frame_number or '—'} · received {age:.0f} s ago"
-            )
+            text = f"Preview frame {self._last_frame_number or '—'} · received {age:.0f} s ago"
+            timing = self._frame_timing or {}
+            shape = timing.get("pixels", np.empty((0, 0))).shape
+            parts = []
+            if timing.get("rate_hz"):
+                parts.append(f"{timing['rate_hz']:.1f} frames/s")
+            if timing.get("roundtrip_ms") is not None:
+                parts.append(f"{timing['roundtrip_ms']:.0f} ms per request")
+            if timing.get("averaged", 1) > 1:
+                parts.append(f"mean of {timing['averaged']} frames")
+            if timing.get("matlab_ms") is not None:
+                parts.append(f"{timing['matlab_ms']:.0f} ms in MATLAB")
+            if shape[0]:
+                parts.append(f"{shape[1]}×{shape[0]} px")
+            if parts:
+                text += "\n" + " · ".join(parts)
+            self.frame_label.setText(text)
         if (
             self._waiting_since is not None
             and time.monotonic() - self._waiting_since > self.timeout_spin.value()
