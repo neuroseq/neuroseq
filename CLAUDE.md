@@ -101,6 +101,49 @@ Packages under `src/neuroseq/`:
 - `elise_support/` — ELiSe protocol dialog, workflows, replay metrics
 - `example_projects/` — example project factories (see table below)
 
+### How files are grouped (follow this when adding or moving code)
+
+The code is grouped **by feature/workflow, not by kind of file**: an importer, its
+dialog and its helpers sit together in one package rather than in global
+`dialogs/` or `widgets/` folders. When adding code:
+
+- **Pick the package by workflow.** Data coming into a project → `importers/`
+  (`importer_<source>.py` holds the Qt-free parsing, `<source>_import_dialog.py`
+  the GUI). Data leaving a project → `export/` (`exporter_<target>.py` + dialogs).
+  Talking to lab hardware/software (ScanImage, SysCon2/HOLO4D) → `device_control/`.
+  Designing stimuli → `stimulation/`: drawn/static patterns in
+  `stimulation/static_input/`, closed-loop routines (rheobase, STDP) in
+  `stimulation/dynamic_input/`. Plotting → `visualization/`. Model-specific support
+  (ELiSe) → its own package (`elise_support/`), not core modules.
+- **Separate logic from widgets.** Keep Qt-free logic in its own module so it can
+  be tested without a GUI. Coordination between widgets/dialogs and the project goes
+  in a controller (`static_input_controller.py`, `dynamic_input_controller.py`,
+  `workspace_acquisition_controller.py`), not in the widget and not in
+  `project_workspace.py`. `project_workspace.py` should only build menus/panes and
+  delegate; `gui.py` is only the tab shell.
+- **Layering.** `visualization_support/` and `stimulation/` must not import
+  `neuroseq.visualization` at runtime (only inside `if TYPE_CHECKING:`);
+  `tests/test_import_layering.py` enforces this. The single allowed exception
+  is `stimulation/stim_editor.py`, which embeds `StimWidget`.
+- **Shared infrastructure, not copies.** Generic Qt helpers go in `qt_helpers.py`.
+  Every finite background task runs through `background_jobs.BackgroundJob`, never
+  a hand-built `QThread`. Every change to project data goes through `Project`
+  methods (`replace_stim_values`, `add_experiment`, `edit_experiments`, …) so the
+  shared undo history (`project_history.py`) is recorded or cleared; never assign
+  `stim_array.values`/`.dt` or `project.experiments[...]` from a dialog.
+- **Plugin folder is not a code location.** `resources/analysis_plugins/` holds
+  only thin, auto-discovered analysis plugins; core code must never import from it.
+  LLM-authored plugins are written (after user confirmation) to the per-user folder
+  from `analysis_plugins.user_plugins_directory()`.
+- **Example projects** are one factory per file under `example_projects/neurons/`
+  or `example_projects/networks/`, registered with `@register_example_project`, and
+  must be imported in `example_projects/__init__.py` (inside the `isort: off`
+  block — import order is menu order).
+- **Moves are clean breaks.** Use absolute `neuroseq.<package>.<module>` imports,
+  and don't leave re-export shims at old paths. Update imports, test monkeypatch
+  string targets, docs, and this file in the same commit. Tests stay flat in
+  `tests/` as `test_<module>.py`.
+
 ### Key source files
 
 | File                                     | Purpose                                                                              |
