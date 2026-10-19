@@ -80,9 +80,7 @@ def test_pipeline_worker_dispatches_and_forwards_progress(
     )
     progress_events = []
     finished_results = []
-    worker.progress.connect(
-        lambda message, fraction: progress_events.append((message, fraction))
-    )
+    worker.progress.connect(progress_events.append)
     worker.finished.connect(finished_results.append)
 
     worker.run()
@@ -271,9 +269,9 @@ def test_dialog_requires_tifs(qtbot):
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
 
-    # No TIFFs added — pressing Run should pop a warning and not start a thread.
+    # No TIFFs added — pressing Run should pop a warning and not start a job.
     dialog._start_pipeline()
-    assert dialog._thread is None
+    assert not dialog._job.busy
 
 
 def test_pipeline_selector_hides_suite2p_parameters_for_roi_average(qtbot):
@@ -387,7 +385,7 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
 
     question.assert_called_once()
     run.assert_not_called()
-    assert dialog._thread is None
+    assert not dialog._job.busy
 
     result = _make_pipeline_result()
     run.side_effect = lambda *_args, progress, **_kwargs: result
@@ -1019,7 +1017,9 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     dialog._cancel_pipeline()
 
     # Still running: dialog must not be rejected and the thread must survive.
-    assert dialog._thread is not None and dialog._thread.isRunning()
+    assert dialog._job.busy
+    assert dialog._job.worker_thread is not None
+    assert dialog._job.worker_thread.isRunning()
     rejected.assert_not_called()
     assert not progress_dialog._cancel_button.isEnabled()
 
@@ -1028,7 +1028,45 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     rejected.assert_not_called()
 
     release.set()
-    qtbot.waitUntil(lambda: dialog._thread is None, timeout=5000)
+    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=5000)
     rejected.assert_called_once_with(dialog)
     assert dialog._run_button.isEnabled()
     assert dialog._pipeline_result is None
+
+
+def test_running_pipeline_reports_progress_to_progress_dialog(qtbot, mocker, tmp_path):
+    import threading
+
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import)
+    qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(0)
+    tif = tmp_path / "fake.tif"
+    tif.write_bytes(b"")
+    dialog._tif_paths.append(tif)
+    dialog._tif_list.addItem(str(tif))
+    release = threading.Event()
+
+    def slow_pipeline(*_args, progress, **_kwargs):
+        progress("halfway", 0.5)
+        release.wait(timeout=5)
+        raise RuntimeError("stop here")
+
+    mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        side_effect=slow_pipeline,
+    )
+
+    dialog._start_pipeline()
+    progress_dialog = dialog._progress_dialog
+    try:
+        qtbot.waitUntil(lambda: progress_dialog._bar.value() == 50, timeout=5000)
+        assert progress_dialog._label.text() == "halfway"
+        assert not dialog._run_button.isEnabled()
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=5000)
+    assert dialog._run_button.isEnabled()

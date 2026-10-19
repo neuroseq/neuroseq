@@ -1,6 +1,6 @@
 """Dialog for end-to-end import of 2-photon calcium imaging TIFFs.
 
-Drives `importer_tif.run_suite2p_pipeline` in a background QThread and feeds the
+Drives `importer_tif.run_suite2p_pipeline` in a `BackgroundJob` and feeds the
 resulting fluorescence / spike arrays into the existing Suite2p import path.
 """
 
@@ -10,7 +10,6 @@ import importlib.util
 import logging
 import subprocess
 import sys
-import threading
 from collections.abc import Callable
 from collections.abc import Mapping
 from pathlib import Path
@@ -24,6 +23,8 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.background_jobs import BackgroundJob
+from neuroseq.background_jobs import CancellableWorker
 from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.data import Data
 from neuroseq.importers.importer_cellpose import CellPoseImporter
@@ -163,12 +164,14 @@ class _QtLogHandler(logging.Handler):
         self._sink(self.format(record))
 
 
-class _PipelineWorker(QtCore.QObject):
-    progress = QtCore.Signal(str, float)
+class _PipelineWorker(CancellableWorker):
+    """Runs the calcium extraction pipeline.
+
+    ``progress`` carries ``(message, fraction)`` tuples, ``finished`` a
+    ``TifPipelineResult``, and ``log`` the pipeline's formatted log records.
+    """
+
     log = QtCore.Signal(str)
-    finished = QtCore.Signal(object)  # TifPipelineResult
-    failed = QtCore.Signal(str)
-    cancelled = QtCore.Signal()
 
     def __init__(
         self,
@@ -184,11 +187,6 @@ class _PipelineWorker(QtCore.QObject):
         self._params = params
         self._pipeline = pipeline
         self._stim_array = stim_array
-        self._cancel_requested = threading.Event()
-
-    def cancel(self) -> None:
-        """Ask the pipeline to stop at its next progress checkpoint."""
-        self._cancel_requested.set()
 
     @QtCore.Slot()
     @returns_to_main_thread
@@ -206,9 +204,9 @@ class _PipelineWorker(QtCore.QObject):
             # Imported here so test environments without suite2p can still import
             # this module.
             def callback(msg: str, frac: float) -> None:
-                if self._cancel_requested.is_set():
+                if self.cancel_requested:
                     raise PipelineCancelled
-                self.progress.emit(msg, float(frac))
+                self.progress.emit((msg, float(frac)))
 
             if self._pipeline == "roi_average":
                 from neuroseq.importers.importer_tif import run_roi_average_pipeline
@@ -338,9 +336,8 @@ class TifImportDialog(QtWidgets.QDialog):
         self._propagate_new_segmentation: bool = False
         self._new_segmentation_path: Path | None = None
 
-        self._thread: QtCore.QThread | None = None
-        self._worker: _PipelineWorker | None = None
-        self._reject_after_thread_exit = False
+        # The dialog's own job, separate from the workspace's BackgroundJob.
+        self._job = BackgroundJob(self)
         self._progress_dialog: _PipelineProgressDialog | None = None
         self._wheel_passthrough_widgets: set[QtCore.QObject] = set()
 
@@ -836,7 +833,6 @@ class TifImportDialog(QtWidgets.QDialog):
         self._progress_dialog.canceled.connect(self._cancel_pipeline)
         self._progress_dialog.show()
 
-        self._thread = QtCore.QThread(self)
         pipeline = str(self._pipeline_combo.currentData())
         stim_array = None
         if (
@@ -844,30 +840,26 @@ class TifImportDialog(QtWidgets.QDialog):
             and self._suppress_stimulation_artefact_checkbox.isChecked()
         ):
             stim_array = self._stim_array_combo.currentData()
-        self._worker = _PipelineWorker(
+        worker = _PipelineWorker(
             list(self._tif_paths), masks, params, pipeline, stim_array
         )
-        self._worker.moveToThread(self._thread)
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.log.connect(self._progress_dialog.appendLog)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.failed.connect(self._thread.quit)
-        self._worker.cancelled.connect(self._thread.quit)
-        self._thread.finished.connect(self._cleanup_thread)
-        self._thread.start()
+        worker.log.connect(self._progress_dialog.appendLog)
+        self._job.start(
+            worker,
+            on_progress=self._on_progress,
+            on_finished=self._on_finished,
+            on_failed=self._on_failed,
+            on_cancelled=self._on_cancelled,
+            cancel=worker.cancel,
+        )
 
-    @QtCore.Slot(str, float)
-    def _on_progress(self, message: str, fraction: float) -> None:
+    def _on_progress(self, update: tuple[str, float]) -> None:
         if self._progress_dialog is None:
             return
+        message, fraction = update
         self._progress_dialog.setLabelText(message)
         self._progress_dialog.setValue(int(max(0.0, min(1.0, fraction)) * 100))
 
-    @QtCore.Slot(object)
     def _on_finished(self, result: TifPipelineResult) -> None:
         self._pipeline_result = result
         if self._progress_dialog is not None:
@@ -881,7 +873,6 @@ class TifImportDialog(QtWidgets.QDialog):
             )
             self._run_button.setEnabled(True)
 
-    @QtCore.Slot(str)
     def _on_failed(self, message: str) -> None:
         if self._progress_dialog is not None:
             self._progress_dialog.close()
@@ -890,42 +881,33 @@ class TifImportDialog(QtWidgets.QDialog):
 
     def _cancel_pipeline(self) -> None:
         # The worker stops at its next progress checkpoint. The dialog must stay
-        # alive until the thread has exited: destroying a running QThread aborts
+        # alive until the job has ended: destroying a running QThread aborts
         # the whole process.
-        if self._worker is None or self._thread is None or not self._thread.isRunning():
+        if not self._job.busy:
             if self._progress_dialog is not None:
                 self._progress_dialog.close()
             self.reject()
             return
         self.logger.info("Pipeline cancel requested")
-        self._worker.cancel()
+        self._job.cancel()
         if self._progress_dialog is not None:
             self._progress_dialog.setCancelEnabled(False)
             self._progress_dialog.setLabelText("Cancelling… finishing current step")
 
-    @QtCore.Slot()
     def _on_cancelled(self) -> None:
+        # BackgroundJob delivers outcomes after the worker thread has exited,
+        # so the dialog can close right away.
         if self._progress_dialog is not None:
             self._progress_dialog.close()
         self._run_button.setEnabled(True)
-        # Reject once the thread has fully exited (see _cleanup_thread).
-        self._reject_after_thread_exit = True
+        super().reject()
 
     def reject(self) -> None:
-        # Block closing the dialog while the worker thread is still running.
-        if self._thread is not None and self._thread.isRunning():
+        # Block closing the dialog while the pipeline job is still running.
+        if self._job.busy:
             self._cancel_pipeline()
             return
         super().reject()
-
-    def _cleanup_thread(self) -> None:
-        if self._thread is not None:
-            self._thread.deleteLater()
-            self._thread = None
-        self._worker = None
-        if self._reject_after_thread_exit:
-            self._reject_after_thread_exit = False
-            super().reject()
 
     # -- Finalisation -------------------------------------------------------
     def _finalize_import(self, result: TifPipelineResult) -> None:

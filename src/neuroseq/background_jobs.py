@@ -255,6 +255,41 @@ class EliseProtocolWorker(QtCore.QObject):
         self.finished.emit(result)
 
 
+class CancellableWorker(QtCore.QObject):
+    """Base for job-specific workers with cooperative cancellation.
+
+    Subclasses implement ``run`` (decorated with ``returns_to_main_thread``)
+    and emit exactly one of ``finished``, ``failed`` or ``cancelled``.
+    ``progress`` carries a task-defined payload; ``cancel`` may be called from
+    any thread and should make the task stop at its next checkpoint.
+    """
+
+    progress = QtCore.Signal(object)
+    finished = QtCore.Signal(object)
+    failed = QtCore.Signal(str)
+    cancelled = QtCore.Signal()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._cancel_requested = threading.Event()
+
+    def cancel(self) -> None:
+        """Ask the task to stop at its next progress checkpoint."""
+        self._cancel_requested.set()
+
+    @property
+    def cancel_requested(self) -> bool:
+        return self._cancel_requested.is_set()
+
+    def run(self) -> None:
+        raise NotImplementedError
+
+
+type JobWorker = (
+    BackgroundIOWorker | ExternalSimWorker | EliseProtocolWorker | CancellableWorker
+)
+
+
 class BackgroundJob(QtCore.QObject):
     """Own one worker and its thread until both execution and cleanup finish.
 
@@ -268,9 +303,7 @@ class BackgroundJob(QtCore.QObject):
 
     def __init__(self, parent: QtCore.QObject | None = None) -> None:
         super().__init__(parent)
-        self.worker: (
-            BackgroundIOWorker | ExternalSimWorker | EliseProtocolWorker | None
-        ) = None
+        self.worker: JobWorker | None = None
         self.worker_thread: QtCore.QThread | None = None
         self._on_progress: Callable[[Any], None] | None = None
         self._on_finished: Callable[[Any], None] | None = None
@@ -289,7 +322,7 @@ class BackgroundJob(QtCore.QObject):
 
     def start(
         self,
-        worker: BackgroundIOWorker | ExternalSimWorker | EliseProtocolWorker,
+        worker: JobWorker,
         *,
         on_progress: Callable[[Any], None],
         on_finished: Callable[[Any], None],
@@ -314,7 +347,9 @@ class BackgroundJob(QtCore.QObject):
         worker.finished.connect(self._finished)
         worker.failed.connect(self._failed)
         terminal_signals = [worker.finished, worker.failed]
-        if isinstance(worker, (ExternalSimWorker, EliseProtocolWorker)):
+        if isinstance(
+            worker, (ExternalSimWorker, EliseProtocolWorker, CancellableWorker)
+        ):
             worker.cancelled.connect(self._cancelled)
             terminal_signals.append(worker.cancelled)
         for signal in terminal_signals:
@@ -328,7 +363,8 @@ class BackgroundJob(QtCore.QObject):
 
     @QtCore.Slot(int)
     @QtCore.Slot(float)
-    def _progress(self, value: int | float) -> None:
+    @QtCore.Slot(object)
+    def _progress(self, value: object) -> None:
         if self.sender() is self.worker and self._on_progress is not None:
             self._on_progress(value)
 
