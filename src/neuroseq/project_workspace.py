@@ -36,6 +36,8 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_manager_dialog import DataManagerDialog
+from neuroseq.device_control.stimulation_setup_widget import SYSCON2_TAB_TITLE
+from neuroseq.device_control.stimulation_setup_widget import StimulationSetupWidget
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
@@ -486,7 +488,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             settings=self.settings,
             manager=self.devices.syscon_session(self),
         )
-        self.syscon2_panel.setVisible(False)
         # Mark, with a cross in the Spatial Footprints panel, every neuron
         # targeted by the preview whose import SysCon2 most recently confirmed -
         # see SysCon2Panel.targets_changed's docstring for why this can't be
@@ -495,7 +496,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self._spatial_footprint_state.set_targeted_stim_ids
         )
         self.syscon2_panel.set_current_stim_provider(self._current_stim_array)
-        split_left_right.addWidget(self.syscon2_panel)
+        # One pane, one tab per stimulus-delivery target.
+        self.stimulation_setup = StimulationSetupWidget(parent=self)
+        self.stimulation_setup.add_setup(self.syscon2_panel, SYSCON2_TAB_TITLE)
+        self.stimulation_setup.setVisible(False)
+        split_left_right.addWidget(self.stimulation_setup)
         split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
@@ -2949,7 +2954,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
-            ("&Stimulation setup", self.syscon2_panel, "mdi6.laser-pointer", False),
+            (
+                "&Stimulation setup",
+                self.stimulation_setup,
+                "mdi6.laser-pointer",
+                False,
+            ),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(

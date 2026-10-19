@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -9,6 +8,7 @@ from qtpy import QtWidgets
 from scipy.ndimage import binary_erosion
 
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.qt_helpers import StableSizeTabWidget
 from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
 from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
@@ -96,41 +96,6 @@ class _PanelLayout(QtWidgets.QVBoxLayout):
         return -1
 
 
-class _StableSizeTabWidget(QtWidgets.QTabWidget):
-    """A QTabWidget whose size hint doesn't change when switching tabs.
-
-    QTabWidget bases sizeHint()/minimumSizeHint() on the *current* page
-    alone, so an enclosing QSplitter reflows every time the user switches to
-    a tab whose content has a different natural size - here, the Cell
-    segmentation and Video tabs visibly bounced around on every switch.
-    Basing it on the largest page instead keeps the splitter's allocation
-    stable regardless of which tab is showing.
-    """
-
-    def _combined_page_size(
-        self, hint_of: Callable[[QtWidgets.QWidget], QtCore.QSize]
-    ) -> QtCore.QSize:
-        width = 0
-        height = 0
-        for index in range(self.count()):
-            page = self.widget(index)
-            if page is None:
-                continue
-            size = hint_of(page)
-            width = max(width, size.width())
-            height = max(height, size.height())
-        bar = self.tabBar()
-        bar_size = bar.sizeHint() if bar is not None else QtCore.QSize(0, 0)
-        # The default (North) tab position stacks the bar above the pages.
-        return QtCore.QSize(max(width, bar_size.width()), height + bar_size.height())
-
-    def sizeHint(self) -> QtCore.QSize:
-        return self._combined_page_size(lambda w: w.sizeHint())
-
-    def minimumSizeHint(self) -> QtCore.QSize:
-        return self._combined_page_size(lambda w: w.minimumSizeHint())
-
-
 class SpatialFootprintWidget(QtWidgets.QWidget):
     """Show cell spatial footprints and calcium video in a tabbed panel.
 
@@ -175,7 +140,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._state = state if state is not None else SpatialFootprintState()
         root_layout = _PanelLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
-        self.tabs = _StableSizeTabWidget(self)
+        self.tabs = StableSizeTabWidget(self)
         self.tabs.setDocumentMode(True)
         cell_tab = QtWidgets.QWidget(self.tabs)
         layout = QtWidgets.QVBoxLayout(cell_tab)
@@ -233,7 +198,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         # Same fixed height and size policy as CalciumVideoWidget's bottom
         # action bar (Save video.../Remove imaging data), so the Cell
         # segmentation and Video tabs both end with a bar of identical size
-        # - keeps _StableSizeTabWidget's per-page size hints matched instead
+        # - keeps StableSizeTabWidget's per-page size hints matched instead
         # of merely close, for the smoothest possible switch between them.
         self.checkbox_container.setFixedHeight(44)
         self.checkbox_container.setSizePolicy(
@@ -315,7 +280,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self.tabs.addTab(cell_tab, "Cell segmentation")
         self.tabs.addTab(self.calcium_video_widget, "Imaging")
         # checkbox_container now lives inside cell_tab's own layout (added
-        # above), so self.tabs (a _StableSizeTabWidget) is root_layout's only
+        # above), so self.tabs (a StableSizeTabWidget) is root_layout's only
         # child and already reports a size hint that's stable across tabs -
         # no need for SpatialFootprintWidget to override its own.
         root_layout.addWidget(self.tabs)
@@ -405,7 +370,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         # on the current tab too would make it (and therefore cell_tab's own
         # size hint) flicker between two different sizes depending on
         # whichever tab happens to be showing - exactly the bounce
-        # _StableSizeTabWidget exists to prevent.
+        # StableSizeTabWidget exists to prevent.
         self.checkbox_container.setVisible(self._cellpose_data is not None)
 
     def _update_empty_state_visibility(self) -> None:
