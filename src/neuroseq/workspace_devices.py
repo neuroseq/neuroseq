@@ -7,6 +7,9 @@ from uuid import uuid4
 
 from qtpy import QtCore
 
+from neuroseq.device_control.bss2_connection import STATE_DISCONNECTED
+from neuroseq.device_control.bss2_connection import Bss2Connection
+from neuroseq.device_control.bss2_protocol import LaunchConfig
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.syscon2_client import SysCon2Client
 from neuroseq.device_control.syscon2_connection_manager import SysCon2ConnectionManager
@@ -74,6 +77,108 @@ class SysCon2Session(QtCore.QObject):
         self._connections.clear()
 
 
+class Bss2Session(QtCore.QObject):
+    """One workspace's view of the shared BrainScaleS-2 helper.
+
+    Connection state is broadcast to every workspace; run progress and
+    results only reach the workspace whose request id prefix they carry.
+    """
+
+    status_changed = QtCore.Signal(str)
+    connected = QtCore.Signal(str)
+    disconnected = QtCore.Signal(str)
+    log_message = QtCore.Signal(str)
+    run_progress = QtCore.Signal(str)
+    run_finished = QtCore.Signal(str, object)
+    run_failed = QtCore.Signal(str, str)
+
+    def __init__(self, connection: Bss2Connection, parent: QtCore.QObject) -> None:
+        super().__init__(parent)
+        self.connection = connection
+        self._prefix = f"{uuid4().hex}:"
+        self._closed = False
+        self._connections = [
+            (connection.status_changed, self.status_changed.emit),
+            (connection.connected, self.connected.emit),
+            (connection.disconnected, self.disconnected.emit),
+            (connection.log_message, self.log_message.emit),
+            (connection.run_progress, self._progress),
+            (connection.run_finished, self._finished),
+            (connection.run_failed, self._failed),
+        ]
+        for signal, slot in self._connections:
+            signal.connect(slot)
+        # The panel connects its slots after construction.
+        QtCore.QTimer.singleShot(0, self._replay_connection_state)
+
+    def _replay_connection_state(self) -> None:
+        if self._closed:
+            return
+        if self.connection.state != STATE_DISCONNECTED:
+            self.status_changed.emit(self.connection.status)
+        if self.connection.is_connected:
+            self.connected.emit(self.connection.identifier or "")
+
+    @property
+    def state(self) -> str:
+        return self.connection.state
+
+    @property
+    def identifier(self) -> str | None:
+        return self.connection.identifier
+
+    @property
+    def busy(self) -> bool:
+        """Whether any workspace's run is executing."""
+        return self.connection.busy
+
+    @property
+    def owns_run(self) -> bool:
+        run_id = self.connection.run_id
+        return run_id is not None and run_id.startswith(self._prefix)
+
+    def connect_helper(
+        self, config: LaunchConfig, token: str, expected_identifier: str = ""
+    ) -> bool:
+        return not self._closed and self.connection.connect_helper(
+            config, token, expected_identifier
+        )
+
+    def disconnect_helper(self) -> None:
+        if not self._closed:
+            self.connection.disconnect_helper()
+
+    def run(self, request_id: str, arguments: dict) -> bool:
+        return not self._closed and self.connection.run(
+            self._prefix + request_id, arguments
+        )
+
+    def stop(self) -> None:
+        if not self._closed:
+            self.connection.stop()
+
+    def _progress(self, run_id: str, message: str) -> None:
+        if not self._closed and run_id.startswith(self._prefix):
+            self.run_progress.emit(message)
+
+    def _finished(self, run_id: str, result: object) -> None:
+        if not self._closed and run_id.startswith(self._prefix):
+            self.run_finished.emit(run_id.removeprefix(self._prefix), result)
+
+    def _failed(self, run_id: str, message: str) -> None:
+        if not self._closed and run_id.startswith(self._prefix):
+            self.run_failed.emit(run_id.removeprefix(self._prefix), message)
+
+    def shutdown(self) -> None:
+        """Detach this workspace; the helper keeps serving the others."""
+        if self._closed:
+            return
+        self._closed = True
+        for signal, slot in self._connections:
+            signal.disconnect(slot)
+        self._connections.clear()
+
+
 class WorkspaceDevices(QtCore.QObject):
     """Own physical connections for the lifetime of the application."""
 
@@ -81,6 +186,7 @@ class WorkspaceDevices(QtCore.QObject):
         super().__init__(parent)
         self.scanimage = ScanImageConnection(self)
         self.syscon = SysCon2ConnectionManager()
+        self.bss2 = Bss2Connection(self)
         self.syscon_connected = False
         self.syscon_state: dict | None = None
         self.syscon.connected.connect(self._connected)
@@ -100,6 +206,10 @@ class WorkspaceDevices(QtCore.QObject):
     def syscon_session(self, parent: QtCore.QObject) -> SysCon2Session:
         return SysCon2Session(self, parent)
 
+    def bss2_session(self, parent: QtCore.QObject) -> Bss2Session:
+        return Bss2Session(self.bss2, parent)
+
     def shutdown(self) -> None:
         self.scanimage.shutdown()
         self.syscon.shutdown()
+        self.bss2.shutdown()
