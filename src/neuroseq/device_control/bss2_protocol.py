@@ -704,6 +704,9 @@ class LaunchConfig:
     singularity: str = "singularity"
     helper_path: Path = HELPER_PATH
     env_setup: str = CONTAINER_ENV_SETUP
+    #: Folder for the cached spack activation script (see
+    #: :func:`activation_cache_file`); ``None`` activates spack on every start.
+    cache_dir: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -734,6 +737,33 @@ def helper_environment(config: LaunchConfig, token: str) -> dict[str, str]:
     return environment
 
 
+#: Sourcing ``spack env activate --sh`` output takes seconds instead of the
+#: ~50 s a full ``spack env activate`` needs on every start.
+_SPACK_SETUP = "source /esd/vendor/spack/share/spack/setup-env.sh"
+
+
+def activation_cache_file(cache_dir: Path, container_image: str) -> Path:
+    """Cache file for one image; a rebuilt/updated image gets a new file."""
+    image = Path(container_image)
+    try:
+        stamp = str(image.stat().st_mtime_ns)
+    except OSError:
+        stamp = "missing"
+    key = hashlib.sha256(f"{image.resolve()}|{stamp}".encode()).hexdigest()[:16]
+    return Path(cache_dir) / f"esd-activate-{key}.sh"
+
+
+def _cached_env_setup(cache: Path) -> str:
+    quoted = shlex.quote(str(cache))
+    partial = shlex.quote(f"{cache}.partial")
+    return (
+        'export SYSTEMNAME="ebrainslab"; '
+        f"if [ -s {quoted} ]; then source {quoted}; "
+        f"else {_SPACK_SETUP} && spack env activate --sh esd > {partial} "
+        f"&& mv {partial} {quoted} && source {quoted}; fi"
+    )
+
+
 def helper_launch_command(config: LaunchConfig, token: str) -> LaunchCommand:
     """``singularity exec --bind <dir> [--app <app>] <image> bash -c '...'``.
 
@@ -742,10 +772,14 @@ def helper_launch_command(config: LaunchConfig, token: str) -> LaunchCommand:
     if not config.container_image.strip():
         raise ValueError("No container image configured")
     helper = Path(config.helper_path).resolve()
-    script = (
-        f"{{ {config.env_setup}; }} 1>&2 && exec python -u {shlex.quote(str(helper))}"
-    )
-    arguments = ["exec", "--bind", str(helper.parent)]
+    env_setup = config.env_setup
+    binds = [str(helper.parent)]
+    if config.cache_dir is not None and env_setup == CONTAINER_ENV_SETUP:
+        cache = activation_cache_file(config.cache_dir, config.container_image)
+        env_setup = _cached_env_setup(cache)
+        binds.append(str(Path(config.cache_dir).resolve()))
+    script = f"{{ {env_setup}; }} 1>&2 && exec python -u {shlex.quote(str(helper))}"
+    arguments = ["exec", "--bind", ",".join(binds)]
     if config.container_app.strip():
         arguments += ["--app", config.container_app.strip()]
     arguments += [config.container_image.strip(), "bash", "-c", script]

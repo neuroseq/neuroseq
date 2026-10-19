@@ -172,13 +172,22 @@ Checked in `image_lab_latest.oci.sif` (Python 3.11, PyNN 0.12.3, neo 0.13.3):
   first entry is the chip identifier.
 - The helper starts through NeuroSeq's launch command and answers `ping`.
 
-Without `squashfuse` on the host, Singularity unpacks the whole `.sif` on
-every start (about 2 minutes). Build an unpacked copy once and choose that
-folder as the container image instead:
+### Start-up time
 
-```bash
-singularity build --sandbox image_lab_latest_sandbox image_lab_latest.oci.sif
-```
+- Without `squashfuse` on the host, Singularity unpacks the whole `.sif` on
+  every start (about 1.5 minutes). Build an unpacked copy once and choose that
+  folder as the container image instead (the container then starts in about
+  1 s):
+
+  ```bash
+  singularity build --sandbox image_lab_latest_sandbox image_lab_latest.oci.sif
+  ```
+
+- Activating the container's spack environment takes about 50 s. NeuroSeq
+  caches the activation (`spack env activate --sh`) per image in the user
+  cache folder (`~/.cache/neuroseq/bss2` on Linux), so only the first
+  connection after installing or updating an image pays this; later
+  connections start in seconds.
 
 ## Still to check on the hardware
 

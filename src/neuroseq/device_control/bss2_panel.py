@@ -18,6 +18,7 @@ import subprocess
 import urllib.request
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -541,6 +542,7 @@ class Bss2Panel(QtWidgets.QWidget):
             host=settings.setup_host,
             port=settings.setup_port,
             user=bp.current_username(),
+            cache_dir=_activation_cache_dir(),
         )
         self._save_settings()
         self._session.connect_helper(config, token, settings.setup_identifier)
@@ -764,6 +766,20 @@ class Bss2Panel(QtWidgets.QWidget):
         if clipboard is not None:
             clipboard.setText(self.debug_report())
         self._log("Debug log copied to the clipboard.")
+
+
+def _activation_cache_dir() -> Path | None:
+    """Per-user folder for the cached spack activation script (or None)."""
+    base = QtCore.QStandardPaths.writableLocation(
+        QtCore.QStandardPaths.StandardLocation.GenericCacheLocation
+    )
+    directory = (Path(base) if base else Path.home() / ".cache") / "neuroseq" / "bss2"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.warning(f"Cannot create {directory}; spack activates on every start")
+        return None
+    return directory
 
 
 def _singularity_version() -> str:

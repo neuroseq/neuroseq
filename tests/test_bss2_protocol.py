@@ -482,3 +482,39 @@ def test_debug_report_header_lists_context_but_not_the_token() -> None:
     assert "connected (identifier chip_x)" in text and "token:       given" in text
     assert "container_image = /img.sif" in text
     assert lines[-1] == "=== log ==="
+
+
+def test_launch_caches_the_spack_activation(tmp_path) -> None:
+    image = tmp_path / "image.sif"
+    image.write_bytes(b"")
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    config = bp.LaunchConfig(
+        container_image=str(image),
+        container_app="",
+        host="h",
+        port=1,
+        user="u",
+        cache_dir=cache_dir,
+    )
+    command = bp.helper_launch_command(config, "")
+    bind = command.arguments[command.arguments.index("--bind") + 1]
+    assert bind.split(",")[1] == str(cache_dir.resolve())
+    script = command.arguments[-1]
+    cache = bp.activation_cache_file(cache_dir, str(image))
+    assert cache.parent == cache_dir and cache.name.startswith("esd-activate-")
+    assert f"if [ -s {cache} ]; then source {cache};" in script
+    assert f"spack env activate --sh esd > {cache}.partial" in script
+    assert script.endswith(f"exec python -u {bp.HELPER_PATH}")
+    # Updating the image changes the cache key.
+    import os
+
+    os.utime(image, ns=(1, 1))
+    assert bp.activation_cache_file(cache_dir, str(image)) != cache
+    assert bp.activation_cache_file(cache_dir, str(tmp_path / "missing")).name
+
+
+def test_launch_without_cache_dir_activates_spack_each_time() -> None:
+    command = bp.helper_launch_command(bp.LaunchConfig("/img", "", "h", 1, "u"), "")
+    assert "spack env activate esd" in command.arguments[-1]
+    assert "--sh" not in command.arguments[-1]

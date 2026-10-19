@@ -397,3 +397,21 @@ def test_connect_refuses_a_missing_image(qtbot, panel, qmessagebox_calls) -> Non
     assert qmessagebox_calls and "does not exist" in qmessagebox_calls[0]["text"]
     assert "does not exist" in panel.log_view.toPlainText()
     assert panel._session.state == STATE_DISCONNECTED
+
+
+def test_activation_cache_dir_is_created(monkeypatch, tmp_path) -> None:
+    from qtpy import QtCore as _QtCore
+
+    from neuroseq.device_control import bss2_panel
+
+    monkeypatch.setattr(
+        _QtCore.QStandardPaths, "writableLocation", lambda _location: str(tmp_path)
+    )
+    directory = bss2_panel._activation_cache_dir()
+    assert directory == tmp_path / "neuroseq" / "bss2" and directory.is_dir()
+    blocker = tmp_path / "file"
+    blocker.write_text("")
+    monkeypatch.setattr(
+        _QtCore.QStandardPaths, "writableLocation", lambda _location: str(blocker)
+    )
+    assert bss2_panel._activation_cache_dir() is None
