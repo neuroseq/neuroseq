@@ -347,7 +347,7 @@ def test_browse_image_and_busy_hardware(
         "neuroseq.device_control.bss2_panel.getopenfilename",
         return_value=("/images/lab.sif", ""),
     )
-    panel.btn_browse_image.click()
+    panel.btn_browse_image.menu().actions()[0].trigger()
     assert panel.image_edit.text() == "/images/lab.sif"
     assert panel._gui_settings.bss2_settings["container_image"] == "/images/lab.sif"
 
@@ -415,3 +415,61 @@ def test_activation_cache_dir_is_created(monkeypatch, tmp_path) -> None:
         _QtCore.QStandardPaths, "writableLocation", lambda _location: str(blocker)
     )
     assert bss2_panel._activation_cache_dir() is None
+
+
+def test_browse_sandbox_folder(qtbot, panel, mocker, tmp_path) -> None:
+    mocker.patch(
+        "neuroseq.device_control.bss2_panel.getexistingdirectory",
+        return_value=str(tmp_path),
+    )
+    actions = [a.text() for a in panel.btn_browse_image.menu().actions()]
+    assert actions == ["Image file (.sif)…", "Sandbox folder…"]
+    panel.btn_browse_image.menu().actions()[1].trigger()
+    assert panel.image_edit.text() == str(tmp_path)
+    assert panel._gui_settings.bss2_settings["container_image"] == str(tmp_path)
+
+
+def test_connect_drops_an_app_the_image_does_not_define(qtbot, panel, mocker) -> None:
+    from neuroseq.device_control import bss2_panel
+
+    mocker.patch.object(bss2_panel, "_container_apps", return_value=set())
+    panel.app_edit.setText("dls")
+    _connect(qtbot, panel)
+    assert panel.app_edit.text() == ""
+    assert "defines no app 'dls'" in panel.log_view.toPlainText()
+    assert panel._gui_settings.bss2_settings["container_app"] == ""
+
+
+def test_connect_keeps_a_defined_or_unknown_app(qtbot, panel, mocker) -> None:
+    from neuroseq.device_control import bss2_panel
+
+    mocker.patch.object(bss2_panel, "_container_apps", return_value={"dls"})
+    panel.app_edit.setText("dls")
+    _connect(qtbot, panel)
+    assert panel.app_edit.text() == "dls"
+
+
+def test_container_apps_parses_singularity_output(mocker) -> None:
+    import subprocess
+
+    from neuroseq.device_control import bss2_panel
+
+    mocker.patch.object(bss2_panel.shutil, "which", return_value="/usr/bin/singularity")
+    run = mocker.patch.object(
+        bss2_panel.subprocess,
+        "run",
+        return_value=subprocess.CompletedProcess([], 0, "INFO: x\ndls\nother\n", ""),
+    )
+    assert bss2_panel._container_apps("/img") == {"dls", "other"}
+    assert run.call_args.args[0] == [
+        "/usr/bin/singularity",
+        "inspect",
+        "--list-apps",
+        "/img",
+    ]
+    run.return_value = subprocess.CompletedProcess([], 255, "", "FATAL")
+    assert bss2_panel._container_apps("/img") is None
+    run.side_effect = subprocess.TimeoutExpired("x", 60)
+    assert bss2_panel._container_apps("/img") is None
+    mocker.patch.object(bss2_panel.shutil, "which", return_value=None)
+    assert bss2_panel._container_apps("/img") is None

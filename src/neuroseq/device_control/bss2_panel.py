@@ -25,6 +25,7 @@ from uuid import uuid4
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
+from qtpy.compat import getexistingdirectory
 from qtpy.compat import getopenfilename
 
 from neuroseq import __version__ as NEUROSEQ_VERSION
@@ -171,7 +172,10 @@ class Bss2Panel(QtWidgets.QWidget):
         self.image_edit.setPlaceholderText("Singularity image (.sif) or sandbox")
         self.image_edit.editingFinished.connect(self._save_settings)
         self.btn_browse_image = QtWidgets.QPushButton("Browse…")
-        self.btn_browse_image.clicked.connect(self._on_browse_image)
+        browse_menu = QtWidgets.QMenu(self.btn_browse_image)
+        browse_menu.addAction("Image file (.sif)…", self._on_browse_image)
+        browse_menu.addAction("Sandbox folder…", self._on_browse_sandbox)
+        self.btn_browse_image.setMenu(browse_menu)
         row = QtWidgets.QHBoxLayout()
         row.addWidget(self.image_edit, 1)
         row.addWidget(self.btn_browse_image)
@@ -453,6 +457,17 @@ class Bss2Panel(QtWidgets.QWidget):
             self.image_edit.setText(path)
             self._save_settings()
 
+    def _on_browse_sandbox(self) -> None:
+        """An unpacked image (``singularity build --sandbox``) is a folder."""
+        path = getexistingdirectory(
+            self,
+            "Choose the BrainScaleS-2 container sandbox folder",
+            self.image_edit.text(),
+        )
+        if path:
+            self.image_edit.setText(path)
+            self._save_settings()
+
     # ---- quiggeldy setups ----------------------------------------------------------
 
     def refresh_setups(self) -> None:
@@ -526,13 +541,24 @@ class Bss2Panel(QtWidgets.QWidget):
         if not os.path.exists(settings.container_image):
             message = (
                 f"The container image {settings.container_image} does not exist "
-                "on this computer.\n\nPull the EBRAINS image (see the "
-                "BrainScaleS-2 user guide) and choose the .sif file with "
-                "Browse, or enter the path of an existing image."
+                "on this computer.\n\nEnter the path of the EBRAINS image in "
+                "'Container image', or use Browse → 'Image file (.sif)…' or "
+                "'Sandbox folder…'. To get the image, see the BrainScaleS-2 "
+                "user guide."
             )
             self._log(message.replace("\n\n", " "))
             QtWidgets.QMessageBox.warning(self, "BrainScaleS-2", message)
             return
+        if settings.container_app:
+            apps = _container_apps(settings.container_image)
+            if apps is not None and settings.container_app not in apps:
+                self._log(
+                    f"The image defines no app '{settings.container_app}' "
+                    f"(apps: {', '.join(sorted(apps)) or 'none'}); "
+                    "launching without --app."
+                )
+                self.app_edit.setText("")
+                settings = self.current_settings()
         token = self.token_edit.text().strip() or os.environ.get("QUIGGELDY_TOKEN", "")
         if not token:
             self._log("No EBRAINS token given; quiggeldy will likely refuse access.")
@@ -780,6 +806,33 @@ def _activation_cache_dir() -> Path | None:
         logger.warning(f"Cannot create {directory}; spack activates on every start")
         return None
     return directory
+
+
+def _container_apps(image: str) -> set[str] | None:
+    """Apps defined in ``image`` (``singularity inspect --list-apps``).
+
+    ``None`` when they cannot be determined, in which case the configured app
+    is used as is.
+    """
+    program = shutil.which("singularity") or shutil.which("apptainer")
+    if program is None:
+        return None
+    try:
+        completed = subprocess.run(
+            [program, "inspect", "--list-apps", image],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    return {
+        line.strip()
+        for line in completed.stdout.splitlines()
+        if line.strip() and not line.startswith(("INFO", "WARNING"))
+    }
 
 
 def _singularity_version() -> str:
