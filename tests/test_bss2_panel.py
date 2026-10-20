@@ -473,3 +473,44 @@ def test_container_apps_parses_singularity_output(mocker) -> None:
     assert bss2_panel._container_apps("/img") is None
     mocker.patch.object(bss2_panel.shutil, "which", return_value=None)
     assert bss2_panel._container_apps("/img") is None
+
+
+def test_connect_without_host_loads_setups_then_connects(qtbot, panel) -> None:
+    panel.setup_fetcher = lambda url: CSV
+    panel.host_edit.setText("")
+    panel.token_edit.setText(TOKEN)
+    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+        panel.btn_connect.click()
+    assert panel.host_edit.text() in {"a.host", "b.host"}
+    assert "loading the setup list first" in panel.log_view.toPlainText()
+
+
+def test_connect_without_host_reports_a_failed_setup_download(
+    qtbot, panel, qmessagebox_calls
+) -> None:
+    def fail(url):
+        raise OSError("offline")
+
+    panel.setup_fetcher = fail
+    panel.host_edit.setText("")
+    panel.connect_hardware()
+    qtbot.waitUntil(lambda: bool(qmessagebox_calls), timeout=5000)
+    assert "Enter the quiggeldy host" in qmessagebox_calls[-1]["text"]
+    assert panel._session.state == STATE_DISCONNECTED
+
+
+def test_connect_without_token_asks_first(qtbot, panel, mocker, monkeypatch) -> None:
+    monkeypatch.delenv("QUIGGELDY_TOKEN", raising=False)
+    panel.host_edit.setText("quiggeldy.test")
+    panel.token_edit.setText("")
+    question = mocker.patch(
+        QUESTION, return_value=QtWidgets.QMessageBox.StandardButton.No
+    )
+    panel.connect_hardware()
+    question.assert_called_once()
+    assert panel._session.state == STATE_DISCONNECTED
+    assert "enter the EBRAINS token first" in panel.log_view.toPlainText()
+
+    question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
+    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+        panel.connect_hardware()

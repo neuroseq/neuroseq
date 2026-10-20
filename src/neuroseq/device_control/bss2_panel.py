@@ -86,6 +86,8 @@ class Bss2Panel(QtWidgets.QWidget):
         self.setup_fetcher: Callable[[str], str] = fetch_text
         self._setup_job = BackgroundJob(self)
         self._setups: list[bp.QuiggeldySetup] = []
+        #: Connect was clicked without a host: connect once the list arrives.
+        self._connect_after_setups = False
         #: (request id, stim name, speed-up) of this tab's run in flight.
         self._run: tuple[str, str, float] | None = None
         self._loading = False
@@ -499,10 +501,21 @@ class Bss2Panel(QtWidgets.QWidget):
         self.setup_combo.setCurrentIndex(index)
         self._on_setup_chosen(index)
         self._log(f"{len(setups)} setup(s) available; default: {setups[index].label}")
+        if self._connect_after_setups:
+            self._connect_after_setups = False
+            self.connect_hardware()
 
     def _on_setups_failed(self, message: str) -> None:
         self.btn_refresh_setups.setEnabled(True)
         self._log(f"Could not load the setup list: {message}")
+        if self._connect_after_setups:
+            self._connect_after_setups = False
+            QtWidgets.QMessageBox.warning(
+                self,
+                "BrainScaleS-2",
+                f"Could not load the quiggeldy setup list ({message}).\n\n"
+                "Enter the quiggeldy host and port by hand, then connect again.",
+            )
 
     def _set_setups(self, setups: list[bp.QuiggeldySetup]) -> None:
         self._setups = list(setups)
@@ -559,8 +572,26 @@ class Bss2Panel(QtWidgets.QWidget):
                 )
                 self.app_edit.setText("")
                 settings = self.current_settings()
+        if not settings.setup_host:
+            # hxcomm cannot resolve an empty host ("DNS lookup … failed").
+            self._log("No quiggeldy host set; loading the setup list first.")
+            self._connect_after_setups = True
+            self.refresh_setups()
+            return
         token = self.token_edit.text().strip() or os.environ.get("QUIGGELDY_TOKEN", "")
         if not token:
+            answer = QtWidgets.QMessageBox.question(
+                self,
+                "BrainScaleS-2",
+                "No EBRAINS token is entered, so quiggeldy will most likely "
+                "refuse the connection.\n\nConnect anyway?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                self._log("Not connecting: enter the EBRAINS token first.")
+                return
             self._log("No EBRAINS token given; quiggeldy will likely refuse access.")
         config = bp.LaunchConfig(
             container_image=settings.container_image,

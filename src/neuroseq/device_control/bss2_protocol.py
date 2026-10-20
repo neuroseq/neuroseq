@@ -717,6 +717,9 @@ class LaunchCommand:
     environment: dict[str, str]
 
 
+_CONTAINER_ENV_PREFIXES = ("SINGULARITYENV_", "APPTAINERENV_")
+
+
 def helper_environment(config: LaunchConfig, token: str) -> dict[str, str]:
     """Quiggeldy variables, both plain and ``SINGULARITYENV_``-prefixed.
 
@@ -733,7 +736,11 @@ def helper_environment(config: LaunchConfig, token: str) -> dict[str, str]:
     if token:
         plain["QUIGGELDY_TOKEN"] = token
     environment = dict(plain)
-    environment.update({f"SINGULARITYENV_{k}": v for k, v in plain.items()})
+    # Apptainer prefers APPTAINERENV_ (and logs an INFO line per
+    # SINGULARITYENV_ variable otherwise); SingularityCE only reads
+    # SINGULARITYENV_. Exporting both works quietly with either.
+    for prefix in _CONTAINER_ENV_PREFIXES:
+        environment.update({f"{prefix}{k}": v for k, v in plain.items()})
     return environment
 
 
@@ -823,7 +830,7 @@ def describe_launch(command: LaunchCommand) -> list[str]:
     plain = {
         key: value
         for key, value in command.environment.items()
-        if not key.startswith("SINGULARITYENV_")
+        if not key.startswith(_CONTAINER_ENV_PREFIXES)
     }
     for key, value in plain.items():
         if key == "QUIGGELDY_TOKEN":
@@ -834,8 +841,10 @@ def describe_launch(command: LaunchCommand) -> list[str]:
             lines.append(f"  env {key}={value}")
     if "QUIGGELDY_TOKEN" not in plain:
         lines.append("  env QUIGGELDY_TOKEN not set by NeuroSeq")
-    if any(key.startswith("SINGULARITYENV_") for key in command.environment):
-        lines.append("  (each also exported with the SINGULARITYENV_ prefix)")
+    if any(key.startswith(_CONTAINER_ENV_PREFIXES) for key in command.environment):
+        lines.append(
+            "  (each also exported with the SINGULARITYENV_ and APPTAINERENV_ prefixes)"
+        )
     return lines
 
 

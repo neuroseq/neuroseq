@@ -415,6 +415,7 @@ def test_launch_command_keeps_token_out_of_argv(tmp_path: Path) -> None:
     assert all(token not in part for part in argv)
     env = command.environment
     assert env["SINGULARITYENV_QUIGGELDY_TOKEN"] == token
+    assert env["APPTAINERENV_QUIGGELDY_TOKEN"] == token
     assert env["QUIGGELDY_TOKEN"] == token
     assert env["SINGULARITYENV_QUIGGELDY_IP"] == "quiggeldy.bioai.eu"
     assert env["QUIGGELDY_PORT"] == "11717"
@@ -463,7 +464,10 @@ def test_describe_launch_hides_the_token_even_after_scrubbing() -> None:
     assert f"QUIGGELDY_TOKEN (value hidden): {len(token)} characters" in text
     # Debug lines are scrubbed before display; the length note must survive.
     assert "value hidden" in bp.scrub_secrets(text, [token])
-    assert "QUIGGELDY_IP=h" in text and "SINGULARITYENV_ prefix" in text
+    assert (
+        "QUIGGELDY_IP=h" in text
+        and "SINGULARITYENV_ and APPTAINERENV_ prefixes" in text
+    )
     no_token = "\n".join(bp.describe_launch(bp.helper_launch_command(config, "")))
     assert "QUIGGELDY_TOKEN not set by NeuroSeq" in no_token
 
