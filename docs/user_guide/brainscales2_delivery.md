@@ -46,11 +46,13 @@ open project tabs, but each tab only receives the results of its own runs.
    and choose the resulting `.sif` file with **Browse…** (leave **Container
    app** empty for such an image unless it defines apps).
 
-2. **Choose a setup.** The picker always lists the quiggeldy instances on the
-   KIP host `helvetica.kip.uni-heidelberg.de`, which run different software
-   versions: **11717 (stable)**, **11750 (experimental)** and **11780
-   (special)**. They are reachable only from allow-listed addresses; ask the
-   BSS-2 team to add your computer's IP. **Refresh** additionally downloads
+2. **Choose a setup.** The picker always lists the quiggeldy instances on
+   `quiggeldy.bioai.eu`, which run different software versions:
+   **11717 (stable)**, **11750 (experimental)** and **11780 (special)**. They
+   are reachable only from allow-listed addresses; ask the BSS-2 team to add
+   your computer's IP. With the EBRAINS `lab_latest` image only the
+   **experimental** instance accepted the connection (October 2026); it is
+   preselected. The others fail with `Could not submit request`. **Refresh** additionally downloads
    the EBRAINS setup list
    (`https://quiggeldy.bioai.eu/nmpi/quiggeldy_setups.csv`, columns
    `Host,Port,Identifier`); its default entry is the one the EBRAINS examples

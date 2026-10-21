@@ -661,14 +661,18 @@ class QuiggeldySetup:
         return f"{address} ({self.description})" if self.description else address
 
 
-#: quiggeldy instances on the KIP host, from the BSS-2 collaborators. They run
-#: different software versions; the chip identifier is reported on connect.
-KIP_QUIGGELDY_HOST = "helvetica.kip.uni-heidelberg.de"
+#: quiggeldy instances from the BSS-2 collaborators (reachable from
+#: allow-listed IPs). They run different software versions; the chip
+#: identifier is reported on connect. With the EBRAINS ``lab_latest`` image,
+#: only the experimental instance accepted the client (checked 2026-10-21).
+KIP_QUIGGELDY_HOST = "quiggeldy.bioai.eu"
 KIP_SETUPS: tuple[QuiggeldySetup, ...] = (
     QuiggeldySetup(KIP_QUIGGELDY_HOST, 11717, "", "stable"),
     QuiggeldySetup(KIP_QUIGGELDY_HOST, 11750, "", "experimental"),
     QuiggeldySetup(KIP_QUIGGELDY_HOST, 11780, "", "special"),
 )
+#: Preselected when no setup is saved yet.
+DEFAULT_KIP_SETUP = 1
 
 
 def combined_setups(

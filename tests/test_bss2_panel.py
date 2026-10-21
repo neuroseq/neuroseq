@@ -107,9 +107,7 @@ def test_refresh_setups_picks_default_and_fills_fields(
     panel.refresh_setups()
     # Two downloaded setups followed by the three built-in KIP instances.
     qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
-    assert panel.setup_combo.itemText(4) == (
-        "helvetica.kip.uni-heidelberg.de:11780 (special)"
-    )
+    assert panel.setup_combo.itemText(4) == ("quiggeldy.bioai.eu:11780 (special)")
     index = bp.default_setup_index("tester", 2)
     assert panel.setup_combo.currentIndex() == index
     expected = ["a.host", "b.host"][index]
@@ -525,25 +523,32 @@ def test_picker_lists_the_kip_instances_and_keeps_a_saved_one(
 ) -> None:
     labels = [setup.label for setup in bp.KIP_SETUPS]
     assert labels == [
-        "helvetica.kip.uni-heidelberg.de:11717 (stable)",
-        "helvetica.kip.uni-heidelberg.de:11750 (experimental)",
-        "helvetica.kip.uni-heidelberg.de:11780 (special)",
+        "quiggeldy.bioai.eu:11717 (stable)",
+        "quiggeldy.bioai.eu:11750 (experimental)",
+        "quiggeldy.bioai.eu:11780 (special)",
     ]
     settings = GuiSettings()
     settings.bss2_settings = {"setup_host": "", "setup_port": 11717}
     fresh = Bss2Panel(devices.bss2_session(devices), settings=settings)
     qtbot.addWidget(fresh)
     assert [fresh.setup_combo.itemText(i) for i in range(3)] == labels
-    assert fresh.setup_combo.currentIndex() == -1
+    # Nothing saved: the experimental instance is preselected and filled in.
+    assert fresh.setup_combo.currentIndex() == bp.DEFAULT_KIP_SETUP == 1
+    assert (fresh.host_edit.text(), fresh.port_spin.value()) == (
+        "quiggeldy.bioai.eu",
+        11750,
+    )
+    fresh._on_setup_chosen(2)
+    assert fresh.port_spin.value() == 11780
     fresh._on_setup_chosen(1)
     assert (fresh.host_edit.text(), fresh.port_spin.value()) == (
-        "helvetica.kip.uni-heidelberg.de",
+        "quiggeldy.bioai.eu",
         11750,
     )
     fresh.shutdown()
 
     settings.bss2_settings = {
-        "setup_host": "helvetica.kip.uni-heidelberg.de",
+        "setup_host": "quiggeldy.bioai.eu",
         "setup_port": 11750,
     }
     kip = Bss2Panel(devices.bss2_session(devices), settings=settings)
@@ -553,19 +558,19 @@ def test_picker_lists_the_kip_instances_and_keeps_a_saved_one(
     kip.shutdown()
 
     settings.bss2_settings = {
-        "setup_host": "quiggeldy.bioai.eu",
+        "setup_host": "other.host",
         "setup_port": 11717,
         "setup_identifier": "chip_a",
     }
     other = Bss2Panel(devices.bss2_session(devices), settings=settings)
     qtbot.addWidget(other)
     assert other.setup_combo.count() == 4
-    assert other.setup_combo.currentText() == "chip_a (quiggeldy.bioai.eu:11717)"
+    assert other.setup_combo.currentText() == "chip_a (other.host:11717)"
     other.shutdown()
 
 
 def test_combined_setups_skips_duplicates() -> None:
-    downloaded = [bp.QuiggeldySetup("helvetica.kip.uni-heidelberg.de", 11717, "chip")]
+    downloaded = [bp.QuiggeldySetup("quiggeldy.bioai.eu", 11717, "chip")]
     combined = bp.combined_setups(downloaded)
     assert [(s.port, s.identifier) for s in combined] == [
         (11717, "chip"),

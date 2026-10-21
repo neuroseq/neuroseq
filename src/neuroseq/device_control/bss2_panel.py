@@ -191,9 +191,9 @@ class Bss2Panel(QtWidgets.QWidget):
 
         self.setup_combo = QtWidgets.QComboBox()
         self.setup_combo.setToolTip(
-            "Quiggeldy instances: the KIP ones on helvetica (stable 11717, "
-            "experimental 11750, special 11780) and, after Refresh, those from "
-            "the EBRAINS list (default pick: sha256(user name) modulo their number)."
+            "Quiggeldy instances on quiggeldy.bioai.eu (stable 11717, "
+            "experimental 11750, special 11780; they need an allow-listed IP) "
+            "and, after Refresh, those from the EBRAINS list."
         )
         self.setup_combo.activated.connect(self._on_setup_chosen)
         self.btn_refresh_setups = QtWidgets.QPushButton("Refresh")
@@ -443,6 +443,14 @@ class Bss2Panel(QtWidgets.QWidget):
                     setups.insert(0, saved)
                     selected = 0
             self._set_setups(setups)
+            if selected < 0:
+                # Nothing saved yet: preselect the instance known to work, so
+                # the host is never empty.
+                selected = bp.DEFAULT_KIP_SETUP
+                default = setups[selected]
+                self.host_edit.setText(default.host)
+                self.port_spin.setValue(default.port)
+                self.identifier_edit.setText(default.identifier)
             self.setup_combo.setCurrentIndex(selected)
             self._on_mode_changed()
         finally:
