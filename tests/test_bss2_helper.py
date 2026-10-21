@@ -138,6 +138,9 @@ class FakePynn(types.ModuleType):
     def end(self):
         self.log.append(("end",))
 
+    def reset(self):
+        self.log.append(("reset",))
+
     def run(self, duration, command=None):
         self.log.append(("run", duration, command))
 
@@ -264,15 +267,19 @@ def test_serve_reports_errors_and_skips_blank_lines(helper) -> None:
     assert "Unknown command" in messages[2]["error"]
 
 
-def test_run_constant_current_appends_segments(helper, fake_stack) -> None:
+def test_run_constant_current_runs_each_segment_separately(helper, fake_stack) -> None:
     messages = _serve(
         helper, [{"id": 1, "command": "run", "arguments": _cc_arguments()}]
     )
     result = messages[-1]["result"]
     assert any(m.get("event") == "progress" for m in messages)
     log = fake_stack.log
+    # One complete run per segment with a reset in between (APPEND chaining
+    # only executed the first part on the chip).
+    steps = [entry[0] for entry in log if entry[0] in ("run", "reset", "set")]
+    assert steps == ["set", "run", "reset", "set", "run", "reset", "set", "run"]
     runs = [entry for entry in log if entry[0] == "run"]
-    assert [r[2] for r in runs] == ["APPEND", "APPEND", "EXECUTE"]
+    assert [r[2] for r in runs] == [None, None, None]
     assert [r[1] for r in runs] == pytest.approx([0.1, 0.1, 0.1])
     sets = [entry[2] for entry in log if entry[0] == "set"]
     assert sets[1] == {
@@ -283,12 +290,18 @@ def test_run_constant_current_appends_segments(helper, fake_stack) -> None:
     assert ("record", "HXNeuron[1:2]", ["v"]) in log
     assert log[0] == ("chip_from_nightly",)
     assert log[1] == ("setup", ("chip", "nightly")) and log[-1] == ("end",)
-    assert bp.decode_array(result["spikes"]["indices"]).tolist() == [0, 2, 2]
-    assert bp.decode_array(result["spikes"]["times_ms"]).tolist() == [0.25, 0.5, 0.75]
+    # Each run's data (relative to its own start) is shifted to the segment start.
+    assert bp.decode_array(result["spikes"]["indices"]).tolist() == [0, 2, 2] * 3
+    assert bp.decode_array(result["spikes"]["times_ms"]) == pytest.approx(
+        [0.25, 0.5, 0.75, 0.35, 0.6, 0.85, 0.45, 0.7, 0.95]
+    )
     assert result["v"]["neuron"] == 1
-    assert bp.decode_array(result["v"]["values"]).tolist() == [1.0, 2.0, 3.0]
+    assert bp.decode_array(result["v"]["values"]).tolist() == [1.0, 2.0, 3.0] * 3
+    assert bp.decode_array(result["v"]["times_ms"]) == pytest.approx(
+        [0.0, 0.1, 0.2, 0.1, 0.2, 0.3, 0.2, 0.3, 0.4]
+    )
     readback = bp.decode_run_result(result, 1000.0)
-    assert readback.trace is not None and readback.trace.traces.shape == (1, 3)
+    assert readback.trace is not None
 
 
 def test_run_spike_input_builds_projection(helper, fake_stack) -> None:

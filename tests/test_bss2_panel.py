@@ -176,7 +176,9 @@ def test_connect_deliver_adds_undoable_experiment(qtbot, panel, mocker) -> None:
     assert experiment.duration == pytest.approx(1.0)
     spikes, trace = experiment.data
     assert isinstance(spikes, SpikeData) and isinstance(trace, TraceData)
-    assert spikes.spike_indices.tolist() == [0, 1, 2]
+    # Only neuron 1 is driven (0.2-0.6 s); the fake chip fires it mid-pulse.
+    assert spikes.spike_indices.tolist() == [1]
+    assert spikes.spike_times.tolist() == pytest.approx([0.4])
     assert trace.indices.tolist() == [1] and trace.units == "a.u."
     assert not panel.run_in_progress
 

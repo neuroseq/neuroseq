@@ -300,6 +300,21 @@ def load_calibration(pynn: Any, identifier: str | None, progress: Progress) -> A
         return pynn.helper.chip_from_portable_binary(data)
 
 
+def _read_run(pop: Any, recorded: Any) -> tuple[np.ndarray, ...]:
+    """Spikes (index, ms) and ``v`` (ms, value) of the run just executed."""
+    spike_segment = pop.get_data("spikes").segments[-1]
+    indices, spike_times = collect_spikes(spike_segment.spiketrains)
+    v_segment = recorded.get_data("v").segments[-1]
+    signals = list(getattr(v_segment, "irregularlysampledsignals", [])) or list(
+        getattr(v_segment, "analogsignals", [])
+    )
+    if signals:
+        v_times, v_values = collect_signal(signals[0])
+    else:
+        v_times, v_values = np.zeros(0), np.zeros(0)
+    return indices, spike_times, v_times, v_values
+
+
 def execute_run(
     spec: dict[str, Any],
     progress: Progress,
@@ -312,6 +327,14 @@ def execute_run(
     (as in the BrainScaleS-2 demos): only ``HXNeuron`` exposes
     ``constant_current_enable``/``constant_current_i_offset``.
     ``neuron_parameters`` are optional ``HXNeuron`` overrides in hardware units.
+
+    Constant current: every segment is its own hardware run
+    (``pynn.reset()``, set enable/offset, ``pynn.run``), read back right
+    after it and shifted to the segment's start time. Chaining segments with
+    ``RunCommand.APPEND`` was checked on the chip (October 2026,
+    quiggeldy.bioai.eu:11750): only the first chained part was executed and
+    recorded, so later pulses never reached the neurons. Each segment
+    therefore starts from the neurons' resting state.
     """
     progress("Importing pynn_brainscales")
     import pynn_brainscales.brainscales2 as pynn
@@ -323,6 +346,10 @@ def execute_run(
         cache["chip"] = load_calibration(pynn, identifier, progress)
     progress("Setting up the chip")
     pynn.setup(initial_config=cache["chip"])
+    spike_indices: list[np.ndarray] = []
+    spike_times: list[np.ndarray] = []
+    v_times: list[np.ndarray] = []
+    v_values: list[np.ndarray] = []
     try:
         pop = pynn.Population(n, pynn.cells.HXNeuron(**spec["neuron_parameters"]))
         pop.record(["spikes"])
@@ -331,24 +358,33 @@ def execute_run(
         recorded.record(["v"])
         if spec["mode"] == INPUT_CONSTANT_CURRENT:
             durations = spec["durations_ms"]
-            progress(f"Executing {durations.size} constant-current segment(s)")
+            start_ms = 0.0
             for i, duration in enumerate(durations):
+                progress(f"Executing constant-current segment {i + 1}/{durations.size}")
+                if i:
+                    pynn.reset()
                 pop.set(
                     constant_current_enable=[bool(v) for v in spec["enable"][i]],
                     constant_current_i_offset=[int(v) for v in spec["offset"][i]],
                 )
-                last = i == durations.size - 1
-                command = pynn.RunCommand.EXECUTE if last else pynn.RunCommand.APPEND
-                pynn.run(float(duration), command)
+                pynn.run(float(duration))
+                idx, times, vt, vv = _read_run(pop, recorded)
+                spike_indices.append(idx)
+                spike_times.append(times + start_ms)
+                v_times.append(vt + start_ms)
+                v_values.append(vv)
+                start_ms += float(duration)
         else:
             trains = spec["spike_trains"]
             try:
                 from pyNN.parameters import Sequence
 
-                times: list[Any] = [Sequence(t) for t in trains]
+                times_list: list[Any] = [Sequence(t) for t in trains]
             except ImportError:
-                times = trains
-            source = pynn.Population(n, pynn.cells.SpikeSourceArray(spike_times=times))
+                times_list = trains
+            source = pynn.Population(
+                n, pynn.cells.SpikeSourceArray(spike_times=times_list)
+            )
             pynn.Projection(
                 source,
                 pop,
@@ -358,28 +394,29 @@ def execute_run(
             )
             progress("Executing the spike-input run")
             pynn.run(spec["duration_ms"])
+            idx, times, vt, vv = _read_run(pop, recorded)
+            spike_indices.append(idx)
+            spike_times.append(times)
+            v_times.append(vt)
+            v_values.append(vv)
         progress("Reading back spikes and membrane voltage")
-        spike_segment = pop.get_data("spikes").segments[-1]
-        indices, spike_times = collect_spikes(spike_segment.spiketrains)
-        v_segment = recorded.get_data("v").segments[-1]
-        signals = list(getattr(v_segment, "irregularlysampledsignals", [])) or list(
-            getattr(v_segment, "analogsignals", [])
-        )
-        v_result = None
-        if signals:
-            v_times, v_values = collect_signal(signals[0])
-            v_result = {
-                "neuron": k,
-                "times_ms": encode_array(v_times, "<f4"),
-                "values": encode_array(v_values, "<f4"),
-            }
     finally:
         pynn.end()
+    indices = np.concatenate(spike_indices) if spike_indices else np.zeros(0, np.uint32)
+    all_spike_times = np.concatenate(spike_times) if spike_times else np.zeros(0)
+    all_v_times = np.concatenate(v_times) if v_times else np.zeros(0)
+    v_result = None
+    if all_v_times.size:
+        v_result = {
+            "neuron": k,
+            "times_ms": encode_array(all_v_times, "<f4"),
+            "values": encode_array(np.concatenate(v_values), "<f4"),
+        }
     return {
         "duration_ms": spec["duration_ms"],
         "spikes": {
             "indices": encode_array(indices, "<u4"),
-            "times_ms": encode_array(spike_times, "<f4"),
+            "times_ms": encode_array(all_spike_times, "<f4"),
         },
         "v": v_result,
     }

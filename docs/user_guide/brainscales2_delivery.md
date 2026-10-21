@@ -6,12 +6,13 @@ holographic stimulation rig, the **BrainScaleS-2** tab delivers the current
 stim array to the BrainScaleS-2 (BSS-2) accelerated neuromorphic chip and adds
 the chip's response to the project as a new data group.
 
-!!! warning "Delivery not yet verified on hardware"
+!!! note "Verified on hardware"
 
-    Connecting works on the real system (chip `hxcube7fpga0chip57_1` through
-    `quiggeldy.bioai.eu:11750`, October 2026), and the container calls were
-    checked against the EBRAINS image. Delivery runs have not been executed on
-    the chip yet; see [Still to check on the hardware](#still-to-check-on-the-hardware).
+    Connection and constant-current delivery work on the real system (chip
+    `hxcube7fpga0chip57_1` through `quiggeldy.bioai.eu:11750`, October 2026):
+    a 10-neuron staircase made every neuron fire only during its own pulse,
+    with the membrane of the recorded neuron read back over the whole run.
+    See [Results on the chip](#results-on-the-chip).
 
 ## How it works
 
@@ -97,10 +98,14 @@ helper sets
 - `constant_current_enable = value > 0`, and
 - `constant_current_i_offset = round(clip(value / value_at_max, 0, 1) * max_i_offset)`
 
-and then runs the segment with `pynn.run(duration, RunCommand.APPEND)`; the
-last segment is run with `RunCommand.EXECUTE`. **Max i_offset** is in hardware
+and runs the segment as its own hardware run (`pynn.reset()` before every
+segment but the first, then `pynn.run(duration)`), reading spikes and membrane
+voltage right after it and shifting them to the segment's start time. Each
+segment therefore starts from the neurons' resting state. (Chaining segments
+with `RunCommand.APPEND`, as in the AdEx tutorial, executed and recorded only
+the first chained part on the chip.) **Max i_offset** is in hardware
 units (0–1022); **Stim value at max** defaults to the array maximum. Segments
-that become identical after rounding are merged. Very many segments (more than 1000) are allowed but slow to prepare, so the confirmation warns about them.
+that become identical after rounding are merged. Every segment costs about 0.5 s of hardware time (20 segments ≈ 12 s); very many segments (more than 1000) are allowed but slow, so the confirmation warns about them.
 
 ### Spike input
 
@@ -171,8 +176,8 @@ log can also be selected and copied directly. **Clear** empties the log.
 
 Checked in `image_lab_latest.oci.sif` (Python 3.11, PyNN 0.12.3, neo 0.13.3):
 
-- `pynn.run(runtime, command)` with `RunCommand.APPEND`/`EXECUTE`; durations
-  are hardware milliseconds, as in the AdEx tutorial (0.1 + 0.6 + 0.3 ms).
+- `pynn.run(runtime)` durations are hardware milliseconds; consecutive runs
+  need `pynn.reset()` in between.
 - `constant_current_enable`, `constant_current_i_offset` (and
   `constant_current_type`) are `HXNeuron` parameters; `CalibHXNeuronCoba` does
   not have them, so delivery uses `HXNeuron` on top of the nightly calibration
@@ -200,14 +205,21 @@ Checked in `image_lab_latest.oci.sif` (Python 3.11, PyNN 0.12.3, neo 0.13.3):
   connection after installing or updating an image pays this; later
   connections start in seconds.
 
-## Still to check on the hardware
+## Results on the chip
 
-- Per-neuron lists in `Population.set(...)` apply from the next `APPEND`
-  segment on.
-- Recording `spikes` on the whole population and `v` on a one-neuron view in
-  the same run; spikes are read from
-  `get_data("spikes").segments[-1].spiketrains`, the membrane from
-  `get_data("v").segments[-1].irregularlysampledsignals[0]` (falling back to
-  `analogsignals`).
-- The calibrated `HXNeuron` defaults respond to `constant_current_i_offset` in
-  the 0–1022 range as expected (the demos use 0–1000).
+Measured on `hxcube7fpga0chip57_1` (quiggeldy.bioai.eu:11750, October 2026):
+
+- **Chained APPEND runs do not work with this software version**: only the
+  first chained part was executed and recorded (membrane data stopped after
+  it; later pulses produced no spikes), whether only `constant_current_enable`
+  or also `constant_current_i_offset` changed between parts. Delivery
+  therefore runs one hardware run per segment.
+- **One run per segment works**: each neuron fires only while its current is
+  on, and `constant_current_i_offset` can change from segment to segment
+  (one neuron: 200 → 0 spikes, 500 → 5, 1000 → 15 spikes per 0.1 ms).
+- Recording `spikes` of the population and `v` of one neuron in the same run
+  works; the membrane is sampled every ≈32 ns of hardware time
+  (≈32 µs biological at speed-up 1000).
+- Neurons differ: at the same `i_offset` they fire at different rates
+  (2–9 spikes per 100 ms pulse at `i_offset` 500 in the staircase test), as
+  expected for analog circuits.

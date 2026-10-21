@@ -51,15 +51,29 @@ class _Population:
     def record(self, _variables):
         pass
 
-    def set(self, **_kwargs):
-        pass
+    def set(self, **kwargs):
+        if "constant_current_enable" in kwargs:
+            self.stack.enabled = list(kwargs["constant_current_enable"])
 
     def __getitem__(self, _item):
         return self
 
     def get_data(self, variable):
         if variable == "spikes":
-            trains = [_Train([0.1 * (i + 1)], i) for i in range(self.n)]
+            # Like the chip: data of the last run; times relative to its start.
+            # Constant current: enabled neurons spike once mid-run; spike
+            # input (no enable set): every neuron spikes at 0.1*(i+1) ms.
+            t = self.stack.elapsed_ms
+            enabled = self.stack.enabled
+            trains = [
+                _Train(
+                    ([t / 2] if enabled[i] else [])
+                    if enabled is not None
+                    else [0.1 * (i + 1)],
+                    i,
+                )
+                for i in range(self.n)
+            ]
             segment = types.SimpleNamespace(spiketrains=trains)
         else:
             t = self.stack.elapsed_ms
@@ -74,6 +88,8 @@ class _Pynn(types.ModuleType):
     def __init__(self):
         super().__init__("pynn_brainscales.brainscales2")
         self.elapsed_ms = 0.0
+        self.enabled: list | None = None
+        self.ran = False
         self.cells = types.SimpleNamespace(
             HXNeuron=lambda **_kw: "neuron",
             SpikeSourceArray=lambda spike_times: "source",
@@ -85,6 +101,11 @@ class _Pynn(types.ModuleType):
     def setup(self, *, initial_config):
         assert initial_config == "chip"
         self.elapsed_ms = 0.0
+        self.enabled = None
+        self.ran = False
+
+    def reset(self):
+        self.ran = False
 
     def end(self):
         pass
@@ -107,7 +128,10 @@ class _Pynn(types.ModuleType):
             os._exit(5)
         if MODE == "slow_run":
             time.sleep(60)
-        self.elapsed_ms += float(duration)
+        if self.ran:  # the real pynn_brainscales refuses this too
+            raise RuntimeError("Call `pynn.reset()` before calling `pynn.run()` again.")
+        self.ran = True
+        self.elapsed_ms = float(duration)
 
 
 class _ManagedConnection:
