@@ -105,7 +105,11 @@ def test_refresh_setups_picks_default_and_fills_fields(
     monkeypatch.setenv("USER", "tester")
     panel.setup_fetcher = lambda url: CSV
     panel.refresh_setups()
-    qtbot.waitUntil(lambda: panel.setup_combo.count() == 2, timeout=5000)
+    # Two downloaded setups followed by the three built-in KIP instances.
+    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
+    assert panel.setup_combo.itemText(4) == (
+        "helvetica.kip.uni-heidelberg.de:11780 (special)"
+    )
     index = bp.default_setup_index("tester", 2)
     assert panel.setup_combo.currentIndex() == index
     expected = ["a.host", "b.host"][index]
@@ -514,3 +518,58 @@ def test_connect_without_token_asks_first(qtbot, panel, mocker, monkeypatch) -> 
     question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
     with qtbot.waitSignal(panel._session.connected, timeout=20000):
         panel.connect_hardware()
+
+
+def test_picker_lists_the_kip_instances_and_keeps_a_saved_one(
+    qtbot, devices, tmp_config_dir
+) -> None:
+    labels = [setup.label for setup in bp.KIP_SETUPS]
+    assert labels == [
+        "helvetica.kip.uni-heidelberg.de:11717 (stable)",
+        "helvetica.kip.uni-heidelberg.de:11750 (experimental)",
+        "helvetica.kip.uni-heidelberg.de:11780 (special)",
+    ]
+    settings = GuiSettings()
+    settings.bss2_settings = {"setup_host": "", "setup_port": 11717}
+    fresh = Bss2Panel(devices.bss2_session(devices), settings=settings)
+    qtbot.addWidget(fresh)
+    assert [fresh.setup_combo.itemText(i) for i in range(3)] == labels
+    assert fresh.setup_combo.currentIndex() == -1
+    fresh._on_setup_chosen(1)
+    assert (fresh.host_edit.text(), fresh.port_spin.value()) == (
+        "helvetica.kip.uni-heidelberg.de",
+        11750,
+    )
+    fresh.shutdown()
+
+    settings.bss2_settings = {
+        "setup_host": "helvetica.kip.uni-heidelberg.de",
+        "setup_port": 11750,
+    }
+    kip = Bss2Panel(devices.bss2_session(devices), settings=settings)
+    qtbot.addWidget(kip)
+    assert kip.setup_combo.count() == 3
+    assert kip.setup_combo.currentText().endswith("(experimental)")
+    kip.shutdown()
+
+    settings.bss2_settings = {
+        "setup_host": "quiggeldy.bioai.eu",
+        "setup_port": 11717,
+        "setup_identifier": "chip_a",
+    }
+    other = Bss2Panel(devices.bss2_session(devices), settings=settings)
+    qtbot.addWidget(other)
+    assert other.setup_combo.count() == 4
+    assert other.setup_combo.currentText() == "chip_a (quiggeldy.bioai.eu:11717)"
+    other.shutdown()
+
+
+def test_combined_setups_skips_duplicates() -> None:
+    downloaded = [bp.QuiggeldySetup("helvetica.kip.uni-heidelberg.de", 11717, "chip")]
+    combined = bp.combined_setups(downloaded)
+    assert [(s.port, s.identifier) for s in combined] == [
+        (11717, "chip"),
+        (11750, ""),
+        (11780, ""),
+    ]
+    assert bp.QuiggeldySetup("h", 1, "").label == "h:1"

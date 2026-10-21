@@ -191,8 +191,9 @@ class Bss2Panel(QtWidgets.QWidget):
 
         self.setup_combo = QtWidgets.QComboBox()
         self.setup_combo.setToolTip(
-            "Quiggeldy setups from the EBRAINS list; the default pick is "
-            "sha256(user name) modulo the number of setups."
+            "Quiggeldy instances: the KIP ones on helvetica (stable 11717, "
+            "experimental 11750, special 11780) and, after Refresh, those from "
+            "the EBRAINS list (default pick: sha256(user name) modulo their number)."
         )
         self.setup_combo.activated.connect(self._on_setup_chosen)
         self.btn_refresh_setups = QtWidgets.QPushButton("Refresh")
@@ -427,16 +428,22 @@ class Bss2Panel(QtWidgets.QWidget):
             self.weight_spin.setValue(settings.spike_weight)
             self.madc_spin.setValue(settings.madc_neuron)
             self.speedup_spin.setValue(settings.speedup)
+            # Built-in KIP instances, plus the saved setup if it is another one.
+            setups = list(bp.KIP_SETUPS)
+            selected = -1
             if settings.setup_host:
-                self._set_setups(
-                    [
-                        bp.QuiggeldySetup(
-                            settings.setup_host,
-                            settings.setup_port,
-                            settings.setup_identifier,
-                        )
-                    ]
-                )
+                address = (settings.setup_host, settings.setup_port)
+                matches = [
+                    i for i, s in enumerate(setups) if (s.host, s.port) == address
+                ]
+                if matches:
+                    selected = matches[0]
+                else:
+                    saved = bp.QuiggeldySetup(*address, settings.setup_identifier)
+                    setups.insert(0, saved)
+                    selected = 0
+            self._set_setups(setups)
+            self.setup_combo.setCurrentIndex(selected)
             self._on_mode_changed()
         finally:
             self._loading = False
@@ -496,8 +503,11 @@ class Bss2Panel(QtWidgets.QWidget):
         if not setups:
             self._on_setups_failed("The setup list is empty.")
             return
-        self._set_setups(setups)
+        # The collaborators' default (hash of the user name) picks among the
+        # downloaded setups; the built-in KIP instances are listed after them.
         index = bp.default_setup_index(bp.current_username(), len(setups))
+        setups = bp.combined_setups(setups)
+        self._set_setups(setups)
         self.setup_combo.setCurrentIndex(index)
         self._on_setup_chosen(index)
         self._log(f"{len(setups)} setup(s) available; default: {setups[index].label}")

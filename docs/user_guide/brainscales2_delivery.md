@@ -46,12 +46,16 @@ open project tabs, but each tab only receives the results of its own runs.
    and choose the resulting `.sif` file with **Browse…** (leave **Container
    app** empty for such an image unless it defines apps).
 
-2. **Choose a setup.** **Refresh** downloads the quiggeldy setup list
+2. **Choose a setup.** The picker always lists the quiggeldy instances on the
+   KIP host `helvetica.kip.uni-heidelberg.de`, which run different software
+   versions: **11717 (stable)**, **11750 (experimental)** and **11780
+   (special)**. They are reachable only from allow-listed addresses; ask the
+   BSS-2 team to add your computer's IP. **Refresh** additionally downloads
+   the EBRAINS setup list
    (`https://quiggeldy.bioai.eu/nmpi/quiggeldy_setups.csv`, columns
-   `Host,Port,Identifier`). The default setup is the one the EBRAINS examples
+   `Host,Port,Identifier`); its default entry is the one the EBRAINS examples
    pick: `sha256(user name) mod number of setups`, where the user name is
-   `$USER`. Host, port and expected identifier stay editable, for example to
-   use another quiggeldy host than the one listed.
+   `$USER`. Host, port and expected identifier stay editable.
 
 3. **Enter your EBRAINS token.** Paste the output of `clb_oauth.get_token()`
    (EBRAINS Collaboratory) into **Token**. If the field is empty, an existing

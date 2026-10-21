@@ -649,10 +649,40 @@ class QuiggeldySetup:
     host: str
     port: int
     identifier: str
+    #: Short note shown in the picker, e.g. the software version it runs.
+    description: str = ""
 
     @property
     def label(self) -> str:
-        return f"{self.identifier} ({self.host}:{self.port})"
+        address = f"{self.host}:{self.port}"
+        note = f", {self.description}" if self.description else ""
+        if self.identifier:
+            return f"{self.identifier} ({address}{note})"
+        return f"{address} ({self.description})" if self.description else address
+
+
+#: quiggeldy instances on the KIP host, from the BSS-2 collaborators. They run
+#: different software versions; the chip identifier is reported on connect.
+KIP_QUIGGELDY_HOST = "helvetica.kip.uni-heidelberg.de"
+KIP_SETUPS: tuple[QuiggeldySetup, ...] = (
+    QuiggeldySetup(KIP_QUIGGELDY_HOST, 11717, "", "stable"),
+    QuiggeldySetup(KIP_QUIGGELDY_HOST, 11750, "", "experimental"),
+    QuiggeldySetup(KIP_QUIGGELDY_HOST, 11780, "", "special"),
+)
+
+
+def combined_setups(
+    downloaded: Iterable[QuiggeldySetup],
+    extra: Iterable[QuiggeldySetup] = KIP_SETUPS,
+) -> list[QuiggeldySetup]:
+    """Downloaded setups first, then ``extra`` ones not already listed."""
+    setups = list(downloaded)
+    known = {(setup.host, setup.port) for setup in setups}
+    for setup in extra:
+        if (setup.host, setup.port) not in known:
+            setups.append(setup)
+            known.add((setup.host, setup.port))
+    return setups
 
 
 def parse_setups_csv(text: str) -> list[QuiggeldySetup]:
