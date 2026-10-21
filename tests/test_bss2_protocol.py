@@ -522,3 +522,12 @@ def test_launch_without_cache_dir_activates_spack_each_time() -> None:
     command = bp.helper_launch_command(bp.LaunchConfig("/img", "", "h", 1, "u"), "")
     assert "spack env activate esd" in command.arguments[-1]
     assert "--sh" not in command.arguments[-1]
+
+
+def test_saved_helvetica_host_migrates_to_quiggeldy() -> None:
+    settings = Bss2Settings.from_dict(
+        {"setup_host": "helvetica.kip.uni-heidelberg.de", "setup_port": 11750}
+    )
+    assert (settings.setup_host, settings.setup_port) == ("quiggeldy.bioai.eu", 11750)
+    kept = Bss2Settings.from_dict({"setup_host": "other.host", "setup_port": 1})
+    assert kept.setup_host == "other.host"

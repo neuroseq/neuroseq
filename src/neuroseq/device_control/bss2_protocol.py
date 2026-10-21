@@ -98,6 +98,7 @@ DEFAULT_CONTAINER_IMAGE = "/containers/stable/latest"
 #: client (experimental software version; needs an allow-listed IP).
 DEFAULT_QUIGGELDY_HOST = "quiggeldy.bioai.eu"
 DEFAULT_QUIGGELDY_PORT = 11750
+_RETIRED_QUIGGELDY_HOSTS = frozenset({"helvetica.kip.uni-heidelberg.de"})
 #: Activates the BSS-2 software stack inside the EBRAINS image. Its output is
 #: sent to stderr so that stdout carries protocol messages only.
 CONTAINER_ENV_SETUP = (
@@ -237,6 +238,11 @@ class Bss2Settings:
         settings.spike_weight = int(np.clip(settings.spike_weight, 0, WEIGHT_LIMIT))
         if not settings.speedup > 0:
             settings.speedup = DEFAULT_SPEEDUP
+        if settings.setup_host in _RETIRED_QUIGGELDY_HOSTS:
+            # A short-lived build offered the instances on helvetica, which is
+            # not reachable from outside KIP; they are served through
+            # quiggeldy.bioai.eu on the same ports.
+            settings.setup_host = DEFAULT_QUIGGELDY_HOST
         return settings
 
 
