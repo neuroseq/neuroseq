@@ -94,6 +94,10 @@ SPIKE_SOURCE_EXPERIMENT = "experiment"
 
 QUIGGELDY_SETUPS_URL = "https://quiggeldy.bioai.eu/nmpi/quiggeldy_setups.csv"
 DEFAULT_CONTAINER_IMAGE = "/containers/stable/latest"
+#: The quiggeldy instance that accepts the EBRAINS ``lab_latest`` image's
+#: client (experimental software version; needs an allow-listed IP).
+DEFAULT_QUIGGELDY_HOST = "quiggeldy.bioai.eu"
+DEFAULT_QUIGGELDY_PORT = 11750
 #: Activates the BSS-2 software stack inside the EBRAINS image. Its output is
 #: sent to stderr so that stdout carries protocol messages only.
 CONTAINER_ENV_SETUP = (
@@ -186,9 +190,10 @@ class Bss2Settings:
     """Persisted tab settings. The EBRAINS token is deliberately not a field."""
 
     container_image: str = DEFAULT_CONTAINER_IMAGE
-    container_app: str = "dls"
-    setup_host: str = ""
-    setup_port: int = 11717
+    #: Empty: the EBRAINS image defines no apps (lab machines use "dls").
+    container_app: str = ""
+    setup_host: str = DEFAULT_QUIGGELDY_HOST
+    setup_port: int = DEFAULT_QUIGGELDY_PORT
     setup_identifier: str = ""
     input_mode: str = INPUT_CONSTANT_CURRENT
     #: 0 means "as many neurons as stim channels".
@@ -665,10 +670,10 @@ class QuiggeldySetup:
 #: allow-listed IPs). They run different software versions; the chip
 #: identifier is reported on connect. With the EBRAINS ``lab_latest`` image,
 #: only the experimental instance accepted the client (checked 2026-10-21).
-KIP_QUIGGELDY_HOST = "quiggeldy.bioai.eu"
+KIP_QUIGGELDY_HOST = DEFAULT_QUIGGELDY_HOST
 KIP_SETUPS: tuple[QuiggeldySetup, ...] = (
     QuiggeldySetup(KIP_QUIGGELDY_HOST, 11717, "", "stable"),
-    QuiggeldySetup(KIP_QUIGGELDY_HOST, 11750, "", "experimental"),
+    QuiggeldySetup(KIP_QUIGGELDY_HOST, DEFAULT_QUIGGELDY_PORT, "", "experimental"),
     QuiggeldySetup(KIP_QUIGGELDY_HOST, 11780, "", "special"),
 )
 #: Preselected when no setup is saved yet.

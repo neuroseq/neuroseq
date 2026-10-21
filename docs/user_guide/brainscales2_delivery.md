@@ -52,7 +52,8 @@ open project tabs, but each tab only receives the results of its own runs.
    are reachable only from allow-listed addresses; ask the BSS-2 team to add
    your computer's IP. With the EBRAINS `lab_latest` image only the
    **experimental** instance accepted the connection (October 2026); it is
-   preselected. The others fail with `Could not submit request`. **Refresh** additionally downloads
+   the default. The others fail with `Could not submit request`. **Refresh**
+   keeps the selected instance when it is still listed. **Refresh** additionally downloads
    the EBRAINS setup list
    (`https://quiggeldy.bioai.eu/nmpi/quiggeldy_setups.csv`, columns
    `Host,Port,Identifier`); its default entry is the one the EBRAINS examples

@@ -511,14 +511,18 @@ class Bss2Panel(QtWidgets.QWidget):
         if not setups:
             self._on_setups_failed("The setup list is empty.")
             return
-        # The collaborators' default (hash of the user name) picks among the
-        # downloaded setups; the built-in KIP instances are listed after them.
-        index = bp.default_setup_index(bp.current_username(), len(setups))
+        # Keep the current instance if it is still listed (Refresh must not
+        # switch away from a working setup); otherwise use the collaborators'
+        # default pick (hash of the user name) among the downloaded setups.
+        current = (self.host_edit.text().strip(), self.port_spin.value())
+        default_index = bp.default_setup_index(bp.current_username(), len(setups))
         setups = bp.combined_setups(setups)
         self._set_setups(setups)
+        listed = [i for i, s in enumerate(setups) if (s.host, s.port) == current]
+        index = listed[0] if listed else default_index
         self.setup_combo.setCurrentIndex(index)
         self._on_setup_chosen(index)
-        self._log(f"{len(setups)} setup(s) available; default: {setups[index].label}")
+        self._log(f"{len(setups)} setup(s) available; selected: {setups[index].label}")
         if self._connect_after_setups:
             self._connect_after_setups = False
             self.connect_hardware()

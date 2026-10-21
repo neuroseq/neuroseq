@@ -104,6 +104,7 @@ def test_refresh_setups_picks_default_and_fills_fields(
 ) -> None:
     monkeypatch.setenv("USER", "tester")
     panel.setup_fetcher = lambda url: CSV
+    panel.host_edit.setText("unlisted.host")  # not in the list: default pick
     panel.refresh_setups()
     # Two downloaded setups followed by the three built-in KIP instances.
     qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
@@ -578,3 +579,21 @@ def test_combined_setups_skips_duplicates() -> None:
         (11780, ""),
     ]
     assert bp.QuiggeldySetup("h", 1, "").label == "h:1"
+
+
+def test_refresh_keeps_the_selected_instance(qtbot, panel) -> None:
+    panel.setup_fetcher = lambda url: CSV
+    assert (panel.host_edit.text(), panel.port_spin.value()) == (
+        bp.DEFAULT_QUIGGELDY_HOST,
+        bp.DEFAULT_QUIGGELDY_PORT,
+    )
+    panel.refresh_setups()
+    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
+    assert panel.setup_combo.currentText().endswith(":11750 (experimental)")
+    assert panel.port_spin.value() == 11750
+
+
+def test_defaults_are_the_working_quiggeldy_instance() -> None:
+    defaults = bp.Bss2Settings()
+    assert (defaults.setup_host, defaults.setup_port) == ("quiggeldy.bioai.eu", 11750)
+    assert defaults.container_app == ""
