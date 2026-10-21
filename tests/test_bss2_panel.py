@@ -502,21 +502,15 @@ def test_connect_without_host_reports_a_failed_setup_download(
     assert panel._session.state == STATE_DISCONNECTED
 
 
-def test_connect_without_token_asks_first(qtbot, panel, mocker, monkeypatch) -> None:
+def test_connect_without_token_does_not_ask(qtbot, panel, mocker, monkeypatch) -> None:
     monkeypatch.delenv("QUIGGELDY_TOKEN", raising=False)
     panel.host_edit.setText("quiggeldy.test")
     panel.token_edit.setText("")
-    question = mocker.patch(
-        QUESTION, return_value=QtWidgets.QMessageBox.StandardButton.No
-    )
-    panel.connect_hardware()
-    question.assert_called_once()
-    assert panel._session.state == STATE_DISCONNECTED
-    assert "enter the EBRAINS token first" in panel.log_view.toPlainText()
-
-    question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
+    question = mocker.patch(QUESTION)
     with qtbot.waitSignal(panel._session.connected, timeout=20000):
         panel.connect_hardware()
+    question.assert_not_called()
+    assert "Connecting without an EBRAINS token." in panel.log_view.toPlainText()
 
 
 def test_picker_lists_the_kip_instances_and_keeps_a_saved_one(

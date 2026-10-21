@@ -151,7 +151,10 @@ def configure_quiggeldy(
         environ["QUIGGELDY_PORT"] = str(int(arguments["port"]))
     warnings = []
     if not environ.get("QUIGGELDY_TOKEN"):
-        warnings.append("No QUIGGELDY_TOKEN in the helper environment.")
+        warnings.append(
+            "No QUIGGELDY_TOKEN set (fine for allow-listed IPs; needed for "
+            "token-based access)."
+        )
     if not environ.get("QUIGGELDY_IP"):
         warnings.append("No quiggeldy host configured.")
     return warnings

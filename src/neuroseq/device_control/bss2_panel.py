@@ -221,15 +221,17 @@ class Bss2Panel(QtWidgets.QWidget):
         self.token_edit = QtWidgets.QLineEdit()
         self.token_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
         self.token_edit.setPlaceholderText(
-            "EBRAINS token (kept in memory only)"
+            "optional: EBRAINS token (kept in memory only)"
             if not os.environ.get("QUIGGELDY_TOKEN")
             else "using QUIGGELDY_TOKEN from the environment"
         )
         self.token_edit.setToolTip(
-            "Output of clb_oauth.get_token(). Passed to the container through its "
+            "Optional. Not needed for the quiggeldy instances reached from an "
+            "allow-listed IP; access through EBRAINS may need the output of "
+            "clb_oauth.get_token(). Passed to the container through its "
             "environment only; never saved."
         )
-        form.addRow("Token", self.token_edit)
+        form.addRow("Token (optional)", self.token_edit)
 
         self.btn_connect = QtWidgets.QPushButton("Connect")
         self.btn_connect.clicked.connect(self.connect_hardware)
@@ -602,19 +604,8 @@ class Bss2Panel(QtWidgets.QWidget):
             return
         token = self.token_edit.text().strip() or os.environ.get("QUIGGELDY_TOKEN", "")
         if not token:
-            answer = QtWidgets.QMessageBox.question(
-                self,
-                "BrainScaleS-2",
-                "No EBRAINS token is entered, so quiggeldy will most likely "
-                "refuse the connection.\n\nConnect anyway?",
-                QtWidgets.QMessageBox.StandardButton.Yes
-                | QtWidgets.QMessageBox.StandardButton.No,
-                QtWidgets.QMessageBox.StandardButton.No,
-            )
-            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
-                self._log("Not connecting: enter the EBRAINS token first.")
-                return
-            self._log("No EBRAINS token given; quiggeldy will likely refuse access.")
+            # Allow-listed IPs connect without a token (user name only).
+            self._log("Connecting without an EBRAINS token.")
         config = bp.LaunchConfig(
             container_image=settings.container_image,
             container_app=settings.container_app,

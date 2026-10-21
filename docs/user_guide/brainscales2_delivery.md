@@ -6,12 +6,12 @@ holographic stimulation rig, the **BrainScaleS-2** tab delivers the current
 stim array to the BrainScaleS-2 (BSS-2) accelerated neuromorphic chip and adds
 the chip's response to the project as a new data group.
 
-!!! warning "Not yet verified on hardware"
+!!! warning "Delivery not yet verified on hardware"
 
-    The BSS-2 path has been tested only against a simulated helper. The
-    container calls and the time conversion listed under
-    [Assumptions](#assumptions-to-check-on-the-real-system) still have to be
-    confirmed on a real chip.
+    Connecting works on the real system (chip `hxcube7fpga0chip57_1` through
+    `quiggeldy.bioai.eu:11750`, October 2026), and the container calls were
+    checked against the EBRAINS image. Delivery runs have not been executed on
+    the chip yet; see [Still to check on the hardware](#still-to-check-on-the-hardware).
 
 ## How it works
 
@@ -60,16 +60,20 @@ open project tabs, but each tab only receives the results of its own runs.
    pick: `sha256(user name) mod number of setups`, where the user name is
    `$USER`. Host, port and expected identifier stay editable.
 
-3. **Enter your EBRAINS token.** Paste the output of `clb_oauth.get_token()`
-   (EBRAINS Collaboratory) into **Token**. If the field is empty, an existing
-   `QUIGGELDY_TOKEN` environment variable is used. The token is kept in memory
+3. **Token (optional).** From an allow-listed IP, the quiggeldy instances
+   accept the connection with your user name alone; leave **Token** empty.
+   For token-based access (e.g. through EBRAINS), paste the output of
+   `clb_oauth.get_token()` (EBRAINS Lab) into **Token**. If the field is
+   empty, an existing `QUIGGELDY_TOKEN` environment variable is used. The
+   token is kept in memory
    for this session only: it is passed to the container through the helper's
-   environment (`QUIGGELDY_TOKEN` and `SINGULARITYENV_QUIGGELDY_TOKEN`), never
+   environment (`QUIGGELDY_TOKEN`, also with the `SINGULARITYENV_` and `APPTAINERENV_` prefixes), never
    on the command line, and it is not saved in the settings or written to the
    log. Anything that looks like the token in helper output is masked.
 
 4. **Connect.** The first activation of the container's software environment
-   takes around 90 seconds; the status line reports each step. Once quiggeldy
+   takes around 50 seconds; later connections start in under a second (see
+   [Start-up time](#start-up-time)). The status line reports each step. Once quiggeldy
    answers, **Connected chip** shows the chip identifier. If it differs from the
    selected setup's identifier, the status says so.
 
