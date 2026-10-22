@@ -309,7 +309,7 @@ def test_failed_save_during_application_close_restores_the_window(window, monkey
 
 
 def test_recording_workspace_stays_open_until_its_acquisition_ends(
-    window, mocker, qmessagebox_calls
+    window, mocker, qmessagebox_calls, tmp_path
 ):
     workspace = window.active_workspace
     connection = window.devices.scanimage
@@ -317,7 +317,14 @@ def test_recording_workspace_stays_open_until_its_acquisition_ends(
     connection.connected = True
     try:
         workspace.acquisition_controller.start_scanimage_recording(
-            {"run_id": "pending-run", "name": "Run", "directory": "/x", "frames": 4}
+            {
+                "run_id": "pending-run",
+                "name": "Run",
+                "directory": str(tmp_path),
+                "stem": "2026-10-22",
+                "counter": 1,
+                "frames": 4,
+            }
         )
         assert workspace.acquisition_controller.acquisition_in_progress
         window._close_tab(0)
@@ -557,14 +564,21 @@ def test_simulation_guard_is_released_on_failure_cancel_and_close(
 
 
 def test_first_frame_timeout_belongs_to_the_workspace_that_started_the_run(
-    window, mocker
+    window, mocker, tmp_path
 ):
     first = window.active_workspace
     second = window._add_workspace(_project())
     connection = window.devices.scanimage
     command = mocker.patch.object(connection, "command", return_value=True)
     first.acquisition_controller.start_scanimage_recording(
-        {"run_id": "a", "name": "Run", "directory": "/x", "frames": 4}
+        {
+            "run_id": "a",
+            "name": "Run",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     connection.run_id = "a"
     try:

@@ -50,7 +50,8 @@ NeuroSeq uses Grab, not Loop, so the loop repeat period is not used.
 
 4. Configure scanners, PMTs, saved/displayed channels and trigger wiring in
    ScanImage. Set **Functional channel** to the channel of the calcium
-   indicator: it is the channel shown for recordings in the Imaging tab.
+   indicator: it is the channel shown for recordings in the Imaging tab and
+   the one dynamic input routines measure (it must be among the saved channels).
 
 The bundled `.m` files are added to the MATLAB path for the session. The adapter
 registers acquisition lifecycle callbacks alongside existing user functions;
@@ -121,12 +122,13 @@ Save the project to retain its acquisition history.
 
 A small, human-readable `<date>_<number>.json` beside the TIFF stores the
 request, the stimulus it relates to (name, sample interval, shape and SHA-256 of
-its samples, not the samples themselves), the block of a dynamic input routine
+its samples; the samples themselves are in `<date>_<number>_stimulus.npy`
+beside it, so the folder alone reproduces the stimulus), the block of a dynamic input routine
 (with the path of its `.seq` file and its SysCon2 sequence-manager entry), and
-the SysCon export settings, written before the hardware command. It aids
-recovery if NeuroSeq exits before the project is saved, and is removed again if
-ScanImage refuses to start. Its requested state is not evidence that the
-acquisition completed.
+the SysCon export settings. Both files are written before the hardware command,
+so they aid recovery if NeuroSeq exits before the project is saved, and both are
+removed again if ScanImage refuses to start. The requested state in the JSON is
+not evidence that the acquisition completed.
 
 The existing **Save imaging data…** action exports a rendered derivative. It does not
 replace ScanImage's original TIFF recording. Recorded ScanImage playback uses channel-specific frame

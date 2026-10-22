@@ -194,7 +194,7 @@ def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path, rec
     assert loaded.calcium_scanimage_index == project.calcium_scanimage_index
 
 
-def test_recording_stays_with_originating_project(qtbot, mocker, recording):
+def test_recording_stays_with_originating_project(qtbot, mocker, recording, tmp_path):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
@@ -204,7 +204,14 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     original = gui.project
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "one",
+            "name": "Test",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     assert original.imaging_acquisitions[0]["status"] == "requested"
     other = window._add_workspace(Project())
@@ -383,14 +390,23 @@ def test_completed_count_mismatch_does_not_attach_recording(
     assert connection.run_id is None
 
 
-def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recording):
+def test_recording_completion_attaches_and_reopens_movie(
+    qtbot, mocker, recording, tmp_path
+):
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "one",
+            "name": "Test",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     gui.scanimage_connection.run_id = "one"
     gui.acquisition_controller.scanimage_status(
@@ -552,7 +568,7 @@ def test_recorded_channel_uses_file_indices_through_symlink(qtbot, recording, tm
 
 @pytest.mark.parametrize("switch_project", [False, True])
 def test_new_recording_preserves_imported_movie(
-    qtbot, mocker, recording, switch_project
+    qtbot, mocker, recording, switch_project, tmp_path
 ):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
@@ -565,7 +581,14 @@ def test_new_recording_preserves_imported_movie(
     project.add_calcium_video([imported], 20, name="Imported")
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "new",
+            "name": "New",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     if switch_project:
         window._add_workspace(Project())

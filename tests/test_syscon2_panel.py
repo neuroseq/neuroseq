@@ -1090,3 +1090,28 @@ def test_target_power_beside_the_export_button(
     used = export.call_args.args[2]
     assert used.target_power_mw == pytest.approx(12.5)
     assert used.spiralling  # the other settings are kept
+
+
+def test_project_without_settings_starts_from_the_default_power(panel):
+    """Review finding 5: the previous project's power must not carry over."""
+    first = Project()
+    first.syscon_export_settings = SysconExportSettings(
+        config_text="x", target_power_mw=60.0
+    )
+    panel.set_project(first)
+    assert panel.target_power_spin.value() == 60.0
+    second = Project()
+    second.dirty = False
+    panel.set_project(second)
+    assert panel.target_power_spin.value() == SysconExportSettings("").target_power_mw
+    assert panel.stimulation_host.export_settings().target_power_mw == 1.0
+    assert second.syscon_export_settings is None
+    assert not second.dirty
+
+
+def test_host_announces_settings_changed_in_the_panel(panel):
+    panel.set_project(Project())
+    changed = []
+    panel.stimulation_host.export_settings_changed.connect(lambda: changed.append(1))
+    panel.target_power_spin.setValue(12.0)
+    assert changed

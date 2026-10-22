@@ -95,6 +95,10 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._armed: set[str] = set()
         #: Recorded blocks whose traces are being extracted.
         self._extracting: set[str] = set()
+        #: Functional (calcium) channel of each block recording, from the ScanImage tab.
+        self._block_channels: dict[str, int] = {}
+        #: Stimulus samples written beside a recording that has not started yet.
+        self._stimulus_files: dict[str, pathlib.Path] = {}
         self._extraction = BackgroundJob(self)
         self._disposed = False
         #: Shown as the "ScanImage (imaging)" tab of the Stimulation setup pane.
@@ -155,14 +159,22 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
-        block = self._blocks.pop(run_id, None)
-        if block is not None and run_id not in self._extracting:
+        self._stimulus_files.pop(run_id, None)
+        if run_id in self._extracting:
+            # The connection ends the run right after recording_ready; the block
+            # completes once its traces are extracted.
+            return
+        self._block_channels.pop(run_id, None)
+        if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(
                 run_id, "The recording ended without producing data."
             )
 
     def start_scanimage_recording(
-        self, arguments: dict, block: BlockRecording | None = None
+        self,
+        arguments: dict,
+        block: BlockRecording | None = None,
+        functional_channel: int | None = None,
     ) -> bool:
         if self.connection.run_id is not None:
             self.controls.show_message("An acquisition is already being finalized.")
@@ -177,13 +189,26 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             synchronization="stimulation_trigger" if block else "unverified",
         )
         stim = block.stim_block if block is not None else self._current_stim()
+        samples_path: pathlib.Path | None = None
         if stim is not None:
             record["stimulus"] = stimulus_summary(stim)
+            # The samples themselves beside the TIFF, so the recording folder alone
+            # reproduces the stimulus even if the project is never saved.
+            samples_path = pathlib.Path(arguments["directory"]) / (
+                f"{arguments['stem']}_{int(arguments['counter']):05d}_stimulus.npy"
+            )
+            try:
+                np.save(samples_path, np.ascontiguousarray(stim.values))
+            except OSError as exc:
+                self.controls.show_message(f"Could not save the stimulus: {exc}")
+                return False
+            record["stimulus"]["samples_file"] = samples_path.name
         if block is not None:
             record["block"] = {
                 "label": block.label,
                 "duration_s": block.duration_s,
                 "tail_s": block.tail_s,
+                "functional_channel": functional_channel,
                 # The exact script this recording captured.
                 "seq_path": block.seq_path,
                 "syscon_sequence": block.syscon_sequence,
@@ -197,10 +222,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             }
         record = json.loads(json.dumps(record, default=str))
         if not self.connection.command("record", {**arguments, "manifest": record}):
+            if samples_path is not None:
+                samples_path.unlink(missing_ok=True)
             return False
         project.imaging_acquisitions.append(record)
         project.mark_dirty()
         self.run_ids.add(arguments["run_id"])
+        if samples_path is not None:
+            self._stimulus_files[arguments["run_id"]] = samples_path
         return True
 
     def scanimage_status(self, status: dict) -> None:
@@ -209,6 +238,13 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if run_id not in self.run_ids:
             return
         state = run.get("state", "unknown")
+        samples_path = self._stimulus_files.get(run_id)
+        if samples_path is not None and state == "failed":
+            # ScanImage refused to start: no recording for these samples to describe.
+            samples_path.unlink(missing_ok=True)
+            del self._stimulus_files[run_id]
+        elif state != "starting":
+            self._stimulus_files.pop(run_id, None)
         if run_id in self._blocks:
             if state in {"waiting_for_first_frame", "recording"} and (
                 run_id not in self._armed
@@ -216,8 +252,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 self._armed.add(run_id)
                 self.block_armed.emit(run_id)
             elif state in _FAILED_STATES:
-                self._blocks.pop(run_id, None)
-                self.block_recording_failed.emit(
+                self._fail_block(
                     run_id, run.get("error") or f"ScanImage reported '{state}'."
                 )
         record = self._record(run_id)
@@ -304,6 +339,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._extract_block(run_id, block, result, name)
 
     def _fail_block(self, run_id: str, message: str) -> None:
+        self._block_channels.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(run_id, message)
 
@@ -318,13 +354,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         paths = list(result["paths"])
         fps = float(result["fps"])
         channels = list(result["channels"])
+        channel = self._block_channels.pop(run_id, self.controls.channel_spin.value())
 
         def task(_report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
             trace = extract_recording_dff(
                 paths,
                 fps=fps,
                 saved_channels=channels,
-                functional_channel=block.functional_channel,
+                functional_channel=channel,
                 cellpose_data=cellpose,
                 stim_block=block.stim_block,
             )
@@ -395,17 +432,27 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         fps = self._frame_rate()
         assert fps is not None
         frames = max(1, math.ceil((recording.duration_s + recording.tail_s) * fps))
+        channel = self.controls.channel_spin.value()
+        saved = self.controls.saved_channels()
+        if saved and channel not in saved:
+            raise ValueError(
+                f"The functional channel {channel} is not among the saved channels "
+                f"({', '.join(map(str, saved))}) in the ScanImage tab."
+            )
         arguments = self.controls.recording_request(
             frames=frames, external_trigger=True
         )
         run_id = arguments["run_id"]
         self._blocks[run_id] = recording
-        if not self.start_scanimage_recording(arguments, recording):
+        self._block_channels[run_id] = channel
+        if not self.start_scanimage_recording(arguments, recording, channel):
             self._blocks.pop(run_id, None)
+            self._block_channels.pop(run_id, None)
             raise ValueError("ScanImage did not accept the recording.")
         return run_id
 
     def abort_block(self, run_id: str) -> None:
         self._blocks.pop(run_id, None)
+        self._block_channels.pop(run_id, None)
         if self.connection.run_id == run_id:
             self.connection.command("abort")

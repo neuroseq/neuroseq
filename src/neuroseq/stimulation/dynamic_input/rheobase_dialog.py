@@ -1388,6 +1388,13 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _reawait_acquisition(self) -> None:
         """Stay on the current probe: ask the user to fix the import and click again."""
+        if self._automatic():
+            # Nobody imports automatic blocks by hand, so waiting would never end.
+            self._finish(
+                "The data recorded for this block is missing from the project; "
+                "the routine was stopped."
+            )
+            return
         host = self.editor.stimulation_host
         if host is not None:
             host.reawait(self)

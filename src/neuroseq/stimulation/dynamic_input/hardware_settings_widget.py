@@ -82,10 +82,11 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             "decay. The number of frames follows from the block length and this tail."
         )
         form.addRow("Record after block:", self.spn_tail_s)
-        self.spn_channel = QtWidgets.QSpinBox(self)
-        self.spn_channel.setRange(1, 32)
-        self.spn_channel.setToolTip("ScanImage channel of the calcium indicator.")
-        form.addRow("Functional channel:", self.spn_channel)
+        channel_note = QtWidgets.QLabel(
+            "Measured on the Functional channel set in the ScanImage tab.", self
+        )
+        channel_note.setWordWrap(True)
+        form.addRow("Calcium channel:", channel_note)
         self.spn_threshold: QtWidgets.QDoubleSpinBox | None = None
         self.spn_spike_threshold = QtWidgets.QDoubleSpinBox(self)
         self.spn_spike_threshold.setRange(0.001, 100.0)
@@ -114,16 +115,33 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             self._lbl_threshold = QtWidgets.QLabel("Response threshold:", self)
             form.addRow(self._lbl_threshold, self.spn_threshold)
             form.addRow(self._lbl_spike_threshold, self.spn_spike_threshold)
-        self.spn_power_mw.valueChanged.connect(self._store_settings)
-        self.cmb_laser.currentIndexChanged.connect(self._store_settings)
-        self.chk_spiral.toggled.connect(self._store_settings)
-        self.chk_ten_spots.toggled.connect(self._store_settings)
+        # Each control changes only its own field, so options changed elsewhere
+        # (the SysCon2 panel) are never overwritten with what this box showed.
+        self.spn_power_mw.valueChanged.connect(
+            lambda value: self._store_setting(target_power_mw=float(value))
+        )
+        self.cmb_laser.currentIndexChanged.connect(
+            lambda _index: self._store_setting(
+                laser_wavelength_nm=int(self.cmb_laser.currentData())
+            )
+        )
+        self.chk_spiral.toggled.connect(
+            lambda checked: self._store_setting(spiralling=checked)
+        )
+        self.chk_ten_spots.toggled.connect(
+            lambda checked: self._store_setting(ten_spots_per_roi=checked)
+        )
         self.chk_automatic.toggled.connect(self._update_recording_controls)
+        self._export_widgets: tuple[QtWidgets.QWidget, ...] = (
+            self.spn_power_mw,
+            self.cmb_laser,
+            self.chk_spiral,
+            self.chk_ten_spots,
+        )
 
     def _update_recording_controls(self, automatic: bool) -> None:
         """Recording options only apply to blocks NeuroSeq records itself."""
         self.spn_tail_s.setEnabled(automatic)
-        self.spn_channel.setEnabled(automatic)
         self.spn_spike_threshold.setEnabled(automatic)
 
     def show_readout(self, dff: bool) -> None:
@@ -145,21 +163,25 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
         return self.spn_threshold.value() / 100.0 if self.spn_threshold else 0.0
 
     def set_host(self, host: SysCon2StimulationHost | None) -> None:
-        self._host = host
+        if host is not self._host:
+            if self._host is not None:
+                self._host.export_settings_changed.disconnect(self.refresh)
+            if host is not None:
+                host.export_settings_changed.connect(self.refresh)
+            self._host = host
         self.refresh()
 
     def refresh(self) -> None:
-        """Show the export options currently stored for the project."""
+        """Show the export options currently stored for the project.
+
+        Leaves the box's own enabled state to the dialog (disabled while running).
+        """
         settings = self._host.export_settings() if self._host is not None else None
-        self.setEnabled(settings is not None)
+        widgets = self._export_widgets
+        for widget in widgets:
+            widget.setEnabled(settings is not None)
         if settings is None:
             return
-        widgets = (
-            self.spn_power_mw,
-            self.cmb_laser,
-            self.chk_spiral,
-            self.chk_ten_spots,
-        )
         for widget in widgets:
             widget.blockSignals(True)
         self.spn_power_mw.setValue(settings.target_power_mw)
@@ -175,21 +197,12 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
         for widget in widgets:
             widget.blockSignals(False)
 
-    def _store_settings(self, *_args: object) -> None:
+    def _store_setting(self, **change: object) -> None:
         if self._host is None:
             return
         settings = self._host.export_settings()
-        if settings is None:
-            return
-        self._host.set_export_settings(
-            replace(
-                settings,
-                target_power_mw=self.spn_power_mw.value(),
-                laser_wavelength_nm=int(self.cmb_laser.currentData()),
-                spiralling=self.chk_spiral.isChecked(),
-                ten_spots_per_roi=self.chk_ten_spots.isChecked(),
-            )
-        )
+        if settings is not None:
+            self._host.set_export_settings(replace(settings, **change))  # type: ignore[arg-type]
 
     def block_recording(
         self, stim: StimArray, start: int, stop: int, label: str
@@ -199,6 +212,5 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             label=label,
             stim_block=slice_stim_array(stim, start, stop),
             tail_s=self.spn_tail_s.value(),
-            functional_channel=self.spn_channel.value(),
             spike_threshold=self.spn_spike_threshold.value(),
         )

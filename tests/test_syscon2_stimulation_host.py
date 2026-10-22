@@ -155,6 +155,7 @@ class _FakeClient:
     def __init__(self, sequences: list[str], states: list[str]) -> None:
         self.calls: list[tuple] = []
         self.states = list(states)
+        self.state_polls = 0
         outer = self
 
         class _Manager:
@@ -172,6 +173,7 @@ class _FakeClient:
                 outer.calls.append(("upload", runs))
 
             def get_state(self):
+                outer.state_polls += 1
                 return outer.states.pop(0) if len(outer.states) > 1 else outer.states[0]
 
             def run_sequence(self, start, edge):
@@ -192,13 +194,14 @@ def _automatic_host(tmp_path, mocker, *, acquisition=True):
     )
     mocker.patch.object(host_module, "export_stim_array", return_value=result)
     mocker.patch.object(host_module, "_POLL_S", 0.0)
+    mocker.patch.object(host_module, "UPLOAD_SETTLE_S", 0.0)
     fake = _FakeAcquisition() if acquisition else None
     host.set_acquisition(fake)
     return host, submitted, fake
 
 
 def _recording(stim: StimArray) -> BlockRecording:
-    return BlockRecording("probe", slice_stim_array(stim, 0, 5), 2.0, 1)
+    return BlockRecording("probe", slice_stim_array(stim, 0, 5), 2.0)
 
 
 def _run(submitted, host, client) -> None:
@@ -453,3 +456,50 @@ def test_cleanup_removes_only_the_temporary_folder(tmp_path) -> None:
     host.cleanup()
     assert not temporary.exists()
     assert tmp_path.is_dir()
+
+
+def test_idle_right_after_upload_is_not_taken_as_ready(
+    stim: StimArray, tmp_path, mocker
+) -> None:
+    """GetState can still say Idle before the upload shows up (review finding 7)."""
+    host, submitted, _acquisition = _automatic_host(tmp_path, mocker)
+    mocker.patch.object(host_module, "UPLOAD_SETTLE_S", 3600.0)
+    client = _FakeClient(
+        ["target\\probe_001.seq"], ["Idle", "Idle", "Uploading", "Idle"]
+    )
+    host.send_block(Project(), stim, 0, 5, automatic=True)
+    _run(submitted, host, client)
+    assert client.state_polls == 4  # waited through the upload
+    assert host.phase == "running"
+
+
+@pytest.mark.parametrize("step", ["prepare", "run"])
+def test_disconnected_hardware_fails_the_block_at_once(
+    stim: StimArray, tmp_path, qtbot, mocker, step
+) -> None:
+    """Review finding 8: a Disconnected state ends the wait instead of timing out."""
+    host, submitted, _acquisition = _automatic_host(tmp_path, mocker)
+    mocker.patch.object(host_module, "RUN_MARGIN_S", 3600.0)
+    mocker.patch.object(host_module, "UPLOAD_TIMEOUT_S", 3600.0)
+    states = ["Disconnected"] if step == "prepare" else ["Idle", "Disconnected"]
+    client = _FakeClient(["target\\probe_001.seq"], states)
+    host.send_block(Project(), stim, 0, 5, automatic=True)
+    if step == "run":
+        _run(submitted, host, client)
+    with qtbot.waitSignal(host.block_failed) as failed:
+        _run(submitted, host, client)
+    assert "disconnected" in failed.args[1]
+
+
+def test_cancelled_block_cannot_be_reawaited(stim: StimArray, tmp_path, mocker) -> None:
+    """Review finding 9."""
+    submitted: list = []
+    host = _host(submitted, SysconExportSettings(config_text=""), tmp_path)
+    mocker.patch.object(host_module, "export_stim_array", return_value=mocker.Mock())
+    owner = object()
+    host.send_block(Project(), stim, 0, 5, owner=owner)
+    host.on_command_finished(submitted[0][0], None)
+    host.cancel(owner)
+    host.reawait(owner)
+    assert host.phase == "idle"
+    assert host.send_block(Project(), stim, 0, 5, owner=owner)

@@ -948,7 +948,6 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     project, _editor, dialog, host = _automatic_dialog(qtbot)
     assert not dialog.btn_data_imported.isVisibleTo(dialog)
     dialog.hardware.spn_tail_s.setValue(2.0)
-    dialog.hardware.spn_channel.setValue(2)
 
     dialog.start()
 
@@ -956,7 +955,7 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     recording = host.recordings[0]
     start, stop = dialog._block_range
     assert recording.stim_block.values.shape[0] == stop - start
-    assert (recording.tail_s, recording.functional_channel) == (2.0, 2)
+    assert recording.tail_s == 2.0
     assert host.owner is dialog
     run_name = host.run_names[0]
     assert run_name.startswith("rheobase_")
@@ -1008,6 +1007,26 @@ def test_syscon2_automatic_probe_can_be_measured_from_deconvolved_spikes(
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert "Deconvolved spikes after the probe: 1." in dialog.log.toPlainText()
+
+
+def test_syscon2_automatic_block_whose_data_vanished_stops_instead_of_waiting(
+    qtbot,
+) -> None:
+    """Review finding 6: there is no import button to press in automatic mode."""
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    host.complete({"trace": "Removed :: dF/F"})  # not in the project
+    assert not dialog._running
+    assert "missing from the project" in dialog.log.toPlainText()
+
+
+def test_hardware_settings_stay_locked_while_a_manual_routine_runs(qtbot) -> None:
+    """Review finding 2: refresh() during a run must not unlock the box."""
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running
+    dialog.refresh()
+    assert not dialog.hardware.isEnabled()
 
 
 def test_syscon2_automatic_needs_a_recorder(qtbot) -> None:

@@ -247,6 +247,9 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
         self.stimulation_host.block_sent.connect(self._on_host_block_sent)
         self.stimulation_host.progress.connect(self.preview_status_label.setText)
+        self.export_settings_changed.connect(
+            self.stimulation_host.export_settings_changed
+        )
 
     def set_project(self, project: Project | None) -> None:
         if project is self._project:
@@ -255,9 +258,10 @@ class SysCon2Panel(QtWidgets.QWidget):
         self.stimulation_host.reset_accepted_warnings()
         self._reset_import_status()
         self.preview_label.setText("No preview yet.")
-        settings = self._export_settings
-        if settings is not None:
-            self._show_export_settings(settings)
+        # The power shown is the project's; a project without stored settings
+        # starts from the default rather than the previous project's power.
+        settings = self._export_settings or default_export_settings(project)
+        self._show_target_power(settings.target_power_mw)
 
     def set_current_stim_provider(
         self, provider: Callable[[], StimArray | None]
@@ -1043,8 +1047,11 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _show_export_settings(self, settings: SysconExportSettings) -> None:
         self._export_settings = settings
+        self._show_target_power(settings.target_power_mw)
+
+    def _show_target_power(self, power_mw: float) -> None:
         self.target_power_spin.blockSignals(True)
-        self.target_power_spin.setValue(settings.target_power_mw)
+        self.target_power_spin.setValue(power_mw)
         self.target_power_spin.blockSignals(False)
         self.export_settings_changed.emit()
 

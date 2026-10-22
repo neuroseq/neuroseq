@@ -57,7 +57,6 @@ def _block(seconds: float = 1.0) -> BlockRecording:
         "rheobase",
         stim,
         tail_s=2.0,
-        functional_channel=1,
         seq_path="D:/runs/rheobase_001.seq",
         syscon_sequence="neuroseq\\rheobase_001.seq",
     )
@@ -101,7 +100,18 @@ def test_recording_metadata_is_small_and_readable(setup):
     assert s.controller.start_scanimage_recording(request)
     manifest = s.command.call_args.args[1]["manifest"]
     # No base64 samples (#628): the stimulus is identified, not embedded.
-    assert set(manifest["stimulus"]) == {"name", "dt", "shape", "dtype", "sha256"}
+    assert set(manifest["stimulus"]) == {
+        "name",
+        "dt",
+        "shape",
+        "dtype",
+        "sha256",
+        "samples_file",
+    }
+    # The samples sit beside the TIFF instead (review finding 10).
+    samples = s.folder / manifest["stimulus"]["samples_file"]
+    assert samples.name == f"{request['stem']}_{request['counter']:05d}_stimulus.npy"
+    np.testing.assert_array_equal(np.load(samples), np.ones((10, 2)))
     assert manifest["synchronization"] == "unverified"
     assert "config_text" not in manifest["syscon_export_settings"]
     assert manifest["syscon_export_settings"]["target_power_mw"] == 3.0
@@ -253,3 +263,110 @@ def test_aborting_a_block_aborts_its_recording(setup):
     s.controller.abort_block(run_id)
     s.command.assert_called_with("abort")
     s.connection.run_id = None
+
+
+def _ready_result(run_id: str, arguments: dict, folder) -> dict:
+    return {
+        "run_id": run_id,
+        "status": "completed",
+        "paths": [str(folder / f"{arguments['stem']}_00001.tif")],
+        "fps": 30.0,
+        "duration_s": 3.0,
+        "channels": [1, 2],
+    }
+
+
+def test_block_completes_when_the_run_ends_right_after_recording_ready(
+    setup, qtbot, mocker
+):
+    """The connection emits run_finished immediately after recording_ready; the
+    block must survive until its traces are extracted (review finding 1)."""
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    mocker.patch.object(controller_module, "extract_recording_dff", return_value=trace)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    failed = []
+    s.controller.block_recording_failed.connect(lambda *args: failed.append(args))
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+        s.connection.recording_ready.emit(_ready_result(run_id, arguments, s.folder))
+        s.connection.run_finished.emit(run_id)
+    assert not failed
+    assert not s.controller._blocks
+
+
+def test_block_measures_the_functional_channel_of_the_scanimage_tab(
+    setup, qtbot, mocker
+):
+    s = setup
+    _ready_for_blocks(s)
+    s.controller.controls.channel_spin.setValue(2)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    extract = mocker.patch.object(
+        controller_module, "extract_recording_dff", return_value=trace
+    )
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    assert arguments["manifest"]["block"]["functional_channel"] == 2
+    s.controller.controls.channel_spin.setValue(1)  # changed after arming
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+        s.controller.scanimage_recording_ready(
+            _ready_result(run_id, arguments, s.folder)
+        )
+    assert extract.call_args.kwargs["functional_channel"] == 2
+
+
+def test_block_needs_its_functional_channel_saved(setup):
+    s = setup
+    _ready_for_blocks(s)
+    controls = s.controller.controls
+    controls._status(
+        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
+    )
+    controls.channel_spin.setValue(1)
+    with pytest.raises(ValueError, match="not among the saved channels"):
+        s.controller.arm_block(_block())
+    s.command.assert_not_called()
+
+
+def test_stimulus_samples_are_removed_when_scanimage_refuses(setup):
+    s = setup
+    request = s.controller.controls.recording_request(frames=4, external_trigger=False)
+    assert s.controller.start_scanimage_recording(request)
+    samples = s.folder / f"{request['stem']}_{request['counter']:05d}_stimulus.npy"
+    assert samples.is_file()
+    s.controller.scanimage_status(
+        {"run": {"id": request["run_id"], "state": "failed", "error": "busy"}}
+    )
+    assert not samples.exists()
+
+
+def test_stimulus_samples_stay_once_the_recording_started(setup):
+    s = setup
+    request = s.controller.controls.recording_request(frames=4, external_trigger=False)
+    s.controller.start_scanimage_recording(request)
+    samples = s.folder / f"{request['stem']}_{request['counter']:05d}_stimulus.npy"
+    s.controller.scanimage_status(
+        {"run": {"id": request["run_id"], "state": "waiting_for_first_frame"}}
+    )
+    s.controller.scanimage_status({"run": {"id": request["run_id"], "state": "failed"}})
+    assert samples.is_file()
+
+
+def test_rejected_record_command_leaves_no_stimulus_file(setup):
+    s = setup
+    s.command.return_value = False
+    request = s.controller.controls.recording_request(frames=4, external_trigger=False)
+    assert not s.controller.start_scanimage_recording(request)
+    assert not list(s.folder.glob("*_stimulus.npy"))

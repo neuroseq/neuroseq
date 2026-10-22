@@ -45,6 +45,9 @@ IMPORT_COMMAND_PREFIX = "stim_host.import"
 COMMAND_PREFIX = "stim_host"
 #: How long SysCon2 may take to report an uploaded sequence ready to run.
 UPLOAD_TIMEOUT_S = 60.0
+#: An "Idle" reply this soon after UploadSequence, before any "Uploading" was seen,
+#: may predate the upload, so it is not taken as ready.
+UPLOAD_SETTLE_S = 1.0
 #: Extra time allowed for an unrecorded block to finish after its nominal duration.
 RUN_MARGIN_S = 30.0
 _POLL_S = 0.1
@@ -59,8 +62,6 @@ class BlockRecording:
     stim_block: StimArray
     #: Recording time after the end of the block (calcium decay), in seconds.
     tail_s: float
-    #: ScanImage channel carrying the calcium indicator.
-    functional_channel: int
     #: OASIS event size (ΔF/F) counted as a deconvolved spike.
     spike_threshold: float = 0.1
     #: The delivered ``.seq`` file and its SysCon2 sequence-manager entry (set by the
@@ -150,14 +151,23 @@ def next_block_name(folder: pathlib.Path, run_name: str) -> str:
     return f"{run_name}_{existing + 1:03d}"
 
 
+def _normalized_state(state: str) -> str:
+    return state.lower().removeprefix("state:").strip()
+
+
 def _ready_to_run(state: str) -> bool:
     """Same readiness rule as the panel's Upload button."""
-    state = state.lower().removeprefix("state:").strip()
+    state = _normalized_state(state)
     return (
         bool(state)
         and state not in {"busy", "disconnected"}
-        and not (state.startswith("upload"))
+        and not state.startswith("upload")
     )
+
+
+def _raise_if_disconnected(state: str) -> None:
+    if _normalized_state(state) == "disconnected":
+        raise RuntimeError("SysCon2 reports the Holo4D hardware as disconnected.")
 
 
 class SysCon2StimulationHost(QtCore.QObject):
@@ -176,12 +186,15 @@ class SysCon2StimulationHost(QtCore.QObject):
       :meth:`acquisition_imported`, else the recording's payload (see
       :class:`BlockAcquisition`), or ``{}`` for an automatic block without recording.
     - ``progress(str)`` -- a status line for the user.
+    - ``export_settings_changed()`` -- emitted by the owner when the export options change.
     """
 
     block_sent = QtCore.Signal(object, object)
     block_failed = QtCore.Signal(object, str)
     block_completed = QtCore.Signal(object, object)
     progress = QtCore.Signal(str)
+    #: The export options returned by :meth:`export_settings` changed.
+    export_settings_changed = QtCore.Signal()
 
     def __init__(
         self,
@@ -369,9 +382,17 @@ class SysCon2StimulationHost(QtCore.QObject):
             )
             client.sequence_manager.select_sequence(remote)
             client.holo4d.upload_sequence(1)
-            deadline = time.monotonic() + UPLOAD_TIMEOUT_S
-            state = ""
-            while not _ready_to_run(state := client.holo4d.get_state()):
+            uploaded_at = time.monotonic()
+            deadline = uploaded_at + UPLOAD_TIMEOUT_S
+            seen_upload = False
+            while True:
+                state = client.holo4d.get_state()
+                _raise_if_disconnected(state)
+                seen_upload |= _normalized_state(state).startswith("upload")
+                if _ready_to_run(state) and (
+                    seen_upload or time.monotonic() - uploaded_at >= UPLOAD_SETTLE_S
+                ):
+                    break
                 if cancel.is_set():
                     raise _Cancelled
                 if time.monotonic() > deadline:
@@ -392,7 +413,7 @@ class SysCon2StimulationHost(QtCore.QObject):
         if self.phase != "awaiting_acquisition" or self._block is None:
             return
         owner = self._block.owner
-        self._clear()
+        self._clear(remember=True)
         self.block_completed.emit(owner, None)
 
     def reawait(self, owner: object = None) -> None:
@@ -432,9 +453,13 @@ class SysCon2StimulationHost(QtCore.QObject):
 
     _last_manual: _Block | None = None
 
-    def _clear(self) -> None:
+    def _clear(self, *, remember: bool = False) -> None:
+        """Forget the block in flight; ``remember`` keeps a completed manual block for
+        :meth:`reawait` (never a cancelled or failed one)."""
         block, self._block = self._block, None
-        self._last_manual = block if block is not None and not block.automatic else None
+        self._last_manual = (
+            block if remember and block is not None and not block.automatic else None
+        )
         self.phase = "idle"
 
     def _confirm_new_warnings(self, warnings: list[str]) -> bool:
@@ -485,7 +510,8 @@ class SysCon2StimulationHost(QtCore.QObject):
             deadline = started + wait_s + RUN_MARGIN_S
             seen_busy = False
             while not cancel.is_set():
-                state = client.holo4d.get_state().lower()
+                state = _normalized_state(client.holo4d.get_state())
+                _raise_if_disconnected(state)
                 if state == "busy":
                     seen_busy = True
                 elif state == "idle" and (
