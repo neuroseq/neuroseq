@@ -82,6 +82,10 @@ class RheobaseBackend(RoutineBackend):
         self.resolution_warning_logged = False
         self.samples: list[tuple[float, float, int]] = []
         self.thresholds: list[tuple[float, float]] = []
+        #: Durations at which even the maximum amplitude evoked no spike.
+        self.unreached_durations: list[float] = []
+        #: Spike counts of the trials of the probe being repeated.
+        self.trial_counts: list[int] = []
 
     def _advance(self) -> None:
         if self.on_advance is not None:
@@ -104,6 +108,8 @@ class RheobaseBackend(RoutineBackend):
         self.duration_stage = "idle"
         self.samples = []
         self.thresholds = []
+        self.unreached_durations = []
+        self.trial_counts = []
         self.rheobase = None
         self.chronaxie_ms = None
         self.fixed_spiking_duration_ms = None
@@ -193,7 +199,7 @@ class RheobaseBackend(RoutineBackend):
                 f"Input dt is {self._one_sample_ms():.6g} ms; durations are snapped to that grid, so finer tolerances cannot be resolved."
             )
 
-    def probe(self, amplitude: float) -> None:
+    def probe(self, amplitude: float, *, repeat: bool = False) -> None:
         c = self._cfg()
         recovery_n, _ = snap_milliseconds_to_dt(c.recovery_ms, c.stim_dt)
         pulse_n, effective_ms = snap_milliseconds_to_dt(
@@ -212,14 +218,30 @@ class RheobaseBackend(RoutineBackend):
                 "Each probe is appended after the existing input with a recovery lead before the pulse so the membrane returns to rest."
             )
             self.logged_recovery_note = True
-        self._log(
-            f"Probe {len(self.samples) + 1}: testing amplitude {amplitude:.6g} at {self.current_duration_ms:.6g} ms."
-        )
+        if not repeat:
+            self._log(
+                f"Probe {len(self.samples) + 1}: testing amplitude {amplitude:.6g} at {self.current_duration_ms:.6g} ms."
+            )
         self.request_simulation(max(c.stim_dt, samples * c.stim_dt))
 
     def record_probe_result(self, spike_count: int) -> None:
         c = self._cfg()
         amplitude = self.pending_amplitude
+        if c.repeats > 1:
+            self.trial_counts.append(int(spike_count))
+            if len(self.trial_counts) < c.repeats:
+                self.probe(amplitude, repeat=True)
+                return
+            counts, self.trial_counts = self.trial_counts, []
+            spiking = [count for count in counts if count > 0]
+            # A response needs most trials to spike; its count is their median.
+            spike_count = (
+                int(np.median(spiking)) if 2 * len(spiking) > len(counts) else 0
+            )
+            self._log(
+                f"Probe {len(self.samples) + 1}: {len(spiking)}/{len(counts)} trials "
+                f"spiked (spikes per trial: {', '.join(map(str, counts))})."
+            )
         self.samples.append((self.current_duration_ms, amplitude, spike_count))
         self._log(
             f"Probe {len(self.samples)}: amplitude {amplitude:.6g} at {self.current_duration_ms:.6g} ms -> {'no spike' if spike_count == 0 else f'{spike_count} spikes'}."
@@ -230,9 +252,7 @@ class RheobaseBackend(RoutineBackend):
             return
         if self.phase == "probe_max":
             if spike_count == 0:
-                self.finish(
-                    f"No spike at the maximum amplitude {c.max_amplitude:.6g}; increase the range."
-                )
+                self._handle_unreached_duration()
                 return
             self.high = c.max_amplitude
             self.phase = "probe_min"
@@ -341,9 +361,48 @@ class RheobaseBackend(RoutineBackend):
             return
         self._handle_strength_duration_threshold()
 
-    def _handle_strength_duration_threshold(self) -> None:
+    def _handle_unreached_duration(self) -> None:
+        """Even the maximum amplitude evokes no spike at the current duration.
+
+        At the longest duration (or with a fixed duration) nothing can be measured.
+        At a shorter duration of the strength-duration search the threshold is just
+        above the range: keep the thresholds found so far, and carry on when that
+        still decides the chronaxie (the maximum is at least twice the rheobase).
+        """
         c = self._cfg()
-        threshold = self.thresholds[-1][1]
+        duration = self.current_duration_ms
+        self.unreached_durations.append(duration)
+        self._measurement_changed()
+        message = (
+            f"No spike at {duration:.6g} ms up to the maximum amplitude "
+            f"{c.max_amplitude:.6g}; its threshold is above the range."
+        )
+        if self.duration_stage not in ("duration_min", "duration_chronaxie_bisect"):
+            self.finish(f"{message} Increase the maximum amplitude.")
+            return
+        self._log(message)
+        rheobase = min(t for _, t in self.thresholds)
+        if c.max_amplitude >= 2.0 * rheobase:
+            # Its threshold is above twice the rheobase: the chronaxie is longer.
+            self._handle_strength_duration_threshold(above_twice_rheobase=True)
+            return
+        summary = (
+            self.on_summarize() if self.on_summarize else "Duration sweep finished."
+        )
+        self.finish(
+            f"{summary} To locate the chronaxie, raise the maximum amplitude to at "
+            f"least {2.0 * rheobase:.6g} (twice the rheobase)."
+        )
+
+    def _handle_strength_duration_threshold(
+        self, *, above_twice_rheobase: bool | None = None
+    ) -> None:
+        """Continue the strength-duration search after a duration's threshold
+        (``above_twice_rheobase`` given instead when it was out of range)."""
+        c = self._cfg()
+        if above_twice_rheobase is None:
+            threshold = self.thresholds[-1][1]
+            above_twice_rheobase = threshold > 2.0 * min(t for _, t in self.thresholds)
         if self.duration_stage == "rheobase":
             if c.max_pulse_ms == c.pulse_ms:
                 self.finish(
@@ -356,7 +415,7 @@ class RheobaseBackend(RoutineBackend):
             self._begin_duration_search(c.pulse_ms, "minimum duration bound")
             return
         if self.duration_stage == "duration_min":
-            if threshold <= 2.0 * (min(t for _, t in self.thresholds)):
+            if not above_twice_rheobase:
                 self.finish(
                     self.on_summarize()
                     if self.on_summarize
@@ -369,7 +428,7 @@ class RheobaseBackend(RoutineBackend):
             self._bisect_strength_duration()
             return
         if self.duration_stage == "duration_chronaxie_bisect":
-            if threshold > 2.0 * (min(t for _, t in self.thresholds)):
+            if above_twice_rheobase:
                 self.duration_low_ms = self.current_duration_ms
             else:
                 self.duration_high_ms = self.current_duration_ms
@@ -429,6 +488,9 @@ class RheobaseRunConfig:
     max_iterations: int
     stim_dt: float
     n_neurons: int
+    #: Trials per probe amplitude; a probe counts as a response when most trials
+    #: spike (noisy hardware: BrainScaleS-2, cells in a dish).
+    repeats: int = 1
 
 
 class RheobaseDialog(SelfRaisingDialog):
@@ -448,6 +510,8 @@ class RheobaseDialog(SelfRaisingDialog):
     #: Amplitudes (min, max, fixed, tolerance) a hardware target starts with: its
     #: amplitudes are fractions (0-1) of the target power / i_offset max.
     HARDWARE_AMPLITUDES = (0.1, 1.0, 0.5, 0.05)
+    #: Trials per probe a hardware target starts with (its responses are noisy).
+    HARDWARE_REPEATS = 3
 
     def __init__(
         self,
@@ -616,6 +680,14 @@ class RheobaseDialog(SelfRaisingDialog):
         self.spn_max_iterations = QtWidgets.QSpinBox(self)
         self.spn_max_iterations.setRange(1, 10_000)
         self.spn_max_iterations.setValue(25)
+        self.spn_repeats = QtWidgets.QSpinBox(self)
+        self.spn_repeats.setRange(1, 99)
+        self.spn_repeats.setValue(1)
+        self.spn_repeats.setToolTip(
+            "Trials per probe amplitude. A probe counts as evoking a response when "
+            "most of its trials spike, which makes the search robust to the "
+            "trial-to-trial noise of hardware (odd numbers avoid ties)."
+        )
         self.cmb_target = QtWidgets.QComboBox(self)
         self.cmb_target.addItems(
             [self.SIMULATION_TARGET, self.SYSCON2_TARGET, self.BSS2_TARGET]
@@ -629,6 +701,7 @@ class RheobaseDialog(SelfRaisingDialog):
         #: Amplitude settings (min, max, fixed, tolerance) per target, so switching
         #: between Brian2 (stim units) and hardware (fractions) keeps both.
         self._amplitudes_by_target: dict[str, tuple[float, float, float, float]] = {}
+        self._repeats_by_target: dict[str, int] = {}
         self._amplitude_target = self.cmb_target.currentText()
         self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         self.cmb_spikes = QtWidgets.QComboBox(self)
@@ -687,6 +760,7 @@ class RheobaseDialog(SelfRaisingDialog):
         form.addRow("Post-pulse window (ms):", self.spn_response_ms)
         form.addRow("Spike threshold (mV):", self.spn_threshold_mv)
         form.addRow("Maximum iterations:", self.spn_max_iterations)
+        form.addRow("Repeats per probe:", self.spn_repeats)
         parameters_layout.addLayout(form)
         self.hardware = HardwareSettingsWidget(self, response_threshold=True)
         self.hardware.chk_automatic.toggled.connect(self._update_target_controls)
@@ -721,6 +795,7 @@ class RheobaseDialog(SelfRaisingDialog):
             self.spn_tolerance,
         ):
             spin.valueChanged.connect(self._on_parameter_changed)
+        self.spn_repeats.valueChanged.connect(lambda _value: self._update_estimate())
         self.spn_max_iterations.valueChanged.connect(
             lambda _value: self._update_estimate()
         )
@@ -1079,6 +1154,11 @@ class RheobaseDialog(SelfRaisingDialog):
         if values is not None:
             for spin, value in zip(spins, values, strict=True):
                 spin.setValue(value)
+        repeats = self._repeats_by_target.get(target)
+        if repeats is None:
+            repeats = 1 if target == self.SIMULATION_TARGET else self.HARDWARE_REPEATS
+        self._repeats_by_target[previous] = self.spn_repeats.value()
+        self.spn_repeats.setValue(repeats)
         self.refresh()
         self._update_target_controls()
 
@@ -1302,6 +1382,7 @@ class RheobaseDialog(SelfRaisingDialog):
             max_iterations=self.spn_max_iterations.value(),
             stim_dt=float(stim.dt),
             n_neurons=int(stim.values.shape[1]),
+            repeats=self.spn_repeats.value(),
         )
         initial_estimate_seconds = (
             config.recovery_ms + config.pulse_ms + config.response_ms
@@ -1619,6 +1700,13 @@ class RheobaseDialog(SelfRaisingDialog):
             summary += f", chronaxie ~= {self._chronaxie_ms:.6g} ms"
         else:
             summary += "; chronaxie is outside the swept duration range"
+        unreached = self._backend.unreached_durations
+        if unreached:
+            summary += (
+                "; no spike up to the maximum amplitude at "
+                + ", ".join(f"{d:.6g}" for d in sorted(unreached))
+                + " ms"
+            )
         return summary + "."
 
     def _final_fixed_amplitude_summary(self) -> str:
@@ -1688,6 +1776,17 @@ class RheobaseDialog(SelfRaisingDialog):
                     color="#1f77b4",
                     label="Spike",
                 )
+        unreached = self._backend.unreached_durations
+        if unreached:
+            self.rheobase_axes.scatter(
+                unreached,
+                [self.spn_max_amplitude.value()] * len(unreached),
+                marker="^",
+                color="#bd2c2c",
+                s=60,
+                label="Threshold above range",
+            )
+        if self._samples:
             probe_x = np.arange(1, len(self._samples) + 1)
             probe_y = amplitudes
             self.search_axes.plot(
@@ -1970,6 +2069,9 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _estimated_probe_count(self) -> int:
         """Rough number of simulations the current settings will run."""
+        return self.spn_repeats.value() * self._estimated_probe_amplitudes()
+
+    def _estimated_probe_amplitudes(self) -> int:
         strategy = self.cmb_sweeping_strategy.currentText()
         if strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY:
             return self._amplitude_search_estimate()

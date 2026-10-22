@@ -295,7 +295,7 @@ def test_rheobase_reports_when_no_spike_at_max(qtbot, monkeypatch) -> None:
 
     assert not dialog._running
     assert len(editor.calls) == 1
-    assert "increase the range" in dialog.log.toPlainText()
+    assert "Increase the maximum amplitude." in dialog.log.toPlainText()
 
 
 def test_rheobase_reports_when_spikes_at_min(qtbot, monkeypatch) -> None:
@@ -767,6 +767,7 @@ def _syscon2_dialog(qtbot):
     dialog.spn_max_amplitude.setValue(1.0)
     dialog.spn_tolerance.setValue(0.3)
     dialog.spn_recovery_ms.setValue(100.0)
+    dialog.spn_repeats.setValue(1)  # one trial per probe unless a test says
     return project, editor, dialog, host
 
 
@@ -1103,6 +1104,7 @@ def _bss2_dialog(qtbot):
     dialog.spn_max_amplitude.setValue(1.0)
     dialog.spn_tolerance.setValue(0.3)
     dialog.spn_recovery_ms.setValue(100.0)
+    dialog.spn_repeats.setValue(1)  # one trial per probe unless a test says
     return project, editor, dialog, host
 
 
@@ -1279,3 +1281,36 @@ def test_bss2_can_be_connected_from_the_dialog(qtbot) -> None:
     assert dialog.lbl_bss2_status.text() == "Connected to chip_a"
     dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
     assert not dialog.bss2_row.isVisibleTo(dialog)
+
+
+def test_hardware_targets_repeat_probes_and_brian2_does_not(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    dialog.refresh()
+    assert dialog.spn_repeats.value() == 1
+    estimate = dialog._estimated_probe_count()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.spn_repeats.value() == dialog.HARDWARE_REPEATS
+    assert dialog._estimated_probe_count() == 3 * dialog._estimated_probe_amplitudes()
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_repeats.value() == 1
+    assert dialog._estimated_probe_count() == estimate
+
+
+def test_bss2_repeats_each_probe_and_takes_the_majority(qtbot) -> None:
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.spn_repeats.setValue(3)
+    dialog.start()
+    for i in range(80):
+        if not dialog._running:
+            break
+        onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
+        above = dialog._pending_amplitude >= 0.5
+        fires = above != (i % 3 == 2)  # every third trial disagrees
+        times = [onset + 0.002] if fires else []
+        name = f"BSS-2 rheobase {i} :: BSS-2 rheobase spikes"
+        project.spikes[name] = SpikeData(name, np.ones(len(times)), np.array(times))
+        host.complete({"spikes": name})
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert len(host.sent) == 3 * len(dialog._samples)

@@ -174,6 +174,16 @@ without opening the tab once it is configured.
 - Because each constant-current segment is its own hardware run starting from
   rest (see _Constant current_ above), every probe starts from rest too; spikes
   after the current switches off are not recorded.
+- The chip's response is noisy near threshold (the same amplitude can spike
+  in one run and not the next). **Repeats per probe** (3 by default on the
+  hardware targets, 1 for Brian2) runs every amplitude several times and counts
+  it as a response when most runs spike; the log lists each run's spikes.
+- If even the maximum amplitude cannot make a short pulse fire, the routine
+  keeps the thresholds it found and marks that duration in the plot (red
+  triangle). It goes on locating the chronaxie when the maximum is at least
+  twice the rheobase, and otherwise finishes with the rheobase and says how far
+  to raise the maximum. Raising **i_offset max** in this tab (up to 1022) gives
+  the fractions more current.
 - **Stop** ends the search and ignores a probe still running; it does not kill
   the shared helper.
 
