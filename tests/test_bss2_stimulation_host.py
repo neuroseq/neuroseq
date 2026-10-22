@@ -140,3 +140,21 @@ def test_any_readback_error_fails_the_block(qtbot, panel, mocker):  # noqa: F811
         host.send_block(Project(), _probe_array(), 10, 20, owner="routine")
     assert failed.args[0] == "routine" and "unexpected" in failed.args[1]
     assert not host.busy
+
+
+def test_routines_can_connect_with_the_tabs_settings(qtbot, panel):  # noqa: F811
+    from tests.test_bss2_connection import TOKEN
+
+    host = panel.stimulation_host
+    assert host.can_connect
+    assert host.connection_status() == "Not connected"
+    panel.host_edit.setText("quiggeldy.test")
+    panel.token_edit.setText(TOKEN)
+    statuses: list[str] = []
+    host.connection_changed.connect(statuses.append)
+    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+        host.connect_hardware()
+    assert not host.can_connect
+    assert host.connection_status().startswith("Connected to fakechip")
+    assert statuses and statuses[-1] == host.connection_status()
+    host.connect_hardware()  # already connected: nothing happens

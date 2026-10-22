@@ -157,7 +157,10 @@ recalled; its results are discarded and you have to reconnect.
 ## Rheobase routine
 
 The **Design dynamic input → rheobase** routine can run its probes on the chip:
-choose the target **BrainScaleS-2 (neuromorphic)** (connect in this tab first).
+choose the target **BrainScaleS-2 (neuromorphic)**.
+The dialog shows the connection state under the target; **Connect** connects
+with this tab's settings (container image, setup, token), so a routine can start
+without opening the tab once it is configured.
 
 - Each probe block (recovery, pulse, post-pulse window) is delivered as
   constant current, like **Deliver** does, with the tab's settings: container,

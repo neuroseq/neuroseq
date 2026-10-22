@@ -99,7 +99,10 @@ class Bss2Panel(QtWidgets.QWidget):
         self._update_ui()
         #: Runs dynamic input routine blocks with this tab's settings.
         self.stimulation_host = Bss2StimulationHost(
-            session, self.current_settings, parent=self
+            session,
+            self.current_settings,
+            parent=self,
+            connect_hardware=self.connect_hardware,
         )
         self.stimulation_host.progress.connect(self._log)
         self.stimulation_host.experiment_added.connect(self._on_host_experiment_added)

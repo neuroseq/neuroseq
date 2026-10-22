@@ -1258,3 +1258,24 @@ def test_bss2_starts_with_valid_amplitudes_and_logs_once(qtbot) -> None:
     assert dialog._running and len(host.sent) == 1
     dialog.stop()
     assert dialog.log.toPlainText().count("Routine stopped.") == 1
+
+
+def test_bss2_can_be_connected_from_the_dialog(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    assert not dialog.bss2_row.isVisibleTo(dialog)
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.bss2_row.isVisibleTo(dialog)
+    assert dialog.lbl_bss2_status.text() == "Not connected"
+    assert dialog.btn_bss2_connect.isEnabled()
+    dialog.btn_bss2_connect.click()
+    assert host.connect_calls == 1
+    assert dialog.lbl_bss2_status.text() == "Starting the container…"
+    assert not dialog.btn_bss2_connect.isEnabled()
+    host.status = "Connected to chip_a"
+    host.connection_changed.emit(host.status)
+    assert dialog.lbl_bss2_status.text() == "Connected to chip_a"
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert not dialog.bss2_row.isVisibleTo(dialog)

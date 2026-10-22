@@ -97,9 +97,12 @@ class FakeBss2Host(QtCore.QObject):
     block_failed = QtCore.Signal(object, str)
     block_completed = QtCore.Signal(object, object)
     progress = QtCore.Signal(str)
+    connection_changed = QtCore.Signal(str)
 
     def __init__(self) -> None:
         super().__init__()
+        self.status = "Not connected"
+        self.connect_calls = 0
         self.sent: list[tuple[int, int, int]] = []
         self.sent_settings: list[Bss2Settings | None] = []
         self.settings = Bss2Settings(i_offset_max=500)
@@ -110,6 +113,18 @@ class FakeBss2Host(QtCore.QObject):
 
     def unavailable(self) -> str | None:
         return self.unavailable_reason
+
+    @property
+    def can_connect(self) -> bool:
+        return self.status == "Not connected"
+
+    def connect_hardware(self) -> None:
+        self.connect_calls += 1
+        self.status = "Starting the container…"
+        self.connection_changed.emit(self.status)
+
+    def connection_status(self) -> str:
+        return self.status
 
     def current_settings(self) -> Bss2Settings:
         return self.settings

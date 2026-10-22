@@ -648,6 +648,22 @@ class RheobaseDialog(SelfRaisingDialog):
             self._update_target_controls
         )
         form.addRow("Stimulation target:", self.cmb_target)
+        # BrainScaleS-2 connection, so a run need not start in the setup pane.
+        self.bss2_row = QtWidgets.QWidget(self)
+        bss2_layout = QtWidgets.QHBoxLayout(self.bss2_row)
+        bss2_layout.setContentsMargins(0, 0, 0, 0)
+        self.lbl_bss2_status = QtWidgets.QLabel("Not connected", self.bss2_row)
+        self.btn_bss2_connect = QtWidgets.QPushButton("Connect", self.bss2_row)
+        self.btn_bss2_connect.setToolTip(
+            "Connect to BrainScaleS-2 with the settings of the BrainScaleS-2 tab "
+            "(container image, setup, token)."
+        )
+        self.btn_bss2_connect.clicked.connect(self._connect_bss2)
+        bss2_layout.addWidget(self.btn_bss2_connect)
+        bss2_layout.addWidget(self.lbl_bss2_status)
+        bss2_layout.addStretch(1)
+        self.lbl_bss2_row = QtWidgets.QLabel("BrainScaleS-2:", self)
+        form.addRow(self.lbl_bss2_row, self.bss2_row)
         form.addRow("Calcium readout:", self.cmb_calcium_readout)
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Spike data (calcium):", self.cmb_spikes)
@@ -1096,8 +1112,11 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_data_imported.setVisible(syscon2 and not automatic)
         # The routine dispatches on the target; it must not change mid-run.
         self.cmb_target.setEnabled(not self._running)
+        self.lbl_bss2_row.setVisible(bss2)
+        self.bss2_row.setVisible(bss2)
         if syscon2 or bss2:
             self._connect_hosts()
+        self._show_bss2_connection()
 
     def _hosts(self) -> list[Any]:
         """The hardware hosts available to this dialog (SysCon2, BrainScaleS-2)."""
@@ -1116,7 +1135,23 @@ class RheobaseDialog(SelfRaisingDialog):
         if syscon2 is not None and host is syscon2:
             # Only SysCon2 reports imported (not yet run) blocks.
             slots.append((syscon2.block_sent, self._on_block_sent))
+        bss2 = self.editor.bss2_host
+        if bss2 is not None and host is bss2:
+            slots.append((bss2.connection_changed, self._show_bss2_connection))
         return slots
+
+    def _connect_bss2(self) -> None:
+        host = self.editor.bss2_host
+        if host is not None:
+            host.connect_hardware()
+        self._show_bss2_connection()
+
+    def _show_bss2_connection(self, *_args: object) -> None:
+        host = self.editor.bss2_host
+        if host is None:
+            return
+        self.lbl_bss2_status.setText(host.connection_status())
+        self.btn_bss2_connect.setEnabled(host.can_connect and not self._running)
 
     def _connect_hosts(self) -> None:
         for host in self._hosts():

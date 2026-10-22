@@ -26,6 +26,7 @@ from qtpy import QtCore
 
 from neuroseq.device_control import bss2_protocol as bp
 from neuroseq.device_control.bss2_connection import STATE_CONNECTED
+from neuroseq.device_control.bss2_connection import STATE_DISCONNECTED
 
 if TYPE_CHECKING:
     from neuroseq.project import Project
@@ -61,31 +62,65 @@ class Bss2StimulationHost(QtCore.QObject):
     - ``block_failed(owner, str)`` -- the block could not be run or read back.
     - ``progress(str)`` -- a status line for the user.
     - ``experiment_added(str)`` -- a readback data group was added to the project.
+    - ``connection_changed(str)`` -- the connection state changed; carries
+      :meth:`connection_status`.
     """
 
     block_completed = QtCore.Signal(object, object)
     block_failed = QtCore.Signal(object, str)
     progress = QtCore.Signal(str)
     experiment_added = QtCore.Signal(str)
+    connection_changed = QtCore.Signal(str)
 
     def __init__(
         self,
         session: Bss2Session,
         settings_provider: Callable[[], bp.Bss2Settings],
         parent: QtCore.QObject | None = None,
+        *,
+        connect_hardware: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._session = session
         self._settings_provider = settings_provider
+        self._connect_hardware = connect_hardware
         self._run: _Run | None = None
         session.run_finished.connect(self._on_run_finished)
         session.run_failed.connect(self._on_run_failed)
         session.run_progress.connect(self._on_run_progress)
+        for signal in (session.status_changed, session.connected, session.disconnected):
+            signal.connect(self._on_connection_changed)
 
     @property
     def busy(self) -> bool:
         """Whether a block of this host is running."""
         return self._run is not None
+
+    @property
+    def can_connect(self) -> bool:
+        """Whether :meth:`connect_hardware` can start a connection now."""
+        return (
+            self._connect_hardware is not None
+            and self._session.state == STATE_DISCONNECTED
+        )
+
+    def connect_hardware(self) -> None:
+        """Connect with the BrainScaleS-2 tab's settings (container, setup, token),
+        so a routine can connect without opening the tab."""
+        if self.can_connect and self._connect_hardware is not None:
+            self._connect_hardware()
+
+    def connection_status(self) -> str:
+        """A one-line connection state for routine dialogs."""
+        state = self._session.state
+        if state == STATE_CONNECTED:
+            return f"Connected to {self._session.identifier or 'BrainScaleS-2'}"
+        if state == STATE_DISCONNECTED:
+            return "Not connected"
+        return self._session.connection.status
+
+    def _on_connection_changed(self, *_args: object) -> None:
+        self.connection_changed.emit(self.connection_status())
 
     def unavailable(self) -> str | None:
         """Why a block cannot be run now, or ``None``."""
