@@ -800,6 +800,8 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.cmb_readout.setEnabled(not syscon2)
         self.cmb_sweep_mode.setEnabled(not syscon2)
         self.btn_data_imported.setVisible(syscon2 and not self._automatic())
+        # The routine dispatches on the target; it must not change mid-run.
+        self.cmb_target.setEnabled(not self._running)
         if syscon2:
             self._connect_host()
         self._update_readout_controls()
@@ -939,6 +941,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         if needs_init or prepare_seconds > 0.0:
             duration = max(prepare_seconds, 0.001)
             self._running = True
+            self._update_target_controls()
             self._phase = (
                 "initialize_weight" if self._weight_mode() else "initialize_trace"
             )

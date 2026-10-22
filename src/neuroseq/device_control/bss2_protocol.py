@@ -652,6 +652,30 @@ def readback_experiment(
     )
 
 
+def add_readback_experiment(
+    project: Any,
+    result: Mapping[str, Any],
+    speedup: float,
+    name: str,
+    *,
+    label: str = "BSS-2",
+) -> tuple[Experiment, RunReadback]:
+    """Decode a ``run`` result and add it to ``project`` as a new data group.
+
+    Shared by the BrainScaleS-2 tab and the routine host. The group is named after
+    ``name`` (see :func:`readback_experiment`), with ``(2)``, ``(3)``... when taken.
+    Raises ``ValueError`` (or ``KeyError``/``TypeError``) for a malformed result.
+    """
+    readback = decode_run_result(result, speedup, label=label)
+    experiment = readback_experiment(readback, name)
+    base, suffix = experiment.name, 2
+    while experiment.name in project.experiments:
+        experiment.name = f"{base} ({suffix})"
+        suffix += 1
+    project.add_experiment(experiment)
+    return experiment, readback
+
+
 # ---- quiggeldy setups ------------------------------------------------------
 
 

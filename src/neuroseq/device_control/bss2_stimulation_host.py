@@ -15,6 +15,7 @@ the target power), so one block's amplitude does not depend on the others.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import replace
@@ -31,6 +32,8 @@ if TYPE_CHECKING:
     from neuroseq.stimulation.stim import StimArray
     from neuroseq.workspace_devices import Bss2Session
 
+logger = logging.getLogger(__name__)
+
 #: Block value driving the chip's ``i_offset max`` (values are fractions of it).
 FULL_SCALE_VALUE = 1.0
 
@@ -42,6 +45,7 @@ class _Run:
     project: Project
     label: str
     speedup: float
+    warnings: list[str]
 
 
 class Bss2StimulationHost(QtCore.QObject):
@@ -52,13 +56,17 @@ class Bss2StimulationHost(QtCore.QObject):
     - ``block_completed(owner, payload)`` -- the run's data is in the project:
       ``payload["spikes"]`` names the spike dataset, ``payload["trace"]`` the probed
       neuron's membrane voltage (if read back), ``payload["experiment"]`` the data group.
+      ``payload["warnings"]`` lists notes about the mapping onto the chip (e.g.
+      channels beyond the tab's neuron limit that were not delivered).
     - ``block_failed(owner, str)`` -- the block could not be run or read back.
     - ``progress(str)`` -- a status line for the user.
+    - ``experiment_added(str)`` -- a readback data group was added to the project.
     """
 
     block_completed = QtCore.Signal(object, object)
     block_failed = QtCore.Signal(object, str)
     progress = QtCore.Signal(str)
+    experiment_added = QtCore.Signal(str)
 
     def __init__(
         self,
@@ -87,9 +95,10 @@ class Bss2StimulationHost(QtCore.QObject):
             return "BrainScaleS-2 is still running another delivery."
         return None
 
-    def i_offset_max(self) -> int:
-        """The constant current of a block value of 1 (the tab's *i_offset max*)."""
-        return int(self._settings_provider().i_offset_max)
+    def current_settings(self) -> bp.Bss2Settings:
+        """The BrainScaleS-2 tab's settings now; a routine keeps one snapshot for all
+        its blocks, so the current scale cannot change in the middle of a search."""
+        return self._settings_provider()
 
     def send_block(
         self,
@@ -101,10 +110,12 @@ class Bss2StimulationHost(QtCore.QObject):
         *,
         owner: object = None,
         record_neuron: int = 0,
+        settings: bp.Bss2Settings | None = None,
     ) -> bool:
         """Run ``stim_array[start:stop]`` as constant current on the chip.
 
-        ``record_neuron`` is the neuron whose membrane voltage the MADC records.
+        ``record_neuron`` is the neuron whose membrane voltage the MADC records;
+        ``settings`` (default: the tab's current ones) give the scale and speed-up.
         Returns ``False`` (after emitting ``block_failed``) if it could not start.
         """
         reason = self.unavailable()
@@ -112,7 +123,7 @@ class Bss2StimulationHost(QtCore.QObject):
             self.block_failed.emit(owner, reason)
             return False
         settings = replace(
-            self._settings_provider(),
+            settings if settings is not None else self._settings_provider(),
             input_mode=bp.INPUT_CONSTANT_CURRENT,
             # One stim neuron per hardware neuron, and block values as fractions of
             # i_offset max rather than of each block's own maximum.
@@ -138,7 +149,9 @@ class Bss2StimulationHost(QtCore.QObject):
                 owner, "BrainScaleS-2 is busy or no longer connected."
             )
             return False
-        self._run = _Run(request_id, owner, project, label, settings.speedup)
+        self._run = _Run(
+            request_id, owner, project, label, settings.speedup, list(plan.warnings)
+        )
         self.progress.emit(
             f"Running a {plan.duration_s:g} s block on BrainScaleS-2 "
             f"({plan.n_segments} segment(s))…"
@@ -168,26 +181,24 @@ class Bss2StimulationHost(QtCore.QObject):
         try:
             if not isinstance(result, dict):
                 raise ValueError("The helper returned no result.")
-            readback = bp.decode_run_result(
-                result, run.speedup, label=f"BSS-2 {run.label}"
+            experiment, readback = bp.add_readback_experiment(
+                run.project, result, run.speedup, run.label, label=f"BSS-2 {run.label}"
             )
-            experiment = bp.readback_experiment(readback, run.label)
-            base, suffix = experiment.name, 2
-            while experiment.name in run.project.experiments:
-                experiment.name = f"{base} ({suffix})"
-                suffix += 1
-            run.project.add_experiment(experiment)
-        except (KeyError, TypeError, ValueError) as exc:
+        except Exception as exc:
+            # Whatever went wrong, the routine must hear about it, or it waits forever.
+            logger.exception("Could not add the BrainScaleS-2 readback")
             self.block_failed.emit(
                 run.owner, f"The run finished, but its data could not be added: {exc}"
             )
             return
-        payload = {
+        payload: dict[str, object] = {
             "experiment": experiment.name,
             "spikes": f"{experiment.name} :: {readback.spikes.name}",
+            "warnings": run.warnings,
         }
         if readback.trace is not None:
             payload["trace"] = f"{experiment.name} :: {readback.trace.name}"
+        self.experiment_added.emit(experiment.name)
         self.progress.emit(
             f"Added '{experiment.name}' ({readback.spikes.spike_indices.size} spike(s))."
         )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from typing import Any
 from typing import cast
 
 import brian2.numpy_ as np
@@ -15,6 +16,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.qt_helpers import SelfRaisingDialog
 from neuroseq.qt_helpers import WheelToScrollFilter
@@ -484,8 +486,11 @@ class RheobaseDialog(SelfRaisingDialog):
         self._block_payload: object = None
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
-        self._host_connected = False
-        self._bss2_host_connected = False
+        #: Stimulation hosts whose block signals this dialog follows.
+        self._connected_hosts: list[Any] = []
+        #: BrainScaleS-2 settings snapshot of the running routine (fixed scale).
+        self._bss2_settings: Bss2Settings | None = None
+        self._bss2_warnings_logged = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -996,6 +1001,7 @@ class RheobaseDialog(SelfRaisingDialog):
         if needs_trace_init or prepare_seconds > 0.0:
             duration = max(prepare_seconds, 0.001)
             self._running = True
+            self._update_target_controls()
             self._phase = "initialize_trace"
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
@@ -1047,47 +1053,49 @@ class RheobaseDialog(SelfRaisingDialog):
         self.spn_threshold_mv.setEnabled(not syscon2 and not bss2)
         self.cmb_spikes.setEnabled(syscon2 and not dff and not automatic)
         self.btn_data_imported.setVisible(syscon2 and not automatic)
-        if syscon2:
-            self._connect_host()
-        if bss2:
-            self._connect_bss2_host()
+        # The routine dispatches on the target; it must not change mid-run.
+        self.cmb_target.setEnabled(not self._running)
+        if syscon2 or bss2:
+            self._connect_hosts()
 
-    def _connect_host(self) -> None:
-        host = self.editor.stimulation_host
-        if host is None or self._host_connected:
-            return
-        host.block_sent.connect(self._on_block_sent)
-        host.block_failed.connect(self._on_block_failed)
-        host.block_completed.connect(self._on_block_completed)
-        self._host_connected = True
+    def _hosts(self) -> list[Any]:
+        """The hardware hosts available to this dialog (SysCon2, BrainScaleS-2)."""
+        return [
+            host
+            for host in (self.editor.stimulation_host, self.editor.bss2_host)
+            if host is not None
+        ]
 
-    def _connect_bss2_host(self) -> None:
-        host = self.editor.bss2_host
-        if host is None or self._bss2_host_connected:
-            return
-        host.block_failed.connect(self._on_block_failed)
-        host.block_completed.connect(self._on_block_completed)
-        self._bss2_host_connected = True
+    def _host_slots(self, host: Any) -> list[tuple[Any, Callable]]:
+        slots: list[tuple[Any, Callable]] = [
+            (host.block_failed, self._on_block_failed),
+            (host.block_completed, self._on_block_completed),
+        ]
+        syscon2 = self.editor.stimulation_host
+        if syscon2 is not None and host is syscon2:
+            # Only SysCon2 reports imported (not yet run) blocks.
+            slots.append((syscon2.block_sent, self._on_block_sent))
+        return slots
+
+    def _connect_hosts(self) -> None:
+        for host in self._hosts():
+            if host in self._connected_hosts:
+                continue
+            for signal, slot in self._host_slots(host):
+                signal.connect(slot)
+            self._connected_hosts.append(host)
+
+    def _disconnect_hosts(self) -> None:
+        for host in self._connected_hosts:
+            for signal, slot in self._host_slots(host):
+                signal.disconnect(slot)
+        self._connected_hosts.clear()
 
     def dispose(self) -> None:
         """Stop a running routine and stop following the stimulation hosts."""
         if self._running:
             self._finish("Routine closed.")
-        self._disconnect_host()
-        host = self.editor.bss2_host
-        if host is not None and self._bss2_host_connected:
-            host.block_failed.disconnect(self._on_block_failed)
-            host.block_completed.disconnect(self._on_block_completed)
-            self._bss2_host_connected = False
-
-    def _disconnect_host(self) -> None:
-        host = self.editor.stimulation_host
-        if host is None or not self._host_connected:
-            return
-        host.block_sent.disconnect(self._on_block_sent)
-        host.block_failed.disconnect(self._on_block_failed)
-        host.block_completed.disconnect(self._on_block_completed)
-        self._host_connected = False
+        self._disconnect_hosts()
 
     def _fix_syscon_dt(self) -> bool:
         if self._running:
@@ -1158,9 +1166,12 @@ class RheobaseDialog(SelfRaisingDialog):
             self._append_start_sample = (
                 self.editor.current_stim_array_last_stimulus_sample()
             )
+        # One scale and speed-up for the whole search, whatever happens in the tab.
+        self._bss2_settings = host.current_settings()
+        self._bss2_warnings_logged = False
         self._append_log(
             "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
-            f"tab's i_offset max ({host.i_offset_max()}). Each probe runs as its own "
+            f"tab's i_offset max ({self._bss2_settings.i_offset_max}). Each probe runs as its own "
             "constant-current block on the chip, starting from rest; stim neuron i is "
             "hardware neuron i, and its spikes after the pulse are counted."
         )
@@ -1330,6 +1341,7 @@ class RheobaseDialog(SelfRaisingDialog):
             "rheobase",
             owner=self,
             record_neuron=self.spn_neuron.value(),
+            settings=self._bss2_settings,
         )
 
     def _on_block_failed(self, owner: object, message: str) -> None:
@@ -1391,6 +1403,10 @@ class RheobaseDialog(SelfRaisingDialog):
         assert self.project is not None
         payload = self._block_payload
         self._block_payload = None
+        if isinstance(payload, dict) and not self._bss2_warnings_logged:
+            for warning in payload.get("warnings") or ():
+                self._append_log(f"BrainScaleS-2: {warning}")
+            self._bss2_warnings_logged = True
         name = payload.get("spikes") if isinstance(payload, dict) else None
         spikes = self.project.get_data(str(name), SpikeData) if name else None
         if spikes is None:
@@ -1745,11 +1761,8 @@ class RheobaseDialog(SelfRaisingDialog):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
-        host = self.editor.stimulation_host
-        if host is not None:
+        for host in self._hosts():
             host.cancel(owner=self)
-        if self.editor.bss2_host is not None:
-            self.editor.bss2_host.cancel(owner=self)
         self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
         self.btn_start.setEnabled(True)

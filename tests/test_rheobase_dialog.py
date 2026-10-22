@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 from neuroseq import theme
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim import StimArray
@@ -1173,3 +1174,29 @@ def test_bss2_stop_cancels_its_block(qtbot) -> None:
     dialog.stop()
     assert host.cancelled == 1
     assert not host.busy
+
+
+def test_bss2_routine_keeps_one_scale_and_locks_its_target(qtbot) -> None:
+    """Review: the tab's settings may change mid-search, and the target must not."""
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    assert not dialog.cmb_target.isEnabled()
+    snapshot = host.sent_settings[0]
+    assert snapshot.i_offset_max == 500
+    host.settings = Bss2Settings(i_offset_max=900)  # changed in the tab
+    onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
+    name = "BSS-2 rheobase 0 :: BSS-2 rheobase spikes"
+    project.spikes[name] = SpikeData(name, np.ones(1), np.array([onset + 0.002]))
+    host.complete(
+        {"spikes": name, "warnings": ["Only the first 512 channels are delivered."]}
+    )
+    assert host.sent_settings[1] is snapshot
+    name = "BSS-2 rheobase 1 :: BSS-2 rheobase spikes"
+    project.spikes[name] = SpikeData(name, np.ones(0), np.array([]))
+    host.complete(
+        {"spikes": name, "warnings": ["Only the first 512 channels are delivered."]}
+    )
+    log = dialog.log.toPlainText()
+    assert log.count("BrainScaleS-2: Only the first 512 channels are delivered.") == 1
+    dialog.stop()
+    assert dialog.cmb_target.isEnabled()

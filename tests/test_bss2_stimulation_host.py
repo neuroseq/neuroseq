@@ -44,12 +44,22 @@ def test_block_runs_on_the_chip_and_its_spikes_reach_the_project(qtbot, panel): 
 
     panel._session.run = capture  # type: ignore[method-assign]
     owner = object()
-    with qtbot.waitSignal(host.block_completed, timeout=20000) as completed:
+    panel.set_project(project)
+    with (
+        qtbot.waitSignal(panel.experiment_added, timeout=20000) as added,
+        qtbot.waitSignal(host.block_completed, timeout=20000) as completed,
+    ):
         assert host.send_block(
             project, _probe_array(), 10, 20, "rheobase", owner=owner, record_neuron=1
         )
         assert host.busy and panel.run_in_progress
         assert "still running" in host.unavailable()
+        # The tab's Stop also applies to a routine's run.
+        qtbot.waitUntil(panel.btn_stop.isEnabled, timeout=5000)
+    # The workspace and the tab hear of the readback like of a Deliver.
+    assert added.args == [completed.args[1]["experiment"]]
+    assert panel.experiment_combo.findText(added.args[0]) >= 0
+    assert not panel.btn_stop.isEnabled()
 
     arguments = sent[0]
     assert arguments["n_neurons"] == 3 and arguments["record_v_neuron"] == 1
@@ -87,7 +97,10 @@ def test_cancelled_block_result_is_ignored(qtbot, panel):  # noqa: F811
     assert host.busy
     host.cancel(owner=owner)
     assert not host.busy
+    # The chip still runs it: the workspace must not close, and Stop applies.
+    assert panel.run_in_progress
     qtbot.waitUntil(lambda: not panel._session.busy, timeout=20000)
+    assert not panel.run_in_progress
     assert not completed
     assert not project.experiments
 
@@ -113,3 +126,17 @@ def test_failed_run_and_invalid_blocks_fail_the_block(qtbot, panel):  # noqa: F8
         panel._session.run_failed.emit("someone-else", "ignored")
         panel._session.run_failed.emit(request_id, "chip went away")
     assert failed.args == [owner, "chip went away"]
+
+
+def test_any_readback_error_fails_the_block(qtbot, panel, mocker):  # noqa: F811
+    """Review: an unexpected exception must not leave the routine waiting."""
+    _connect(qtbot, panel)
+    host = panel.stimulation_host
+    mocker.patch(
+        "neuroseq.device_control.bss2_protocol.add_readback_experiment",
+        side_effect=RuntimeError("unexpected"),
+    )
+    with qtbot.waitSignal(host.block_failed, timeout=20000) as failed:
+        host.send_block(Project(), _probe_array(), 10, 20, owner="routine")
+    assert failed.args[0] == "routine" and "unexpected" in failed.args[1]
+    assert not host.busy

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from qtpy import QtCore
 
+from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 
 
@@ -100,6 +101,8 @@ class FakeBss2Host(QtCore.QObject):
     def __init__(self) -> None:
         super().__init__()
         self.sent: list[tuple[int, int, int]] = []
+        self.sent_settings: list[Bss2Settings | None] = []
+        self.settings = Bss2Settings(i_offset_max=500)
         self.owner: object = None
         self.busy = False
         self.cancelled = 0
@@ -108,13 +111,23 @@ class FakeBss2Host(QtCore.QObject):
     def unavailable(self) -> str | None:
         return self.unavailable_reason
 
-    def i_offset_max(self) -> int:
-        return 500
+    def current_settings(self) -> Bss2Settings:
+        return self.settings
 
     def send_block(
-        self, project, stim, start, stop, label="block", *, owner=None, record_neuron=0
+        self,
+        project,
+        stim,
+        start,
+        stop,
+        label="block",
+        *,
+        owner=None,
+        record_neuron=0,
+        settings=None,
     ):
         self.sent.append((start, stop, record_neuron))
+        self.sent_settings.append(settings)
         self.owner = owner
         self.busy = True
         return True

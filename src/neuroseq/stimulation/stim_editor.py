@@ -4,6 +4,7 @@ import logging
 import math
 from collections.abc import Callable
 from enum import Enum
+from typing import TYPE_CHECKING
 from typing import Literal
 from typing import overload
 
@@ -13,8 +14,6 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
-from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
@@ -41,6 +40,10 @@ from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+
+if TYPE_CHECKING:
+    from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
+    from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 
 
 class DrawMode(Enum):

@@ -922,3 +922,11 @@ def test_syscon2_start_no_longer_needs_a_selected_trace(qtbot) -> None:
     dialog.start()
     assert dialog._running
     assert len(host.sent) == 1
+
+
+def test_target_is_locked_while_the_sweep_runs(qtbot) -> None:
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running and not dialog.cmb_target.isEnabled()
+    dialog.stop()
+    assert dialog.cmb_target.isEnabled()
