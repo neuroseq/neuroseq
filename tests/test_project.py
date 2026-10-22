@@ -1551,3 +1551,46 @@ def test_device_settings_setters_mark_the_project_dirty_only_on_change():
     project.set_syscon_export_settings(SysconExportSettings(config_text="cfg"))
     project.set_device_folder("syscon_export", "E:/exports")
     assert not project.dirty
+
+
+def test_block_data_of_a_run_is_collected_in_one_group():
+    """Each block of a routine run lands in one group at its own time."""
+    project = Project()
+    for offset, spike_time in ((0.0, 0.05), (0.3, 0.1)):
+        spikes = SpikeData("chip spikes", np.array([1]), np.array([spike_time]))
+        trace = TraceData(
+            "v", np.full((1, 10), offset + 1.0), np.array([1]), "a.u.", 0.01
+        )
+        project.place_block_data("Run", [spikes, trace], offset, 0.2)
+    experiment = project.experiments["Run"]
+    assert experiment.duration == pytest.approx(0.5)
+    spikes = next(d for d in experiment.data if isinstance(d, SpikeData))
+    np.testing.assert_allclose(spikes.spike_times, [0.05, 0.4])
+    trace = next(d for d in experiment.data if isinstance(d, TraceData))
+    # 10 samples, a gap held at the last value, then the second block at 0.3 s.
+    assert trace.traces.shape == (1, 40)
+    np.testing.assert_allclose(trace.traces[0, 10:30], 1.0)
+    np.testing.assert_allclose(trace.traces[0, 30:], 1.3)
+    project.history.undo()
+    spikes = next(
+        d for d in project.experiments["Run"].data if isinstance(d, SpikeData)
+    )
+    np.testing.assert_allclose(spikes.spike_times, [0.05])
+    project.history.undo()
+    assert "Run" not in project.experiments
+
+
+def test_block_trace_is_resampled_to_the_groups_interval():
+    project = Project()
+    first = TraceData("v", np.zeros((1, 10)), np.array([0]), "a.u.", 0.01)
+    project.place_block_data("Run", [first], 0.0, 0.1)
+    second = TraceData(
+        "v", np.linspace(0, 1, 21)[None, :], np.array([0]), "a.u.", 0.005
+    )
+    project.place_block_data("Run", [second], 0.1, 0.1)
+    trace = project.experiments["Run"].data[0]
+    assert trace.dt == 0.01
+    np.testing.assert_allclose(trace.traces[0, 10:], np.linspace(0, 1, 11), atol=1e-6)
+    other = TraceData("v", np.zeros((1, 5)), np.array([3]), "a.u.", 0.01)
+    with pytest.raises(ValueError, match="other neurons"):
+        project.place_block_data("Run", [other], 0.2, 0.05)

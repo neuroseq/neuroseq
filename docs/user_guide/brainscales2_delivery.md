@@ -168,9 +168,11 @@ without opening the tab once it is configured.
 - Probe amplitudes are fractions (0-1) of **i_offset max**, so a probe of 0.5
   drives half of it, whatever the other probes are. Stim neuron _i_ is
   hardware neuron _i_, and the probed neuron's membrane voltage is recorded.
-- Every probe's readback is added to the project as its own data group,
-  `BSS-2 rheobase <timestamp>`; the routine counts the probed neuron's spikes
-  in the pulse plus the post-pulse window and continues its search.
+- All probes of a run go into one data group, `BSS-2 rheobase <date time>`,
+  each placed at its probe's time in the input array, so the spikes and the
+  membrane voltage line up with the stimuli. The routine counts the probed
+  neuron's spikes in the pulse plus the post-pulse window and continues its
+  search.
 - Because each constant-current segment is its own hardware run starting from
   rest (see _Constant current_ above), every probe starts from rest too; spikes
   after the current switches off are not recorded.

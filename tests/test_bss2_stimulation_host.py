@@ -158,3 +158,26 @@ def test_routines_can_connect_with_the_tabs_settings(qtbot, panel):  # noqa: F81
     assert host.connection_status().startswith("Connected to fakechip")
     assert statuses and statuses[-1] == host.connection_status()
     host.connect_hardware()  # already connected: nothing happens
+
+
+def test_a_runs_blocks_share_one_data_group(qtbot, panel):  # noqa: F811
+    project = Project()
+    _connect(qtbot, panel)
+    host = panel.stimulation_host
+    stim = _probe_array()
+    payloads = []
+    for start, stop in ((0, 10), (10, 20)):
+        with qtbot.waitSignal(host.block_completed, timeout=20000) as completed:
+            host.send_block(
+                project, stim, start, stop, "rheobase", record_neuron=1, group="Run 1"
+            )
+        payloads.append(completed.args[1])
+    assert list(project.experiments) == ["Run 1"]
+    assert {p["experiment"] for p in payloads} == {"Run 1"}
+    spikes = project.get_data(payloads[0]["spikes"], SpikeData)
+    # Block 1 drives neuron 0 at 0.2-0.5 s, block 2 neuron 1 at 1.2-1.4 s (stim
+    # array time); the fake chip fires each in the middle of its pulse.
+    assert spikes.spike_indices.tolist() == [0, 1]
+    assert spikes.spike_times.tolist() == pytest.approx([0.35, 1.3])
+    # Each payload also carries its own block's spikes, timed from the block.
+    assert payloads[1]["block_spikes"].spike_times.tolist() == pytest.approx([0.3])

@@ -1112,6 +1112,44 @@ class Project:
             self.update_limits()
             self.mark_dirty()
 
+    def place_block_data(
+        self,
+        experiment_name: str,
+        data: Sequence[TraceData | SpikeData],
+        offset_seconds: float,
+        duration_seconds: float,
+        label: str = "Add block data",
+    ) -> None:
+        """Place the data of one block of a closed-loop routine in a data group.
+
+        The group (created if needed) collects a whole routine run instead of one
+        group per block: spikes are shifted by ``offset_seconds`` (block-relative
+        times -> the stim array's timeline) and added to the spike dataset of the
+        same name; a trace is resampled to that trace's ``dt`` and written at the
+        offset, a gap before it holding the trace's last value. One undoable step.
+        """
+        if offset_seconds < 0 or duration_seconds < 0:
+            raise ValueError("Block offset and duration must not be negative.")
+        with self.edit_experiments([experiment_name], label):
+            experiment = self.experiments.get(experiment_name)
+            if experiment is None:
+                experiment = Experiment(experiment_name, 0.0, [0.0], [])
+                self.experiments[experiment_name] = experiment
+            for datum in data:
+                if isinstance(datum, SpikeData):
+                    _place_block_spikes(experiment, datum, offset_seconds)
+                elif isinstance(datum, TraceData):
+                    _place_block_trace(experiment, datum, offset_seconds)
+                else:
+                    raise TypeError(f"Cannot place {type(datum).__name__} data.")
+            end = offset_seconds + duration_seconds
+            experiment.duration = max(experiment.duration, end)
+            experiment.timepoints = sorted(
+                set(experiment.timepoints) | {offset_seconds, end}
+            )
+            self.update_limits()
+            self.mark_dirty()
+
     def pad_stim_arrays(
         self, total_time_seconds: float, only_stim_name: str | None = None
     ):
@@ -1578,3 +1616,61 @@ class Project:
                     )
         self.filepath = pathlib.Path(filepath)
         self.dirty = False
+
+
+def _place_block_spikes(
+    experiment: Experiment, spikes: SpikeData, offset_seconds: float
+) -> None:
+    times = np.asarray(spikes.spike_times, dtype=np.float64) + offset_seconds
+    existing = find_by_name_and_type(experiment.data, spikes.name, SpikeData)
+    if existing is None:
+        experiment.data.append(
+            SpikeData(
+                spikes.name, spikes.spike_indices.copy(), times, spikes.raw_cellpose_ids
+            )
+        )
+        return
+    # New buffers, never in place: the undo history keeps the old ones.
+    indices = np.concatenate([existing.spike_indices, spikes.spike_indices])
+    all_times = np.concatenate([np.asarray(existing.spike_times, np.float64), times])
+    order = np.argsort(all_times, kind="stable")
+    existing.spike_indices = indices[order]
+    existing.spike_times = all_times[order]
+
+
+def _place_block_trace(
+    experiment: Experiment, trace: TraceData, offset_seconds: float
+) -> None:
+    existing = find_by_name_and_type(experiment.data, trace.name, TraceData)
+    dt = float(existing.dt) if existing is not None else float(trace.dt)
+    values = np.asarray(trace.traces, dtype=np.float64)
+    if not np.isclose(dt, trace.dt):
+        source_t = np.arange(values.shape[1]) * float(trace.dt)
+        grid = np.arange(int(np.floor(source_t[-1] / dt)) + 1) * dt
+        values = np.stack([np.interp(grid, source_t, row) for row in values])
+    start = int(round(offset_seconds / dt))
+    if existing is None:
+        lead = np.repeat(values[:, :1], start, axis=1)
+        experiment.data.append(
+            TraceData(
+                trace.name,
+                np.concatenate([lead, values], axis=1),
+                trace.indices.copy(),
+                trace.units,
+                dt,
+                trace.raw_cellpose_ids,
+            )
+        )
+        return
+    if not np.array_equal(existing.indices, trace.indices):
+        raise ValueError(
+            f"Trace '{trace.name}' records other neurons than the data group's."
+        )
+    old = np.asarray(existing.traces)
+    if old.shape[1] < start:
+        gap = np.repeat(old[:, -1:], start - old.shape[1], axis=1)
+        old = np.concatenate([old, gap], axis=1)
+    stop = start + values.shape[1]
+    existing.traces = np.concatenate(
+        [old[:, :start], values.astype(old.dtype), old[:, stop:]], axis=1
+    )

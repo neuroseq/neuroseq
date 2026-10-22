@@ -1124,7 +1124,7 @@ def test_bss2_search_converges_from_chip_spikes(qtbot) -> None:
     assert dialog._running
     assert host.owner is dialog
     assert "i_offset max (500)" in dialog.log.toPlainText()
-    for i in range(20):
+    for _ in range(20):
         if not dialog._running:
             break
         start, stop, record_neuron = host.sent[-1]
@@ -1134,13 +1134,19 @@ def test_bss2_search_converges_from_chip_spikes(qtbot) -> None:
         # Like the chip readback: times relative to the block, neuron 1 fires
         # during strong enough pulses.
         times = [onset + 0.002] if dialog._pending_amplitude >= 0.5 else []
-        name = f"BSS-2 rheobase {i} :: BSS-2 rheobase spikes"
-        project.spikes[name] = SpikeData(name, np.ones(len(times)), np.array(times))
-        host.complete({"spikes": name, "experiment": f"BSS-2 rheobase {i}"})
+        spikes = SpikeData(
+            "BSS-2 rheobase spikes", np.ones(len(times)), np.array(times)
+        )
+        host.complete(
+            {"spikes": "run :: BSS-2 rheobase spikes", "block_spikes": spikes}
+        )
 
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert "Spikes after the probe on BrainScaleS-2: 1." in dialog.log.toPlainText()
+    # All probes of the run go to one data group, not one group each.
+    assert len(set(host.groups)) == 1
+    assert host.groups[0].startswith("BSS-2 rheobase ")
 
 
 def test_bss2_rejects_amplitudes_above_one_and_unavailable_hardware(qtbot) -> None:
@@ -1165,7 +1171,7 @@ def test_bss2_failure_or_missing_readback_stops_the_routine(qtbot) -> None:
     assert "BrainScaleS-2 failed: chip went away" in dialog.log.toPlainText()
     _project, _editor, dialog, host = _bss2_dialog(qtbot)
     dialog.start()
-    host.complete({"spikes": "Removed :: spikes"})
+    host.complete({"spikes": "Removed :: spikes"})  # no block_spikes
     assert not dialog._running
     assert "readback of this probe is missing" in dialog.log.toPlainText()
 
@@ -1187,16 +1193,20 @@ def test_bss2_routine_keeps_one_scale_and_locks_its_target(qtbot) -> None:
     assert snapshot.i_offset_max == 500
     host.settings = Bss2Settings(i_offset_max=900)  # changed in the tab
     onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
-    name = "BSS-2 rheobase 0 :: BSS-2 rheobase spikes"
-    project.spikes[name] = SpikeData(name, np.ones(1), np.array([onset + 0.002]))
+    spikes = SpikeData("spikes", np.ones(1), np.array([onset + 0.002]))
     host.complete(
-        {"spikes": name, "warnings": ["Only the first 512 channels are delivered."]}
+        {
+            "block_spikes": spikes,
+            "warnings": ["Only the first 512 channels are delivered."],
+        }
     )
     assert host.sent_settings[1] is snapshot
-    name = "BSS-2 rheobase 1 :: BSS-2 rheobase spikes"
-    project.spikes[name] = SpikeData(name, np.ones(0), np.array([]))
+    spikes = SpikeData("spikes", np.ones(0), np.array([]))
     host.complete(
-        {"spikes": name, "warnings": ["Only the first 512 channels are delivered."]}
+        {
+            "block_spikes": spikes,
+            "warnings": ["Only the first 512 channels are delivered."],
+        }
     )
     log = dialog.log.toPlainText()
     assert log.count("BrainScaleS-2: Only the first 512 channels are delivered.") == 1
@@ -1308,9 +1318,8 @@ def test_bss2_repeats_each_probe_and_takes_the_majority(qtbot) -> None:
         above = dialog._pending_amplitude >= 0.5
         fires = above != (i % 3 == 2)  # every third trial disagrees
         times = [onset + 0.002] if fires else []
-        name = f"BSS-2 rheobase {i} :: BSS-2 rheobase spikes"
-        project.spikes[name] = SpikeData(name, np.ones(len(times)), np.array(times))
-        host.complete({"spikes": name})
+        spikes = SpikeData("spikes", np.ones(len(times)), np.array(times))
+        host.complete({"block_spikes": spikes})
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert len(host.sent) == 3 * len(dialog._samples)

@@ -105,6 +105,7 @@ class FakeBss2Host(QtCore.QObject):
         self.connect_calls = 0
         self.sent: list[tuple[int, int, int]] = []
         self.sent_settings: list[Bss2Settings | None] = []
+        self.groups: list[str | None] = []
         self.settings = Bss2Settings(i_offset_max=500)
         self.owner: object = None
         self.busy = False
@@ -140,8 +141,10 @@ class FakeBss2Host(QtCore.QObject):
         owner=None,
         record_neuron=0,
         settings=None,
+        group=None,
     ):
         self.sent.append((start, stop, record_neuron))
+        self.groups.append(group)
         self.sent_settings.append(settings)
         self.owner = owner
         self.busy = True

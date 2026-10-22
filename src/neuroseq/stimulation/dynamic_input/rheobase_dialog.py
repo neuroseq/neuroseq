@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import cast
@@ -588,6 +589,8 @@ class RheobaseDialog(SelfRaisingDialog):
         self._connected_hosts: dict[int, list[tuple[Any, Callable]]] = {}
         #: BrainScaleS-2 settings snapshot of the running routine (fixed scale).
         self._bss2_settings: Bss2Settings | None = None
+        #: Data group collecting this run's BrainScaleS-2 readbacks.
+        self._bss2_group: str | None = None
         self._bss2_warnings_logged = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
@@ -1358,6 +1361,7 @@ class RheobaseDialog(SelfRaisingDialog):
         # One scale and speed-up for the whole search, whatever happens in the tab.
         self._bss2_settings = host.current_settings()
         self._bss2_warnings_logged = False
+        self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
         self._append_log(
             "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
             f"tab's i_offset max ({self._bss2_settings.i_offset_max}). Each probe runs as its own "
@@ -1532,6 +1536,8 @@ class RheobaseDialog(SelfRaisingDialog):
             owner=self,
             record_neuron=self.spn_neuron.value(),
             settings=self._bss2_settings,
+            # One data group for the whole run, not one per probe.
+            group=self._bss2_group,
         )
 
     def _on_block_failed(self, owner: object, message: str) -> None:
@@ -1598,8 +1604,8 @@ class RheobaseDialog(SelfRaisingDialog):
                 self._append_log(f"BrainScaleS-2: {warning}")
             self._bss2_warnings_logged = True
         name = payload.get("spikes") if isinstance(payload, dict) else None
-        spikes = self.project.get_data(str(name), SpikeData) if name else None
-        if spikes is None:
+        spikes = payload.get("block_spikes") if isinstance(payload, dict) else None
+        if not isinstance(spikes, SpikeData):
             self._finish(
                 "The BrainScaleS-2 readback of this probe is missing from the "
                 "project; the routine was stopped."

@@ -47,6 +47,10 @@ class _Run:
     label: str
     speedup: float
     warnings: list[str]
+    #: Data group collecting a routine run's blocks (None: one group per block).
+    group: str | None = None
+    #: Where the block starts in the stim array (biological seconds).
+    offset_s: float = 0.0
 
 
 class Bss2StimulationHost(QtCore.QObject):
@@ -56,7 +60,9 @@ class Bss2StimulationHost(QtCore.QObject):
 
     - ``block_completed(owner, payload)`` -- the run's data is in the project:
       ``payload["spikes"]`` names the spike dataset, ``payload["trace"]`` the probed
-      neuron's membrane voltage (if read back), ``payload["experiment"]`` the data group.
+      neuron's membrane voltage (if read back), ``payload["experiment"]`` the data group;
+      ``payload["block_spikes"]`` is this block's own :class:`SpikeData`, timed from the
+      block's start (the named datasets may hold a whole routine run).
       ``payload["warnings"]`` lists notes about the mapping onto the chip (e.g.
       channels beyond the tab's neuron limit that were not delivered).
     - ``block_failed(owner, str)`` -- the block could not be run or read back.
@@ -146,11 +152,15 @@ class Bss2StimulationHost(QtCore.QObject):
         owner: object = None,
         record_neuron: int = 0,
         settings: bp.Bss2Settings | None = None,
+        group: str | None = None,
     ) -> bool:
         """Run ``stim_array[start:stop]`` as constant current on the chip.
 
         ``record_neuron`` is the neuron whose membrane voltage the MADC records;
         ``settings`` (default: the tab's current ones) give the scale and speed-up.
+        With ``group``, the readback is placed in that data group at the block's time
+        in the stim array (one group for a whole routine run); otherwise it gets a
+        data group of its own, like a Deliver from the BrainScaleS-2 tab.
         Returns ``False`` (after emitting ``block_failed``) if it could not start.
         """
         reason = self.unavailable()
@@ -185,7 +195,14 @@ class Bss2StimulationHost(QtCore.QObject):
             )
             return False
         self._run = _Run(
-            request_id, owner, project, label, settings.speedup, list(plan.warnings)
+            request_id,
+            owner,
+            project,
+            label,
+            settings.speedup,
+            list(plan.warnings),
+            group=group,
+            offset_s=start_sample * float(stim_array.dt),
         )
         self.progress.emit(
             f"Running a {plan.duration_s:g} s block on BrainScaleS-2 "
@@ -216,9 +233,30 @@ class Bss2StimulationHost(QtCore.QObject):
         try:
             if not isinstance(result, dict):
                 raise ValueError("The helper returned no result.")
-            experiment, readback = bp.add_readback_experiment(
-                run.project, result, run.speedup, run.label, label=f"BSS-2 {run.label}"
-            )
+            if run.group is None:
+                experiment, readback = bp.add_readback_experiment(
+                    run.project,
+                    result,
+                    run.speedup,
+                    run.label,
+                    label=f"BSS-2 {run.label}",
+                )
+                name = experiment.name
+            else:
+                readback = bp.decode_run_result(
+                    result, run.speedup, label=f"BSS-2 {run.label}"
+                )
+                block_data: list = [readback.spikes]
+                if readback.trace is not None:
+                    block_data.append(readback.trace)
+                run.project.place_block_data(
+                    run.group,
+                    block_data,
+                    run.offset_s,
+                    readback.duration_s,
+                    "Add BrainScaleS-2 readback",
+                )
+                name = run.group
         except Exception as exc:
             # Whatever went wrong, the routine must hear about it, or it waits forever.
             logger.exception("Could not add the BrainScaleS-2 readback")
@@ -227,15 +265,18 @@ class Bss2StimulationHost(QtCore.QObject):
             )
             return
         payload: dict[str, object] = {
-            "experiment": experiment.name,
-            "spikes": f"{experiment.name} :: {readback.spikes.name}",
+            "experiment": name,
+            "spikes": f"{name} :: {readback.spikes.name}",
+            # This block's own spikes, timed from the block's start.
+            "block_spikes": readback.spikes,
             "warnings": run.warnings,
         }
         if readback.trace is not None:
-            payload["trace"] = f"{experiment.name} :: {readback.trace.name}"
-        self.experiment_added.emit(experiment.name)
+            payload["trace"] = f"{name} :: {readback.trace.name}"
+        self.experiment_added.emit(name)
         self.progress.emit(
-            f"Added '{experiment.name}' ({readback.spikes.spike_indices.size} spike(s))."
+            f"Added the readback to '{name}' "
+            f"({readback.spikes.spike_indices.size} spike(s))."
         )
         self.block_completed.emit(run.owner, payload)
 
