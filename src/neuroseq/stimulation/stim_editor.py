@@ -13,6 +13,7 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
+from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import DrawStim
@@ -91,6 +92,8 @@ class StimEditor(QtWidgets.QWidget):
         self.copy_values = np.zeros((0, 0))
         #: Set by the main window; routine dialogs offer a SysCon2 target when present.
         self.stimulation_host: SysCon2StimulationHost | None = None
+        #: Runs dynamic input blocks on BrainScaleS-2 (set by the workspace).
+        self.bss2_host: Bss2StimulationHost | None = None
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position

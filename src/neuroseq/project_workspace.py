@@ -572,6 +572,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
         self.stim_editor.stimulation_host = self.syscon2_panel.stimulation_host
+        self.stim_editor.bss2_host = self.bss2_panel.stimulation_host
         self.stim_editor.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )

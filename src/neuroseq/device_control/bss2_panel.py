@@ -37,6 +37,7 @@ from neuroseq.device_control.bss2_connection import STATE_CONNECTED
 from neuroseq.device_control.bss2_connection import STATE_CONNECTING
 from neuroseq.device_control.bss2_connection import STATE_DISCONNECTED
 from neuroseq.device_control.bss2_connection import STATE_STARTING
+from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
 from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.stimulation.stim import StimArray
 
@@ -96,6 +97,11 @@ class Bss2Panel(QtWidgets.QWidget):
         self._load_settings()
         self._wire_session()
         self._update_ui()
+        #: Runs dynamic input routine blocks with this tab's settings.
+        self.stimulation_host = Bss2StimulationHost(
+            session, self.current_settings, parent=self
+        )
+        self.stimulation_host.progress.connect(self._log)
 
     # ---- workspace API --------------------------------------------------------
 
@@ -112,8 +118,8 @@ class Bss2Panel(QtWidgets.QWidget):
 
     @property
     def run_in_progress(self) -> bool:
-        """Whether this tab's hardware run is still executing."""
-        return self._run is not None
+        """Whether this tab's or a routine's hardware run is still executing."""
+        return self._run is not None or self.stimulation_host.busy
 
     def shutdown(self) -> None:
         """Detach from the shared helper (it keeps running for other tabs)."""

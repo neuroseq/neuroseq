@@ -88,3 +88,43 @@ class FakeStimulationHost(QtCore.QObject):
             return
         self.cancelled += 1
         self.phase = "idle"
+
+
+class FakeBss2Host(QtCore.QObject):
+    """A stand-in for Bss2StimulationHost: blocks run until :meth:`complete`."""
+
+    block_failed = QtCore.Signal(object, str)
+    block_completed = QtCore.Signal(object, object)
+    progress = QtCore.Signal(str)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.sent: list[tuple[int, int, int]] = []
+        self.owner: object = None
+        self.busy = False
+        self.cancelled = 0
+        self.unavailable_reason: str | None = None
+
+    def unavailable(self) -> str | None:
+        return self.unavailable_reason
+
+    def i_offset_max(self) -> int:
+        return 500
+
+    def send_block(
+        self, project, stim, start, stop, label="block", *, owner=None, record_neuron=0
+    ):
+        self.sent.append((start, stop, record_neuron))
+        self.owner = owner
+        self.busy = True
+        return True
+
+    def complete(self, payload: object) -> None:
+        self.busy = False
+        self.block_completed.emit(self.owner, payload)
+
+    def cancel(self, owner: object = None) -> None:
+        if owner is not None and owner is not self.owner:
+            return
+        self.cancelled += 1
+        self.busy = False

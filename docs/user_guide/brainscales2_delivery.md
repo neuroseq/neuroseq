@@ -154,6 +154,26 @@ added (undoable with Edit → Undo) containing
 **Stop** terminates the helper. A run already sent to the chip cannot be
 recalled; its results are discarded and you have to reconnect.
 
+## Rheobase routine
+
+The **Design dynamic input → rheobase** routine can run its probes on the chip:
+choose the target **BrainScaleS-2 (neuromorphic)** (connect in this tab first).
+
+- Each probe block (recovery, pulse, post-pulse window) is delivered as
+  constant current, like **Deliver** does, with the tab's settings: container,
+  setup, speed-up and **i_offset max**.
+- Probe amplitudes are fractions (0-1) of **i_offset max**, so a probe of 0.5
+  drives half of it, whatever the other probes are. Stim neuron _i_ is
+  hardware neuron _i_, and the probed neuron's membrane voltage is recorded.
+- Every probe's readback is added to the project as its own data group,
+  `BSS-2 rheobase <timestamp>`; the routine counts the probed neuron's spikes
+  in the pulse plus the post-pulse window and continues its search.
+- Because each constant-current segment is its own hardware run starting from
+  rest (see _Constant current_ above), every probe starts from rest too; spikes
+  after the current switches off are not recorded.
+- **Stop** ends the search and ignores a probe still running; it does not kill
+  the shared helper.
+
 ## Debug log
 
 The **Debug log** box at the bottom of the tab records every step with a

@@ -62,6 +62,7 @@ class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
         self.stimulation_host = None
+        self.bss2_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,

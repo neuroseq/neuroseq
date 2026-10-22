@@ -13,6 +13,7 @@ from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from tests.fake_stimulation_host import FakeBss2Host
 from tests.fake_stimulation_host import FakeStimulationHost
 
 
@@ -40,7 +41,7 @@ class _FakeProject:
 
     def get_data(self, name: str, data_type: type):
         if data_type is SpikeData:
-            return self.spikes[name]
+            return self.spikes.get(name)
         assert data_type is TraceData
         if name in self.traces:
             return self.traces[name]
@@ -52,6 +53,7 @@ class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
         self.stimulation_host = None
+        self.bss2_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -1086,3 +1088,88 @@ def test_syscon2_manual_dff_readout_uses_the_imported_trace(qtbot) -> None:
     dialog.btn_data_imported.click()
     assert dialog._last_measured_dataset == "rec0"
     assert len(host.sent) == 2
+
+
+def _bss2_dialog(qtbot):
+    project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    _use_fixed_duration_strategy(dialog)
+    dialog.spn_neuron.setValue(1)
+    dialog.spn_min_amplitude.setValue(0.1)
+    dialog.spn_max_amplitude.setValue(1.0)
+    dialog.spn_tolerance.setValue(0.3)
+    dialog.spn_recovery_ms.setValue(100.0)
+    return project, editor, dialog, host
+
+
+def test_bss2_target_needs_a_host(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    assert not dialog.cmb_target.model().item(2).isEnabled()
+    _project, _editor, dialog, _host = _bss2_dialog(qtbot)
+    assert dialog.cmb_target.currentText() == dialog.BSS2_TARGET
+    assert not dialog.hardware.isVisibleTo(dialog)
+    assert not dialog.btn_data_imported.isVisibleTo(dialog)
+    assert not dialog.cmb_trace.isEnabled()
+
+
+def test_bss2_search_converges_from_chip_spikes(qtbot) -> None:
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running
+    assert host.owner is dialog
+    assert "i_offset max (500)" in dialog.log.toPlainText()
+    for i in range(20):
+        if not dialog._running:
+            break
+        start, stop, record_neuron = host.sent[-1]
+        assert (start, stop) == dialog._block_range
+        assert record_neuron == 1
+        onset = dialog._pulse_onset_seconds - start * 0.001
+        # Like the chip readback: times relative to the block, neuron 1 fires
+        # during strong enough pulses.
+        times = [onset + 0.002] if dialog._pending_amplitude >= 0.5 else []
+        name = f"BSS-2 rheobase {i} :: BSS-2 rheobase spikes"
+        project.spikes[name] = SpikeData(name, np.ones(len(times)), np.array(times))
+        host.complete({"spikes": name, "experiment": f"BSS-2 rheobase {i}"})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert "Spikes after the probe on BrainScaleS-2: 1." in dialog.log.toPlainText()
+
+
+def test_bss2_rejects_amplitudes_above_one_and_unavailable_hardware(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.spn_max_amplitude.setValue(5.0)
+    dialog.start()
+    assert not host.sent and not dialog._running
+    assert "fraction of i_offset max" in dialog.log.toPlainText()
+    dialog.spn_max_amplitude.setValue(1.0)
+    host.unavailable_reason = "Connect to BrainScaleS-2 first."
+    dialog.start()
+    assert not host.sent and not dialog._running
+
+
+def test_bss2_failure_or_missing_readback_stops_the_routine(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    host.block_failed.emit(object(), "someone else's block")
+    assert dialog._running
+    host.block_failed.emit(dialog, "chip went away")
+    assert not dialog._running
+    assert "BrainScaleS-2 failed: chip went away" in dialog.log.toPlainText()
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    host.complete({"spikes": "Removed :: spikes"})
+    assert not dialog._running
+    assert "readback of this probe is missing" in dialog.log.toPlainText()
+
+
+def test_bss2_stop_cancels_its_block(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    dialog.stop()
+    assert host.cancelled == 1
+    assert not host.busy

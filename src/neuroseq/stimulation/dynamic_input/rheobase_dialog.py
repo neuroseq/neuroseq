@@ -438,6 +438,7 @@ class RheobaseDialog(SelfRaisingDialog):
     FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY = "Fixed duration, varying amplitude"
     SIMULATION_TARGET = "Brian2 simulation"
     SYSCON2_TARGET = "SysCon2 (calcium imaging)"
+    BSS2_TARGET = "BrainScaleS-2 (neuromorphic)"
     DFF_READOUT = "Calcium response (ΔF/F)"
     SPIKES_READOUT = "Deconvolved spikes"
     #: Baseline before each probe pulse for the calcium response.
@@ -484,6 +485,7 @@ class RheobaseDialog(SelfRaisingDialog):
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
         self._host_connected = False
+        self._bss2_host_connected = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
 
@@ -607,10 +609,14 @@ class RheobaseDialog(SelfRaisingDialog):
         self.spn_max_iterations.setRange(1, 10_000)
         self.spn_max_iterations.setValue(25)
         self.cmb_target = QtWidgets.QComboBox(self)
-        self.cmb_target.addItems([self.SIMULATION_TARGET, self.SYSCON2_TARGET])
+        self.cmb_target.addItems(
+            [self.SIMULATION_TARGET, self.SYSCON2_TARGET, self.BSS2_TARGET]
+        )
         self.cmb_target.setToolTip(
             "Brian2: simulate the probes. SysCon2: deliver each probe to the cells "
-            "through SysCon2, then measure the response in calcium data you import."
+            "through SysCon2 and measure their calcium response. BrainScaleS-2: run "
+            "each probe as a constant current on the neuromorphic chip (connect in "
+            "Stimulation setup > BrainScaleS-2) and count its spikes."
         )
         self.cmb_target.currentTextChanged.connect(self._update_target_controls)
         self.cmb_spikes = QtWidgets.QComboBox(self)
@@ -889,10 +895,15 @@ class RheobaseDialog(SelfRaisingDialog):
             self.cmb_spikes.setCurrentText(selected_spikes)
         syscon2_available = self.editor.stimulation_host is not None
         self.hardware.set_host(self.editor.stimulation_host)
-        syscon2_item = cast(QtGui.QStandardItemModel, self.cmb_target.model()).item(1)
-        if syscon2_item is not None:
-            syscon2_item.setEnabled(syscon2_available)
-        if not syscon2_available and self._target_is_syscon2():
+        bss2_available = self.editor.bss2_host is not None
+        model = cast(QtGui.QStandardItemModel, self.cmb_target.model())
+        for row, available in ((1, syscon2_available), (2, bss2_available)):
+            item = model.item(row)
+            if item is not None:
+                item.setEnabled(available)
+        if (not syscon2_available and self._target_is_syscon2()) or (
+            not bss2_available and self._target_is_bss2()
+        ):
             self.cmb_target.setCurrentIndex(0)
         modifier = self.editor.current_stim_modifier
         if modifier is not None:
@@ -929,6 +940,9 @@ class RheobaseDialog(SelfRaisingDialog):
         project = self._require_project()
         if self._target_is_syscon2():
             self._start_syscon2(choice, stim)
+            return
+        if self._target_is_bss2():
+            self._start_bss2(choice)
             return
         prepare_seconds = 0.0
         if choice == "clear":
@@ -1003,6 +1017,12 @@ class RheobaseDialog(SelfRaisingDialog):
     def _target_is_syscon2(self) -> bool:
         return self.cmb_target.currentText() == self.SYSCON2_TARGET
 
+    def _target_is_bss2(self) -> bool:
+        return self.cmb_target.currentText() == self.BSS2_TARGET
+
+    def _hardware_name(self) -> str:
+        return "BrainScaleS-2" if self._target_is_bss2() else "SysCon2"
+
     def _automatic(self) -> bool:
         """SysCon2 blocks are run and recorded without the user (issue #651)."""
         return self._target_is_syscon2() and self.hardware.automatic
@@ -1012,6 +1032,7 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _update_target_controls(self, *_args: object) -> None:
         syscon2 = self._target_is_syscon2()
+        bss2 = self._target_is_bss2()
         automatic = self._automatic()
         self.btn_syscon_dt.setVisible(syscon2)
         self.btn_syscon_dt.setEnabled(not self._running)
@@ -1021,12 +1042,15 @@ class RheobaseDialog(SelfRaisingDialog):
         dff = self._dff_readout()
         self.hardware.show_readout(dff)
         # Automatic blocks bring their own datasets; manual ones are picked here.
-        self.cmb_trace.setEnabled(not syscon2 or (dff and not automatic))
-        self.spn_threshold_mv.setEnabled(not syscon2)
+        # BrainScaleS-2 blocks bring their own spikes, so no dataset is picked.
+        self.cmb_trace.setEnabled(not bss2 and (not syscon2 or (dff and not automatic)))
+        self.spn_threshold_mv.setEnabled(not syscon2 and not bss2)
         self.cmb_spikes.setEnabled(syscon2 and not dff and not automatic)
         self.btn_data_imported.setVisible(syscon2 and not automatic)
         if syscon2:
             self._connect_host()
+        if bss2:
+            self._connect_bss2_host()
 
     def _connect_host(self) -> None:
         host = self.editor.stimulation_host
@@ -1037,11 +1061,24 @@ class RheobaseDialog(SelfRaisingDialog):
         host.block_completed.connect(self._on_block_completed)
         self._host_connected = True
 
+    def _connect_bss2_host(self) -> None:
+        host = self.editor.bss2_host
+        if host is None or self._bss2_host_connected:
+            return
+        host.block_failed.connect(self._on_block_failed)
+        host.block_completed.connect(self._on_block_completed)
+        self._bss2_host_connected = True
+
     def dispose(self) -> None:
-        """Stop a running routine and stop following the stimulation host."""
+        """Stop a running routine and stop following the stimulation hosts."""
         if self._running:
             self._finish("Routine closed.")
         self._disconnect_host()
+        host = self.editor.bss2_host
+        if host is not None and self._bss2_host_connected:
+            host.block_failed.disconnect(self._on_block_failed)
+            host.block_completed.disconnect(self._on_block_completed)
+            self._bss2_host_connected = False
 
     def _disconnect_host(self) -> None:
         host = self.editor.stimulation_host
@@ -1103,6 +1140,32 @@ class RheobaseDialog(SelfRaisingDialog):
             )
         self._begin_search(clear_log=False)
 
+    def _start_bss2(self, choice: str) -> None:
+        """Begin a routine whose probes run on BrainScaleS-2."""
+        host = self.editor.bss2_host
+        if host is None:
+            self._append_log("BrainScaleS-2 is not available.")
+            return
+        reason = host.unavailable()
+        if reason is not None:
+            self._append_log(reason)
+            return
+        if choice == "clear":
+            self.editor.zero_current_stim_array()
+            self.editor.reset_stim_array()
+            self._append_start_sample = 0
+        else:
+            self._append_start_sample = (
+                self.editor.current_stim_array_last_stimulus_sample()
+            )
+        self._append_log(
+            "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
+            f"tab's i_offset max ({host.i_offset_max()}). Each probe runs as its own "
+            "constant-current block on the chip, starting from rest; stim neuron i is "
+            "hardware neuron i, and its spikes after the pulse are counted."
+        )
+        self._begin_search(clear_log=False)
+
     def _begin_search(self, *, clear_log: bool) -> None:
         strategy = self.cmb_sweeping_strategy.currentText()
         min_amplitude = self.spn_min_amplitude.value()
@@ -1118,7 +1181,7 @@ class RheobaseDialog(SelfRaisingDialog):
         ):
             self._finish("Maximum pulse duration must be at least the minimum.")
             return
-        if self._target_is_syscon2():
+        if self._target_is_syscon2() or self._target_is_bss2():
             amplitudes = (
                 [self.spn_fixed_amplitude.value()]
                 if fixed_amplitude
@@ -1128,6 +1191,9 @@ class RheobaseDialog(SelfRaisingDialog):
                 self._finish(
                     "For SysCon2 the amplitudes must lie within 0-1 "
                     "(fraction of the export target power)."
+                    if self._target_is_syscon2()
+                    else "For BrainScaleS-2 the amplitudes must lie within 0-1 "
+                    "(fraction of i_offset max)."
                 )
                 return
         stim = self._require_stim()
@@ -1197,6 +1263,9 @@ class RheobaseDialog(SelfRaisingDialog):
         self._backend.request_simulation(seconds)
 
     def request_simulation(self, seconds: float) -> None:
+        if self._target_is_bss2():
+            self._request_bss2_block()
+            return
         if not self._target_is_syscon2():
             self.simulation_requested.emit(seconds)
             return
@@ -1245,9 +1314,27 @@ class RheobaseDialog(SelfRaisingDialog):
         )
         self.btn_data_imported.setEnabled(True)
 
+    def _request_bss2_block(self) -> None:
+        host = self.editor.bss2_host
+        if host is None or self.project is None:
+            self._finish("BrainScaleS-2 is not available.")
+            return
+        start, stop = self._block_range
+        self._append_log("Running the probe on BrainScaleS-2...")
+        # A failure is reported through host.block_failed -> _on_block_failed.
+        host.send_block(
+            self.project,
+            self._require_stim(),
+            start,
+            stop,
+            "rheobase",
+            owner=self,
+            record_neuron=self.spn_neuron.value(),
+        )
+
     def _on_block_failed(self, owner: object, message: str) -> None:
         if owner is self and self._running:
-            self._finish(f"SysCon2 failed: {message}")
+            self._finish(f"{self._hardware_name()} failed: {message}")
 
     def _on_block_completed(self, owner: object, payload: object) -> None:
         if owner is self and self._running:
@@ -1285,6 +1372,9 @@ class RheobaseDialog(SelfRaisingDialog):
         if self._target_is_syscon2():
             self._advance_syscon2()
             return
+        if self._target_is_bss2():
+            self._advance_bss2()
+            return
         trace = self.project.get_data(self.cmb_trace.currentText(), TraceData)
         if trace is None:
             self._finish("The selected trace is unavailable after simulation.")
@@ -1295,6 +1385,32 @@ class RheobaseDialog(SelfRaisingDialog):
             self._finish(f"Spike measurement failed: {exc}")
             return
         self._backend.record_probe_result(spike_count)
+
+    def _advance_bss2(self) -> None:
+        """Count the probed neuron's spikes in the block BrainScaleS-2 just ran."""
+        assert self.project is not None
+        payload = self._block_payload
+        self._block_payload = None
+        name = payload.get("spikes") if isinstance(payload, dict) else None
+        spikes = self.project.get_data(str(name), SpikeData) if name else None
+        if spikes is None:
+            self._finish(
+                "The BrainScaleS-2 readback of this probe is missing from the "
+                "project; the routine was stopped."
+            )
+            return
+        self.refresh()
+        # The readback's time axis starts with the block.
+        onset = self._pulse_onset_seconds - self._block_range[0] * float(
+            self._require_stim().dt
+        )
+        window_ms = self._current_duration_ms + self.spn_response_ms.value()
+        count = measure_calcium_spike_count(
+            spikes, self.spn_neuron.value(), onset, window_ms
+        )
+        self._append_log(f"Spikes after the probe on BrainScaleS-2: {count}.")
+        self._last_measured_dataset = str(name)
+        self._backend.record_probe_result(count)
 
     def _advance_syscon2(self) -> None:
         assert self.project is not None
@@ -1632,6 +1748,8 @@ class RheobaseDialog(SelfRaisingDialog):
         host = self.editor.stimulation_host
         if host is not None:
             host.cancel(owner=self)
+        if self.editor.bss2_host is not None:
+            self.editor.bss2_host.cancel(owner=self)
         self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
         self.btn_start.setEnabled(True)
