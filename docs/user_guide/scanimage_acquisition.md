@@ -121,8 +121,9 @@ Save the project to retain its acquisition history.
 
 A small, human-readable `<date>_<number>.json` beside the TIFF stores the
 request, the stimulus it relates to (name, sample interval, shape and SHA-256 of
-its samples, not the samples themselves), the block of a dynamic input routine,
-and the SysCon export settings, written before the hardware command. It aids
+its samples, not the samples themselves), the block of a dynamic input routine
+(with the path of its `.seq` file and its SysCon2 sequence-manager entry), and
+the SysCon export settings, written before the hardware command. It aids
 recovery if NeuroSeq exits before the project is saved, and is removed again if
 ScanImage refuses to start. Its requested state is not evidence that the
 acquisition completed.

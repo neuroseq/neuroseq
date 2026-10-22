@@ -18,6 +18,7 @@ This is the hardware counterpart of the Brian2 simulation host that the closed-l
 
 from __future__ import annotations
 
+import datetime
 import logging
 import pathlib
 import tempfile
@@ -62,6 +63,10 @@ class BlockRecording:
     functional_channel: int
     #: OASIS event size (ΔF/F) counted as a deconvolved spike.
     spike_threshold: float = 0.1
+    #: The delivered ``.seq`` file and its SysCon2 sequence-manager entry (set by the
+    #: host before arming), so the recording names the exact script it captured.
+    seq_path: str = ""
+    syscon_sequence: str = ""
 
     @property
     def duration_s(self) -> float:
@@ -130,6 +135,21 @@ def remote_sequence_path(sequences: list[str], name: str, target: str) -> str:
     return (in_target or matches)[-1]
 
 
+def routine_run_name(label: str, now: datetime.datetime | None = None) -> str:
+    """Folder and file-name prefix of one routine run, e.g. ``rheobase_2026-10-22_143012``.
+
+    Unique per run, so block files of different runs never share a name in SysCon2's
+    target directory.
+    """
+    return f"{label}_{(now or datetime.datetime.now()):%Y-%m-%d_%H%M%S}"
+
+
+def next_block_name(folder: pathlib.Path, run_name: str) -> str:
+    """``<run_name>_<NNN>`` for the next block written to ``folder``."""
+    existing = len(list(folder.glob(f"{run_name}_*.seq"))) if folder.is_dir() else 0
+    return f"{run_name}_{existing + 1:03d}"
+
+
 def _ready_to_run(state: str) -> bool:
     """Same readiness rule as the panel's Upload button."""
     state = state.lower().removeprefix("state:").strip()
@@ -172,6 +192,7 @@ class SysCon2StimulationHost(QtCore.QObject):
         target_directory_provider: Callable[[], str],
         confirm_warnings: Callable[[list[str]], bool] | None = None,
         is_connected: Callable[[], bool] = lambda: True,
+        run_directory_provider: Callable[[], pathlib.Path] | None = None,
         output_dir: pathlib.Path | None = None,
         parent: QtCore.QObject | None = None,
     ) -> None:
@@ -182,6 +203,8 @@ class SysCon2StimulationHost(QtCore.QObject):
         self._target_directory_provider = target_directory_provider
         self._confirm_warnings = confirm_warnings
         self._is_connected = is_connected
+        #: Where routine runs keep their block files (one subfolder per run).
+        self._run_directory_provider = run_directory_provider
         #: Export warnings the user already accepted, so a routine asks once, not per block.
         self._accepted_warnings: set[str] = set()
         self._tmpdir: tempfile.TemporaryDirectory[str] | None = None
@@ -196,7 +219,14 @@ class SysCon2StimulationHost(QtCore.QObject):
 
     @property
     def output_dir(self) -> pathlib.Path:
+        """Temporary folder of blocks sent without a routine run name."""
         return self._output_dir
+
+    def run_directory(self, run_name: str) -> pathlib.Path:
+        """The folder keeping the block files of routine run ``run_name``."""
+        if self._run_directory_provider is None:
+            return self._output_dir / run_name
+        return self._run_directory_provider() / run_name
 
     @property
     def owner(self) -> object | None:
@@ -249,8 +279,13 @@ class SysCon2StimulationHost(QtCore.QObject):
         owner: object = None,
         automatic: bool = False,
         recording: BlockRecording | None = None,
+        run_name: str | None = None,
     ) -> bool:
         """Export ``stim_array[start:stop]`` and import it into SysCon2.
+
+        With ``run_name`` (see :func:`routine_run_name`) the block's ``.seq``, overview
+        and stimulus sidecar are kept in :meth:`run_directory` as
+        ``<run_name>_<NNN>.seq``; without it they go to a temporary folder.
 
         ``preserve_amplitude`` exports the array's values as a fraction of the target power
         instead of forcing every active sample to full power (needed for amplitude sweeps).
@@ -282,13 +317,18 @@ class SysCon2StimulationHost(QtCore.QObject):
         if preserve_amplitude and settings.force_binary_intensity:
             settings = replace(settings, force_binary_intensity=False)
         index = next(self._counter)
+        if run_name:
+            folder = self.run_directory(run_name)
+            name = next_block_name(folder, run_name)
+        else:
+            folder, name = self._output_dir, f"{label}_{index:03d}"
         try:
             result = export_stim_array(
                 project,  # type: ignore[arg-type]
                 stim_array,
                 settings,
-                self._output_dir,
-                f"{label}_{index:03d}",
+                folder,
+                name,
                 start_sample=start_sample,
                 stop_sample=stop_sample,
                 confirm_warnings=self._confirm_new_warnings,
@@ -516,6 +556,11 @@ class SysCon2StimulationHost(QtCore.QObject):
                 self._run(block)
                 return
             assert self._acquisition is not None
+            block.recording = replace(
+                block.recording,
+                seq_path=str(block.result.seq_path),
+                syscon_sequence=block.remote_path,
+            )
             try:
                 block.run_id = self._acquisition.arm_block(block.recording)
             except ValueError as exc:

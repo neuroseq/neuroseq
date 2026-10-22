@@ -98,7 +98,10 @@ following details matter when testing the current implementation.
    `TargetConnectorPort`) to ScanImage's acquisition trigger. Start the routine:
    for every block NeuroSeq imports, selects and uploads it, arms a triggered
    recording (block plus **Record after block**), runs it and extracts ΔF/F.
-   Verify the recording starts with the block (sequence start to first frame),
+   The routine log names the run's folder; check that every block's `.seq`,
+   overview and sidecar are kept there and that each recording's `.json`
+   names the right `.seq`. Verify the recording starts with the block (sequence
+   start to first frame),
    that each `<date>_<number>.tif` holds the requested frames, and that the
    logged ΔF/F rise (ΔF/F readout) or deconvolved spike count (spike readout)
    matches the cell's visible response. Tune the spike threshold on a few probes

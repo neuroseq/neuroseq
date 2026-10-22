@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from qtpy import QtCore
 
 from neuroseq.export.syscon2_export_service import SysconExportSettings
@@ -22,6 +24,7 @@ class FakeStimulationHost(QtCore.QObject):
         self.sent: list[tuple[int, int, bool]] = []
         self.recordings: list[object] = []
         self.automatic: list[bool] = []
+        self.run_names: list[str | None] = []
         self.owner: object = None
         self.cancelled = 0
         self.unavailable: str | None = None
@@ -32,6 +35,9 @@ class FakeStimulationHost(QtCore.QObject):
 
     def set_export_settings(self, settings: SysconExportSettings) -> None:
         self.settings = settings
+
+    def run_directory(self, run_name: str) -> Path:
+        return Path("runs") / run_name
 
     def recording_unavailable(self) -> str | None:
         return self.unavailable
@@ -48,8 +54,10 @@ class FakeStimulationHost(QtCore.QObject):
         owner=None,
         automatic=False,
         recording=None,
+        run_name=None,
     ):
         self.sent.append((start, stop, preserve_amplitude))
+        self.run_names.append(run_name)
         self.recordings.append(recording)
         self.automatic.append(automatic)
         self.owner = owner

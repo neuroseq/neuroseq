@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+
 import brian2.numpy_ as np
 import pytest
 from qtpy import QtCore
@@ -7,7 +9,9 @@ from qtpy import QtCore
 import neuroseq.device_control.syscon2_stimulation_host as host_module
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
+from neuroseq.device_control.syscon2_stimulation_host import next_block_name
 from neuroseq.device_control.syscon2_stimulation_host import remote_sequence_path
+from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.export.syscon2_export_service import SysconExportError
 from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
@@ -395,3 +399,57 @@ def test_remote_sequence_path_prefers_the_target_folder() -> None:
     assert remote_sequence_path(entries, "x.seq", "elsewhere") == "target\\X.SEQ"
     with pytest.raises(RuntimeError):
         remote_sequence_path(entries, "z.seq", "target")
+
+
+def test_routine_runs_keep_their_blocks_in_a_named_folder(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    submitted: list = []
+    host = _host(
+        submitted,
+        SysconExportSettings(config_text=""),
+        tmp_path / "temp",
+        run_directory_provider=lambda: tmp_path / "exports",
+    )
+    export = mocker.patch.object(host_module, "export_stim_array")
+    run = routine_run_name("rheobase", datetime.datetime(2026, 10, 22, 14, 30, 12))
+    assert run == "rheobase_2026-10-22_143012"
+    assert host.run_directory(run) == tmp_path / "exports" / run
+
+    host.send_block(Project(), stim, 0, 5, run_name=run)
+    folder, name = export.call_args.args[3:5]
+    assert (folder, name) == (tmp_path / "exports" / run, f"{run}_001")
+    # Numbering continues from the block files already in the folder.
+    folder.mkdir(parents=True)
+    (folder / f"{run}_001.seq").write_text("")
+    assert next_block_name(folder, run) == f"{run}_002"
+    host.cancel()
+    host.send_block(Project(), stim, 0, 5, label="probe")
+    assert export.call_args.args[3:5] == (tmp_path / "temp", "probe_002")
+
+
+def test_recording_is_told_which_sequence_it_captures(
+    stim: StimArray, tmp_path, mocker
+) -> None:
+    host, submitted, acquisition = _automatic_host(tmp_path, mocker)
+    client = _FakeClient(["target\\probe_001.seq"], ["Idle"])
+    host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
+    _run(submitted, host, client)
+    recording = acquisition.armed[0]
+    assert recording.seq_path == str(tmp_path / "probe_001.seq")
+    assert recording.syscon_sequence == "target\\probe_001.seq"
+
+
+def test_cleanup_removes_only_the_temporary_folder(tmp_path) -> None:
+    host = SysCon2StimulationHost(
+        lambda name, fn: None,
+        settings_provider=lambda: None,
+        target_directory_provider=lambda: "",
+        run_directory_provider=lambda: tmp_path,
+    )
+    temporary = host.output_dir
+    assert temporary.is_dir()
+    host.cleanup()
+    host.cleanup()
+    assert not temporary.exists()
+    assert tmp_path.is_dir()

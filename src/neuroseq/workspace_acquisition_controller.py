@@ -184,6 +184,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 "label": block.label,
                 "duration_s": block.duration_s,
                 "tail_s": block.tail_s,
+                # The exact script this recording captured.
+                "seq_path": block.seq_path,
+                "syscon_sequence": block.syscon_sequence,
             }
         settings = self._export_settings()
         if settings is not None:

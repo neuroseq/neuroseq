@@ -235,6 +235,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             settings_setter=self.set_export_settings,
             target_directory_provider=lambda: self.target_directory_edit.text().strip(),
             is_connected=lambda: self._connected,
+            run_directory_provider=self._export_directory,
             confirm_warnings=lambda warnings: self._confirm(
                 "Review export changes:\n" + "\n".join(warnings)
             ),
@@ -304,6 +305,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._execution_cancel.set()
         self._manager.shutdown()
         self._import_files.cleanup()
+        self.stimulation_host.cleanup()
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         self.shutdown()

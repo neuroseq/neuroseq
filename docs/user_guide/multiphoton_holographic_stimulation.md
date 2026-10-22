@@ -277,5 +277,14 @@ the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
 is only imported into SysCon2 and you run, record and import it yourself, then
 click **Calcium data imported** (rheobase can then measure ΔF/F of an imported
 trace or deconvolved spikes). Export warnings, such as a missing power LUT, are
-asked once per routine rather than failing every block. The **Create input array** and **Edit input
+asked once per routine rather than failing every block.
+
+Each routine run keeps its block scripts in its own folder inside the project's
+export folder (the one **Export with settings…** used last), for example
+`SysCon exports\rheobase_2026-10-22_143012\`. Every block is saved there as
+`rheobase_2026-10-22_143012_001.seq`, with its overview PNG and stimulus sidecar,
+and imported into SysCon2 under the same name, so names never repeat across
+runs. A recording of a block records the path of its `.seq`. Scripts exported
+with **Export current array to stimulation setup** stay temporary and are
+deleted when NeuroSeq closes. The **Create input array** and **Edit input
 array** dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

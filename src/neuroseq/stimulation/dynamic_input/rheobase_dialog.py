@@ -15,6 +15,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.qt_helpers import SelfRaisingDialog
 from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
@@ -480,6 +481,8 @@ class RheobaseDialog(SelfRaisingDialog):
         #: What the host reported for the block that just completed (see
         #: SysCon2StimulationHost.block_completed); None for a manual import.
         self._block_payload: object = None
+        #: Names this SysCon2 run's folder and block files (see routine_run_name).
+        self._run_name: str | None = None
         self._host_connected = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
@@ -1079,6 +1082,10 @@ class RheobaseDialog(SelfRaisingDialog):
                 self.editor.current_stim_array_last_stimulus_sample()
             )
         self._last_measured_dataset = None
+        self._run_name = routine_run_name("rheobase")
+        self._append_log(
+            f"Block scripts are kept in {host.run_directory(self._run_name)}."
+        )
         if self._automatic():
             self._append_log(
                 "SysCon2 target: amplitudes are fractions (0-1) of the export target "
@@ -1220,6 +1227,7 @@ class RheobaseDialog(SelfRaisingDialog):
             preserve_amplitude=True,
             owner=self,
             automatic=automatic,
+            run_name=self._run_name,
             recording=(
                 self.hardware.block_recording(stim, start, stop, "rheobase")
                 if automatic

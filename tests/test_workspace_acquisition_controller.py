@@ -53,7 +53,14 @@ def _block(seconds: float = 1.0) -> BlockRecording:
     stim = StimArray(
         "Stim", StimType.External, np.ones((int(seconds * 1000), 2)), "", 0.001
     )
-    return BlockRecording("rheobase", stim, tail_s=2.0, functional_channel=1)
+    return BlockRecording(
+        "rheobase",
+        stim,
+        tail_s=2.0,
+        functional_channel=1,
+        seq_path="D:/runs/rheobase_001.seq",
+        syscon_sequence="neuroseq\\rheobase_001.seq",
+    )
 
 
 def _ready_for_blocks(s) -> None:
@@ -145,6 +152,12 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     extract = mocker.patch.object(
         controller_module, "extract_recording_dff", return_value=trace
     )
+    # OASIS itself is tested with the extraction; its first (numba) call can be
+    # slow, and this test is about the controller's wiring.
+    spikes = SpikeData("Deconvolved spikes", np.array([0]), np.array([1.0]))
+    deconvolve = mocker.patch.object(
+        controller_module, "deconvolve_dff", return_value=spikes
+    )
     controller = s.controller
 
     run_id = controller.arm_block(_block(1.0))
@@ -156,6 +169,8 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     manifest = arguments["manifest"]
     assert manifest["synchronization"] == "stimulation_trigger"
     assert manifest["block"]["label"] == "rheobase"
+    assert manifest["block"]["seq_path"] == "D:/runs/rheobase_001.seq"
+    assert manifest["block"]["syscon_sequence"] == "neuroseq\\rheobase_001.seq"
     with qtbot.waitSignal(controller.block_armed) as armed:
         controller.scanimage_status(
             {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
@@ -187,9 +202,11 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     ]
     data = s.project.experiments[name].data
     assert trace in data
-    assert [d.name for d in data if isinstance(d, SpikeData)] == ["Deconvolved spikes"]
+    assert spikes in data
     assert extract.call_args.kwargs["saved_channels"] == [1, 2]
     assert extract.call_args.kwargs["functional_channel"] == 1
+    assert deconvolve.call_args.args == (trace,)
+    assert deconvolve.call_args.kwargs == {"threshold": 0.1}
     assert not controller.acquisition_in_progress
 
 

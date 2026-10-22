@@ -958,6 +958,9 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert recording.stim_block.values.shape[0] == stop - start
     assert (recording.tail_s, recording.functional_channel) == (2.0, 2)
     assert host.owner is dialog
+    run_name = host.run_names[0]
+    assert run_name.startswith("rheobase_")
+    assert f"runs/{run_name}" in dialog.log.toPlainText()
     for i in range(20):
         if not dialog._running:
             break
@@ -970,6 +973,7 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert all(host.automatic)
+    assert set(host.run_names) == {run_name}  # one folder for the whole run
 
 
 def test_syscon2_automatic_probe_can_be_measured_from_deconvolved_spikes(
