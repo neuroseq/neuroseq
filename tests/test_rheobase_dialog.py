@@ -1314,3 +1314,20 @@ def test_bss2_repeats_each_probe_and_takes_the_majority(qtbot) -> None:
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert len(host.sent) == 3 * len(dialog._samples)
+
+
+def test_summary_reports_a_chronaxie_bound_as_a_bound(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    backend = dialog._backend
+    backend.rheobase = 0.381
+    backend.chronaxie_ms = None
+    backend.chronaxie_upper_bound_ms = 10.0
+    summary = dialog._final_summary()
+    assert "chronaxie <= 10 ms" in summary
+    assert "lower the minimum pulse duration" in summary
+    backend.chronaxie_upper_bound_ms = None
+    backend.chronaxie_range = (10.0, 12.5)
+    backend.chronaxie_ms = 11.25
+    assert "chronaxie between 10 and 12.5 ms" in dialog._final_summary()
+    backend.chronaxie_range = None
+    assert "chronaxie ~= 11.25 ms" in dialog._final_summary()

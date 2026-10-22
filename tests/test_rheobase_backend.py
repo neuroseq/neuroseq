@@ -130,3 +130,39 @@ def test_unreached_longest_duration_still_finishes():
     backend, finished = _strength_duration(0.3)
     assert backend.unreached_durations == [50.0]
     assert "Increase the maximum amplitude." in finished[0]
+
+
+def test_chronaxie_below_the_swept_range_is_only_an_upper_bound():
+    """The chip run: thresholds 0.381 at 50 ms and 0.578 at 10 ms never reach
+    twice the rheobase (0.763), so the chronaxie is <= 10 ms, not ~= 10 ms."""
+    host = Host()
+    backend = RheobaseBackend(host)
+    finished = []
+    backend.on_finished = finished.append
+    backend.on_summarize = lambda: "summary"
+    backend.begin_search(_config("Amplitude and duration", 0.1, 1.0, 10.0, 50.0))
+    while backend.running:
+        threshold = 0.381 if backend.current_duration_ms > 30 else 0.578
+        backend.record_probe_result(int(backend.pending_amplitude >= threshold))
+    assert finished == ["summary"]
+    assert backend.chronaxie_ms is None
+    assert backend.chronaxie_upper_bound_ms == 10.0
+    assert backend.chronaxie_range is None
+
+
+def test_unfireable_duration_brackets_the_chronaxie():
+    """Every measured threshold is below twice the rheobase, but a shorter pulse
+    could not fire even at a maximum above it: the chronaxie lies in between."""
+    backend = RheobaseBackend(Host())
+    backend.config = _config("Amplitude and duration", 0.05, 1.0, 5.0, 50.0)
+    backend.thresholds = [(50.0, 0.4), (12.0, 0.7)]
+    backend.unreached_durations = [5.0, 8.0, 20.0]
+    backend._update_strength_duration_metrics()
+    assert backend.chronaxie_range == (8.0, 12.0)
+    assert backend.chronaxie_ms == 10.0
+    assert backend.chronaxie_upper_bound_ms is None
+    # A maximum below twice the rheobase decides nothing: only the bound remains.
+    backend.config = _config("Amplitude and duration", 0.05, 0.75, 5.0, 50.0)
+    backend._update_strength_duration_metrics()
+    assert backend.chronaxie_range is None and backend.chronaxie_ms is None
+    assert backend.chronaxie_upper_bound_ms == 12.0

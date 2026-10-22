@@ -76,6 +76,11 @@ class RheobaseBackend(RoutineBackend):
         self.duration_stage = "idle"
         self.rheobase: float | None = None
         self.chronaxie_ms: float | None = None
+        #: (shorter, longer) duration bracketing the chronaxie when only known
+        #: to lie between an unfireable duration and a measured one.
+        self.chronaxie_range: tuple[float, float] | None = None
+        #: The chronaxie is at most this (shorter than the swept range).
+        self.chronaxie_upper_bound_ms: float | None = None
         self.fixed_spiking_duration_ms: float | None = None
         self.iteration = 0
         self.logged_recovery_note = False
@@ -112,6 +117,8 @@ class RheobaseBackend(RoutineBackend):
         self.trial_counts = []
         self.rheobase = None
         self.chronaxie_ms = None
+        self.chronaxie_range = None
+        self.chronaxie_upper_bound_ms = None
         self.fixed_spiking_duration_ms = None
         self.logged_recovery_note = False
         self.resolution_warning_logged = False
@@ -372,6 +379,7 @@ class RheobaseBackend(RoutineBackend):
         c = self._cfg()
         duration = self.current_duration_ms
         self.unreached_durations.append(duration)
+        self._update_strength_duration_metrics()
         self._measurement_changed()
         message = (
             f"No spike at {duration:.6g} ms up to the maximum amplitude "
@@ -453,13 +461,24 @@ class RheobaseBackend(RoutineBackend):
         )
 
     def _update_strength_duration_metrics(self) -> None:
+        """Rheobase and chronaxie (where the threshold reaches twice the rheobase).
+
+        The chronaxie is interpolated between two measured thresholds when they
+        straddle twice the rheobase. When every measured threshold is below that:
+        if a shorter duration could not fire even at a maximum of at least twice
+        the rheobase, the chronaxie lies between it and the shortest measured
+        duration (``chronaxie_range``, estimate its middle); otherwise only
+        ``chronaxie_upper_bound_ms`` (the shortest measured duration) is known.
+        """
+        self.chronaxie_ms = None
+        self.chronaxie_range = None
+        self.chronaxie_upper_bound_ms = None
         if not self.thresholds:
-            self.rheobase = self.chronaxie_ms = None
+            self.rheobase = None
             return
         pairs = sorted(self.thresholds)
         self.rheobase = min(value for _, value in pairs)
         target = 2.0 * self.rheobase
-        self.chronaxie_ms = None
         for (d0, a0), (d1, a1) in zip(pairs, pairs[1:], strict=False):
             if a0 == target:
                 self.chronaxie_ms = d0
@@ -467,8 +486,20 @@ class RheobaseBackend(RoutineBackend):
             if (a0 - target) * (a1 - target) <= 0.0 and a0 != a1:
                 self.chronaxie_ms = d0 + (target - a0) * (d1 - d0) / (a1 - a0)
                 return
-        if pairs[0][1] <= target:
-            self.chronaxie_ms = pairs[0][0]
+        shortest, shortest_threshold = pairs[0]
+        if shortest_threshold > target:
+            return
+        unreached = [
+            d
+            for d in self.unreached_durations
+            if d < shortest and self._cfg().max_amplitude >= target
+        ]
+        if unreached:
+            low = max(unreached)
+            self.chronaxie_range = (low, shortest)
+            self.chronaxie_ms = 0.5 * (low + shortest)
+        else:
+            self.chronaxie_upper_bound_ms = shortest
 
 
 @dataclass(frozen=True)
@@ -1696,10 +1727,7 @@ class RheobaseDialog(SelfRaisingDialog):
         if self._rheobase is None:
             return "Duration sweep finished without a rheobase estimate."
         summary = f"Duration sweep finished; rheobase ~= {self._rheobase:.6g} {self._unit_label()}"
-        if self._chronaxie_ms is not None:
-            summary += f", chronaxie ~= {self._chronaxie_ms:.6g} ms"
-        else:
-            summary += "; chronaxie is outside the swept duration range"
+        summary += self._chronaxie_text()
         unreached = self._backend.unreached_durations
         if unreached:
             summary += (
@@ -1708,6 +1736,25 @@ class RheobaseDialog(SelfRaisingDialog):
                 + " ms"
             )
         return summary + "."
+
+    def _chronaxie_text(self) -> str:
+        """The chronaxie as measured: a value, a bracket, or only a bound."""
+        backend = self._backend
+        if backend.chronaxie_range is not None:
+            low, high = backend.chronaxie_range
+            return (
+                f", chronaxie between {low:.6g} and {high:.6g} ms (no spike at "
+                f"{low:.6g} ms up to the maximum amplitude)"
+            )
+        if self._chronaxie_ms is not None:
+            return f", chronaxie ~= {self._chronaxie_ms:.6g} ms"
+        if backend.chronaxie_upper_bound_ms is not None:
+            return (
+                f", chronaxie <= {backend.chronaxie_upper_bound_ms:.6g} ms (below the "
+                "swept range: even the shortest pulse needs less than twice the "
+                "rheobase; lower the minimum pulse duration to locate it)"
+            )
+        return "; chronaxie is outside the swept duration range"
 
     def _final_fixed_amplitude_summary(self) -> str:
         amplitude = self.spn_fixed_amplitude.value()
@@ -1895,10 +1942,8 @@ class RheobaseDialog(SelfRaisingDialog):
             return
         if self._rheobase is not None:
             text = f"Rheobase ~= {self._rheobase:.6g} {units}"
-            if self._chronaxie_ms is not None:
-                text += f"; chronaxie ~= {self._chronaxie_ms:.6g} ms"
-            elif len(self._thresholds) > 1:
-                text += "; chronaxie outside swept range"
+            if self._chronaxie_ms is not None or len(self._thresholds) > 1:
+                text += self._chronaxie_text().replace(", ", "; ", 1)
             text += f" (current bracket width {self._high - self._low:.6g})"
             self.lbl_status.setText(text)
         elif self._samples:
