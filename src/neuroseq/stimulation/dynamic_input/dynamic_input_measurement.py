@@ -96,15 +96,24 @@ def measure_calcium_spike_count(
     neuron_id: int,
     onset_seconds: float,
     window_ms: float,
+    frame_seconds: float = 0.0,
 ) -> int:
     """Count deconvolved spikes of ``neuron_id`` in ``[onset, onset + window]``.
 
     ``onset_seconds`` is relative to the start of the acquisition that produced ``spikes``.
+    Spikes are timed at the start of their imaging frame, so with ``frame_seconds`` (the
+    frame period) a spike in the frame containing the onset also counts.
     """
     stop_seconds = onset_seconds + window_ms / 1000.0
+    # The start of the frame containing the onset, not of the frame before it.
+    after_onset = (
+        spikes.spike_times > onset_seconds - frame_seconds
+        if frame_seconds > 0
+        else spikes.spike_times >= onset_seconds
+    )
     in_window = (
         (spikes.spike_indices == neuron_id)
-        & (spikes.spike_times >= onset_seconds)
+        & after_onset
         & (spikes.spike_times <= stop_seconds)
     )
     return int(np.count_nonzero(in_window))

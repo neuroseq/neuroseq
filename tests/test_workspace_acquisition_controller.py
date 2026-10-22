@@ -7,6 +7,7 @@ import pytest
 from qtpy import QtWidgets
 
 import neuroseq.workspace_acquisition_controller as controller_module
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
@@ -178,9 +179,15 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     name = arguments["name"]
     assert recorded.args == [
         run_id,
-        {"trace": f"{name} :: dF/F", "experiment": name},
+        {
+            "trace": f"{name} :: dF/F",
+            "spikes": f"{name} :: Deconvolved spikes",
+            "experiment": name,
+        },
     ]
-    assert trace in s.project.experiments[name].data
+    data = s.project.experiments[name].data
+    assert trace in data
+    assert [d.name for d in data if isinstance(d, SpikeData)] == ["Deconvolved spikes"]
     assert extract.call_args.kwargs["saved_channels"] == [1, 2]
     assert extract.call_args.kwargs["functional_channel"] == 1
     assert not controller.acquisition_in_progress

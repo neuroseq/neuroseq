@@ -100,7 +100,9 @@ following details matter when testing the current implementation.
    recording (block plus **Record after block**), runs it and extracts ΔF/F.
    Verify the recording starts with the block (sequence start to first frame),
    that each `<date>_<number>.tif` holds the requested frames, and that the
-   logged ΔF/F rise matches the cell's visible response.
+   logged ΔF/F rise (ΔF/F readout) or deconvolved spike count (spike readout)
+   matches the cell's visible response. Tune the spike threshold on a few probes
+   first: OASIS event sizes are in ΔF/F, so it depends on expression level.
 9. **Manual blocks** (automatic unticked): for **every** block, refresh the
    sequence list, select the newly imported block, set **Runs = 1**, then
    **Upload**, **Run** and acquire. The host only imports. Import each probe into a

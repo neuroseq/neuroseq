@@ -2,7 +2,8 @@
 
 Also records the blocks of dynamic input routines for
 :class:`~neuroseq.device_control.syscon2_stimulation_host.SysCon2StimulationHost`: each block
-is a triggered recording whose ΔF/F traces are extracted with the project's Cellpose masks.
+is a triggered recording whose ΔF/F traces are extracted with the project's Cellpose masks
+and deconvolved into spikes with OASIS.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from collections.abc import Sequence
 from datetime import UTC
 from datetime import datetime
 from typing import TYPE_CHECKING
+from typing import cast
 
 import brian2.numpy_ as np
 from qtpy import QtCore
@@ -27,9 +29,11 @@ from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
+from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 from neuroseq.importers.importer_scanimage_traces import extract_recording_dff
 
 if TYPE_CHECKING:
+    from neuroseq.data import SpikeData
     from neuroseq.data import TraceData
     from neuroseq.device_control.scanimage_connection import ScanImageConnection
     from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
@@ -315,8 +319,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         fps = float(result["fps"])
         channels = list(result["channels"])
 
-        def task(_report: Callable[[int], None]) -> TraceData:
-            return extract_recording_dff(
+        def task(_report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
+            trace = extract_recording_dff(
                 paths,
                 fps=fps,
                 saved_channels=channels,
@@ -324,8 +328,10 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 cellpose_data=cellpose,
                 stim_block=block.stim_block,
             )
+            return trace, deconvolve_dff(trace, threshold=block.spike_threshold)
 
-        def finished(trace: object) -> None:
+        def finished(result: object) -> None:
+            trace, spikes = cast(tuple["TraceData", "SpikeData"], result)
             self._extracting.discard(run_id)
             if self._blocks.pop(run_id, None) is None:
                 return
@@ -335,12 +341,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     run_id, "The recording's data group was removed."
                 )
                 return
-            current.add_data_to_experiment(experiment, trace)  # type: ignore[arg-type]
+            current.add_data_to_experiment(experiment, trace)
+            current.add_data_to_experiment(experiment, spikes)
             self.recording_added.emit()
             self.block_recorded.emit(
                 run_id,
                 {
-                    "trace": f"{experiment} :: {trace.name}",  # type: ignore[attr-defined]
+                    "trace": f"{experiment} :: {trace.name}",
+                    "spikes": f"{experiment} :: {spikes.name}",
                     "experiment": experiment,
                 },
             )
@@ -350,7 +358,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._fail_block(run_id, f"Trace extraction failed: {message}")
 
         self._extracting.add(run_id)
-        self.controls.show_message(f"Extracting ΔF/F traces of {experiment}…")
+        self.controls.show_message(
+            f"Extracting ΔF/F traces and spikes of {experiment}…"
+        )
         self._extraction.start(
             BackgroundIOWorker(task),
             on_progress=lambda _value: None,

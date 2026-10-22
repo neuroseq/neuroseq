@@ -270,8 +270,10 @@ per cell (the project's export settings, shared with the SysCon2 tab, so no
 uploaded and run by NeuroSeq while ScanImage records it, triggered by the
 sequence, and its ΔF/F traces are extracted with the project's Cellpose masks;
 see [ScanImage acquisition](scanimage_acquisition.md#dynamic-input-routines).
-Rheobase then counts a probe as evoking a response when the neuron's ΔF/F rises
-by the **Response threshold** within the post-pulse window. Unticked, each block
+Rheobase then counts a probe as evoking a response, depending on **Calcium
+readout**, when the neuron's ΔF/F rises by the **Response threshold** within
+the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
+(an event of at least the **Spike threshold**) in it. Unticked, each block
 is only imported into SysCon2 and you run, record and import it yourself, then
 click **Calcium data imported** (rheobase can then measure ΔF/F of an imported
 trace or deconvolved spikes). Export warnings, such as a missing power LUT, are

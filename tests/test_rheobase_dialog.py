@@ -939,6 +939,7 @@ def _dff_trace(dialog, name: str, *, responding: bool) -> TraceData:
 def _automatic_dialog(qtbot):
     project, editor, dialog, host = _syscon2_dialog(qtbot)
     dialog.hardware.chk_automatic.setChecked(True)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.DFF_READOUT)
     dialog.spn_response_ms.setValue(300.0)
     return project, editor, dialog, host
 
@@ -946,7 +947,6 @@ def _automatic_dialog(qtbot):
 def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     project, _editor, dialog, host = _automatic_dialog(qtbot)
     assert not dialog.btn_data_imported.isVisibleTo(dialog)
-    assert not dialog.cmb_calcium_readout.isEnabled()
     dialog.hardware.spn_tail_s.setValue(2.0)
     dialog.hardware.spn_channel.setValue(2)
 
@@ -970,6 +970,40 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert not dialog._running
     assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
     assert all(host.automatic)
+
+
+def test_syscon2_automatic_probe_can_be_measured_from_deconvolved_spikes(
+    qtbot,
+) -> None:
+    project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.SPIKES_READOUT)
+    assert dialog.cmb_calcium_readout.isEnabled()
+    assert not dialog.cmb_spikes.isEnabled()  # the block names its spikes
+    assert dialog.hardware.spn_spike_threshold.isVisibleTo(dialog)
+    assert not dialog.hardware.spn_threshold.isVisibleTo(dialog)
+    dialog.hardware.spn_spike_threshold.setValue(0.25)
+    dialog.start()
+    assert host.recordings[0].spike_threshold == 0.25
+    frame = 1 / 30
+    for i in range(20):
+        if not dialog._running:
+            break
+        onset = (
+            dialog._pulse_onset_seconds
+            - dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+        )
+        trace_name, spikes_name = f"Block {i} :: dF/F", f"Block {i} :: spikes"
+        project.traces[trace_name] = _dff_trace(dialog, trace_name, responding=False)
+        # Timed at the start of the frame holding the onset: counts with tolerance.
+        times = [frame * int(onset / frame)] if dialog._pending_amplitude >= 0.5 else []
+        project.spikes[spikes_name] = SpikeData(
+            spikes_name, np.zeros(len(times)), np.array(times)
+        )
+        host.complete({"trace": trace_name, "spikes": spikes_name})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert "Deconvolved spikes after the probe: 1." in dialog.log.toPlainText()
 
 
 def test_syscon2_automatic_needs_a_recorder(qtbot) -> None:

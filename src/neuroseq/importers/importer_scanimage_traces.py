@@ -1,8 +1,8 @@
 """Calcium traces of a ScanImage recording, extracted with the project's Cellpose masks.
 
 Used by the closed-loop routines (rheobase, STDP window) to turn each recorded block into a
-ΔF/F trace without the TIFF import dialog: every block reuses the same masks, so neuron IDs
-stay those of the stimulation targets. Qt-free.
+ΔF/F trace, and its OASIS-deconvolved spikes, without the TIFF import dialog: every block
+reuses the same masks, so neuron IDs stay those of the stimulation targets. Qt-free.
 """
 
 from __future__ import annotations
@@ -13,9 +13,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.importers.importer_tif import DEFAULT_TAU
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import cellpose_result_to_masks
 from neuroseq.importers.importer_tif import run_roi_average_pipeline
@@ -26,6 +28,10 @@ if TYPE_CHECKING:
 
 DFF_TRACE_NAME = "dF/F"
 DFF_UNITS = "dF/F"
+SPIKES_NAME = "Deconvolved spikes"
+#: OASIS event size (in ΔF/F) counted as a spike by default; a single action
+#: potential of jGCaMP8m gives a few tenths.
+DEFAULT_SPIKE_THRESHOLD = 0.1
 
 
 def baseline_frame_count(stim_block: StimArray | None, fs: float) -> int:
@@ -99,4 +105,40 @@ def extract_recording_dff(
         DFF_UNITS,
         1.0 / fps,
         cellpose_ids,
+    )
+
+
+def deconvolve_dff(
+    trace: TraceData,
+    *,
+    threshold: float = DEFAULT_SPIKE_THRESHOLD,
+    tau: float = DEFAULT_TAU,
+) -> SpikeData:
+    """Spikes of a ΔF/F trace, deconvolved with OASIS (as Suite2p does).
+
+    The trace is already baseline-corrected, so Suite2p's sliding-window baseline,
+    meant for long recordings, is skipped. OASIS estimates events in ΔF/F units;
+    every frame whose event reaches ``threshold`` is a spike at that frame's start,
+    so the threshold is absolute and a silent cell's noise is not scaled up into
+    spikes.
+    """
+    from suite2p.extraction import dcnv
+
+    events = dcnv.oasis(
+        F=np.ascontiguousarray(trace.traces, dtype=np.float32),
+        batch_size=200,
+        tau=float(tau),
+        fs=1.0 / float(trace.dt),
+    )
+    rows, frames = np.nonzero(np.asarray(events) >= threshold)
+    order = np.argsort(frames, kind="stable")
+    rows, frames = rows[order], frames[order]
+    raw_ids = (
+        trace.raw_cellpose_ids[rows] if trace.raw_cellpose_ids is not None else None
+    )
+    return SpikeData(
+        SPIKES_NAME,
+        trace.indices[rows],
+        frames.astype(np.float64) * float(trace.dt),
+        raw_ids,
     )

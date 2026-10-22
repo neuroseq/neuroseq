@@ -60,6 +60,8 @@ class BlockRecording:
     tail_s: float
     #: ScanImage channel carrying the calcium indicator.
     functional_channel: int
+    #: OASIS event size (ΔF/F) counted as a deconvolved spike.
+    spike_threshold: float = 0.1
 
     @property
     def duration_s(self) -> float:
@@ -71,8 +73,8 @@ class BlockAcquisition(Protocol):
 
     Signals: ``block_armed(str run_id)`` once the recording waits for its trigger,
     ``block_recorded(str run_id, object payload)`` once its traces are in the project
-    (``payload["trace"]`` is the ΔF/F dataset name), ``block_recording_failed(str run_id,
-    str message)``.
+    (``payload["trace"]`` is the ΔF/F dataset name, ``payload["spikes"]`` that of its
+    deconvolved spikes), ``block_recording_failed(str run_id, str message)``.
     """
 
     block_armed: QtCore.SignalInstance

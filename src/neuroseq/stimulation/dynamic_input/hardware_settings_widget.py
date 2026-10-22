@@ -14,6 +14,7 @@ from qtpy import QtWidgets
 
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
 from neuroseq.export.syscon2_export_service import slice_stim_array
+from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
 
 if TYPE_CHECKING:
     from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
@@ -86,6 +87,20 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
         self.spn_channel.setToolTip("ScanImage channel of the calcium indicator.")
         form.addRow("Functional channel:", self.spn_channel)
         self.spn_threshold: QtWidgets.QDoubleSpinBox | None = None
+        self.spn_spike_threshold = QtWidgets.QDoubleSpinBox(self)
+        self.spn_spike_threshold.setRange(0.001, 100.0)
+        self.spn_spike_threshold.setDecimals(3)
+        self.spn_spike_threshold.setSingleStep(0.05)
+        self.spn_spike_threshold.setValue(DEFAULT_SPIKE_THRESHOLD)
+        self.spn_spike_threshold.setSuffix(" ΔF/F")
+        self.spn_spike_threshold.setToolTip(
+            "Each recorded block's ΔF/F is deconvolved with OASIS (jGCaMP8m decay, "
+            "0.5 s); an event at least this large, in ΔF/F, counts as a spike. A "
+            "single action potential of jGCaMP8m gives a few tenths."
+        )
+        self._lbl_spike_threshold = QtWidgets.QLabel("Spike threshold:", self)
+        self._lbl_spike_threshold.setVisible(response_threshold)
+        self.spn_spike_threshold.setVisible(response_threshold)
         if response_threshold:
             self.spn_threshold = QtWidgets.QDoubleSpinBox(self)
             self.spn_threshold.setRange(0.1, 10_000.0)
@@ -96,7 +111,9 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
                 "A probe counts as evoking a response when the neuron's ΔF/F rises "
                 "by at least this much after the pulse."
             )
-            form.addRow("Response threshold:", self.spn_threshold)
+            self._lbl_threshold = QtWidgets.QLabel("Response threshold:", self)
+            form.addRow(self._lbl_threshold, self.spn_threshold)
+            form.addRow(self._lbl_spike_threshold, self.spn_spike_threshold)
         self.spn_power_mw.valueChanged.connect(self._store_settings)
         self.cmb_laser.currentIndexChanged.connect(self._store_settings)
         self.chk_spiral.toggled.connect(self._store_settings)
@@ -107,6 +124,16 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
         """Recording options only apply to blocks NeuroSeq records itself."""
         self.spn_tail_s.setEnabled(automatic)
         self.spn_channel.setEnabled(automatic)
+        self.spn_spike_threshold.setEnabled(automatic)
+
+    def show_readout(self, dff: bool) -> None:
+        """Show the threshold of the routine's calcium readout: ΔF/F rise or spikes."""
+        if self.spn_threshold is None:
+            return
+        self._lbl_threshold.setVisible(dff)
+        self.spn_threshold.setVisible(dff)
+        self._lbl_spike_threshold.setVisible(not dff)
+        self.spn_spike_threshold.setVisible(not dff)
 
     @property
     def automatic(self) -> bool:
@@ -173,4 +200,5 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             stim_block=slice_stim_array(stim, start, stop),
             tail_s=self.spn_tail_s.value(),
             functional_channel=self.spn_channel.value(),
+            spike_threshold=self.spn_spike_threshold.value(),
         )

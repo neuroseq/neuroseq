@@ -619,8 +619,9 @@ class RheobaseDialog(SelfRaisingDialog):
         self.cmb_calcium_readout.addItems([self.DFF_READOUT, self.SPIKES_READOUT])
         self.cmb_calcium_readout.setToolTip(
             "How a probe delivered through SysCon2 counts as evoking a response: a "
-            "calcium rise of at least the response threshold, or deconvolved spikes "
-            "after the pulse. Automatic blocks are measured as ΔF/F."
+            "calcium rise of at least the response threshold, or spikes deconvolved "
+            "from the calcium signal (OASIS) after the pulse. Automatic blocks provide "
+            "both; manual imports need the matching dataset."
         )
         self.cmb_calcium_readout.currentTextChanged.connect(
             self._update_target_controls
@@ -1004,9 +1005,7 @@ class RheobaseDialog(SelfRaisingDialog):
         return self._target_is_syscon2() and self.hardware.automatic
 
     def _dff_readout(self) -> bool:
-        return self._automatic() or (
-            self.cmb_calcium_readout.currentText() == self.DFF_READOUT
-        )
+        return self.cmb_calcium_readout.currentText() == self.DFF_READOUT
 
     def _update_target_controls(self, *_args: object) -> None:
         syscon2 = self._target_is_syscon2()
@@ -1015,12 +1014,13 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_syscon_dt.setEnabled(not self._running)
         self.hardware.setVisible(syscon2)
         self.hardware.setEnabled(not self._running)
-        self.cmb_calcium_readout.setEnabled(syscon2 and not automatic)
+        self.cmb_calcium_readout.setEnabled(syscon2)
         dff = self._dff_readout()
-        # Automatic blocks bring their own trace; manual ones are picked here.
+        self.hardware.show_readout(dff)
+        # Automatic blocks bring their own datasets; manual ones are picked here.
         self.cmb_trace.setEnabled(not syscon2 or (dff and not automatic))
         self.spn_threshold_mv.setEnabled(not syscon2)
-        self.cmb_spikes.setEnabled(syscon2 and not dff)
+        self.cmb_spikes.setEnabled(syscon2 and not dff and not automatic)
         self.btn_data_imported.setVisible(syscon2 and not automatic)
         if syscon2:
             self._connect_host()
@@ -1295,11 +1295,16 @@ class RheobaseDialog(SelfRaisingDialog):
         self._block_payload = None
         dff = self._dff_readout()
         combo = self.cmb_trace if dff else self.cmb_spikes
-        if isinstance(payload, dict) and payload.get("trace"):
-            # An automatic block names the traces extracted from its recording.
-            combo.setCurrentText(str(payload["trace"]))
+        key = "trace" if dff else "spikes"
+        if isinstance(payload, dict) and payload.get(key):
+            # An automatic block names the datasets extracted from its recording.
+            combo.setCurrentText(str(payload[key]))
         elif self._automatic():
-            self._finish("The recorded probe produced no calcium trace.")
+            self._finish(
+                "The recorded probe produced no calcium trace."
+                if dff
+                else "The recorded probe produced no deconvolved spikes."
+            )
             return
         else:
             self._select_newest_if_stale(combo)
@@ -1346,9 +1351,14 @@ class RheobaseDialog(SelfRaisingDialog):
             if spikes is None:
                 self._finish(f"Spike dataset '{name}' is unavailable.")
                 return
+            frame_seconds = 0.0
+            if isinstance(payload, dict) and payload.get("trace"):
+                trace = self.project.get_data(str(payload["trace"]), TraceData)
+                frame_seconds = float(trace.dt) if trace is not None else 0.0
             response = measure_calcium_spike_count(
-                spikes, self.spn_neuron.value(), onset, window_ms
+                spikes, self.spn_neuron.value(), onset, window_ms, frame_seconds
             )
+            self._append_log(f"Deconvolved spikes after the probe: {response}.")
         self._last_measured_dataset = name
         self._backend.record_probe_result(response)
 
