@@ -36,6 +36,10 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.data_manager_dialog import DataManagerDialog
+from neuroseq.device_control.bss2_panel import Bss2Panel
+from neuroseq.device_control.stimulation_setup_widget import BSS2_TAB_TITLE
+from neuroseq.device_control.stimulation_setup_widget import SYSCON2_TAB_TITLE
+from neuroseq.device_control.stimulation_setup_widget import StimulationSetupWidget
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
 from neuroseq.example_projects import default_project
 from neuroseq.example_projects import example_projects
@@ -486,7 +490,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             settings=self.settings,
             manager=self.devices.syscon_session(self),
         )
-        self.syscon2_panel.setVisible(False)
         # Mark, with a cross in the Spatial Footprints panel, every neuron
         # targeted by the preview whose import SysCon2 most recently confirmed -
         # see SysCon2Panel.targets_changed's docstring for why this can't be
@@ -495,7 +498,17 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self._spatial_footprint_state.set_targeted_stim_ids
         )
         self.syscon2_panel.set_current_stim_provider(self._current_stim_array)
-        split_left_right.addWidget(self.syscon2_panel)
+        # One pane, one tab per stimulus-delivery target.
+        self.stimulation_setup = StimulationSetupWidget(parent=self)
+        self.stimulation_setup.add_setup(self.syscon2_panel, SYSCON2_TAB_TITLE)
+        self.bss2_panel = Bss2Panel(
+            self.devices.bss2_session(self), parent=self, settings=self.settings
+        )
+        self.bss2_panel.set_current_stim_provider(self._current_stim_array)
+        self.bss2_panel.experiment_added.connect(self._on_bss2_experiment_added)
+        self.stimulation_setup.add_setup(self.bss2_panel, BSS2_TAB_TITLE)
+        self.stimulation_setup.setVisible(False)
+        split_left_right.addWidget(self.stimulation_setup)
         split_left_right.setSizes([1000, 1000, 1000, 1000])
         # synapses (heatmap) and cell segmentation (spatial footprint) stacked
         # to the right of the stim editor
@@ -1191,6 +1204,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
+        self.bss2_panel.set_project(self.project)
         self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
@@ -1217,6 +1231,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
+        self.bss2_panel.set_project(self.project)
         self._refresh_video_selector()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
@@ -2199,6 +2214,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._update_combo_boxes()
         self.update_limits()
 
+    def _on_bss2_experiment_added(self, name: str) -> None:
+        self._update_combo_boxes()
+        self.update_limits()
+        self._select_experiment_data(name)
+
     def _refresh_video_selector(self) -> None:
         if not hasattr(self, "cmb_video"):
             return
@@ -2949,7 +2969,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             ),
             ("&Console", self.console_widget, "mdi6.console", True),
             ("&Chat", self.chat_widget, "mdi6.robot-happy-outline", False),
-            ("&Stimulation setup", self.syscon2_panel, "mdi6.laser-pointer", False),
+            (
+                "&Stimulation setup",
+                self.stimulation_setup,
+                "mdi6.laser-pointer",
+                False,
+            ),
         ]:
             w: QtWidgets.QWidget = widget  # type: ignore[assignment]
             self._view_actions[w] = add_action(
@@ -3811,6 +3836,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 "A HOLO4D sequence upload or run is in progress. Wait for it to "
                 "finish or press Stop in the stimulation setup."
             )
+        if self.bss2_panel.run_in_progress:
+            blockers.append(
+                "A BrainScaleS-2 run is in progress. Wait for it to finish or "
+                "press Stop in the stimulation setup."
+            )
         if self._background_job.busy and not self._background_job.cancellable:
             label = self._background_job_label.rstrip(".…") or "A background task"
             blockers.append(
@@ -3859,6 +3889,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.stim_editor.disconnect_history()
         self.set_active(False)
         self.syscon2_panel.shutdown()
+        self.bss2_panel.shutdown()
         self.acquisition_controller.dispose()
         if self._owns_devices:
             self.devices.shutdown()

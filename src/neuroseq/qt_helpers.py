@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -104,3 +105,38 @@ def wrap_in_scroll_area(
     scroll.setWidget(widget)
     scroll.setWidgetResizable(True)
     return scroll
+
+
+class StableSizeTabWidget(QtWidgets.QTabWidget):
+    """A QTabWidget whose size hint doesn't change when switching tabs.
+
+    QTabWidget bases sizeHint()/minimumSizeHint() on the *current* page
+    alone, so an enclosing QSplitter reflows every time the user switches to
+    a tab whose content has a different natural size - e.g. the Cell
+    segmentation and Video tabs visibly bounced around on every switch.
+    Basing it on the largest page instead keeps the splitter's allocation
+    stable regardless of which tab is showing.
+    """
+
+    def _combined_page_size(
+        self, hint_of: Callable[[QtWidgets.QWidget], QtCore.QSize]
+    ) -> QtCore.QSize:
+        width = 0
+        height = 0
+        for index in range(self.count()):
+            page = self.widget(index)
+            if page is None:
+                continue
+            size = hint_of(page)
+            width = max(width, size.width())
+            height = max(height, size.height())
+        bar = self.tabBar()
+        bar_size = bar.sizeHint() if bar is not None else QtCore.QSize(0, 0)
+        # The default (North) tab position stacks the bar above the pages.
+        return QtCore.QSize(max(width, bar_size.width()), height + bar_size.height())
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.sizeHint())
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._combined_page_size(lambda w: w.minimumSizeHint())

@@ -16,6 +16,7 @@ import pytest
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.bss2_protocol import channels_to_neurons
 from neuroseq.example_models import pynn_demo
 
 
@@ -95,17 +96,17 @@ def test_pynn_helpers_and_stim_to_spike_times() -> None:
     assert pynn_demo._float({"x": "1.25"}, "x") == pytest.approx(1.25)
 
     sampled = np.array([[1.0, 2.0]], dtype=np.float32)
-    assert np.array_equal(pynn_demo._channels_to_neurons(sampled, 2), sampled)
+    assert np.array_equal(channels_to_neurons(sampled, 2), sampled)
     assert np.array_equal(
-        pynn_demo._channels_to_neurons(sampled[:, :1], 3),
+        channels_to_neurons(sampled[:, :1], 3),
         np.array([[1.0, 1.0, 1.0]], dtype=np.float32),
     )
     assert np.array_equal(
-        pynn_demo._channels_to_neurons(sampled, 1),
+        channels_to_neurons(sampled, 1),
         np.array([[1.0]], dtype=np.float32),
     )
     assert np.array_equal(
-        pynn_demo._channels_to_neurons(sampled, 3),
+        channels_to_neurons(sampled, 3),
         np.array([[1.0, 2.0, 0.0]], dtype=np.float32),
     )
 

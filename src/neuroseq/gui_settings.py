@@ -47,6 +47,15 @@ def _autodetect_fiji() -> str:
     return found or ""
 
 
+def _without_secrets(values: dict) -> dict:
+    """Drop anything token-like: credentials are never persisted."""
+    return {
+        key: value
+        for key, value in values.items()
+        if isinstance(key, str) and "token" not in key.lower()
+    }
+
+
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
@@ -62,6 +71,9 @@ class GuiSettings:
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
     syscon_export_directory: str = ""
+    #: BrainScaleS-2 tab settings (``bss2_protocol.Bss2Settings.to_dict()``).
+    #: Never contains the EBRAINS token.
+    bss2_settings: dict = field(default_factory=dict)
     recent_projects: list[str] = field(default_factory=list)
 
     def __init__(self) -> None:
@@ -70,6 +82,7 @@ class GuiSettings:
         self.logger.info("loading GUI settings")
         self.__dict__["fiji_executable_path"] = _autodetect_fiji()
         self.__dict__["recent_projects"] = []
+        self.__dict__["bss2_settings"] = {}
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
 
@@ -106,6 +119,7 @@ class GuiSettings:
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
                         "syscon_export_directory": self.syscon_export_directory,
+                        "bss2_settings": _without_secrets(self.bss2_settings),
                         "recent_projects": self.recent_projects,
                     },
                     f,
@@ -157,6 +171,7 @@ class GuiSettings:
             )
             syscon_export_directory = config.get("syscon_export_directory", "")
             recent_projects = config.get("recent_projects", [])
+            bss2_settings = config.get("bss2_settings", {})
 
             # setting values
             if brian2_backend in ["cython", "numpy"]:
@@ -241,6 +256,11 @@ class GuiSettings:
             )
             self.__dict__["syscon_export_directory"] = str(
                 syscon_export_directory or ""
+            )
+            self.__dict__["bss2_settings"] = (
+                _without_secrets(bss2_settings)
+                if isinstance(bss2_settings, dict)
+                else {}
             )
             if isinstance(recent_projects, list) and all(
                 isinstance(p, str) for p in recent_projects

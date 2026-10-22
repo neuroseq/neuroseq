@@ -41,6 +41,8 @@ from neuroseq.data import Data
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.bss2_protocol import BSS2_NEURON_PARAMETERS
+from neuroseq.device_control.bss2_protocol import stim_to_spike_times
 from neuroseq.example_models.NN import NN
 from neuroseq.example_models.NN import ParamValue
 from neuroseq.example_models.NN import ProgressCallback
@@ -66,23 +68,6 @@ _BRIAN2_NEURON = dict(
     tau_syn_E=5.0,
     tau_syn_I=5.0,
 )
-
-# pynn-brainscales CalibHXNeuronCoba defaults (hardware units: dimensionless
-# voltages, microsecond time constants). Requested targets; Calix solves the
-# per-neuron CapMem codes on-chip.
-_BSS2_NEURON = dict(
-    v_rest=110.0,
-    v_reset=100.0,
-    v_thresh=160.0,
-    tau_m=10.0,
-    tau_syn_E=10.0,
-    tau_syn_I=10.0,
-    tau_refrac=2.0,
-    cm=63,
-    e_rev_E=300.0,
-    e_rev_I=30.0,
-)
-
 
 DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
     "backend": {
@@ -160,24 +145,6 @@ def _float(params: Mapping[str, ParamValue], key: str) -> float:
     return float(params[key])  # type: ignore[arg-type]
 
 
-def _channels_to_neurons(sampled: np.ndarray, n_neurons: int) -> np.ndarray:
-    """Map a (time, n_channels) stim block onto (time, n_neurons).
-
-    Mirrors ``sinus_offset._stim_as_unit_time_series``: pass channels through
-    when they already match, broadcast a single channel, truncate extra
-    channels, and zero-pad when there are too few.
-    """
-    if sampled.shape[1] == n_neurons:
-        return sampled
-    if sampled.shape[1] == 1:
-        return np.repeat(sampled, n_neurons, axis=1)
-    if sampled.shape[1] > n_neurons:
-        return sampled[:, :n_neurons]
-    padded = np.zeros((sampled.shape[0], n_neurons), dtype=sampled.dtype)
-    padded[:, : sampled.shape[1]] = sampled
-    return padded
-
-
 def _make_backend(backend: str):
     """Return ``(sim_module, make_cells(n), weights_are_int)`` for a backend."""
     if backend == "brian2":
@@ -211,7 +178,7 @@ def _make_backend(backend: str):
 
         def make_cells(n: int):
             return sim.Population(
-                n, sim.cells.CalibHXNeuronCoba(**_BSS2_NEURON), label="exc"
+                n, sim.cells.CalibHXNeuronCoba(**BSS2_NEURON_PARAMETERS), label="exc"
             )
 
         # BrainScaleS-2 synapse weights are 6-bit integers in [0, 63].
@@ -246,33 +213,16 @@ class PynnDemo(NN):
     ) -> list[np.ndarray]:
         """Convert stim arrays into one evoked-spike train per neuron (ms).
 
-        The stim arrays are summed and sampled on a regular ``event_ms`` grid;
-        wherever a neuron's summed stim exceeds ``threshold`` a stimulation
-        spike is emitted at that grid time. This models optogenetic drive: a
-        non-zero stimulus produces a spike in the targeted neuron.
+        See :func:`neuroseq.device_control.bss2_protocol.stim_to_spike_times`,
+        shared with BrainScaleS-2 stimulus delivery.
         """
-        total_ms = simulation_time * 1000.0
-        n_slots = max(1, int(total_ms // event_ms))
-        slot_times_ms = np.arange(n_slots) * event_ms + 0.5 * event_ms
-        slot_times_s = slot_times_ms / 1000.0
-
-        summed = np.zeros((n_slots, n_neurons), dtype=np.float64)
-        for info in stims_dict.values():
-            arr = np.asarray(info["array"], dtype=np.float64)
-            if arr.ndim == 1:
-                arr = arr[:, None]
-            stim_dt_s = float(info["dt"])
-            if stim_dt_s <= 0:
-                raise ValueError("Stim dt must be > 0")
-            bins = np.minimum(
-                (slot_times_s / stim_dt_s).astype(np.int64), arr.shape[0] - 1
-            )
-            summed += _channels_to_neurons(arr[bins], n_neurons)
-
-        active = summed > threshold
-        return [
-            slot_times_ms[active[:, i]].astype(np.float64) for i in range(n_neurons)
-        ]
+        return stim_to_spike_times(
+            ((info["array"], info["dt"]) for info in stims_dict.values()),
+            simulation_time,
+            n_neurons,
+            threshold=threshold,
+            event_ms=event_ms,
+        )
 
     def simulate(
         self,
