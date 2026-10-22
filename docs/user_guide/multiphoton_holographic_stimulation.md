@@ -275,8 +275,10 @@ readout**, when the neuron's ΔF/F rises by the **Response threshold** within
 the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
 (an event of at least the **Spike threshold**) in it. Unticked, each block
 is only imported into SysCon2 and you run, record and import it yourself, then
-click **Calcium data imported** (rheobase can then measure ΔF/F of an imported
-trace or deconvolved spikes). Export warnings, such as a missing power LUT, are
+click **Calcium data imported** (rheobase can then measure the rise of an
+imported ΔF/F or raw fluorescence trace, e.g. the TIFF import's ROI averages,
+or deconvolved spikes; Suite2p's normalised traces are refused, since a rise
+relative to their baseline is meaningless). Export warnings, such as a missing power LUT, are
 asked once per routine rather than failing every block.
 
 Each routine run keeps its block scripts in its own folder inside the project's

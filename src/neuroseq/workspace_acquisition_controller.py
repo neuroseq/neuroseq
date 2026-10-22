@@ -99,7 +99,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._block_channels: dict[str, int] = {}
         #: Stimulus samples written beside a recording that has not started yet.
         self._stimulus_files: dict[str, pathlib.Path] = {}
-        self._extraction = BackgroundJob(self)
+        #: Last reported state of each run started here.
+        self._run_states: dict[str, str] = {}
+        #: Running trace extractions, one job each: a routine's next block must not
+        #: wait for (or fail because of) a previous, possibly abandoned, one.
+        self._extractions: dict[str, BackgroundJob] = {}
         self._disposed = False
         #: Shown as the "ScanImage (imaging)" tab of the Stimulation setup pane.
         self.controls = ScanImageControls(
@@ -122,7 +126,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         can recover it, but nothing can progress while disconnected, so it
         does not keep the workspace open.
         """
-        return self._extraction.busy or (
+        return any(job.busy for job in self._extractions.values()) or (
             self.connection.connected and self.connection.run_id in self.run_ids
         )
 
@@ -159,7 +163,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
-        self._stimulus_files.pop(run_id, None)
+        self._remove_metadata_without_recording(run_id)
         if run_id in self._extracting:
             # The connection ends the run right after recording_ready; the block
             # completes once its traces are extracted.
@@ -169,6 +173,20 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self.block_recording_failed.emit(
                 run_id, "The recording ended without producing data."
             )
+
+    def _remove_metadata_without_recording(self, run_id: str) -> None:
+        """A run that ended without a TIFF (refused, or aborted before its first
+        frame) leaves no recording for its stimulus and JSON to describe. Runs
+        with an unknown outcome (interrupted) keep them for recovery."""
+        samples_path = self._stimulus_files.pop(run_id, None)
+        state = self._run_states.pop(run_id, None)
+        if samples_path is None or state not in {"failed", "aborted"}:
+            return
+        prefix = samples_path.name.removesuffix("_stimulus.npy")
+        if any(samples_path.parent.glob(f"{prefix}*.tif")):
+            return
+        samples_path.unlink(missing_ok=True)
+        samples_path.with_name(f"{prefix}.json").unlink(missing_ok=True)
 
     def start_scanimage_recording(
         self,
@@ -213,7 +231,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 "seq_path": block.seq_path,
                 "syscon_sequence": block.syscon_sequence,
             }
-        settings = self._export_settings()
+        # A routine's block: the options it was actually delivered with.
+        settings = (
+            block.export_settings
+            if block is not None and block.export_settings is not None
+            else self._export_settings()
+        )
         if settings is not None:
             record["syscon_export_settings"] = {
                 key: value
@@ -238,13 +261,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if run_id not in self.run_ids:
             return
         state = run.get("state", "unknown")
-        samples_path = self._stimulus_files.get(run_id)
-        if samples_path is not None and state == "failed":
-            # ScanImage refused to start: no recording for these samples to describe.
-            samples_path.unlink(missing_ok=True)
-            del self._stimulus_files[run_id]
-        elif state != "starting":
-            self._stimulus_files.pop(run_id, None)
+        self._run_states[run_id] = state
         if run_id in self._blocks:
             if state in {"waiting_for_first_frame", "recording"} and (
                 run_id not in self._armed
@@ -286,12 +303,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def recorded_scanimage_channel(self, index: dict | None, channel: int) -> int:
         if index is not None and channel not in index["channels"]:
             selected = index["channels"][0]
+            # Only the display falls back: the Functional channel stays what the
+            # user chose, since dynamic input routines measure it.
             self.controls.show_message(
                 f"Channel {channel} was not saved in this recording; showing channel {selected}."
             )
-            self.controls.channel_spin.blockSignals(True)
-            self.controls.channel_spin.setValue(selected)
-            self.controls.channel_spin.blockSignals(False)
             return selected
         return channel
 
@@ -346,9 +362,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _extract_block(
         self, run_id: str, block: BlockRecording, result: dict, experiment: str
     ) -> None:
-        if self._extraction.busy:
-            self._fail_block(run_id, "Another recording is still being extracted.")
-            return
+        # The project recorded into, even if another one is open when this finishes.
         project = self._project()
         cellpose = project.cellpose_data
         paths = list(result["paths"])
@@ -372,14 +386,13 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._extracting.discard(run_id)
             if self._blocks.pop(run_id, None) is None:
                 return
-            current = self._project()
-            if experiment not in current.experiments:
+            if experiment not in project.experiments:
                 self.block_recording_failed.emit(
                     run_id, "The recording's data group was removed."
                 )
                 return
-            current.add_data_to_experiment(experiment, trace)
-            current.add_data_to_experiment(experiment, spikes)
+            project.add_data_to_experiment(experiment, trace)
+            project.add_data_to_experiment(experiment, spikes)
             self.recording_added.emit()
             self.block_recorded.emit(
                 run_id,
@@ -398,19 +411,27 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.controls.show_message(
             f"Extracting ΔF/F traces and spikes of {experiment}…"
         )
-        self._extraction.start(
+        job = BackgroundJob(self)
+        self._extractions[run_id] = job
+        job.idle.connect(lambda: self._extraction_done(run_id))
+        job.start(
             BackgroundIOWorker(task),
             on_progress=lambda _value: None,
             on_finished=finished,
             on_failed=failed,
         )
 
+    def _extraction_done(self, run_id: str) -> None:
+        job = self._extractions.pop(run_id, None)
+        if job is not None:
+            job.deleteLater()
+
     # ---- BlockAcquisition, for the SysCon2 stimulation host ----
 
     def block_recording_unavailable(self) -> str | None:
         if not self.connection.connected:
             return "Connect to ScanImage first (Stimulation setup > ScanImage)."
-        if self.connection.run_id is not None or self._extraction.busy:
+        if self.connection.run_id is not None:
             return "ScanImage is still busy with another recording."
         if self._project().cellpose_data is None:
             return (

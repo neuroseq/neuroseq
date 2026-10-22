@@ -349,19 +349,35 @@ def test_stimulus_samples_are_removed_when_scanimage_refuses(setup):
     s.controller.scanimage_status(
         {"run": {"id": request["run_id"], "state": "failed", "error": "busy"}}
     )
+    s.connection.run_finished.emit(request["run_id"])
     assert not samples.exists()
 
 
-def test_stimulus_samples_stay_once_the_recording_started(setup):
+@pytest.mark.parametrize(
+    ("state", "tiff", "kept"),
+    [
+        ("aborted", False, False),  # e.g. first-frame timeout: no recording
+        ("aborted", True, True),  # aborted mid-recording: a partial TIFF exists
+        ("interrupted", False, True),  # outcome unknown: keep for recovery
+        ("completed", True, True),
+    ],
+)
+def test_stimulus_and_metadata_stay_only_with_a_recording(setup, state, tiff, kept):
     s = setup
     request = s.controller.controls.recording_request(frames=4, external_trigger=False)
     s.controller.start_scanimage_recording(request)
-    samples = s.folder / f"{request['stem']}_{request['counter']:05d}_stimulus.npy"
-    s.controller.scanimage_status(
-        {"run": {"id": request["run_id"], "state": "waiting_for_first_frame"}}
-    )
-    s.controller.scanimage_status({"run": {"id": request["run_id"], "state": "failed"}})
-    assert samples.is_file()
+    prefix = f"{request['stem']}_{request['counter']:05d}"
+    samples = s.folder / f"{prefix}_stimulus.npy"
+    metadata = s.folder / f"{prefix}.json"
+    metadata.write_text("{}")  # written by the ScanImage helper
+    if tiff:
+        (s.folder / f"{prefix}.tif").write_bytes(b"")
+    run_id = request["run_id"]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": state}})
+    s.connection.run_finished.emit(run_id)
+    assert samples.exists() == kept
+    assert metadata.exists() == kept
 
 
 def test_rejected_record_command_leaves_no_stimulus_file(setup):
@@ -370,3 +386,87 @@ def test_rejected_record_command_leaves_no_stimulus_file(setup):
     request = s.controller.controls.recording_request(frames=4, external_trigger=False)
     assert not s.controller.start_scanimage_recording(request)
     assert not list(s.folder.glob("*_stimulus.npy"))
+
+
+def test_showing_a_recording_does_not_change_the_functional_channel(setup):
+    """Review: the display may fall back, the measured channel must not."""
+    s = setup
+    controls = s.controller.controls
+    controls.channel_spin.setValue(2)
+    shown = s.controller.recorded_scanimage_channel({"channels": [1]}, 2)
+    assert shown == 1
+    assert controls.channel_spin.value() == 2
+
+
+def test_next_block_does_not_wait_for_an_earlier_extraction(setup, qtbot, mocker):
+    """Review: an abandoned block's extraction must not block or fail the next."""
+    import threading
+
+    s = setup
+    _ready_for_blocks(s)
+    release = threading.Event()
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+
+    def slow_extract(*_args, **_kwargs):
+        release.wait(10)
+        return trace
+
+    mocker.patch.object(controller_module, "extract_recording_dff", slow_extract)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    first = s.controller.arm_block(_block())
+    first_arguments = s.command.call_args.args[1]
+    s.controller.scanimage_recording_ready(
+        _ready_result(first, first_arguments, s.folder)
+    )
+    s.controller.abort_block(first)  # the routine stopped meanwhile
+    assert s.controller.block_recording_unavailable() is None
+    second = s.controller.arm_block(_block())
+    second_arguments = s.command.call_args.args[1]
+    recorded = []
+    s.controller.block_recorded.connect(lambda run_id, _p: recorded.append(run_id))
+    s.controller.scanimage_recording_ready(
+        _ready_result(second, second_arguments, s.folder)
+    )
+    assert s.controller.acquisition_in_progress
+    release.set()
+    qtbot.waitUntil(lambda: not s.controller.acquisition_in_progress, timeout=10000)
+    assert recorded == [second]  # the abandoned first block reports nothing
+
+
+def test_traces_go_to_the_project_that_was_recorded_into(setup, qtbot, mocker):
+    """Review: opening another project during extraction must not redirect data."""
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    mocker.patch.object(controller_module, "extract_recording_dff", return_value=trace)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    recorded_into = s.project
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_recording_ready(_ready_result(run_id, arguments, s.folder))
+    other = Project()
+    other.add_experiment(controller_module.Experiment(arguments["name"], 3.0, [], []))
+    s.controller._project = lambda: other
+    qtbot.waitUntil(lambda: not s.controller.acquisition_in_progress, timeout=10000)
+    assert trace in recorded_into.experiments[arguments["name"]].data
+    assert other.experiments[arguments["name"]].data == []
+
+
+def test_block_metadata_records_the_settings_it_was_delivered_with(setup):
+    import dataclasses
+
+    s = setup
+    _ready_for_blocks(s)
+    delivered = SysconExportSettings(config_text="cfg", target_power_mw=42.0)
+    block = dataclasses.replace(_block(), export_settings=delivered)
+    s.controller.arm_block(block)
+    manifest = s.command.call_args.args[1]["manifest"]
+    assert manifest["syscon_export_settings"]["target_power_mw"] == 42.0

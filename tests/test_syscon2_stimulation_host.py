@@ -439,6 +439,7 @@ def test_recording_is_told_which_sequence_it_captures(
     host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
     _run(submitted, host, client)
     recording = acquisition.armed[0]
+    assert recording.export_settings == SysconExportSettings(config_text="")
     assert recording.seq_path == str(tmp_path / "probe_001.seq")
     assert recording.syscon_sequence == "target\\probe_001.seq"
 

@@ -61,6 +61,13 @@ def test_delta_f_over_f_uses_the_frames_before_the_stimulus() -> None:
     )
 
 
+def test_delta_f_over_f_of_a_negative_baseline() -> None:
+    """Review: only the divisor is made positive (offset-corrected detectors)."""
+    np.testing.assert_allclose(
+        delta_f_over_f(np.array([[-50.0, -50.0, -25.0]]), 2), [[0.0, 0.0, 0.5]]
+    )
+
+
 def test_baseline_frame_count_stops_at_the_first_stimulus() -> None:
     assert baseline_frame_count(_block(0.5, 1.0), FPS) == 15
     assert baseline_frame_count(None, FPS) == 0

@@ -68,6 +68,8 @@ class BlockRecording:
     #: host before arming), so the recording names the exact script it captured.
     seq_path: str = ""
     syscon_sequence: str = ""
+    #: The export options the block was delivered with (set by the host).
+    export_settings: SysconExportSettings | None = None
 
     @property
     def duration_s(self) -> float:
@@ -109,6 +111,7 @@ class _Block:
     automatic: bool
     recording: BlockRecording | None
     cancel: threading.Event
+    settings: SysconExportSettings | None = None
     remote_path: str = ""
     run_id: str | None = None
     run_submitted: bool = False
@@ -358,6 +361,7 @@ class SysCon2StimulationHost(QtCore.QObject):
             automatic=automatic,
             recording=recording,
             cancel=threading.Event(),
+            settings=settings,
         )
         self._block = block
         seq_path = str(result.seq_path)
@@ -586,6 +590,7 @@ class SysCon2StimulationHost(QtCore.QObject):
                 block.recording,
                 seq_path=str(block.result.seq_path),
                 syscon_sequence=block.remote_path,
+                export_settings=block.settings,
             )
             try:
                 block.run_id = self._acquisition.arm_block(block.recording)

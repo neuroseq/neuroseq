@@ -1200,3 +1200,23 @@ def test_bss2_routine_keeps_one_scale_and_locks_its_target(qtbot) -> None:
     assert log.count("BrainScaleS-2: Only the first 512 channels are delivered.") == 1
     dialog.stop()
     assert dialog.cmb_target.isEnabled()
+
+
+def test_calcium_readout_is_locked_while_running(qtbot) -> None:
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert dialog.cmb_calcium_readout.isEnabled()
+    dialog.start()
+    assert not dialog.cmb_calcium_readout.isEnabled()
+    dialog.stop()
+    assert dialog.cmb_calcium_readout.isEnabled()
+
+
+def test_dispose_disconnects_exactly_what_it_connected(qtbot) -> None:
+    """Review: a host replaced after connecting must still be disconnected."""
+    _project, editor, dialog, old = _syscon2_dialog(qtbot)
+    dialog.start()
+    editor.stimulation_host = FakeStimulationHost()  # rewired meanwhile
+    dialog.dispose()
+    old.block_sent.emit(dialog, None)
+    old.block_completed.emit(dialog, None)
+    assert not dialog._running

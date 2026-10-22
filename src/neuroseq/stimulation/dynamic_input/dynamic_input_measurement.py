@@ -119,6 +119,12 @@ def measure_calcium_spike_count(
     return int(np.count_nonzero(in_window))
 
 
+#: Trace units measured as ΔF/F directly.
+DFF_UNITS = frozenset({"df/f", "δf/f", "dff"})
+#: Units of raw fluorescence, measured relative to their pre-probe baseline.
+RAW_FLUORESCENCE_UNITS = frozenset({"fluorescence", "f", "a.u."})
+
+
 def _calcium_row(trace: TraceData, neuron_id: int) -> np.ndarray:
     matches = np.flatnonzero(trace.indices == neuron_id)
     if matches.size == 0:
@@ -188,6 +194,19 @@ def calcium_rise_fraction(
         response_ms,
     )
     rise = peak - baseline
-    if str(trace.units).strip().lower() in {"df/f", "δf/f", "dff"}:
+    units = str(trace.units).strip().lower()
+    if units in DFF_UNITS:
         return rise
-    return rise / abs(baseline) if baseline else float("inf") if rise > 0 else 0.0
+    if units not in RAW_FLUORESCENCE_UNITS:
+        # e.g. Suite2p traces normalised to 0-1: a rise relative to their baseline
+        # means nothing, and would make every probe a response.
+        raise ValueError(
+            f"Trace units '{trace.units}' are neither ΔF/F nor raw fluorescence; "
+            "select a ΔF/F trace (or the raw ROI averages of the TIFF import)."
+        )
+    if baseline <= 0:
+        raise ValueError(
+            "The fluorescence baseline before the probe is not positive, so no "
+            "relative rise can be computed."
+        )
+    return rise / baseline

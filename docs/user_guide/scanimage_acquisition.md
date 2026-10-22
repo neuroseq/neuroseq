@@ -106,8 +106,9 @@ A completed acquisition is added to the project that requested it and becomes
 its selected imaging data. Imported imaging data and earlier recordings stay in
 the list.
 The tab's **Functional channel** picks the channel shown for recorded
-playback. It is kept when the recording saved it; otherwise it changes to the
-first saved channel and displays a message.
+playback. When the shown recording did not save it, its first saved channel is
+shown instead, with a message; the setting itself stays, since dynamic input
+routines measure that channel.
 
 The imaging data selector next to **Image acquisition** lists all imaging data in
 the project: imported TIFF/GIF/movie files and finished recordings. **Import

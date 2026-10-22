@@ -614,7 +614,8 @@ def test_new_recording_preserves_imported_movie(
     assert gui.calcium_video_widget.recorded_channel == 2
     gui.scanimage_controls.channel_spin.setValue(3)
     assert gui.calcium_video_widget.recorded_channel == 1
-    assert gui.scanimage_controls.channel_spin.value() == 1
+    # Only the display falls back; routines still measure the chosen channel.
+    assert gui.scanimage_controls.channel_spin.value() == 3
     assert "was not saved" in gui.scanimage_controls.message_label.text()
     project.dirty = False
     window.close()

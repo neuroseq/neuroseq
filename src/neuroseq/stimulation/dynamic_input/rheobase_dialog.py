@@ -486,8 +486,8 @@ class RheobaseDialog(SelfRaisingDialog):
         self._block_payload: object = None
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
-        #: Stimulation hosts whose block signals this dialog follows.
-        self._connected_hosts: list[Any] = []
+        #: The (signal, slot) pairs this dialog connected, by stimulation host.
+        self._connected_hosts: dict[int, list[tuple[Any, Callable]]] = {}
         #: BrainScaleS-2 settings snapshot of the running routine (fixed scale).
         self._bss2_settings: Bss2Settings | None = None
         self._bss2_warnings_logged = False
@@ -1044,7 +1044,8 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_syscon_dt.setEnabled(not self._running)
         self.hardware.setVisible(syscon2)
         self.hardware.setEnabled(not self._running)
-        self.cmb_calcium_readout.setEnabled(syscon2)
+        # Requests and measurements both depend on the readout: fixed while running.
+        self.cmb_calcium_readout.setEnabled(syscon2 and not self._running)
         dff = self._dff_readout()
         self.hardware.show_readout(dff)
         # Automatic blocks bring their own datasets; manual ones are picked here.
@@ -1079,15 +1080,17 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _connect_hosts(self) -> None:
         for host in self._hosts():
-            if host in self._connected_hosts:
+            if id(host) in self._connected_hosts:
                 continue
-            for signal, slot in self._host_slots(host):
+            slots = self._host_slots(host)
+            for signal, slot in slots:
                 signal.connect(slot)
-            self._connected_hosts.append(host)
+            self._connected_hosts[id(host)] = slots
 
     def _disconnect_hosts(self) -> None:
-        for host in self._connected_hosts:
-            for signal, slot in self._host_slots(host):
+        # Exactly what was connected, even if the editor's hosts changed since.
+        for slots in self._connected_hosts.values():
+            for signal, slot in slots:
                 signal.disconnect(slot)
         self._connected_hosts.clear()
 

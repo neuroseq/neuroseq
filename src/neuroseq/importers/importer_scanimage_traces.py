@@ -45,15 +45,17 @@ def baseline_frame_count(stim_block: StimArray | None, fs: float) -> int:
 
 
 def delta_f_over_f(traces: np.ndarray, baseline_frames: int) -> np.ndarray:
-    """ΔF/F per row. F0 is the mean of the first ``baseline_frames`` frames, or the
-    20th percentile of the whole trace when there are none."""
+    """ΔF/F per row: ``(F - F0) / |F0|``. F0 is the mean of the first
+    ``baseline_frames`` frames, or the 20th percentile of the whole trace when there
+    are none. Only the divisor is made positive (and non-zero), so a negative
+    baseline (offset-corrected detectors) still subtracts correctly."""
     traces = np.asarray(traces, dtype=np.float64)
     if baseline_frames >= 1:
         f0 = traces[:, : min(baseline_frames, traces.shape[1])].mean(axis=1)
     else:
         f0 = np.percentile(traces, 20, axis=1)
-    f0 = np.where(np.abs(f0) < 1e-9, 1e-9, np.abs(f0))
-    return ((traces - f0[:, np.newaxis]) / f0[:, np.newaxis]).astype(np.float32)
+    scale = np.maximum(np.abs(f0), 1e-9)
+    return ((traces - f0[:, np.newaxis]) / scale[:, np.newaxis]).astype(np.float32)
 
 
 def extract_recording_dff(

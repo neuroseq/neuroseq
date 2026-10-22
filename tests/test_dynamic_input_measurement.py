@@ -70,3 +70,17 @@ def test_dff_rise_is_the_change_itself() -> None:
     assert calcium_rise_fraction(trace, 3, 1.0, 500.0, 300.0) == pytest.approx(0.4)
     with pytest.raises(ValueError, match="not recorded"):
         calcium_rise_fraction(trace, 4, 1.0, 500.0, 300.0)
+
+
+def test_rise_of_normalised_or_baseline_less_traces_is_refused() -> None:
+    """Review: Suite2p traces are normalised to 0-1, so a relative rise is noise."""
+    normalised = TraceData(
+        "Suite2p", np.array([[0.02] * 10 + [0.03] * 5]), np.array([0]), "units", 0.1
+    )
+    with pytest.raises(ValueError, match="neither"):
+        calcium_rise_fraction(normalised, 0, 1.0, 500.0, 300.0)
+    dark = TraceData(
+        "F", np.array([[0.0] * 10 + [5.0] * 5]), np.array([0]), "fluorescence", 0.1
+    )
+    with pytest.raises(ValueError, match="not positive"):
+        calcium_rise_fraction(dark, 0, 1.0, 500.0, 300.0)
