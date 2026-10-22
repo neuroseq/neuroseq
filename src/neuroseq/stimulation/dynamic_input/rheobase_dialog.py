@@ -41,6 +41,8 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_pro
 from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
     HardwareSettingsWidget,
 )
+from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
+from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
 from neuroseq.stimulation.dynamic_input.rheobase import bisection_converged
 from neuroseq.stimulation.dynamic_input.rheobase import next_bracket
 from neuroseq.stimulation.stim_timing import format_milliseconds
@@ -586,7 +588,7 @@ class RheobaseDialog(SelfRaisingDialog):
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
         #: The (signal, slot) pairs this dialog connected, by stimulation host.
-        self._connected_hosts: dict[int, list[tuple[Any, Callable]]] = {}
+        self._host_connections = HostConnections()
         #: BrainScaleS-2 settings snapshot of the running routine (fixed scale).
         self._bss2_settings: Bss2Settings | None = None
         #: Data group collecting this run's BrainScaleS-2 readbacks.
@@ -734,9 +736,11 @@ class RheobaseDialog(SelfRaisingDialog):
         )
         #: Amplitude settings (min, max, fixed, tolerance) per target, so switching
         #: between Brian2 (stim units) and hardware (fractions) keeps both.
-        self._amplitudes_by_target: dict[str, tuple[float, float, float, float]] = {}
-        self._repeats_by_target: dict[str, int] = {}
-        self._amplitude_target = self.cmb_target.currentText()
+        self._target_values = PerTargetValues(
+            (*self._amplitude_spins(), self.spn_repeats),
+            self._target_defaults,
+            self.cmb_target.currentText(),
+        )
         self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         self.cmb_spikes = QtWidgets.QComboBox(self)
         self.cmb_spikes.setToolTip(
@@ -1174,25 +1178,17 @@ class RheobaseDialog(SelfRaisingDialog):
             self.spn_tolerance,
         )
 
+    def _target_defaults(self, target: str) -> tuple[float, ...] | None:
+        """Amplitudes and repeats a target starts with: fractions (0-1) and three
+        trials on hardware; Brian2 keeps the values it was built with."""
+        if target == self.SIMULATION_TARGET:
+            return None
+        return (*self.HARDWARE_AMPLITUDES, self.HARDWARE_REPEATS)
+
     def _on_target_changed(self, target: str) -> None:
-        """Keep each target's amplitudes: Brian2 uses stim units, the hardware
-        targets fractions (0-1), so one set never fits both."""
-        spins = self._amplitude_spins()
-        previous = self._amplitude_target
-        low, high, fixed, tolerance = (spin.value() for spin in spins)
-        self._amplitudes_by_target[previous] = (low, high, fixed, tolerance)
-        self._amplitude_target = target
-        values = self._amplitudes_by_target.get(target)
-        if values is None and target != self.SIMULATION_TARGET:
-            values = self.HARDWARE_AMPLITUDES
-        if values is not None:
-            for spin, value in zip(spins, values, strict=True):
-                spin.setValue(value)
-        repeats = self._repeats_by_target.get(target)
-        if repeats is None:
-            repeats = 1 if target == self.SIMULATION_TARGET else self.HARDWARE_REPEATS
-        self._repeats_by_target[previous] = self.spn_repeats.value()
-        self.spn_repeats.setValue(repeats)
+        """Keep each target's amplitudes and repeats: Brian2 uses stim units, the
+        hardware targets fractions (0-1), so one set never fits both."""
+        self._target_values.switch(target)
         self.refresh()
         self._update_target_controls()
 
@@ -1269,19 +1265,10 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _connect_hosts(self) -> None:
         for host in self._hosts():
-            if id(host) in self._connected_hosts:
-                continue
-            slots = self._host_slots(host)
-            for signal, slot in slots:
-                signal.connect(slot)
-            self._connected_hosts[id(host)] = slots
+            self._host_connections.connect(host, self._host_slots(host))
 
     def _disconnect_hosts(self) -> None:
-        # Exactly what was connected, even if the editor's hosts changed since.
-        for slots in self._connected_hosts.values():
-            for signal, slot in slots:
-                signal.disconnect(slot)
-        self._connected_hosts.clear()
+        self._host_connections.disconnect_all()
 
     def dispose(self) -> None:
         """Stop a running routine and stop following the stimulation hosts."""

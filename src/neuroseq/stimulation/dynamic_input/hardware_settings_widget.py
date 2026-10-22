@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from qtpy import QtWidgets
 
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
+from neuroseq.export.exporter_syscon2 import _SUPPORTED_LASER_WAVELENGTHS_NM
 from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
 
@@ -20,8 +21,8 @@ if TYPE_CHECKING:
     from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
     from neuroseq.stimulation.stim import StimArray
 
-#: Lasers the HOLO4D export can drive, as in the export dialog.
-LASER_WAVELENGTHS_NM = (940, 1030, 1100)
+#: Lasers the HOLO4D export can drive (the exporter's own list).
+LASER_WAVELENGTHS_NM = _SUPPORTED_LASER_WAVELENGTHS_NM
 
 
 class HardwareSettingsWidget(QtWidgets.QGroupBox):

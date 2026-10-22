@@ -33,6 +33,8 @@ from typing import Protocol
 from qtpy import QtCore
 
 from neuroseq.device_control.syscon2_client import SysCon2Client
+from neuroseq.device_control.syscon2_protocol import holo4d_ready_to_run
+from neuroseq.device_control.syscon2_protocol import normalized_holo4d_state
 from neuroseq.export.syscon2_export_service import SysconExportError
 from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
@@ -154,22 +156,8 @@ def next_block_name(folder: pathlib.Path, run_name: str) -> str:
     return f"{run_name}_{existing + 1:03d}"
 
 
-def _normalized_state(state: str) -> str:
-    return state.lower().removeprefix("state:").strip()
-
-
-def _ready_to_run(state: str) -> bool:
-    """Same readiness rule as the panel's Upload button."""
-    state = _normalized_state(state)
-    return (
-        bool(state)
-        and state not in {"busy", "disconnected"}
-        and not state.startswith("upload")
-    )
-
-
 def _raise_if_disconnected(state: str) -> None:
-    if _normalized_state(state) == "disconnected":
+    if normalized_holo4d_state(state) == "disconnected":
         raise RuntimeError("SysCon2 reports the Holo4D hardware as disconnected.")
 
 
@@ -231,6 +219,8 @@ class SysCon2StimulationHost(QtCore.QObject):
         self._counter = count(1)
         self._block: _Block | None = None
         self._acquisition: BlockAcquisition | None = None
+        #: Run id armed while arm_block was still running (see _on_block_armed).
+        self._armed_early: str | None = None
         self.phase = "idle"
 
     @property
@@ -243,6 +233,12 @@ class SysCon2StimulationHost(QtCore.QObject):
         if self._run_directory_provider is None:
             return self._output_dir / run_name
         return self._run_directory_provider() / run_name
+
+    @property
+    def uses_hardware(self) -> bool:
+        """Whether a block is being imported, uploaded, recorded or run. A manual
+        block waiting for the user's import (``awaiting_acquisition``) is not."""
+        return self.phase in {"sending", "preparing", "arming", "running"}
 
     @property
     def owner(self) -> object | None:
@@ -392,8 +388,8 @@ class SysCon2StimulationHost(QtCore.QObject):
             while True:
                 state = client.holo4d.get_state()
                 _raise_if_disconnected(state)
-                seen_upload |= _normalized_state(state).startswith("upload")
-                if _ready_to_run(state) and (
+                seen_upload |= normalized_holo4d_state(state).startswith("upload")
+                if holo4d_ready_to_run(state) and (
                     seen_upload or time.monotonic() - uploaded_at >= UPLOAD_SETTLE_S
                 ):
                     break
@@ -447,6 +443,14 @@ class SysCon2StimulationHost(QtCore.QObject):
         if block.run_id is not None and self._acquisition is not None:
             self._acquisition.abort_block(block.run_id)
         self._clear()
+
+    def abort(self, message: str) -> None:
+        """End the block in flight as failed (e.g. Stop in the SysCon2 tab): the
+        routine is told, a running sequence is stopped, a recording aborted, and a
+        SysCon2 task waiting on the hardware returns at its next poll."""
+        if self._block is not None:
+            self._block.cancel.set()
+            self._fail(message)
 
     def cleanup(self) -> None:
         if self._tmpdir is not None:
@@ -514,7 +518,7 @@ class SysCon2StimulationHost(QtCore.QObject):
             deadline = started + wait_s + RUN_MARGIN_S
             seen_busy = False
             while not cancel.is_set():
-                state = _normalized_state(client.holo4d.get_state())
+                state = normalized_holo4d_state(client.holo4d.get_state())
                 _raise_if_disconnected(state)
                 if state == "busy":
                     seen_busy = True
@@ -541,9 +545,15 @@ class SysCon2StimulationHost(QtCore.QObject):
 
     def _on_block_armed(self, run_id: str) -> None:
         block = self._block
-        if block is None or block.run_id != run_id or self.phase != "arming":
+        if block is None or self.phase != "arming":
             return
-        self._run(block)
+        if block.run_id is None:
+            self._armed_early = (
+                run_id  # still inside arm_block; see on_command_finished
+            )
+            return
+        if block.run_id == run_id:
+            self._run(block)
 
     def _on_block_recorded(self, run_id: str, payload: object) -> None:
         block = self._block
@@ -592,12 +602,17 @@ class SysCon2StimulationHost(QtCore.QObject):
                 syscon_sequence=block.remote_path,
                 export_settings=block.settings,
             )
+            self.phase = "arming"
+            self._armed_early = None
             try:
                 block.run_id = self._acquisition.arm_block(block.recording)
             except ValueError as exc:
                 self._fail(f"Could not start the recording: {exc}")
                 return
-            self.phase = "arming"
+            if self._armed_early == block.run_id:
+                # The recorder reported it armed before arm_block returned.
+                self._run(block)
+                return
             self.progress.emit("Waiting for ScanImage to arm the triggered recording…")
         elif step == "run" and self.phase == "running" and block.recording is None:
             self._complete({})

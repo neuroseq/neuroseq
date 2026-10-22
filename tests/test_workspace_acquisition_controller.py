@@ -470,3 +470,55 @@ def test_block_metadata_records_the_settings_it_was_delivered_with(setup):
     s.controller.arm_block(block)
     manifest = s.command.call_args.args[1]["manifest"]
     assert manifest["syscon_export_settings"]["target_power_mw"] == 42.0
+
+
+def test_a_project_without_a_folder_starts_from_the_default_and_keeps_it(
+    setup, tmp_path
+):
+    """Review: a new project shows the default folder, not the previous project's,
+    and records the folder its recordings go to."""
+    s = setup
+    controls = s.controller.controls
+    default = tmp_path / "default"
+    default.mkdir()
+    controls.settings.scanimage_recording_directory = str(default)
+    other = tmp_path / "previous"
+    other.mkdir()
+    controls.set_directory(str(other))
+    fresh = Project()
+    s.controller._project = lambda: fresh
+    s.controller.project_changed()
+    assert controls.directory_edit.text() == str(default)
+    request = controls.recording_request(frames=4, external_trigger=False)
+    s.controller.start_scanimage_recording(request)
+    assert fresh.device_folders["scanimage_recording"] == str(default)
+
+
+def test_leaving_the_folder_field_unchanged_does_not_dirty_the_project(setup):
+    s = setup
+    s.project.dirty = False
+    s.controller.controls._directory_edited()
+    assert not s.project.dirty
+
+
+def test_failing_to_add_the_traces_fails_the_block(setup, qtbot, mocker):
+    """Review: an error while adding the data must not leave the routine waiting."""
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    mocker.patch.object(controller_module, "extract_recording_dff", return_value=trace)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    mocker.patch.object(
+        s.project, "add_data_to_experiment", side_effect=KeyError("group gone")
+    )
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    with qtbot.waitSignal(s.controller.block_recording_failed, timeout=5000) as failed:
+        s.controller.scanimage_recording_ready(
+            _ready_result(run_id, arguments, s.folder)
+        )
+    assert "could not be added" in failed.args[1]

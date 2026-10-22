@@ -36,6 +36,8 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_pro
 from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
     HardwareSettingsWidget,
 )
+from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
+from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
 from neuroseq.stimulation.dynamic_input.stdp_window import classify_window
 from neuroseq.stimulation.dynamic_input.stdp_window import delta_t_sweep
 from neuroseq.stimulation.dynamic_input.stdp_window import interleave_by_magnitude
@@ -356,7 +358,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         self._block_payload: object = None
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
-        self._host_connected = False
+        self._host_connections = HostConnections()
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -478,8 +480,13 @@ class StdpWindowDialog(SelfRaisingDialog):
             "in data you import (continuous sweep only - cells cannot be reset)."
         )
         #: Pulse amplitude per target: Brian2 uses stim units, SysCon2 fractions.
-        self._amplitude_by_target: dict[str, float] = {}
-        self._amplitude_target = self.cmb_target.currentText()
+        self._target_values = PerTargetValues(
+            (self.spn_amplitude,),
+            lambda target: (
+                None if target == self.SIMULATION_TARGET else (self.HARDWARE_AMPLITUDE,)
+            ),
+            self.cmb_target.currentText(),
+        )
         self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         form.addRow("Stimulation target:", self.cmb_target)
         form.addRow("Readout:", self.cmb_readout)
@@ -796,13 +803,7 @@ class StdpWindowDialog(SelfRaisingDialog):
 
     def _on_target_changed(self, target: str) -> None:
         """Keep each target's pulse amplitude (stim units vs fraction of power)."""
-        self._amplitude_by_target[self._amplitude_target] = self.spn_amplitude.value()
-        self._amplitude_target = target
-        value = self._amplitude_by_target.get(target)
-        if value is None and target != self.SIMULATION_TARGET:
-            value = self.HARDWARE_AMPLITUDE
-        if value is not None:
-            self.spn_amplitude.setValue(value)
+        self._target_values.switch(target)
         self.refresh()
         self._update_target_controls()
 
@@ -827,24 +828,21 @@ class StdpWindowDialog(SelfRaisingDialog):
 
     def _connect_host(self) -> None:
         host = self.editor.stimulation_host
-        if host is None or self._host_connected:
-            return
-        host.block_sent.connect(self._on_block_sent)
-        host.block_failed.connect(self._on_block_failed)
-        host.block_completed.connect(self._on_block_completed)
-        self._host_connected = True
+        if host is not None:
+            self._host_connections.connect(
+                host,
+                [
+                    (host.block_sent, self._on_block_sent),
+                    (host.block_failed, self._on_block_failed),
+                    (host.block_completed, self._on_block_completed),
+                ],
+            )
 
     def dispose(self) -> None:
         """Stop a running routine and stop following the stimulation host."""
         if self._running:
             self._finish("Routine closed.")
-        host = self.editor.stimulation_host
-        if host is None or not self._host_connected:
-            return
-        host.block_sent.disconnect(self._on_block_sent)
-        host.block_failed.disconnect(self._on_block_failed)
-        host.block_completed.disconnect(self._on_block_completed)
-        self._host_connected = False
+        self._host_connections.disconnect_all()
 
     def _on_readout_changed(self, _index: int) -> None:
         self._update_readout_controls()

@@ -13,6 +13,7 @@ Schema = dict[str, dict[str, SchemaValue]]
 ProgressCallback = Callable[[float], None]
 """Called periodically by `simulate` with the completion fraction in [0, 1]."""
 
+
 class NN:
     """Standard interface for neuroseq external simulation backends.
 
@@ -66,6 +67,4 @@ class NN:
         forwards compatibility, but are free to ignore it when running
         without a progress consumer.
         """
-        raise NotImplementedError(
-            "NN.simulate must be implemented by subclasses"
-        )
+        raise NotImplementedError("NN.simulate must be implemented by subclasses")

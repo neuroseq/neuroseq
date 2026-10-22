@@ -77,6 +77,8 @@ class ScanImageControls(QtWidgets.QWidget):
         self.directory_edit = QtWidgets.QLineEdit(
             settings.scanimage_recording_directory
         )
+        #: The folder last shown or chosen, to tell a real edit from a focus-out.
+        self._shown_directory = settings.scanimage_recording_directory
         self.directory_edit.setToolTip(
             "Every recording is saved directly in this folder as one TIFF named "
             "<date>_<number>.tif, with its metadata in <date>_<number>.json."
@@ -196,6 +198,7 @@ class ScanImageControls(QtWidgets.QWidget):
     def set_directory(self, directory: str) -> None:
         """Show the recording folder of the workspace's project."""
         self.directory_edit.setText(directory)
+        self._shown_directory = directory
         self._update_next_file()
 
     def _browse_python(self) -> None:
@@ -214,7 +217,9 @@ class ScanImageControls(QtWidgets.QWidget):
 
     def _directory_edited(self) -> None:
         path = self.directory_edit.text().strip()
-        if path:
+        # editingFinished also fires when the field merely loses focus.
+        if path and path != self._shown_directory:
+            self._shown_directory = path
             self.settings.scanimage_recording_directory = path
             self.directory_changed.emit(path)
         self._update_next_file()

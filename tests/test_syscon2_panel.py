@@ -1115,3 +1115,26 @@ def test_host_announces_settings_changed_in_the_panel(panel):
     panel.stimulation_host.export_settings_changed.connect(lambda: changed.append(1))
     panel.target_power_spin.setValue(12.0)
     assert changed
+
+
+def test_routine_blocks_count_as_execution_and_stop_reaches_them(panel, mocker):
+    """Review: the panel must not offer Upload/Run, or let the workspace close,
+    while a routine's block uses the hardware; its Stop ends that block."""
+    panel.set_project(Project())
+    panel._on_connected()
+    host = panel.stimulation_host
+    abort = mocker.patch.object(host, "abort")
+    host.phase = "running"
+    panel._update_connection_ui()
+    assert panel.execution_in_progress
+    assert not panel.btn_holo4d_upload.isEnabled()
+    assert not panel.btn_holo4d_run.isEnabled()
+    mocker.patch.object(panel, "_submit")
+    panel._on_holo4d_stop_clicked()
+    abort.assert_called_once()
+    # A manual block waiting for the user's import does not use the hardware.
+    host.phase = "awaiting_acquisition"
+    panel._set_execution_progress("idle", "")
+    assert not panel.execution_in_progress
+    assert panel.btn_holo4d_upload.isEnabled()
+    host.phase = "idle"

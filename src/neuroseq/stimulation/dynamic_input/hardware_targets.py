@@ -1,0 +1,74 @@
+"""Helpers shared by the routine dialogs that can run on hardware targets
+(rheobase, STDP window): following the stimulation hosts' signals, and keeping
+each target's parameter values (stim units for Brian2, fractions on hardware).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from collections.abc import Sequence
+from typing import Any
+
+from qtpy import QtWidgets
+
+#: (signal, slot) pairs to connect for one host.
+Slots = list[tuple[Any, Callable]]
+
+
+class HostConnections:
+    """The (signal, slot) pairs a dialog connected, per host, so it disconnects
+    exactly those, even if the editor's hosts were replaced meanwhile."""
+
+    def __init__(self) -> None:
+        self._connected: dict[int, Slots] = {}
+
+    def connect(self, host: object, slots: Slots) -> None:
+        """Connect ``slots`` of ``host`` unless that host is connected already."""
+        if id(host) in self._connected:
+            return
+        for signal, slot in slots:
+            signal.connect(slot)
+        self._connected[id(host)] = slots
+
+    def disconnect_all(self) -> None:
+        for slots in self._connected.values():
+            for signal, slot in slots:
+                signal.disconnect(slot)
+        self._connected.clear()
+
+
+class PerTargetValues:
+    """Remembers some spin boxes' values per stimulation target.
+
+    Switching target stores the old target's values and shows the new target's:
+    what it had before, else its defaults (``defaults(target)``; ``None`` keeps the
+    values shown).
+    """
+
+    def __init__(
+        self,
+        spins: Sequence[QtWidgets.QSpinBox | QtWidgets.QDoubleSpinBox],
+        defaults: Callable[[str], Sequence[float] | None],
+        target: str,
+    ) -> None:
+        self._spins = tuple(spins)
+        self._defaults = defaults
+        self._target = target
+        self._values: dict[str, tuple[float, ...]] = {}
+
+    def switch(self, target: str) -> None:
+        if target == self._target:
+            return
+        self._values[self._target] = tuple(spin.value() for spin in self._spins)
+        self._target = target
+        values = self._values.get(target)
+        if values is None:
+            defaults = self._defaults(target)
+            values = tuple(defaults) if defaults is not None else None
+        if values is None:
+            return
+        for spin, value in zip(self._spins, values, strict=True):
+            if isinstance(spin, QtWidgets.QSpinBox):
+                spin.setValue(int(value))
+            else:
+                spin.setValue(float(value))

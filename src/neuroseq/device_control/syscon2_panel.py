@@ -26,6 +26,8 @@ from qtpy.compat import getopenfilename
 from neuroseq.device_control.syscon2_client import LightsourceStatus
 from neuroseq.device_control.syscon2_client import SysCon2Client
 from neuroseq.device_control.syscon2_connection_manager import SysCon2ConnectionManager
+from neuroseq.device_control.syscon2_protocol import holo4d_ready_to_run
+from neuroseq.device_control.syscon2_protocol import normalized_holo4d_state
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
@@ -247,6 +249,13 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
         self.stimulation_host.block_sent.connect(self._on_host_block_sent)
         self.stimulation_host.progress.connect(self.preview_status_label.setText)
+        # The host's phase changes with its progress and outcome signals.
+        for signal in (
+            self.stimulation_host.progress,
+            self.stimulation_host.block_completed,
+            self.stimulation_host.block_failed,
+        ):
+            signal.connect(lambda *_args: self._update_connection_ui())
         self.export_settings_changed.connect(
             self.stimulation_host.export_settings_changed
         )
@@ -301,8 +310,18 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     @property
     def execution_in_progress(self) -> bool:
-        """Whether a HOLO4D upload, run or stop is still being tracked."""
-        return self._execution_phase != "idle"
+        """Whether a HOLO4D upload, run or stop is still being tracked, here or for
+        a dynamic input routine's block."""
+        return self._execution_phase != "idle" or self.stimulation_host.uses_hardware
+
+    def _idle_for_upload(self) -> bool:
+        """Upload/Run are offered only when neither this tab nor a routine uses
+        the hardware."""
+        return (
+            self._connected
+            and self._execution_phase == "idle"
+            and not self.stimulation_host.uses_hardware
+        )
 
     def shutdown(self) -> None:
         """Disconnect and stop the background connection thread. Call on app shutdown."""
@@ -688,7 +707,7 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     def _update_connection_ui(self) -> None:
         self._update_sequence_buttons()
-        idle = self._connected and self._execution_phase == "idle"
+        idle = self._idle_for_upload()
         self.btn_holo4d_upload.setEnabled(idle)
         self.btn_holo4d_run.setEnabled(idle)
         self.btn_holo4d_stop.setEnabled(self._connected)
@@ -1205,8 +1224,8 @@ class SysCon2Panel(QtWidgets.QWidget):
             self._progress_timer.stop()
         else:
             self._progress_timer.start()
-        self.btn_holo4d_upload.setEnabled(self._connected and not busy)
-        self.btn_holo4d_run.setEnabled(self._connected and not busy)
+        self.btn_holo4d_upload.setEnabled(self._idle_for_upload())
+        self.btn_holo4d_run.setEnabled(self._idle_for_upload())
         self._update_sequence_buttons()
         self._update_progress_text()
 
@@ -1312,7 +1331,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             self._set_execution_progress("idle", "Stop acknowledged.")
 
     def _advance_execution(self, state: str) -> None:
-        state = state.lower().removeprefix("state:").strip()
+        state = normalized_holo4d_state(state)
         if state != self._hardware_state:
             logger.info(
                 "Holo4D state %r -> %r (execution phase %s)",
@@ -1322,7 +1341,7 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
         self._hardware_state = state
         if self._execution_phase == "ready_check":
-            if state in {"", "busy", "disconnected"} or state.startswith("upload"):
+            if not holo4d_ready_to_run(state):
                 self._progress_message = f"Upload acknowledged; waiting for hardware (state: {state or '?'})…"
                 self._update_progress_text()
             else:
@@ -1354,6 +1373,9 @@ class SysCon2Panel(QtWidgets.QWidget):
             )
 
     def _on_holo4d_stop_clicked(self) -> None:
+        # A routine's block first: its waiting task frees the connection thread at
+        # its next poll, so this Stop is not queued behind the whole sequence.
+        self.stimulation_host.abort("Stopped in the stimulation setup.")
         # Invalidate any pending upload completion so Stop can never be followed by Run.
         self._execution_cancel.set()
         self._execution_serial += 1

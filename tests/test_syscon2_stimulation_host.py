@@ -504,3 +504,40 @@ def test_cancelled_block_cannot_be_reawaited(stim: StimArray, tmp_path, mocker) 
     host.reawait(owner)
     assert host.phase == "idle"
     assert host.send_block(Project(), stim, 0, 5, owner=owner)
+
+
+def test_abort_tells_the_routine_and_frees_the_worker(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    """Review: Stop in the SysCon2 tab must end a routine's block, not wait
+    behind it in the connection thread."""
+    host, submitted, _acquisition = _automatic_host(tmp_path, mocker)
+    owner = object()
+    host.send_block(Project(), stim, 0, 5, owner=owner, automatic=True)
+    with qtbot.waitSignal(host.block_failed) as failed:
+        host.abort("Stopped in the stimulation setup.")
+    assert failed.args == [owner, "Stopped in the stimulation setup."]
+    assert host.phase == "idle"
+    # The waiting upload task returns at its next poll instead of timing out.
+    client = _FakeClient(["target\\probe_001.seq"], ["Uploading"])
+    with pytest.raises(host_module._Cancelled):
+        submitted[0][1](client)
+    host.abort("nothing in flight")  # no block: no signal, no error
+
+
+def test_recording_armed_inside_arm_block_still_runs_the_block(
+    stim: StimArray, tmp_path, mocker
+) -> None:
+    """Review: a recorder may report 'armed' before arm_block returns."""
+    host, submitted, acquisition = _automatic_host(tmp_path, mocker)
+
+    def arm_and_report(recording):
+        acquisition.armed.append(recording)
+        acquisition.block_armed.emit("run1")
+        return "run1"
+
+    acquisition.arm_block = arm_and_report  # type: ignore[method-assign]
+    host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
+    _run(submitted, host, _FakeClient(["target\\probe_001.seq"], ["Idle"]))
+    assert host.phase == "running"
+    assert submitted[-1][0].endswith(".run")

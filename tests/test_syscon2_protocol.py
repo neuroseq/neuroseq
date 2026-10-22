@@ -17,6 +17,8 @@ from neuroseq.device_control.syscon2_protocol import encode_raw
 from neuroseq.device_control.syscon2_protocol import encode_string
 from neuroseq.device_control.syscon2_protocol import encode_structures
 from neuroseq.device_control.syscon2_protocol import encode_word
+from neuroseq.device_control.syscon2_protocol import holo4d_ready_to_run
+from neuroseq.device_control.syscon2_protocol import normalized_holo4d_state
 from neuroseq.device_control.syscon2_protocol import parse_standard_response
 from neuroseq.device_control.syscon2_protocol import parse_string_response
 from neuroseq.device_control.syscon2_protocol import read_bool
@@ -159,3 +161,11 @@ def test_read_data_response_status_error() -> None:
 def test_bytes_reader_raises_on_truncated_data() -> None:
     with pytest.raises(SysCon2ProtocolError):
         read_dword(bytes_reader(bytes([0x01, 0x02])))
+
+
+def test_holo4d_state_rules_shared_by_panel_and_routine_host() -> None:
+    assert normalized_holo4d_state("State: Idle ") == "idle"
+    assert holo4d_ready_to_run("State:Idle")
+    assert holo4d_ready_to_run("Ready")  # unknown states do not block forever
+    for state in ("", "Busy", "Disconnected", "Uploading", "upload pending"):
+        assert not holo4d_ready_to_run(state)

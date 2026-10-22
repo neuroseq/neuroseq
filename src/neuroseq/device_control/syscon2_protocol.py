@@ -182,3 +182,20 @@ def read_data_response_status(reader: Reader) -> None:
     status = read_byte(reader)
     if status != 0:
         raise SysCon2Error(f"status={status}")
+
+
+def normalized_holo4d_state(state: str) -> str:
+    """``Holo4D::GetState`` reply as a lower-case state id (``State: Idle`` -> ``idle``)."""
+    return state.lower().removeprefix("state:").strip()
+
+
+def holo4d_ready_to_run(state: str) -> bool:
+    """Whether an uploaded sequence can be run: the hardware reports a state and is
+    neither uploading, busy nor disconnected. Unknown states count as ready rather
+    than leaving a caller stuck on a state name it does not know."""
+    state = normalized_holo4d_state(state)
+    return (
+        bool(state)
+        and state not in {"busy", "disconnected"}
+        and not state.startswith("upload")
+    )

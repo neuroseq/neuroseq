@@ -141,10 +141,13 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.connection.run_finished.disconnect(self._forget_run)
 
     def project_changed(self) -> None:
-        """Show the recording folder of the (new) project, if it has one."""
+        """Show the recording folder of the (new) project; one without a folder of
+        its own starts from the folder last used in any project (the default for
+        new projects), not from whatever the previous project showed."""
         folder = self._project().device_folders.get(RECORDING_FOLDER)
-        if folder:
-            self.controls.set_directory(folder)
+        self.controls.set_directory(
+            folder or self.controls.settings.scanimage_recording_directory
+        )
 
     def _remember_directory(self, directory: str) -> None:
         self._project().set_device_folder(RECORDING_FOLDER, directory)
@@ -250,6 +253,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return False
         project.imaging_acquisitions.append(record)
         project.mark_dirty()
+        # The project records the folder its recordings went to.
+        self._remember_directory(str(arguments["directory"]))
         self.run_ids.add(arguments["run_id"])
         if samples_path is not None:
             self._stimulus_files[arguments["run_id"]] = samples_path
@@ -391,8 +396,16 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     run_id, "The recording's data group was removed."
                 )
                 return
-            project.add_data_to_experiment(experiment, trace)
-            project.add_data_to_experiment(experiment, spikes)
+            try:
+                project.add_data_to_experiment(experiment, trace)
+                project.add_data_to_experiment(experiment, spikes)
+            except Exception as exc:
+                # The routine must hear about it, or it waits for this block forever.
+                logger.exception("Could not add the traces of recording %s", run_id)
+                self.block_recording_failed.emit(
+                    run_id, f"The traces could not be added: {exc}"
+                )
+                return
             self.recording_added.emit()
             self.block_recorded.emit(
                 run_id,
