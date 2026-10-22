@@ -195,6 +195,12 @@ Before experimental use, verify on the acquisition PC:
 - External triggering, first-frame timeout and abort behave as expected.
 - An automatic routine block arms ScanImage, the sequence's TTL starts the
   recording, and the response window lines up with the delivered pulse.
+- ScanImage runs as fast with NeuroSeq connected as without: compare its frame
+  rate and dropped frames during Focus and a recording. Each status reply
+  reports `elapsed_ms`, the time the call spent in ScanImage's MATLAB thread;
+  NeuroSeq polls status five times a second. (The removed live view
+  base64-encoded every frame in MATLAB, about 160 ms per 512×512 frame on
+  that same thread, which is what slowed ScanImage down.)
 - Completed and interrupted recordings survive project save/reopen, and a
   recording finishing after a project switch attaches to its originating project.
 - Hardware stimulation markers and image timestamps agree before claiming any
