@@ -34,6 +34,7 @@ from neuroseq.export.syscon2_export_service import SysconExportError
 from neuroseq.export.syscon2_export_service import SysconExportResult
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import default_export_directory
+from neuroseq.export.syscon2_export_service import default_export_settings
 from neuroseq.export.syscon2_export_service import default_target_directory
 from neuroseq.export.syscon2_export_service import export_stim_array
 from neuroseq.stimulation.stim import StimArray
@@ -171,6 +172,8 @@ class SysCon2Panel(QtWidgets.QWidget):
     #: Targets in the most recent preview whose import was acknowledged by SysCon.
     #: This does not indicate remote selection, upload, or live illumination.
     targets_changed = QtCore.Signal(object)
+    #: The project's export options (or the target power beside them) changed.
+    export_settings_changed = QtCore.Signal()
 
     def __init__(
         self,
@@ -211,8 +214,6 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._progress_timer.setInterval(250)
         self._progress_timer.timeout.connect(self._update_progress_text)
         self._current_stim_provider: Callable[[], StimArray | None] | None = None
-        #: Export options of the last successful dialog export; reused by the one-click button.
-        self._export_settings: SysconExportSettings | None = None
         self._active_dialog: StimulationGeneratorDialog | None = None
         self._result_handlers: dict[str, Callable[[object], None]] = {
             "sequence_manager.get_sequences": self._on_sequences,
@@ -230,8 +231,13 @@ class SysCon2Panel(QtWidgets.QWidget):
         #: Hardware counterpart of the Brian2 simulation host for dynamic input routines.
         self.stimulation_host = SysCon2StimulationHost(
             self._manager.submit,
-            settings_provider=lambda: self._export_settings,
+            settings_provider=self.effective_export_settings,
+            settings_setter=self.set_export_settings,
             target_directory_provider=lambda: self.target_directory_edit.text().strip(),
+            is_connected=lambda: self._connected,
+            confirm_warnings=lambda warnings: self._confirm(
+                "Review export changes:\n" + "\n".join(warnings)
+            ),
             parent=self,
         )
         self._manager.command_finished.connect(
@@ -239,14 +245,18 @@ class SysCon2Panel(QtWidgets.QWidget):
         )
         self._manager.command_failed.connect(self.stimulation_host.on_command_failed)
         self.stimulation_host.block_sent.connect(self._on_host_block_sent)
+        self.stimulation_host.progress.connect(self.preview_status_label.setText)
 
     def set_project(self, project: Project | None) -> None:
         if project is self._project:
             return
         self._project = project
-        self._export_settings = None
+        self.stimulation_host.reset_accepted_warnings()
         self._reset_import_status()
         self.preview_label.setText("No preview yet.")
+        settings = self._export_settings
+        if settings is not None:
+            self._show_export_settings(settings)
 
     def set_current_stim_provider(
         self, provider: Callable[[], StimArray | None]
@@ -255,8 +265,36 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._current_stim_provider = provider
 
     @property
+    def _export_settings(self) -> SysconExportSettings | None:
+        """Export options of the project: last used by a dialog export or a routine."""
+        return self._project.syscon_export_settings if self._project else None
+
+    @_export_settings.setter
+    def _export_settings(self, settings: SysconExportSettings | None) -> None:
+        if self._project is None or settings == self._project.syscon_export_settings:
+            return
+        self._project.syscon_export_settings = settings
+        self._project.mark_dirty()
+
+    @property
     def export_settings(self) -> SysconExportSettings | None:
         return self._export_settings
+
+    def effective_export_settings(self) -> SysconExportSettings:
+        """The project's export options, or defaults with the panel's target power, so a
+        routine can deliver blocks without a prior 'Export with settings…' (issue #651).
+        """
+        settings = self._export_settings
+        if settings is None:
+            settings = replace(
+                default_export_settings(self._project),
+                target_power_mw=self.target_power_spin.value(),
+            )
+        return settings
+
+    def set_export_settings(self, settings: SysconExportSettings) -> None:
+        """Store options chosen elsewhere (a routine's hardware settings)."""
+        self._show_export_settings(settings)
 
     @property
     def execution_in_progress(self) -> bool:
@@ -979,12 +1017,21 @@ class SysCon2Panel(QtWidgets.QWidget):
             dialog.exec()
         finally:
             self._active_dialog = None
-        if self._settings is not None and dialog.output_folder is not None:
-            self._settings.syscon_export_directory = str(dialog.output_folder)
+        if dialog.output_folder is not None:
+            folder = str(dialog.output_folder)
+            if self._project is not None:
+                self._project.device_folders["syscon_export"] = folder
+            if self._settings is not None:
+                self._settings.syscon_export_directory = folder
 
     def _export_directory(self) -> pathlib.Path:
-        """The folder used last, or a default one (issue #614)."""
-        stored = self._settings.syscon_export_directory if self._settings else ""
+        """The folder this project used last (issue #581), else the folder used last in
+        any project, else a default one (issue #614)."""
+        stored = (
+            self._project.device_folders.get("syscon_export", "")
+            if self._project is not None
+            else ""
+        ) or (self._settings.syscon_export_directory if self._settings else "")
         return pathlib.Path(stored) if stored else default_export_directory()
 
     def _on_target_power_changed(self, value: float) -> None:
@@ -992,12 +1039,14 @@ class SysCon2Panel(QtWidgets.QWidget):
             self._export_settings = replace(
                 self._export_settings, target_power_mw=float(value)
             )
+        self.export_settings_changed.emit()
 
     def _show_export_settings(self, settings: SysconExportSettings) -> None:
         self._export_settings = settings
         self.target_power_spin.blockSignals(True)
         self.target_power_spin.setValue(settings.target_power_mw)
         self.target_power_spin.blockSignals(False)
+        self.export_settings_changed.emit()
 
     def _on_export_current_clicked(self) -> None:
         if self._project is None:
@@ -1107,7 +1156,7 @@ class SysCon2Panel(QtWidgets.QWidget):
 
         self._submit(name, task)
 
-    def _on_host_block_sent(self, result: object) -> None:
+    def _on_host_block_sent(self, _owner: object, result: object) -> None:
         if not isinstance(result, SysconExportResult):
             return
         self._preview_request = None
@@ -1115,7 +1164,12 @@ class SysCon2Panel(QtWidgets.QWidget):
         self._remember_preview(str(result.seq_path), str(result.overview_png_path))
         self.import_path_edit.setText(str(result.seq_path))
         self.preview_status_label.setText(
-            f"Import confirmed: {result.seq_path.name}. Select it, then Upload and Run."
+            f"Import confirmed: {result.seq_path.name}. "
+            + (
+                "Uploaded; the routine runs it."
+                if self.stimulation_host.phase != "awaiting_acquisition"
+                else "Select it, then Upload and Run."
+            )
         )
         self.targets_changed.emit(result.targeted_stim_ids)
         if self._connected:

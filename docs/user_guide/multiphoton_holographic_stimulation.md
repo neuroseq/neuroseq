@@ -134,6 +134,9 @@ stimulation setup** sets the power of that quick export. Changing only the power
 there keeps all other settings of the last export; **Export with settings…**
 starts from the same value.
 
+Export settings and the export folder belong to the project: they are saved with
+it and restored when you switch between open projects.
+
 ### Target power and power LUT
 
 The dialog has a **Target power** (mW) spinner next to a **Load LUT…**
@@ -255,5 +258,22 @@ without claiming measured completion. **Stop** also cancels any queued Run.
 The preview is collapsed by default; click **Show preview** to expand it.
 
 The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
-starting with the wrong timestep. The **Create input array** and **Edit input
+starting with the wrong timestep.
+
+### Dynamic input routines on the rig
+
+With the **SysCon2 (calcium imaging)** target, the rheobase and STDP window
+dialogs show **Hardware settings**: target power, laser, spiral scanning and spots
+per cell (the project's export settings, shared with the SysCon2 tab, so no
+**Export with settings…** is needed first), plus how blocks are recorded. With
+**Run blocks automatically and record them with ScanImage**, each block is
+uploaded and run by NeuroSeq while ScanImage records it, triggered by the
+sequence, and its ΔF/F traces are extracted with the project's Cellpose masks;
+see [ScanImage acquisition](scanimage_acquisition.md#dynamic-input-routines).
+Rheobase then counts a probe as evoking a response when the neuron's ΔF/F rises
+by the **Response threshold** within the post-pulse window. Unticked, each block
+is only imported into SysCon2 and you run, record and import it yourself, then
+click **Calcium data imported** (rheobase can then measure ΔF/F of an imported
+trace or deconvolved spikes). Export warnings, such as a missing power LUT, are
+asked once per routine rather than failing every block. The **Create input array** and **Edit input
 array** dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

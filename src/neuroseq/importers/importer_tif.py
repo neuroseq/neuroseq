@@ -23,6 +23,7 @@ import brian2.numpy_ as np
 import numpy.typing as npt
 
 if TYPE_CHECKING:
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
     from neuroseq.stimulation.stim import StimArray
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,23 @@ ProgressCallback = Callable[[str, float], None]
 
 class PipelineCancelled(Exception):
     """Raised from a progress callback to abort a running pipeline cleanly."""
+
+
+def cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
+    """Convert stored masks back to Cellpose's raw label layout.
+
+    Masks share the TIFFs' pixel coordinates; only Cellpose's 1-based labels
+    and zero-valued background need restoring.
+    """
+    if result.segmentation_array is None:
+        raise ValueError("Cellpose segmentation is missing; re-run Cellpose import.")
+    seg = np.asarray(result.segmentation_array, dtype=np.int32)
+    masks = seg.copy()
+    # In CellposeImportResult: background = -1, cells = 0..N-1
+    # Suite2p / Cellpose raw layout: background = 0, cells = 1..N
+    masks[masks >= 0] += 1
+    masks[masks < 0] = 0
+    return masks
 
 
 def _noop_progress(_message: str, _fraction: float) -> None:

@@ -7,6 +7,7 @@ export settings and the same sanity gate.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import pathlib
 import re
@@ -63,6 +64,46 @@ class SysconExportSettings:
     laser_wavelength_nm: int = 940
     target_power_mw: float = 1.0
     exact_slm_timing: bool = True
+
+
+DEFAULT_SYSCON2_CONFIG_TEXT = """nohash
+version=3
+scanmode=Accurate
+runs=1
+invertedportcnt=0
+AutoTriggerRulesEnabled=False
+AutoTriggerRulesCount=1
+SourceConnectorPort0=dummy_1_0 RMI In
+TargetConnectorPort0=Holo4D TTL Out 2
+PreTiming_us0=20000
+PostTiming_us0=20000
+timelinezoomfactor=10
+timelineviewposx=0
+timelineviewposy=0
+"""
+
+
+def default_syscon2_config_text(project: Project | None) -> str:
+    """The HOLO4D configuration block: the project's imported template, if any."""
+    template = getattr(project, "syscon2_export_template_text", None)
+    return template or DEFAULT_SYSCON2_CONFIG_TEXT
+
+
+def default_export_settings(project: Project | None) -> SysconExportSettings:
+    """Export settings to use before the user has chosen any (issue #651)."""
+    return SysconExportSettings(config_text=default_syscon2_config_text(project))
+
+
+def export_settings_to_dict(settings: SysconExportSettings) -> dict[str, object]:
+    return dataclasses.asdict(settings)
+
+
+def export_settings_from_dict(payload: dict) -> SysconExportSettings:
+    """Rebuild saved settings, ignoring fields this version does not know."""
+    names = {field.name for field in dataclasses.fields(SysconExportSettings)}
+    return SysconExportSettings(
+        **{key: value for key, value in payload.items() if key in names}
+    )
 
 
 @dataclass(frozen=True)

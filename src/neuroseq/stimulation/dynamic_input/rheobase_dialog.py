@@ -23,6 +23,9 @@ from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_rout
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
+    calcium_rise_fraction,
+)
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
     measure_calcium_spike_count,
 )
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
@@ -31,6 +34,9 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import RoutineBackend
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import SimulationHost
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_property
+from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
+    HardwareSettingsWidget,
+)
 from neuroseq.stimulation.dynamic_input.rheobase import bisection_converged
 from neuroseq.stimulation.dynamic_input.rheobase import next_bracket
 from neuroseq.stimulation.stim_timing import format_milliseconds
@@ -431,6 +437,10 @@ class RheobaseDialog(SelfRaisingDialog):
     FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY = "Fixed duration, varying amplitude"
     SIMULATION_TARGET = "Brian2 simulation"
     SYSCON2_TARGET = "SysCon2 (calcium imaging)"
+    DFF_READOUT = "Calcium response (ΔF/F)"
+    SPIKES_READOUT = "Deconvolved spikes"
+    #: Baseline before each probe pulse for the calcium response.
+    CALCIUM_BASELINE_MS = 250.0
 
     def __init__(
         self,
@@ -467,6 +477,9 @@ class RheobaseDialog(SelfRaisingDialog):
         self._block_range = (0, 0)
         self._last_measured_dataset: str | None = None
         self._data_before_block: dict[str, object] = {}
+        #: What the host reported for the block that just completed (see
+        #: SysCon2StimulationHost.block_completed); None for a manual import.
+        self._block_payload: object = None
         self._host_connected = False
         self.setWindowTitle("Minimal input for spiking (rheobase)")
         self.resize(640, 620)
@@ -602,7 +615,18 @@ class RheobaseDialog(SelfRaisingDialog):
             "Imported spike dataset (deconvolved calcium) holding the latest probe's "
             "recording. Its time axis must start when the sent block starts."
         )
+        self.cmb_calcium_readout = QtWidgets.QComboBox(self)
+        self.cmb_calcium_readout.addItems([self.DFF_READOUT, self.SPIKES_READOUT])
+        self.cmb_calcium_readout.setToolTip(
+            "How a probe delivered through SysCon2 counts as evoking a response: a "
+            "calcium rise of at least the response threshold, or deconvolved spikes "
+            "after the pulse. Automatic blocks are measured as ΔF/F."
+        )
+        self.cmb_calcium_readout.currentTextChanged.connect(
+            self._update_target_controls
+        )
         form.addRow("Stimulation target:", self.cmb_target)
+        form.addRow("Calcium readout:", self.cmb_calcium_readout)
         form.addRow("Trace to analyze:", self.cmb_trace)
         form.addRow("Spike data (calcium):", self.cmb_spikes)
         form.addRow("Sweeping strategy:", self.cmb_sweeping_strategy)
@@ -626,6 +650,10 @@ class RheobaseDialog(SelfRaisingDialog):
         form.addRow("Spike threshold (mV):", self.spn_threshold_mv)
         form.addRow("Maximum iterations:", self.spn_max_iterations)
         parameters_layout.addLayout(form)
+        self.hardware = HardwareSettingsWidget(self, response_threshold=True)
+        self.hardware.chk_automatic.toggled.connect(self._update_target_controls)
+        parameters_layout.addWidget(self.hardware)
+        parameters_layout.addStretch(1)
 
         self.parameters_scroll = QtWidgets.QScrollArea(self)
         self.parameters_scroll.setWidget(self.parameters_panel)
@@ -856,6 +884,7 @@ class RheobaseDialog(SelfRaisingDialog):
             self.cmb_spikes.addItems(self.project.get_data_names(SpikeData))
             self.cmb_spikes.setCurrentText(selected_spikes)
         syscon2_available = self.editor.stimulation_host is not None
+        self.hardware.set_host(self.editor.stimulation_host)
         syscon2_item = cast(QtGui.QStandardItemModel, self.cmb_target.model()).item(1)
         if syscon2_item is not None:
             syscon2_item.setEnabled(syscon2_available)
@@ -970,14 +999,29 @@ class RheobaseDialog(SelfRaisingDialog):
     def _target_is_syscon2(self) -> bool:
         return self.cmb_target.currentText() == self.SYSCON2_TARGET
 
-    def _update_target_controls(self, _text: str = "") -> None:
+    def _automatic(self) -> bool:
+        """SysCon2 blocks are run and recorded without the user (issue #651)."""
+        return self._target_is_syscon2() and self.hardware.automatic
+
+    def _dff_readout(self) -> bool:
+        return self._automatic() or (
+            self.cmb_calcium_readout.currentText() == self.DFF_READOUT
+        )
+
+    def _update_target_controls(self, *_args: object) -> None:
         syscon2 = self._target_is_syscon2()
+        automatic = self._automatic()
         self.btn_syscon_dt.setVisible(syscon2)
         self.btn_syscon_dt.setEnabled(not self._running)
-        self.cmb_trace.setEnabled(not syscon2)
+        self.hardware.setVisible(syscon2)
+        self.hardware.setEnabled(not self._running)
+        self.cmb_calcium_readout.setEnabled(syscon2 and not automatic)
+        dff = self._dff_readout()
+        # Automatic blocks bring their own trace; manual ones are picked here.
+        self.cmb_trace.setEnabled(not syscon2 or (dff and not automatic))
         self.spn_threshold_mv.setEnabled(not syscon2)
-        self.cmb_spikes.setEnabled(syscon2)
-        self.btn_data_imported.setVisible(syscon2)
+        self.cmb_spikes.setEnabled(syscon2 and not dff)
+        self.btn_data_imported.setVisible(syscon2 and not automatic)
         if syscon2:
             self._connect_host()
 
@@ -989,6 +1033,21 @@ class RheobaseDialog(SelfRaisingDialog):
         host.block_failed.connect(self._on_block_failed)
         host.block_completed.connect(self._on_block_completed)
         self._host_connected = True
+
+    def dispose(self) -> None:
+        """Stop a running routine and stop following the stimulation host."""
+        if self._running:
+            self._finish("Routine closed.")
+        self._disconnect_host()
+
+    def _disconnect_host(self) -> None:
+        host = self.editor.stimulation_host
+        if host is None or not self._host_connected:
+            return
+        host.block_sent.disconnect(self._on_block_sent)
+        host.block_failed.disconnect(self._on_block_failed)
+        host.block_completed.disconnect(self._on_block_completed)
+        self._host_connected = False
 
     def _fix_syscon_dt(self) -> bool:
         if self._running:
@@ -1002,11 +1061,15 @@ class RheobaseDialog(SelfRaisingDialog):
         """Begin a routine whose probes are delivered through SysCon2."""
         if not self._fix_syscon_dt():
             return
-        if self.editor.stimulation_host is None or (
-            self.editor.stimulation_host.phase != "idle"
-        ):
+        host = self.editor.stimulation_host
+        if host is None or host.phase != "idle":
             self._append_log("SysCon2 is not ready (a block is still in flight).")
             return
+        if self._automatic():
+            reason = host.recording_unavailable()
+            if reason is not None:
+                self._append_log(reason)
+                return
         if choice == "clear":
             self.editor.zero_current_stim_array()
             self.editor.reset_stim_array()
@@ -1016,12 +1079,21 @@ class RheobaseDialog(SelfRaisingDialog):
                 self.editor.current_stim_array_last_stimulus_sample()
             )
         self._last_measured_dataset = None
-        self._append_log(
-            "SysCon2 target: amplitudes are fractions (0-1) of the export target power. "
-            "Each probe is sent as its own block; the spike data's time axis must start "
-            "when that block starts, and the post-pulse window should span a few imaging "
-            "frames."
-        )
+        if self._automatic():
+            self._append_log(
+                "SysCon2 target: amplitudes are fractions (0-1) of the export target "
+                "power. Each probe is uploaded and run as its own block while ScanImage "
+                "records it, triggered by the sequence; its ΔF/F traces are extracted "
+                "with the project's Cellpose masks. The post-pulse window should span a "
+                "few imaging frames."
+            )
+        else:
+            self._append_log(
+                "SysCon2 target: amplitudes are fractions (0-1) of the export target "
+                "power. Each probe is sent as its own block; the imported data's time "
+                "axis must start when that block starts, and the post-pulse window "
+                "should span a few imaging frames."
+            )
         self._begin_search(clear_log=False)
 
     def _begin_search(self, *, clear_log: bool) -> None:
@@ -1081,6 +1153,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_start.setEnabled(False)
         self.btn_stop.setEnabled(True)
         self.btn_pause.setEnabled(True)
+        self._update_target_controls()
         self._append_log(
             f"Estimated simulations for the current settings: ~{self._estimated_probe_count()}."
         )
@@ -1124,38 +1197,53 @@ class RheobaseDialog(SelfRaisingDialog):
         if host is None or self.project is None:
             self._finish("SysCon2 is not available.")
             return
+        data_type = TraceData if self._dff_readout() else SpikeData
         self._data_before_block = {
-            name: self.project.get_data(name, SpikeData)
-            for name in self.project.get_data_names(SpikeData)
+            name: self.project.get_data(name, data_type)
+            for name in self.project.get_data_names(data_type)
         }
         start, stop = self._block_range
-        self._append_log("Exporting probe and sending it to SysCon2...")
+        stim = self._require_stim()
+        automatic = self._automatic()
+        self._append_log(
+            "Exporting the probe; SysCon2 runs it while ScanImage records..."
+            if automatic
+            else "Exporting probe and sending it to SysCon2..."
+        )
         # A failure is reported through host.block_failed -> _on_block_failed.
         host.send_block(
             self.project,
-            self._require_stim(),
+            stim,
             start,
             stop,
             "rheobase",
             preserve_amplitude=True,
+            owner=self,
+            automatic=automatic,
+            recording=(
+                self.hardware.block_recording(stim, start, stop, "rheobase")
+                if automatic
+                else None
+            ),
         )
 
-    def _on_block_sent(self, _result: object) -> None:
-        if not (self._running and self._target_is_syscon2()):
+    def _on_block_sent(self, owner: object, _result: object) -> None:
+        if owner is not self or not self._running or self._automatic():
             return
         self.refresh()
         self._append_log(
             "Probe sent to SysCon2. Run it and acquire, import the calcium data, select "
-            "the new spike dataset, then click 'Calcium data imported'."
+            "the new dataset, then click 'Calcium data imported'."
         )
         self.btn_data_imported.setEnabled(True)
 
-    def _on_block_failed(self, message: str) -> None:
-        if self._running and self._target_is_syscon2():
+    def _on_block_failed(self, owner: object, message: str) -> None:
+        if owner is self and self._running:
             self._finish(f"SysCon2 failed: {message}")
 
-    def _on_block_completed(self) -> None:
-        if self._running and self._target_is_syscon2():
+    def _on_block_completed(self, owner: object, payload: object) -> None:
+        if owner is self and self._running:
+            self._block_payload = payload
             self._backend.simulation_finished()
 
     def _on_data_imported_clicked(self) -> None:
@@ -1203,11 +1291,26 @@ class RheobaseDialog(SelfRaisingDialog):
     def _advance_syscon2(self) -> None:
         assert self.project is not None
         self.refresh()
-        self._select_newest_if_stale(self.cmb_spikes)
-        name = self.cmb_spikes.currentText()
+        payload = self._block_payload
+        self._block_payload = None
+        dff = self._dff_readout()
+        combo = self.cmb_trace if dff else self.cmb_spikes
+        if isinstance(payload, dict) and payload.get("trace"):
+            # An automatic block names the traces extracted from its recording.
+            combo.setCurrentText(str(payload["trace"]))
+        elif self._automatic():
+            self._finish("The recorded probe produced no calcium trace.")
+            return
+        else:
+            self._select_newest_if_stale(combo)
+        name = combo.currentText()
         if not name:
             self.btn_data_imported.setEnabled(True)
-            self._append_log("Select the imported spike dataset first.")
+            self._append_log(
+                "Select the imported calcium trace first."
+                if dff
+                else "Select the imported spike dataset first."
+            )
             self._reawait_acquisition()
             return
         if not self._is_fresh_dataset(name):
@@ -1217,23 +1320,43 @@ class RheobaseDialog(SelfRaisingDialog):
             )
             self._reawait_acquisition()
             return
-        spikes = self.project.get_data(name, SpikeData)
-        if spikes is None:
-            self._finish(f"Spike dataset '{name}' is unavailable.")
-            return
-        self._last_measured_dataset = name
         block_start_seconds = self._block_range[0] * float(self._require_stim().dt)
         onset = self._pulse_onset_seconds - block_start_seconds
         window_ms = self._current_duration_ms + self.spn_response_ms.value()
-        spike_count = measure_calcium_spike_count(
-            spikes, self.spn_neuron.value(), onset, window_ms
-        )
-        self._backend.record_probe_result(spike_count)
+        if dff:
+            trace = self.project.get_data(name, TraceData)
+            if trace is None:
+                self._finish(f"Trace '{name}' is unavailable.")
+                return
+            try:
+                rise = calcium_rise_fraction(
+                    trace,
+                    self.spn_neuron.value(),
+                    onset,
+                    self.CALCIUM_BASELINE_MS,
+                    window_ms,
+                )
+            except ValueError as exc:
+                self._finish(f"Calcium measurement failed: {exc}")
+                return
+            self._append_log(f"Calcium rise after the probe: {100 * rise:.1f} % ΔF/F.")
+            response = int(rise >= self.hardware.response_threshold)
+        else:
+            spikes = self.project.get_data(name, SpikeData)
+            if spikes is None:
+                self._finish(f"Spike dataset '{name}' is unavailable.")
+                return
+            response = measure_calcium_spike_count(
+                spikes, self.spn_neuron.value(), onset, window_ms
+            )
+        self._last_measured_dataset = name
+        self._backend.record_probe_result(response)
 
     def _is_fresh_dataset(self, name: str) -> bool:
         if self.project is None or not name or name.startswith("Simulation :: "):
             return False
-        data = self.project.get_data(name, SpikeData)
+        data_type = TraceData if self._dff_readout() else SpikeData
+        data = self.project.get_data(name, data_type)
         return data is not None and data is not self._data_before_block.get(name)
 
     def _select_newest_if_stale(self, combo: QtWidgets.QComboBox) -> None:
@@ -1249,7 +1372,7 @@ class RheobaseDialog(SelfRaisingDialog):
         """Stay on the current probe: ask the user to fix the import and click again."""
         host = self.editor.stimulation_host
         if host is not None:
-            host.phase = "awaiting_acquisition"
+            host.reawait(self)
         self._backend.awaiting_simulation = True
         self.btn_data_imported.setEnabled(True)
 
@@ -1483,7 +1606,7 @@ class RheobaseDialog(SelfRaisingDialog):
     def _finish(self, message: str) -> None:
         host = self.editor.stimulation_host
         if host is not None:
-            host.cancel()
+            host.cancel(owner=self)
         self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
         self.btn_start.setEnabled(True)
@@ -1574,6 +1697,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
+        self._update_target_controls()
 
     def _unit_label(self) -> str:
         return self.lbl_units.text() or "a.u."

@@ -766,11 +766,11 @@ def test_pipeline_progress_dialog_details_toggle(qtbot):
     ],
 )
 def test_cellpose_result_to_masks_round_trip(seg, expected):
-    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
+    from neuroseq.importers.importer_tif import cellpose_result_to_masks
 
     fake_result = MagicMock()
     fake_result.segmentation_array = seg
-    np.testing.assert_array_equal(_cellpose_result_to_masks(fake_result), expected)
+    np.testing.assert_array_equal(cellpose_result_to_masks(fake_result), expected)
 
 
 def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):

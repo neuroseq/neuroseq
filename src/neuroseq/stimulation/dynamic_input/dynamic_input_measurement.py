@@ -110,6 +110,32 @@ def measure_calcium_spike_count(
     return int(np.count_nonzero(in_window))
 
 
+def _calcium_row(trace: TraceData, neuron_id: int) -> np.ndarray:
+    matches = np.flatnonzero(trace.indices == neuron_id)
+    if matches.size == 0:
+        raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
+    return trace.traces[int(matches[0])]
+
+
+def _calcium_baseline_and_peak(
+    values: np.ndarray, dt: float, onset: float, baseline_ms: float, response_ms: float
+) -> tuple[float, float]:
+    """Mean of the ``baseline_ms`` before ``onset`` and peak of the ``response_ms`` after."""
+    onset_idx = int(np.floor(onset / dt))
+    if onset_idx >= values.size:
+        raise ValueError(
+            f"The selected trace ends at {values.size * dt:.3f} s, "
+            f"before the probe at {onset:.3f} s. Select the newly imported "
+            "recording and try again."
+        )
+    onset_idx = max(onset_idx, 0)
+    base_start = max(0, int(np.floor((onset - baseline_ms / 1000.0) / dt)))
+    baseline = values[base_start : max(onset_idx, base_start + 1)]
+    stop = min(values.size, int(np.ceil((onset + response_ms / 1000.0) / dt)) + 1)
+    window = values[onset_idx : max(stop, onset_idx + 1)]
+    return float(np.mean(baseline)), float(np.max(window))
+
+
 def measure_calcium_response(
     trace: TraceData,
     neuron_id: int,
@@ -123,27 +149,36 @@ def measure_calcium_response(
     ``baseline_ms`` immediately before the onset. Times are relative to the start of the
     acquisition that produced ``trace``; the amplitude is in the trace's own units.
     """
-    matches = np.flatnonzero(trace.indices == neuron_id)
-    if matches.size == 0:
-        raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
-    values = trace.traces[int(matches[0])]
+    values = _calcium_row(trace, neuron_id)
     amplitudes: list[float] = []
     for onset in probe_pulse_times_s:
-        onset_idx = int(np.floor(onset / trace.dt))
-        if onset_idx >= values.size:
-            raise ValueError(
-                f"The selected trace ends at {values.size * trace.dt:.3f} s, "
-                f"before the probe at {onset:.3f} s. Select the newly imported "
-                "recording and try again."
-            )
-        onset_idx = max(onset_idx, 0)
-        base_start = max(0, int(np.floor((onset - baseline_ms / 1000.0) / trace.dt)))
-        baseline = values[base_start : max(onset_idx, base_start + 1)]
-        stop = min(
-            values.size, int(np.ceil((onset + response_ms / 1000.0) / trace.dt)) + 1
+        baseline, peak = _calcium_baseline_and_peak(
+            values, trace.dt, onset, baseline_ms, response_ms
         )
-        window = values[onset_idx : max(stop, onset_idx + 1)]
-        amplitudes.append(float(np.max(window) - np.mean(baseline)))
+        amplitudes.append(peak - baseline)
     return EPSPMeasurement(
         float(np.mean(amplitudes)), tuple(amplitudes), units=trace.units
     )
+
+
+def calcium_rise_fraction(
+    trace: TraceData,
+    neuron_id: int,
+    onset_seconds: float,
+    baseline_ms: float,
+    response_ms: float,
+) -> float:
+    """Rise of ``neuron_id``'s calcium signal after ``onset_seconds`` as a fraction:
+    the ΔF/F change of a ΔF/F trace, or the change relative to the baseline of a raw
+    fluorescence trace. Times are relative to the start of the acquisition."""
+    baseline, peak = _calcium_baseline_and_peak(
+        _calcium_row(trace, neuron_id),
+        trace.dt,
+        onset_seconds,
+        baseline_ms,
+        response_ms,
+    )
+    rise = peak - baseline
+    if str(trace.units).strip().lower() in {"df/f", "δf/f", "dff"}:
+        return rise
+    return rise / abs(baseline) if baseline else float("inf") if rise > 0 else 0.0

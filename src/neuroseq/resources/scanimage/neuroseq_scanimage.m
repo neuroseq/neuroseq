@@ -4,7 +4,7 @@ function reply = neuroseq_scanimage(operation, payload)
 persistent run ownedFocus
 started = tic;
 if isempty(ownedFocus), ownedFocus = false; end
-if isempty(run), run = struct('id', '', 'state', 'idle', 'directory', ''); end
+if isempty(run), run = idle_run(); end
 args = jsondecode(payload);
 hSI = evalin('base', 'hSI');
 if strcmp(operation, 'event')
@@ -22,8 +22,6 @@ end
 run = restore_settings(hSI, run);
 switch operation
     case 'probe'
-        assert(isprop(hSI, 'hDisplay') && isprop(hSI.hDisplay, 'lastFrame'), ...
-            'This adapter requires the ScanImage 2023 hDisplay API.');
         assert(isprop(hSI, 'extTrigEnable'), 'Missing ScanImage property: extTrigEnable');
         required = {'logFilePath','logFileStem','logFileCounter'};
         for k=1:numel(required)
@@ -64,7 +62,7 @@ switch operation
         assert(strcmp(hSI.acqState, 'idle'), 'ScanImage is busy.');
         % Idle without a terminal event: put back settings before forgetting the run.
         run = restore_settings(hSI, run, true);
-        run = struct('id', '', 'state', 'idle', 'directory', '');
+        run = idle_run();
         hSI.startFocus(); ownedFocus = true;
     case 'record'
         assert(strcmp(hSI.acqState, 'idle'), 'Stop the current acquisition before recording.');
@@ -93,18 +91,26 @@ switch operation
         assert(~isempty(channels) || ~isempty(hSI.hChannels.channelSave), ...
             'Select at least one saved channel.');
         assert(args.frames >= 1 && args.frames == fix(args.frames), 'Invalid frame count.');
-        assert(~exist(args.directory, 'dir'), 'Run directory already exists.');
-        [ok, msg] = mkdir(args.directory); assert(ok, msg);
+        assert(args.counter >= 1 && args.counter == fix(args.counter), 'Invalid recording number.');
+        % One TIFF per recording, named <stem>_<number>.tif, directly in the
+        % recording folder (issues #628, #651).
+        target = fullfile(args.directory, sprintf('%s_%05d.tif', args.stem, args.counter));
+        assert(~exist(target, 'file'), 'NeuroSeq:FileExists', 'Recording %s already exists.', target);
+        if ~exist(args.directory, 'dir')
+            [ok, msg] = mkdir(args.directory); assert(ok, msg);
+        end
         % Retain settings until completion/abort and restore only once idle.
         old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
             hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
             optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop'), ...
-            hSI.hChannels.channelSave};
-        run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, 'old',{old});
+            hSI.hChannels.channelSave, optional_prop(hSI.hScan2D, 'logFramesPerFile')};
+        run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, ...
+            'stem',args.stem, 'counter',args.counter, 'old',{old});
         try
             hSI.hScan2D.logFilePath = args.directory;
-            hSI.hScan2D.logFileStem = 'acquisition';
-            hSI.hScan2D.logFileCounter = 1;
+            hSI.hScan2D.logFileStem = args.stem;
+            hSI.hScan2D.logFileCounter = args.counter;
+            if ~isempty(old{10}), hSI.hScan2D.logFramesPerFile = Inf; end
             hSI.extTrigEnable = logical(args.external_trigger);
             hSI.hStackManager.framesPerSlice = args.frames;
             hSI.hChannels.loggingEnable = true;
@@ -163,90 +169,11 @@ if isprop(hSI,'VERSION_MAJOR')
     end
 end
 if ~isempty(run.directory) && strcmp(hSI.acqState,'idle')
-    files = dir(fullfile(run.directory, '*.tif'));
+    files = dir(fullfile(run.directory, sprintf('%s_%05d*.tif', run.stem, run.counter)));
     out.files = arrayfun(@(f) fullfile(f.folder,f.name), files, 'UniformOutput',false);
-end
-if strcmp(operation,'status') && isfield(args,'channel') && ~strcmp(hSI.acqState,'idle')
-    [images, channels, problem] = display_frames(hSI);
-    idx = find(channels == args.channel, 1);
-    if isempty(problem) && isempty(idx)
-        problem = sprintf('Channel %d is not displayed in ScanImage.', args.channel);
-    elseif isempty(problem) && (numel(images) < idx || isempty(images{idx}) || ~ismatrix(images{idx}))
-        problem = 'ScanImage has no frame of this channel yet.';
-    end
-    if ~isempty(problem)
-        out.preview_problem = problem;
-    else
-        source = images{idx};
-        % Up to 512 pixels per side as recorded; larger frames are averaged
-        % in blocks rather than subsampled, which would add noise.
-        factor = max(1, ceil(max(size(source)) / 512));
-        if factor == 1 && isa(source, 'int16')
-            img = source; dtype = 'int16';
-        elseif factor == 1
-            img = single(source); dtype = 'float32';
-        else
-            rows = floor(size(source,1) / factor) * factor;
-            cols = floor(size(source,2) / factor) * factor;
-            blocks = reshape(single(source(1:rows,1:cols)), factor, rows/factor, factor, cols/factor);
-            img = reshape(mean(mean(blocks,1),3), rows/factor, cols/factor); dtype = 'float32';
-        end
-        out.frame = struct('shape',size(img), 'dtype',dtype, 'order','F', ...
-            'data',matlab.net.base64encode(typecast(img(:),'uint8')));
-        % ScanImage's display window for the channel, so the preview has
-        % the same contrast as the ScanImage window.
-        luts = hSI.hChannels.channelLUT;
-        if iscell(luts) && numel(luts) >= args.channel
-            out.frame.lut = double(luts{args.channel});
-        elseif isnumeric(luts) && size(luts,1) >= args.channel
-            out.frame.lut = double(luts(args.channel,:));
-        end
-        if isprop(hSI.hDisplay,'displayRollingAverageFactor')
-            out.frame.display_average = double(hSI.hDisplay.displayRollingAverageFactor);
-        end
-        number = read_display(hSI, 'lastFrameNumber');
-        if ~isempty(number), out.frame.number = number; end
-        timestamp = read_display(hSI, 'lastFrameTimestamp');
-        if ~isempty(timestamp), out.frame.timestamp = timestamp; end
-    end
 end
 out.elapsed_ms = 1000 * toc(started);
 reply = jsonencode(out);
-end
-
-function [images, channels, problem] = display_frames(hSI)
-% The last displayed frames and their channels. Reading these can fail in
-% ScanImage 2023.1.0 itself (Display.get.lastFrameChannels raises "Brace
-% indexing is not supported" while its display holds no frames), so a failed
-% read skips the preview frame instead of failing the whole status reply.
-images = {}; problem = '';
-channels = hSI.hChannels.channelDisplay;
-if isprop(hSI.hDisplay,'lastFrameChannels')
-    try
-        channels = hSI.hDisplay.lastFrameChannels;
-    catch err
-        % Fall back to the displayed channels, in the same order.
-        problem = ['lastFrameChannels: ' err.message];
-    end
-end
-try
-    images = hSI.hDisplay.lastFrame;
-    if ~iscell(images), images = {images}; end
-    problem = '';  % the frames themselves are what the preview needs
-catch err
-    problem = ['ScanImage display frame not readable: ' err.message];
-end
-end
-
-function value = read_display(hSI, name)
-% A display property, or empty when it is missing or cannot be read.
-value = [];
-if isprop(hSI.hDisplay, name)
-    try
-        value = hSI.hDisplay.(name);
-    catch
-    end
-end
 end
 
 function value = optional_prop(obj, name)
@@ -268,6 +195,7 @@ if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
     if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = old{7}; end
     if ~isempty(old{8}), hSI.acqsPerLoop = old{8}; end
     if numel(old) >= 9, hSI.hChannels.channelSave = old{9}; end
+    if numel(old) >= 10 && ~isempty(old{10}), hSI.hScan2D.logFramesPerFile = old{10}; end
     run = rmfield(run,'old');
 end
 end
@@ -277,4 +205,8 @@ settings = struct('saved_channels',hSI.hChannels.channelSave, ...
     'frames_per_slice',hSI.hStackManager.framesPerSlice, ...
     'external_trigger',hSI.extTrigEnable, 'logging',hSI.hChannels.loggingEnable, ...
     'directory',hSI.hScan2D.logFilePath, 'stem',hSI.hScan2D.logFileStem);
+end
+
+function run = idle_run()
+run = struct('id', '', 'state', 'idle', 'directory', '', 'stem', '', 'counter', 0);
 end

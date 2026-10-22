@@ -121,6 +121,10 @@ class DynamicInputController(QtCore.QObject):
         ):
             dialog = getattr(self, attr_name)
             if dialog is not None:
+                # Release a SysCon2 block still in flight for this routine.
+                dispose = getattr(dialog, "dispose", None)
+                if dispose is not None:
+                    dispose()
                 dialog.close()
                 dialog.deleteLater()
                 setattr(self, attr_name, None)

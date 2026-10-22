@@ -1,0 +1,102 @@
+"""Calcium traces of a ScanImage recording, extracted with the project's Cellpose masks.
+
+Used by the closed-loop routines (rheobase, STDP window) to turn each recorded block into a
+ΔF/F trace without the TIFF import dialog: every block reuses the same masks, so neuron IDs
+stay those of the stimulation targets. Qt-free.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from neuroseq.data import TraceData
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.importers.importer_tif import TifPipelineParams
+from neuroseq.importers.importer_tif import cellpose_result_to_masks
+from neuroseq.importers.importer_tif import run_roi_average_pipeline
+
+if TYPE_CHECKING:
+    from neuroseq.importers.importer_cellpose import CellposeImportResult
+    from neuroseq.stimulation.stim import StimArray
+
+DFF_TRACE_NAME = "dF/F"
+DFF_UNITS = "dF/F"
+
+
+def baseline_frame_count(stim_block: StimArray | None, fs: float) -> int:
+    """Frames recorded before the block's first stimulus (its ΔF/F baseline)."""
+    if stim_block is None:
+        return 0
+    active = np.flatnonzero(np.any(np.asarray(stim_block.values) != 0, axis=1))
+    if active.size == 0:
+        return 0
+    return int(np.floor(float(active[0]) * float(stim_block.dt) * fs))
+
+
+def delta_f_over_f(traces: np.ndarray, baseline_frames: int) -> np.ndarray:
+    """ΔF/F per row. F0 is the mean of the first ``baseline_frames`` frames, or the
+    20th percentile of the whole trace when there are none."""
+    traces = np.asarray(traces, dtype=np.float64)
+    if baseline_frames >= 1:
+        f0 = traces[:, : min(baseline_frames, traces.shape[1])].mean(axis=1)
+    else:
+        f0 = np.percentile(traces, 20, axis=1)
+    f0 = np.where(np.abs(f0) < 1e-9, 1e-9, np.abs(f0))
+    return ((traces - f0[:, np.newaxis]) / f0[:, np.newaxis]).astype(np.float32)
+
+
+def extract_recording_dff(
+    paths: Sequence[str | Path],
+    *,
+    fps: float,
+    saved_channels: Sequence[int],
+    functional_channel: int,
+    cellpose_data: CellposeImportResult | None,
+    stim_block: StimArray | None = None,
+) -> TraceData:
+    """ΔF/F of every Cellpose ROI in a ScanImage recording.
+
+    ``saved_channels`` are the ScanImage channel numbers interleaved in the TIFFs and
+    ``functional_channel`` the one carrying the calcium indicator. ``stim_block`` is the
+    stimulus delivered during the recording, starting at its first frame: frames lit by
+    the stimulation laser are interpolated, and the frames before its first stimulus are
+    the ΔF/F baseline.
+    """
+    if cellpose_data is None:
+        raise ValueError(
+            "Load a Cellpose segmentation of this field of view first: its masks "
+            "define the neurons whose calcium traces are measured."
+        )
+    channels = [int(channel) for channel in saved_channels]
+    if functional_channel not in channels:
+        raise ValueError(
+            f"Channel {functional_channel} was not saved in the recording "
+            f"(saved: {', '.join(map(str, channels)) or 'none'})."
+        )
+    if fps <= 0:
+        raise ValueError("The recording has no valid frame rate.")
+    masks = cellpose_result_to_masks(cellpose_data)
+    params = TifPipelineParams(
+        fs=fps,
+        nchannels=len(channels),
+        functional_chan=channels.index(functional_channel) + 1,
+    )
+    result = run_roi_average_pipeline(
+        [Path(path) for path in paths], masks, params, stim_array=stim_block
+    )
+    cellpose_ids = np.asarray(result.extra["roi_labels"], dtype=np.uint32) - 1
+    return TraceData(
+        DFF_TRACE_NAME,
+        delta_f_over_f(result.F, baseline_frame_count(stim_block, fps)),
+        remap_raw_cellpose_ids(
+            cellpose_ids, resolve_stimulus_to_cellpose_mapping(cellpose_data)
+        ),
+        DFF_UNITS,
+        1.0 / fps,
+        cellpose_ids,
+    )

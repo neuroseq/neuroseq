@@ -27,6 +27,9 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import export_settings_from_dict
+from neuroseq.export.syscon2_export_service import export_settings_to_dict
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage import compact_index
@@ -151,6 +154,12 @@ class Project:
         self.imaging_acquisitions: list[dict] = []
         self.syscon2_export_template_text: str | None = None
         self.power_luts: dict[int, PowerLut] = {}
+        # Holographic export options, shared by the SysCon2 panel and the dynamic
+        # input routines; kept with the project so switching projects keeps them.
+        self.syscon_export_settings: SysconExportSettings | None = None
+        # Folders last used by this project's device workflows, by purpose
+        # ("syscon_export", "scanimage_recording"); open projects do not share them.
+        self.device_folders: dict[str, str] = {}
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_ram_trace_plot_matrix = 256
@@ -205,6 +214,11 @@ class Project:
                             "power_luts", {}
                         ).items()
                     }
+                    if "syscon_export_settings" in _meta:
+                        self.syscon_export_settings = export_settings_from_dict(
+                            _meta["syscon_export_settings"]
+                        )
+                    self.device_folders = dict(_meta.get("device_folders", {}))
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
                     for acquisition in self.imaging_acquisitions:
                         if "recording" in acquisition:
@@ -1516,6 +1530,12 @@ class Project:
                 metadata["calcium_video_fps"] = self.calcium_video_fps
             if self.imaging_acquisitions:
                 metadata["imaging_acquisitions"] = self.imaging_acquisitions
+            if self.syscon_export_settings is not None:
+                metadata["syscon_export_settings"] = export_settings_to_dict(
+                    self.syscon_export_settings
+                )
+            if self.device_folders:
+                metadata["device_folders"] = self.device_folders
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()

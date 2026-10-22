@@ -558,6 +558,44 @@ def test_refreshing_same_project_preserves_export_settings(panel):
     assert panel.export_settings is settings
     panel.set_project(Project())
     assert panel.export_settings is None
+    # Kept with the project, so switching back restores them.
+    panel.set_project(project)
+    assert panel.export_settings is settings
+
+
+def test_routines_get_default_settings_with_the_panel_power(panel):
+    project = Project()
+    project.syscon2_export_template_text = "template"
+    panel.set_project(project)
+    panel.target_power_spin.setValue(7.5)
+    settings = panel.stimulation_host.export_settings()
+    assert settings.config_text == "template"
+    assert settings.target_power_mw == 7.5
+    assert panel.export_settings is None  # nothing stored until chosen
+
+    changed = []
+    panel.export_settings_changed.connect(lambda: changed.append(True))
+    panel.stimulation_host.set_export_settings(
+        SysconExportSettings(config_text="x", target_power_mw=12.0)
+    )
+    assert project.syscon_export_settings.target_power_mw == 12.0
+    assert panel.target_power_spin.value() == 12.0
+    assert project.dirty
+    assert changed
+
+
+def test_export_folder_is_remembered_per_project(panel, mocker, tmp_path):
+    first, second = Project(), Project()
+    first.device_folders["syscon_export"] = str(tmp_path / "first")
+    panel.set_project(first)
+    assert panel._export_directory() == tmp_path / "first"
+    panel.set_project(second)
+    assert panel._export_directory() != tmp_path / "first"
+    dialog_cls = mocker.patch.object(syscon2_panel_module, "StimulationGeneratorDialog")
+    dialog_cls.return_value.output_folder = tmp_path / "second"
+    panel.open_generator_dialog()
+    assert second.device_folders["syscon_export"] == str(tmp_path / "second")
+    assert first.device_folders["syscon_export"] == str(tmp_path / "first")
 
 
 def test_import_ack_tracks_latest_preview_and_snapshots_file(panel, mocker, tmp_path):
@@ -911,7 +949,7 @@ def test_generated_and_routine_exports_display_resizable_preview(
     )
     targets = mocker.Mock()
     panel.targets_changed.connect(targets)
-    panel.stimulation_host.block_sent.emit(result)
+    panel.stimulation_host.block_sent.emit(None, result)
     assert "Import confirmed: block.seq" in panel.preview_status_label.text()
     targets.assert_called_with(frozenset({2}))
 

@@ -71,7 +71,6 @@ class CalciumVideoWidget(FPLWidget):
         self._video_warning_shown = False
         self._stim_warning_shown = False
         self._hovered_cellpose_id: int | None = None
-        self._live = False
         self._scanimage_index: dict | None = None
         self._frame_times: np.ndarray | None = None
 
@@ -151,8 +150,8 @@ class CalciumVideoWidget(FPLWidget):
 
     def _set_canvas_visible(self, visible: bool) -> None:
         self.widget.setVisible(visible)
-        self.save_button.setEnabled(visible and not self._live)
-        self.remove_button.setEnabled(visible and not self._live)
+        self.save_button.setEnabled(visible)
+        self.remove_button.setEnabled(visible)
         self.video_actions_widget.setVisible(visible)
 
     def _close_pages(self) -> None:
@@ -285,29 +284,6 @@ class CalciumVideoWidget(FPLWidget):
             self.set_scanimage_index(scanimage_index, channel)
         self.set_time_ms(0)
 
-    def set_live(self, live: bool) -> None:
-        self._live = live
-        if not live:
-            self._set_canvas_visible(bool(self._frame_refs))
-            self.empty_state_widget.setVisible(not self._frame_refs)
-            self.set_time_ms(0)
-        else:
-            self.save_button.setEnabled(False)
-            self.remove_button.setEnabled(False)
-
-    def show_live_frame(self, frame: dict) -> None:
-        if not self._live:
-            return
-        self.empty_state_widget.hide()
-        self.widget.show()
-        # ScanImage's display window for the channel, when it sends one, so
-        # the preview has the contrast of the ScanImage window.
-        self.current_frame = self._to_rgb(frame["pixels"], frame.get("lut"))
-        # Arrival time is not stimulation time. Never draw planned stimulation
-        # crosses on live frames without a measured synchronization mapping.
-        self._set_crosses(set())
-        self._draw_current_frame()
-
     def _apply_channels(self) -> None:
         if self._channels > 1 and self._shown_channel > 0:
             self._frame_refs = self._all_frame_refs[
@@ -413,7 +389,7 @@ class CalciumVideoWidget(FPLWidget):
             not self.ids_checkbox.isChecked()
             or self._frame_graphic is None
             or self._cellpose_data is None
-            # A downsampled live preview does not line up with the cells.
+            # A frame that does not share the masks' pixel grid.
             or self._frame_graphic.data.value.shape[:2]
             != self._cellpose_data.segmentation_array.shape
         ):
@@ -640,7 +616,7 @@ class CalciumVideoWidget(FPLWidget):
 
     def frame_index_at(self, time_ms: float) -> int | None:
         """Index of the movie frame shown at ``time_ms``; None without a movie."""
-        if self._live or not self._frame_refs or self._fps is None:
+        if not self._frame_refs or self._fps is None:
             return None
         if self._frame_times is not None:
             index = (
@@ -680,8 +656,8 @@ class CalciumVideoWidget(FPLWidget):
             self._frame_graphic is not None
             and self._frame_graphic.data.value.shape != frame.shape
         ):
-            # Live previews are downsampled, so they rarely match the recorded
-            # movie; fastplotlib images cannot change shape in place.
+            # Movies of another size; fastplotlib images cannot change shape
+            # in place.
             with contextlib.suppress(Exception):
                 self.subplot.remove_graphic(self._frame_graphic)
             self._frame_graphic = None
@@ -710,7 +686,7 @@ class CalciumVideoWidget(FPLWidget):
         self.set_time_ms(round(time_s * 1000))
 
     def _on_save_labeled_video_clicked(self) -> None:
-        if self._live or not self._frame_refs or self._fps is None:
+        if not self._frame_refs or self._fps is None:
             return
         current = self._current_frame_index or 0
         options = SaveImagingDialog(
@@ -756,7 +732,7 @@ class CalciumVideoWidget(FPLWidget):
         all by default) of the shown channel. ``original`` keeps the recorded
         pixel values as a TIFF stack; otherwise the frames are saved as
         displayed, with the stimulated cells marked."""
-        if self._live or not self._frame_refs or self._fps is None:
+        if not self._frame_refs or self._fps is None:
             return
         last = len(self._frame_refs) - 1 if last is None else last
         indices = range(max(0, first), min(len(self._frame_refs) - 1, last) + 1)

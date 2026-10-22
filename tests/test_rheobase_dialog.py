@@ -3,7 +3,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
-from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -14,6 +13,7 @@ from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from tests.fake_stimulation_host import FakeStimulationHost
 
 
 class _FakeProject:
@@ -28,19 +28,23 @@ class _FakeProject:
         )
         self.stim_arrays: dict[str, StimArray] = {}
         self.spikes: dict[str, SpikeData] = {}
+        #: Imported calcium traces, by name.
+        self.traces: dict[str, TraceData] = {}
         self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
     def get_data_names(self, data_type: type) -> list[str]:
         if data_type is SpikeData:
             return list(self.spikes)
         assert data_type is TraceData
-        return [self.trace.name] if self.trace_available else []
+        return ([self.trace.name] if self.trace_available else []) + list(self.traces)
 
     def get_data(self, name: str, data_type: type):
         if data_type is SpikeData:
             return self.spikes[name]
-        assert name == self.trace.name
         assert data_type is TraceData
+        if name in self.traces:
+            return self.traces[name]
+        assert name == self.trace.name
         return self.trace
 
 
@@ -745,41 +749,16 @@ def test_rheobase_plot_window_is_scrollable(qtbot) -> None:
     assert scroll_areas[0].widgetResizable()
 
 
-class _FakeHost(QtCore.QObject):
-    block_sent = QtCore.Signal(object)
-    block_failed = QtCore.Signal(str)
-    block_completed = QtCore.Signal()
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.phase = "idle"
-        self.sent: list[tuple[int, int, bool]] = []
-        self.cancelled = 0
-
-    def send_block(
-        self, project, stim, start, stop, label="block", *, preserve_amplitude=False
-    ):
-        self.sent.append((start, stop, preserve_amplitude))
-        self.phase = "awaiting_acquisition"
-        self.block_sent.emit(None)
-        return True
-
-    def acquisition_imported(self) -> None:
-        self.phase = "idle"
-        self.block_completed.emit()
-
-    def cancel(self) -> None:
-        self.cancelled += 1
-        self.phase = "idle"
-
-
 def _syscon2_dialog(qtbot):
     project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-    host = _FakeHost()
+    host = FakeStimulationHost()
     editor.stimulation_host = host  # type: ignore[assignment]
     dialog.refresh()
     dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    # Manual delivery: the user runs, records and imports each block.
+    dialog.hardware.chk_automatic.setChecked(False)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.SPIKES_READOUT)
     _use_fixed_duration_strategy(dialog)
     dialog.spn_min_amplitude.setValue(0.1)
     dialog.spn_max_amplitude.setValue(1.0)
@@ -854,7 +833,7 @@ def test_syscon2_reused_dataset_does_not_advance_search(qtbot) -> None:
 def test_syscon2_failure_finishes_routine(qtbot) -> None:
     _project, _editor, dialog, host = _syscon2_dialog(qtbot)
     dialog.start()
-    host.block_failed.emit("pipe closed")
+    host.block_failed.emit(dialog, "pipe closed")
     assert not dialog._running
     assert not dialog.btn_data_imported.isEnabled()
 
@@ -942,3 +921,124 @@ def test_dynamic_syscon_dt_button_resamples_before_start(qtbot, mocker):
     dialog.btn_syscon_dt.click()
     prepare.assert_called_once_with(dialog)
     assert "0.5208125" in dialog.lbl_stim_dt.text()
+
+
+def _dff_trace(dialog, name: str, *, responding: bool) -> TraceData:
+    """ΔF/F of a recording starting with the probe block, as automatic blocks yield."""
+    dt = 1 / 30
+    onset = (
+        dialog._pulse_onset_seconds
+        - dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+    )
+    values = np.zeros((1, 120), dtype=np.float32)
+    if responding:
+        values[0, int(onset / dt) + 1 :] = 0.5
+    return TraceData("dF/F", values, np.array([0]), "dF/F", dt)
+
+
+def _automatic_dialog(qtbot):
+    project, editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.hardware.chk_automatic.setChecked(True)
+    dialog.spn_response_ms.setValue(300.0)
+    return project, editor, dialog, host
+
+
+def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
+    project, _editor, dialog, host = _automatic_dialog(qtbot)
+    assert not dialog.btn_data_imported.isVisibleTo(dialog)
+    assert not dialog.cmb_calcium_readout.isEnabled()
+    dialog.hardware.spn_tail_s.setValue(2.0)
+    dialog.hardware.spn_channel.setValue(2)
+
+    dialog.start()
+
+    assert host.automatic == [True]
+    recording = host.recordings[0]
+    start, stop = dialog._block_range
+    assert recording.stim_block.values.shape[0] == stop - start
+    assert (recording.tail_s, recording.functional_channel) == (2.0, 2)
+    assert host.owner is dialog
+    for i in range(20):
+        if not dialog._running:
+            break
+        name = f"Block {i} :: dF/F"
+        project.traces[name] = _dff_trace(
+            dialog, name, responding=dialog._pending_amplitude >= 0.5
+        )
+        host.complete({"trace": name})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert all(host.automatic)
+
+
+def test_syscon2_automatic_needs_a_recorder(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    host.unavailable = "Connect to ScanImage first."
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+    assert "Connect to ScanImage first." in dialog.log.toPlainText()
+
+
+def test_syscon2_automatic_block_without_trace_finishes(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    host.complete({})
+    assert not dialog._running
+    assert "no calcium trace" in dialog.log.toPlainText()
+
+
+def test_syscon2_ignores_blocks_of_other_routines(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    other = object()
+    host.block_failed.emit(other, "someone else's block failed")
+    host.block_completed.emit(other, None)
+    assert dialog._running
+    assert len(host.sent) == 1
+
+
+def test_syscon2_stop_cancels_only_its_own_block(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    host.owner = object()  # another routine's block is in flight now
+    dialog.stop()
+    assert host.cancelled == 0
+    assert not dialog._running
+
+
+def test_syscon2_dispose_stops_the_routine_and_releases_the_host(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    dialog.dispose()
+    assert not dialog._running
+    assert host.cancelled == 1
+    host.block_completed.emit(dialog, None)  # no longer connected
+    assert not dialog._running
+
+
+def test_syscon2_manual_dff_readout_uses_the_imported_trace(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.DFF_READOUT)
+    dialog.spn_response_ms.setValue(300.0)
+    assert dialog.cmb_trace.isEnabled()
+    assert not dialog.cmb_spikes.isEnabled()
+    dialog.start()
+    project.traces["rec0"] = _dff_trace(dialog, "rec0", responding=True)
+    dialog.btn_data_imported.click()
+    assert dialog._last_measured_dataset == "rec0"
+    assert len(host.sent) == 2
+
+
+def test_hardware_settings_edit_the_hosts_export_settings(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.hardware.spn_power_mw.setValue(23.0)
+    dialog.hardware.cmb_laser.setCurrentIndex(dialog.hardware.cmb_laser.findData(1100))
+    dialog.hardware.chk_spiral.setChecked(True)
+    assert host.settings.target_power_mw == 23.0
+    assert host.settings.laser_wavelength_nm == 1100
+    assert host.settings.spiralling
+    host.settings = host.settings.__class__(config_text="", target_power_mw=5.0)
+    dialog.refresh()
+    assert dialog.hardware.spn_power_mw.value() == 5.0
