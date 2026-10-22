@@ -1,8 +1,7 @@
 # ScanImage acquisition on the same PC
 
 The **ScanImage (imaging)** tab of the **Stimulation setup** pane connects to a
-running ScanImage MATLAB session; the **Image acquisition** toolbar button shows
-it. It starts Focus, starts or externally arms a recording, aborts an
+running ScanImage MATLAB session (View → Show Stimulation setup). It starts Focus, starts or externally arms a recording, aborts an
 acquisition, and opens completed TIFF files in the Imaging tab. ScanImage owns
 the scanner, its own live display and the original recording.
 
@@ -40,7 +39,7 @@ NeuroSeq uses Grab, not Loop, so the loop repeat period is not used.
    `numpy` and `tifffile`, in the helper interpreter. A current unpinned engine
    package is not necessarily compatible with older MATLAB.
 
-3. Click **Image acquisition** in the toolbar, select that Python executable and enter
+3. Open the **ScanImage (imaging)** tab of the Stimulation setup pane, select that Python executable and enter
    the shared session name. Click **Connect**. The helper connects only to an
    existing session with that name; it never starts another MATLAB instance.
    Required ScanImage properties and user-function registration are probed.
@@ -110,7 +109,7 @@ playback. When the shown recording did not save it, its first saved channel is
 shown instead, with a message; the setting itself stays, since dynamic input
 routines measure that channel.
 
-The imaging data selector next to **Image acquisition** lists all imaging data in
+The imaging data selector next to **Design dynamic input** lists all imaging data in
 the project: imported TIFF/GIF/movie files and finished recordings. **Import
 Imaging Data** adds to this list, and **Remove imaging data** removes only the
 selected entry.

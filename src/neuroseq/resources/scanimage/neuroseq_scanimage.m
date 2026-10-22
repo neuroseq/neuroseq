@@ -153,7 +153,7 @@ publicRun = run;
 if isfield(publicRun,'old'), publicRun = rmfield(publicRun,'old'); end
 out = struct('acq_state',hSI.acqState, 'run',publicRun, 'fps',hSI.hRoiManager.scanFrameRate, ...
     'matlab_version',version, 'channels',hSI.hChannels.channelDisplay, 'files',{{}});
-% For the Image acquisition dialog's channel choice.
+% For the ScanImage tab's channel choice.
 out.channels_available = hSI.hChannels.channelsAvailable;
 out.saved_channels = hSI.hChannels.channelSave;
 out.can_abort = ownedFocus || any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}));
