@@ -313,6 +313,8 @@ class StdpWindowDialog(SelfRaisingDialog):
     SYSCON2_TARGET = "SysCon2 (calcium imaging)"
     CALCIUM_READOUT = "Calcium response (dF/F) change (%)"
     CALCIUM_BASELINE_MS = 100.0
+    #: Pulse amplitude a hardware target starts with (a fraction of target power).
+    HARDWARE_AMPLITUDE = 0.8
 
     def __init__(
         self,
@@ -475,7 +477,10 @@ class StdpWindowDialog(SelfRaisingDialog):
             "through SysCon2 and measure the calcium response of the postsynaptic cell "
             "in data you import (continuous sweep only - cells cannot be reset)."
         )
-        self.cmb_target.currentTextChanged.connect(self._update_target_controls)
+        #: Pulse amplitude per target: Brian2 uses stim units, SysCon2 fractions.
+        self._amplitude_by_target: dict[str, float] = {}
+        self._amplitude_target = self.cmb_target.currentText()
+        self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         form.addRow("Stimulation target:", self.cmb_target)
         form.addRow("Readout:", self.cmb_readout)
         form.addRow("Sweep mode:", self.cmb_sweep_mode)
@@ -722,7 +727,9 @@ class StdpWindowDialog(SelfRaisingDialog):
             maximum = max(0, n_neurons - 1)
             self.spn_presynaptic.setMaximum(maximum)
             self.spn_postsynaptic.setMaximum(maximum)
-            self.lbl_units.setText(stim.units)
+            self.lbl_units.setText(
+                "× target power" if self._target_is_syscon2() else stim.units
+            )
             self.lbl_stim_name.setText(stim.name)
             self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
@@ -786,6 +793,18 @@ class StdpWindowDialog(SelfRaisingDialog):
             not self._target_is_syscon2()
             and self.cmb_sweep_mode.currentText() == self.RESET_MODE
         )
+
+    def _on_target_changed(self, target: str) -> None:
+        """Keep each target's pulse amplitude (stim units vs fraction of power)."""
+        self._amplitude_by_target[self._amplitude_target] = self.spn_amplitude.value()
+        self._amplitude_target = target
+        value = self._amplitude_by_target.get(target)
+        if value is None and target != self.SIMULATION_TARGET:
+            value = self.HARDWARE_AMPLITUDE
+        if value is not None:
+            self.spn_amplitude.setValue(value)
+        self.refresh()
+        self._update_target_controls()
 
     def _automatic(self) -> bool:
         """SysCon2 blocks are run and recorded without the user (issue #651)."""
@@ -1640,7 +1659,6 @@ class StdpWindowDialog(SelfRaisingDialog):
             host.cancel(owner=self)
         self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
-        self._append_log(message)
 
     def _on_backend_finished(self, message: str) -> None:
         # The backend can call finish() on itself (e.g. sweep complete)

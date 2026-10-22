@@ -1220,3 +1220,41 @@ def test_dispose_disconnects_exactly_what_it_connected(qtbot) -> None:
     old.block_sent.emit(dialog, None)
     old.block_completed.emit(dialog, None)
     assert not dialog._running
+
+
+def test_each_target_keeps_its_own_amplitudes(qtbot) -> None:
+    """Brian2 amplitudes are stim units; hardware ones fractions (0-1)."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    dialog.refresh()
+    assert (dialog.spn_min_amplitude.value(), dialog.spn_max_amplitude.value()) == (
+        1.0,
+        100.0,
+    )
+    dialog.spn_max_amplitude.setValue(80.0)
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert (
+        dialog.spn_min_amplitude.value(),
+        dialog.spn_max_amplitude.value(),
+        dialog.spn_fixed_amplitude.value(),
+    ) == dialog.HARDWARE_AMPLITUDES[:3]
+    assert dialog.lbl_units.text() == "× i_offset max"
+    dialog.spn_max_amplitude.setValue(0.7)
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_max_amplitude.value() == 80.0
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.spn_max_amplitude.value() == 0.7
+
+
+def test_bss2_starts_with_valid_amplitudes_and_logs_once(qtbot) -> None:
+    """The reported run: switching target and pressing Start must not be refused,
+    and a refusal is logged once."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    dialog.start()
+    assert dialog._running and len(host.sent) == 1
+    dialog.stop()
+    assert dialog.log.toPlainText().count("Routine stopped.") == 1

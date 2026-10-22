@@ -930,3 +930,15 @@ def test_target_is_locked_while_the_sweep_runs(qtbot) -> None:
     assert dialog._running and not dialog.cmb_target.isEnabled()
     dialog.stop()
     assert dialog.cmb_target.isEnabled()
+
+
+def test_syscon2_pulse_amplitude_is_a_fraction_of_its_own(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.stimulation_host = FakeStimulationHost()  # type: ignore[assignment]
+    dialog.refresh()
+    assert dialog.spn_amplitude.value() == 100.0
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    assert dialog.spn_amplitude.value() == dialog.HARDWARE_AMPLITUDE
+    assert dialog.lbl_units.text() == "× target power"
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_amplitude.value() == 100.0

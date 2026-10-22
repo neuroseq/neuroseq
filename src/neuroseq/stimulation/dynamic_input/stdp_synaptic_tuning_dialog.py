@@ -962,7 +962,6 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
 
     def _finish(self, message: str) -> None:
         self._backend.finish(message)
-        self._append_log(message)
 
     def _on_backend_finished(self, message: str) -> None:
         # The backend can call finish() on itself (e.g. target reached)

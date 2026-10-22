@@ -445,6 +445,9 @@ class RheobaseDialog(SelfRaisingDialog):
     SPIKES_READOUT = "Deconvolved spikes"
     #: Baseline before each probe pulse for the calcium response.
     CALCIUM_BASELINE_MS = 250.0
+    #: Amplitudes (min, max, fixed, tolerance) a hardware target starts with: its
+    #: amplitudes are fractions (0-1) of the target power / i_offset max.
+    HARDWARE_AMPLITUDES = (0.1, 1.0, 0.5, 0.05)
 
     def __init__(
         self,
@@ -623,7 +626,11 @@ class RheobaseDialog(SelfRaisingDialog):
             "each probe as a constant current on the neuromorphic chip (connect in "
             "Stimulation setup > BrainScaleS-2) and count its spikes."
         )
-        self.cmb_target.currentTextChanged.connect(self._update_target_controls)
+        #: Amplitude settings (min, max, fixed, tolerance) per target, so switching
+        #: between Brian2 (stim units) and hardware (fractions) keeps both.
+        self._amplitudes_by_target: dict[str, tuple[float, float, float, float]] = {}
+        self._amplitude_target = self.cmb_target.currentText()
+        self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         self.cmb_spikes = QtWidgets.QComboBox(self)
         self.cmb_spikes.setToolTip(
             "Imported spike dataset (deconvolved calcium) holding the latest probe's "
@@ -915,8 +922,8 @@ class RheobaseDialog(SelfRaisingDialog):
             stim = modifier.stim_array
             n_neurons = stim.values.shape[1]
             self.spn_neuron.setMaximum(max(0, n_neurons - 1))
-            self.lbl_units.setText(stim.units)
-            self.lbl_fixed_units.setText(stim.units)
+            self.lbl_units.setText(self._amplitude_units(stim.units))
+            self.lbl_fixed_units.setText(self._amplitude_units(stim.units))
             self.lbl_stim_name.setText(stim.name)
             self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
@@ -1025,6 +1032,39 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _target_is_bss2(self) -> bool:
         return self.cmb_target.currentText() == self.BSS2_TARGET
+
+    def _amplitude_units(self, stim_units: str) -> str:
+        """What amplitudes mean for the current target."""
+        if self._target_is_bss2():
+            return "× i_offset max"
+        if self._target_is_syscon2():
+            return "× target power"
+        return stim_units
+
+    def _amplitude_spins(self) -> tuple[QtWidgets.QDoubleSpinBox, ...]:
+        return (
+            self.spn_min_amplitude,
+            self.spn_max_amplitude,
+            self.spn_fixed_amplitude,
+            self.spn_tolerance,
+        )
+
+    def _on_target_changed(self, target: str) -> None:
+        """Keep each target's amplitudes: Brian2 uses stim units, the hardware
+        targets fractions (0-1), so one set never fits both."""
+        spins = self._amplitude_spins()
+        previous = self._amplitude_target
+        low, high, fixed, tolerance = (spin.value() for spin in spins)
+        self._amplitudes_by_target[previous] = (low, high, fixed, tolerance)
+        self._amplitude_target = target
+        values = self._amplitudes_by_target.get(target)
+        if values is None and target != self.SIMULATION_TARGET:
+            values = self.HARDWARE_AMPLITUDES
+        if values is not None:
+            for spin, value in zip(spins, values, strict=True):
+                spin.setValue(value)
+        self.refresh()
+        self._update_target_controls()
 
     def _hardware_name(self) -> str:
         return "BrainScaleS-2" if self._target_is_bss2() else "SysCon2"
@@ -1772,7 +1812,6 @@ class RheobaseDialog(SelfRaisingDialog):
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
-        self._append_log(message)
 
     @property
     def _running(self) -> bool:
