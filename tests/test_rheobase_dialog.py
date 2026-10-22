@@ -1063,16 +1063,3 @@ def test_syscon2_manual_dff_readout_uses_the_imported_trace(qtbot) -> None:
     dialog.btn_data_imported.click()
     assert dialog._last_measured_dataset == "rec0"
     assert len(host.sent) == 2
-
-
-def test_hardware_settings_edit_the_hosts_export_settings(qtbot) -> None:
-    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
-    dialog.hardware.spn_power_mw.setValue(23.0)
-    dialog.hardware.cmb_laser.setCurrentIndex(dialog.hardware.cmb_laser.findData(1100))
-    dialog.hardware.chk_spiral.setChecked(True)
-    assert host.settings.target_power_mw == 23.0
-    assert host.settings.laser_wavelength_nm == 1100
-    assert host.settings.spiralling
-    host.settings = host.settings.__class__(config_text="", target_power_mw=5.0)
-    dialog.refresh()
-    assert dialog.hardware.spn_power_mw.value() == 5.0

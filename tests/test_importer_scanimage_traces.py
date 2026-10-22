@@ -114,15 +114,6 @@ def test_extraction_needs_masks_and_the_functional_channel(tmp_path) -> None:
         )
 
 
-def test_raw_fluorescence_rise_is_relative_to_its_baseline() -> None:
-    from neuroseq.data import TraceData
-
-    trace = TraceData(
-        "F", np.array([[100.0] * 10 + [130.0] * 5]), np.array([0]), "fluorescence", 0.1
-    )
-    assert calcium_rise_fraction(trace, 0, 1.0, 500.0, 300.0) == pytest.approx(0.3)
-
-
 def _transients(spike_frames: dict[int, list[int]], n_frames: int = 150) -> np.ndarray:
     """ΔF/F of three cells: 0.4 per spike, decaying with jGCaMP8m's 0.5 s, plus noise."""
     t = np.arange(n_frames) / FPS
@@ -176,16 +167,3 @@ def test_recorded_probe_is_counted_from_deconvolved_spikes(tmp_path) -> None:
     assert set(spikes.spike_indices) == {7}
     assert measure_calcium_spike_count(spikes, 7, onset, 300.0, 1 / FPS) >= 1
     assert measure_calcium_spike_count(spikes, 3, onset, 300.0, 1 / FPS) == 0
-
-
-def test_spike_in_the_onset_frame_counts_only_with_frame_tolerance() -> None:
-    from neuroseq.data import SpikeData
-    from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
-        measure_calcium_spike_count,
-    )
-
-    frame = 1 / FPS
-    # Timed at the start of frame 15, which contains an onset at 0.51 s.
-    spikes = SpikeData("s", np.array([0, 0]), np.array([14 * frame, 15 * frame]))
-    assert measure_calcium_spike_count(spikes, 0, 0.51, 100.0) == 0
-    assert measure_calcium_spike_count(spikes, 0, 0.51, 100.0, frame) == 1

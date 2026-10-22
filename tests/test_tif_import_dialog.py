@@ -752,27 +752,6 @@ def test_pipeline_progress_dialog_details_toggle(qtbot):
     assert dialog._log_view.isHidden()
 
 
-@pytest.mark.parametrize(
-    "seg, expected",
-    [
-        (
-            np.array([[-1, 0], [1, -1]], dtype=np.int32),
-            np.array([[0, 1], [2, 0]], dtype=np.int32),
-        ),
-        (
-            np.array([[-1, -1], [-1, -1]], dtype=np.int32),
-            np.array([[0, 0], [0, 0]], dtype=np.int32),
-        ),
-    ],
-)
-def test_cellpose_result_to_masks_round_trip(seg, expected):
-    from neuroseq.importers.importer_tif import cellpose_result_to_masks
-
-    fake_result = MagicMock()
-    fake_result.segmentation_array = seg
-    np.testing.assert_array_equal(cellpose_result_to_masks(fake_result), expected)
-
-
 def test_browse_tifs_dedupes_added_paths(qtbot, mocker, tmp_path):
     from neuroseq.importers.tif_import_dialog import TifImportDialog
 

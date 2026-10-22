@@ -271,10 +271,8 @@ class SysCon2Panel(QtWidgets.QWidget):
 
     @_export_settings.setter
     def _export_settings(self, settings: SysconExportSettings | None) -> None:
-        if self._project is None or settings == self._project.syscon_export_settings:
-            return
-        self._project.syscon_export_settings = settings
-        self._project.mark_dirty()
+        if self._project is not None:
+            self._project.set_syscon_export_settings(settings)
 
     @property
     def export_settings(self) -> SysconExportSettings | None:
@@ -1020,7 +1018,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         if dialog.output_folder is not None:
             folder = str(dialog.output_folder)
             if self._project is not None:
-                self._project.device_folders["syscon_export"] = folder
+                self._project.set_device_folder("syscon_export", folder)
             if self._settings is not None:
                 self._settings.syscon_export_directory = folder
 

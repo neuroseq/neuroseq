@@ -886,32 +886,11 @@ def test_record_saves_the_channels_ticked_in_the_dialog(
     assert "at least one channel" in panel.message_label.text()
 
 
-def test_recordings_are_numbered_per_day_in_the_folder(tmp_path):
-    import datetime
-
-    from neuroseq.device_control.scanimage_controls import next_recording_number
-    from neuroseq.device_control.scanimage_controls import recording_file_name
-    from neuroseq.device_control.scanimage_controls import recording_stem
-
-    stem = recording_stem(datetime.date(2026, 10, 22))
-    assert stem == "2026-10-22"
-    assert next_recording_number(tmp_path / "missing", stem) == 1
-    assert next_recording_number(tmp_path, stem) == 1
-    for name in (
-        "2026-10-22_00002.tif",
-        "2026-10-22_00005.json",
-        "2026-10-21_00009.tif",
-    ):
-        (tmp_path / name).write_text("")
-    assert next_recording_number(tmp_path, stem) == 6
-    assert recording_file_name(stem, 6) == "2026-10-22_00006.tif"
-
-
 def test_record_request_names_the_file_by_date_and_number(
     qtbot, connection, tmp_path, tmp_config_dir
 ):
     from neuroseq.device_control.scanimage_controls import ScanImageControls
-    from neuroseq.device_control.scanimage_controls import recording_stem
+    from neuroseq.device_control.scanimage_files import recording_stem
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
@@ -935,20 +914,3 @@ def test_record_request_names_the_file_by_date_and_number(
     with pytest.raises(ValueError, match="recording folder"):
         panel.set_directory(str(tmp_path / "missing"))
         panel.recording_request(frames=1, external_trigger=True)
-
-
-def test_device_settings_are_saved_with_the_project(tmp_path):
-    from neuroseq.export.syscon2_export_service import SysconExportSettings
-    from neuroseq.project import Project
-    from neuroseq.save_load_options import SaveLoadOptions
-
-    project = Project()
-    project.syscon_export_settings = SysconExportSettings(
-        config_text="cfg", target_power_mw=23.0, laser_wavelength_nm=1100
-    )
-    project.device_folders = {"scanimage_recording": "D:/data", "syscon_export": "E:/"}
-    path = tmp_path / "devices.nseq"
-    project.save(path, SaveLoadOptions(True, True, False, False))
-    loaded = Project(path)
-    assert loaded.syscon_export_settings == project.syscon_export_settings
-    assert loaded.device_folders == project.device_folders

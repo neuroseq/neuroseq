@@ -139,10 +139,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self.controls.set_directory(folder)
 
     def _remember_directory(self, directory: str) -> None:
-        project = self._project()
-        if project.device_folders.get(RECORDING_FOLDER) != directory:
-            project.device_folders[RECORDING_FOLDER] = directory
-            project.mark_dirty()
+        self._project().set_device_folder(RECORDING_FOLDER, directory)
 
     def _record(self, run_id: str) -> dict | None:
         """The project's record of ``run_id``; ``None`` if the project was replaced."""

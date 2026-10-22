@@ -1039,3 +1039,24 @@ def test_roi_average_pipeline_stops_when_progress_raises_cancelled(tmp_path):
             [path], masks, TifPipelineParams(nchannels=1), progress=progress
         )
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "seg, expected",
+    [
+        (
+            np.array([[-1, 0], [1, -1]], dtype=np.int32),
+            np.array([[0, 1], [2, 0]], dtype=np.int32),
+        ),
+        (
+            np.array([[-1, -1], [-1, -1]], dtype=np.int32),
+            np.array([[0, 0], [0, 0]], dtype=np.int32),
+        ),
+    ],
+)
+def test_cellpose_result_to_masks_round_trip(seg, expected):
+    from neuroseq.importers.importer_tif import cellpose_result_to_masks
+
+    fake_result = MagicMock()
+    fake_result.segmentation_array = seg
+    np.testing.assert_array_equal(cellpose_result_to_masks(fake_result), expected)

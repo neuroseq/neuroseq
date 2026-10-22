@@ -363,6 +363,20 @@ class Project:
                 ProjectCommand(label, lambda: redo(before), lambda: undo(after))
             )
 
+    def set_syscon_export_settings(self, settings: SysconExportSettings | None) -> None:
+        """Store the holographic export options used by the SysCon2 panel and routines."""
+        if settings == self.syscon_export_settings:
+            return
+        self.syscon_export_settings = settings
+        self.mark_dirty()
+
+    def set_device_folder(self, purpose: str, folder: str) -> None:
+        """Remember the folder this project's ``purpose`` workflow used last."""
+        if self.device_folders.get(purpose) == folder:
+            return
+        self.device_folders[purpose] = folder
+        self.mark_dirty()
+
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
         names = [name for name in dict.fromkeys(names) if name in self.experiments]

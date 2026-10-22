@@ -15,6 +15,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
@@ -1522,3 +1523,31 @@ def test_import_project_marks_dirty(tmp_path: Path) -> None:
     assert project.dirty is False
     project.import_project(tmp_file, SaveLoadOptions(True, True, True, True))
     assert project.dirty is True
+
+
+def test_device_settings_are_saved_with_the_project(tmp_path):
+    project = Project()
+    project.syscon_export_settings = SysconExportSettings(
+        config_text="cfg", target_power_mw=23.0, laser_wavelength_nm=1100
+    )
+    project.device_folders = {"scanimage_recording": "D:/data", "syscon_export": "E:/"}
+    path = tmp_path / "devices.nseq"
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    loaded = Project(path)
+    assert loaded.syscon_export_settings == project.syscon_export_settings
+    assert loaded.device_folders == project.device_folders
+
+
+def test_device_settings_setters_mark_the_project_dirty_only_on_change():
+    project = Project()
+    project.dirty = False
+    settings = SysconExportSettings(config_text="cfg")
+    project.set_syscon_export_settings(settings)
+    project.set_device_folder("syscon_export", "E:/exports")
+    assert project.dirty
+    assert project.syscon_export_settings is settings
+    assert project.device_folders == {"syscon_export": "E:/exports"}
+    project.dirty = False
+    project.set_syscon_export_settings(SysconExportSettings(config_text="cfg"))
+    project.set_device_folder("syscon_export", "E:/exports")
+    assert not project.dirty
