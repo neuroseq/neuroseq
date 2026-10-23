@@ -585,6 +585,9 @@ class RheobaseDialog(SelfRaisingDialog):
         #: What the host reported for the block that just completed (see
         #: SysCon2StimulationHost.block_completed); None for a manual import.
         self._block_payload: object = None
+        #: End of the last block delivered to hardware (samples): the stim array
+        #: keeps everything up to here when a hardware routine ends.
+        self._delivered_end_sample = 0
         #: Names this SysCon2 run's folder and block files (see routine_run_name).
         self._run_name: str | None = None
         #: The (signal, slot) pairs this dialog connected, by stimulation host.
@@ -1305,6 +1308,8 @@ class RheobaseDialog(SelfRaisingDialog):
             self._append_start_sample = (
                 self.editor.current_stim_array_last_stimulus_sample()
             )
+        # Nothing delivered yet: ending now keeps the array up to here.
+        self._delivered_end_sample = self._append_start_sample
         self._last_measured_dataset = None
         self._run_name = routine_run_name("rheobase")
         self._append_log(
@@ -1345,6 +1350,8 @@ class RheobaseDialog(SelfRaisingDialog):
             self._append_start_sample = (
                 self.editor.current_stim_array_last_stimulus_sample()
             )
+        # Nothing delivered yet: ending now keeps the array up to here.
+        self._delivered_end_sample = self._append_start_sample
         # One scale and speed-up for the whole search, whatever happens in the tab.
         self._bss2_settings = host.current_settings()
         self._bss2_warnings_logged = False
@@ -1533,6 +1540,8 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def _on_block_completed(self, owner: object, payload: object) -> None:
         if owner is self and self._running:
+            # Kept in the array when the routine ends (see _on_backend_finished).
+            self._delivered_end_sample = self._block_range[1]
             self._block_payload = payload
             self._backend.simulation_finished()
 
@@ -2060,7 +2069,13 @@ class RheobaseDialog(SelfRaisingDialog):
         # tail. It is also what restores the dialog after start() minimized
         # it out of the way of the stim array/traces.
         self.showNormal()
-        self.editor.reset_stim_array()
+        if self._target_is_syscon2() or self._target_is_bss2():
+            # Delivered blocks are not simulated: keep them, drop only the
+            # padding (and a block placed but never delivered) after them.
+            dt = float(self._require_stim().dt)
+            self.editor.trim_stim_array_after(self._delivered_end_sample * dt)
+        else:
+            self.editor.reset_stim_array()
         self._array_cursor = None
         self.btn_data_imported.setEnabled(False)
         self.btn_start.setEnabled(True)

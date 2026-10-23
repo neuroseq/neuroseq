@@ -459,6 +459,25 @@ class StimEditor(QtWidgets.QWidget):
             return  # already at (or within a sample of) the simulation head
         self._apply_trim(target_secs, only_stim_name=stim.name)
 
+    def trim_stim_array_after(self, end_seconds: float) -> None:
+        """Trim the current stim array to ``end_seconds`` (never below the
+        simulation head), removing only the tail after it.
+
+        Hardware routines (SysCon2, BrainScaleS-2) use this instead of
+        :meth:`reset_stim_array`: their delivered blocks are not simulated, so the
+        simulation head would discard them.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        stim = self.current_stim_modifier.stim_array
+        current_secs = float(stim.dt) * stim.values.shape[0]
+        target_secs = max(
+            end_seconds, self.project.b2_model.get_sim_time_secs(), float(stim.dt)
+        )
+        if current_secs <= target_secs + float(stim.dt) * 0.5:
+            return
+        self._apply_trim(target_secs, only_stim_name=stim.name)
+
     def current_stim_array_has_unsimulated_tail(self) -> bool:
         """Would reset_stim_array() actually discard nonzero content?
 

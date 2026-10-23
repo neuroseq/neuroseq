@@ -94,6 +94,9 @@ class _FakeEditor:
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
 
+    def trim_stim_array_after(self, end_seconds: float) -> None:
+        self.trimmed_after = end_seconds
+
     def current_stim_array_has_unsimulated_tail(self) -> bool:
         stim = self.current_stim_modifier.stim_array
         target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))

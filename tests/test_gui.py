@@ -4653,3 +4653,99 @@ def test_main_menu_export_uses_stored_folder_and_settings(qtbot, monkeypatch, tm
     assert panel._settings.syscon_export_directory == str(chosen)
     gui._close_confirmed = True
     gui.close()
+
+
+def test_hardware_rheobase_keeps_its_delivered_pulses_in_the_stim_array(qtbot):
+    """The probes delivered to BrainScaleS-2 stay in the input array when the
+    sweep ends; only the padding after the last delivered probe goes."""
+    from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
+    from tests.fake_stimulation_host import FakeBss2Host
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    project = default_project()
+    gui.update_project(project)
+    stim = gui.stim_editor.current_stim_modifier.stim_array
+    gui.stim_editor.zero_current_stim_array()
+    host = FakeBss2Host()
+    gui.stim_editor.bss2_host = host  # type: ignore[assignment]
+    dialog = RheobaseDialog(gui.stim_editor)
+    qtbot.addWidget(dialog)
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    dialog.cmb_sweeping_strategy.setCurrentText(
+        dialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+    )
+    dialog.spn_repeats.setValue(1)
+    dialog.spn_tolerance.setValue(0.3)
+    dialog.start()
+    for _ in range(20):
+        if not dialog._running:
+            break
+        onset = dialog._pulse_onset_seconds - dialog._block_range[0] * float(stim.dt)
+        times = [onset + 0.002] if dialog._pending_amplitude >= 0.5 else []
+        host.complete(
+            {"block_spikes": SpikeData("s", np.zeros(len(times)), np.array(times))}
+        )
+    assert not dialog._running
+    stim = gui.stim_editor.current_stim_modifier.stim_array
+    last_block_end = dialog._delivered_end_sample
+    assert last_block_end > 0
+    # Every delivered probe is still there, and nothing after the last one.
+    assert stim.values.shape[0] == last_block_end
+    pulses = np.flatnonzero(np.diff((stim.values[:, 0] > 0).astype(int)) == 1)
+    assert len(pulses) == len(dialog._samples)
+    project.dirty = False
+
+
+def test_hardware_rheobase_drops_a_probe_that_was_never_delivered(qtbot):
+    from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
+    from tests.fake_stimulation_host import FakeBss2Host
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    project = default_project()
+    gui.update_project(project)
+    gui.stim_editor.zero_current_stim_array()
+    host = FakeBss2Host()
+    gui.stim_editor.bss2_host = host  # type: ignore[assignment]
+    dialog = RheobaseDialog(gui.stim_editor)
+    qtbot.addWidget(dialog)
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    dialog.start()
+    dialog.stop()  # before the chip ran the first probe
+    stim = gui.stim_editor.current_stim_modifier.stim_array
+    assert not np.any(stim.values)
+    project.dirty = False
+
+
+def test_refused_hardware_rheobase_keeps_the_existing_input(qtbot, monkeypatch):
+    from neuroseq.stimulation.dynamic_input import rheobase_dialog
+    from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
+    from tests.fake_stimulation_host import FakeBss2Host
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    project = default_project()
+    gui.update_project(project)
+    before = gui.stim_editor.current_stim_modifier.stim_array.values.copy()
+    assert np.any(before)
+    gui.stim_editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    # The start prompt is answered "continue after the last stimulus".
+    monkeypatch.setattr(
+        rheobase_dialog, "confirm_start_routine", lambda *_args: "continue"
+    )
+    dialog = RheobaseDialog(gui.stim_editor)
+    qtbot.addWidget(dialog)
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    dialog.spn_max_amplitude.setValue(5.0)  # refused: above 1
+    dialog.start()
+    assert not dialog._running
+    after = gui.stim_editor.current_stim_modifier.stim_array.values
+    assert np.any(after)
+    np.testing.assert_array_equal(after[: before.shape[0]], before[: after.shape[0]])
+    last = int(np.flatnonzero(np.any(before != 0, axis=1))[-1])
+    assert after.shape[0] > last
+    project.dirty = False
