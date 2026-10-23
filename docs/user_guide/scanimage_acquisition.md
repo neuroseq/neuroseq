@@ -85,6 +85,16 @@ its configured trigger input. Otherwise it starts through software.
 The first-frame timeout requests an abort if no acquisition start is observed.
 "Waiting for first frame" is not proof that hardware is ready to accept a TTL.
 
+### Field of view for cell segmentation
+
+**Grab FOV for segmentation** records a short recording (30 frames by default,
+started by software, without stimulation), averages its **Functional channel**
+into one image and saves it beside the recording as
+`<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
+Cellpose on it. Because the image comes from the same scan, the masks share the
+recordings' pixel grid, as the dynamic input routines need. The snapshot is
+listed in the acquisition history but adds no data group or imaging entry.
+
 NeuroSeq reports state from ScanImage, waits for completed/aborted acquisition
 events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame

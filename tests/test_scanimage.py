@@ -936,3 +936,16 @@ def test_record_request_names_the_file_by_date_and_number(
     with pytest.raises(ValueError, match="recording folder"):
         panel.set_directory(str(tmp_path / "missing"))
         panel.recording_request(frames=1, external_trigger=True)
+
+
+def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    segment = mocker.patch.object(gui, "btn_import_cellpose_data_clicked")
+    image = tmp_path / "2026-10-23_00001_mean.tif"
+    gui.acquisition_controller.fov_ready.emit(str(image))
+    segment.assert_called_once_with(segment=image)
+    gui._close_confirmed = True
+    gui.close()

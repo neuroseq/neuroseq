@@ -25,6 +25,8 @@ from neuroseq.gui_settings import GuiSettings
 
 class ScanImageControls(QtWidgets.QWidget):
     record_requested = QtCore.Signal(object)
+    #: Record a short FOV recording for cell segmentation (``record`` arguments).
+    fov_requested = QtCore.Signal(object)
     channel_changed = QtCore.Signal(int)
     #: The user picked another recording folder (the path as a string).
     directory_changed = QtCore.Signal(str)
@@ -159,6 +161,23 @@ class ScanImageControls(QtWidgets.QWidget):
             actions.addWidget(action_widget)
         actions.addStretch(1)
         layout.addLayout(actions)
+        fov_row = QtWidgets.QHBoxLayout()
+        self.fov_button = QtWidgets.QPushButton("Grab FOV for segmentation")
+        self.fov_button.setToolTip(
+            "Record a few frames, average the functional channel into one image of "
+            "the field of view, and segment the cells in it with Cellpose. The "
+            "image is saved beside the recording as <date>_<number>_mean.tif."
+        )
+        self.fov_button.clicked.connect(self._grab_fov)
+        self.fov_frames_spin = QtWidgets.QSpinBox()
+        self.fov_frames_spin.setRange(1, 10000)
+        self.fov_frames_spin.setValue(30)
+        self.fov_frames_spin.setSuffix(" frames")
+        self.fov_frames_spin.setToolTip("Frames averaged into the FOV image.")
+        fov_row.addWidget(self.fov_button)
+        fov_row.addWidget(self.fov_frames_spin)
+        fov_row.addStretch(1)
+        layout.addLayout(fov_row)
         self.message_label = QtWidgets.QLabel()
         self.message_label.setWordWrap(True)
         layout.addWidget(self.message_label)
@@ -258,6 +277,7 @@ class ScanImageControls(QtWidgets.QWidget):
             self.disconnect_button,
             self.preview_button,
             self.record_button,
+            self.fov_button,
             self.abort_button,
         ):
             widget.setEnabled(connected)
@@ -335,6 +355,17 @@ class ScanImageControls(QtWidgets.QWidget):
             return
         self.record_requested.emit(request)
 
+    def _grab_fov(self) -> None:
+        try:
+            request = self.recording_request(
+                frames=self.fov_frames_spin.value(), external_trigger=False
+            )
+        except ValueError as exc:
+            self.show_message(str(exc))
+            return
+        request["name"] = f"FOV {request['name']}"
+        self.fov_requested.emit(request)
+
     def _status(self, status: dict) -> None:
         self._show_save_channels(status)
         state = status.get("acq_state", "unknown")
@@ -344,7 +375,12 @@ class ScanImageControls(QtWidgets.QWidget):
             f"acquisition: {run.get('state', 'idle')}"
         )
         idle = state == "idle"
-        for widget in (self.record_button, self.preview_button, self.disconnect_button):
+        for widget in (
+            self.record_button,
+            self.fov_button,
+            self.preview_button,
+            self.disconnect_button,
+        ):
             widget.setEnabled(idle and self.connection.run_id is None)
         self.abort_button.setEnabled(not idle and status.get("can_abort", False))
         if (

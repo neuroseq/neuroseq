@@ -522,3 +522,58 @@ def test_failing_to_add_the_traces_fails_the_block(setup, qtbot, mocker):
             _ready_result(run_id, arguments, s.folder)
         )
     assert "could not be added" in failed.args[1]
+
+
+def test_grab_fov_records_averages_and_hands_the_image_to_segmentation(setup, qtbot):
+    import tifffile
+
+    s = setup
+    controls = s.controller.controls
+    controls.fov_frames_spin.setValue(30)
+    controls.channel_spin.setValue(2)
+    with qtbot.waitSignal(controls.fov_requested) as requested:
+        controls.fov_button.setEnabled(True)
+        controls.fov_button.click()
+    arguments = s.command.call_args.args[1]
+    assert requested.args[0]["run_id"] == arguments["run_id"]
+    assert (arguments["frames"], arguments["external_trigger"]) == (30, False)
+    assert arguments["name"].startswith("FOV ")
+    manifest = arguments["manifest"]
+    assert manifest["purpose"] == "fov_for_segmentation"
+    assert "stimulus" not in manifest  # an FOV snapshot is not stimulated
+    assert not list(s.folder.glob("*_stimulus.npy"))
+
+    prefix = f"{arguments['stem']}_{arguments['counter']:05d}"
+    tiff = s.folder / f"{prefix}.tif"
+    pages = []
+    for _ in range(30):
+        pages += [np.full((4, 5), 9, np.int16), np.full((4, 5), 50, np.int16)]
+    tifffile.imwrite(tiff, np.stack(pages))
+    with qtbot.waitSignal(s.controller.fov_ready) as ready:
+        s.controller.scanimage_recording_ready(
+            {
+                "run_id": arguments["run_id"],
+                "status": "completed",
+                "paths": [str(tiff)],
+                "fps": 30.0,
+                "duration_s": 1.0,
+                "channels": [1, 2],
+            }
+        )
+    image_path = s.folder / f"{prefix}_mean.tif"
+    assert ready.args == [str(image_path)]
+    np.testing.assert_allclose(tifffile.imread(image_path), 50.0)  # channel 2
+    # A snapshot for segmentation, not a recording to analyse.
+    assert s.project.experiments == {}
+    assert s.project.calcium_videos == []
+    record = s.project.imaging_acquisitions[-1]
+    assert record["fov_image"] == str(image_path)
+
+
+def test_failed_fov_recording_says_so(setup):
+    s = setup
+    request = s.controller.controls.recording_request(frames=30, external_trigger=False)
+    s.controller.start_fov_recording(request)
+    s.controller.scanimage_status({"run": {"id": request["run_id"], "state": "failed"}})
+    s.connection.run_finished.emit(request["run_id"])
+    assert "without data" in s.controller.controls.message_label.text()

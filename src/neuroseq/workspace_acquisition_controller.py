@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
+import tifffile
 from qtpy import QtCore
 from qtpy import QtWidgets
 
@@ -31,6 +32,7 @@ from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 from neuroseq.importers.importer_scanimage_traces import extract_recording_dff
+from neuroseq.importers.importer_scanimage_traces import functional_channel_mean
 
 if TYPE_CHECKING:
     from neuroseq.data import SpikeData
@@ -67,6 +69,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     """Own acquisition state without owning the shared physical connection."""
 
     recording_added = QtCore.Signal()
+    #: The mean image of a "Grab FOV" recording was saved (its path).
+    fov_ready = QtCore.Signal(str)
     # BlockAcquisition signals, see syscon2_stimulation_host.
     block_armed = QtCore.Signal(str)
     block_recorded = QtCore.Signal(str, object)
@@ -101,6 +105,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._stimulus_files: dict[str, pathlib.Path] = {}
         #: Last reported state of each run started here.
         self._run_states: dict[str, str] = {}
+        #: "Grab FOV" recordings, averaged into one image for cell segmentation.
+        self._fov_runs: set[str] = set()
         #: Running trace extractions, one job each: a routine's next block must not
         #: wait for (or fail because of) a previous, possibly abandoned, one.
         self._extractions: dict[str, BackgroundJob] = {}
@@ -111,6 +117,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         )
         self.controls.channel_changed.connect(self.set_scanimage_channel)
         self.controls.record_requested.connect(self.start_scanimage_recording)
+        self.controls.fov_requested.connect(self.start_fov_recording)
         self.controls.directory_changed.connect(self._remember_directory)
         connection.status_changed.connect(self.scanimage_status)
         connection.recording_ready.connect(self.scanimage_recording_ready)
@@ -167,6 +174,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
         self._remove_metadata_without_recording(run_id)
+        if run_id in self._fov_runs:
+            self._fov_runs.discard(run_id)
+            self.controls.show_message("The FOV recording ended without data.")
         if run_id in self._extracting:
             # The connection ends the run right after recording_ready; the block
             # completes once its traces are extracted.
@@ -191,11 +201,23 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         samples_path.unlink(missing_ok=True)
         samples_path.with_name(f"{prefix}.json").unlink(missing_ok=True)
 
+    def start_fov_recording(self, arguments: dict) -> bool:
+        """Record a few frames whose mean image becomes the FOV to segment."""
+        if not self.start_scanimage_recording(
+            arguments, purpose="fov_for_segmentation"
+        ):
+            return False
+        self._fov_runs.add(arguments["run_id"])
+        self.controls.show_message("Recording the field of view…")
+        return True
+
     def start_scanimage_recording(
         self,
         arguments: dict,
         block: BlockRecording | None = None,
         functional_channel: int | None = None,
+        *,
+        purpose: str | None = None,
     ) -> bool:
         if self.connection.run_id is not None:
             self.controls.show_message("An acquisition is already being finalized.")
@@ -209,7 +231,16 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             # recordings have no verified relation to any stimulus.
             synchronization="stimulation_trigger" if block else "unverified",
         )
-        stim = block.stim_block if block is not None else self._current_stim()
+        if purpose is not None:
+            record["purpose"] = purpose
+        # An FOV snapshot is taken without stimulation: no stimulus to describe.
+        stim = (
+            block.stim_block
+            if block is not None
+            else None
+            if purpose is not None
+            else self._current_stim()
+        )
         samples_path: pathlib.Path | None = None
         if stim is not None:
             record["stimulus"] = stimulus_summary(stim)
@@ -334,6 +365,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             finished_at=datetime.now(UTC).isoformat(),
         )
         record.pop("error", None)
+        if run_id in self._fov_runs:
+            self._fov_runs.discard(run_id)
+            self._save_fov_image(result, record)
+            project.mark_dirty()
+            return
         name = record["name"]
         if name in project.experiments:
             name = f"{name} ({run_id[:8]})"
@@ -358,6 +394,26 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._fail_block(run_id, f"The recording was {result['status']}.")
             return
         self._extract_block(run_id, block, result, name)
+
+    def _save_fov_image(self, result: dict, record: dict) -> None:
+        """Average the functional channel and save it beside the recording."""
+        paths = [pathlib.Path(p) for p in result["paths"]]
+        channel = self.controls.channel_spin.value()
+        try:
+            image = functional_channel_mean(
+                paths, saved_channels=result["channels"], functional_channel=channel
+            )
+            target = paths[0].with_name(f"{paths[0].stem}_mean.tif")
+            tifffile.imwrite(target, image)
+        except (OSError, ValueError) as exc:
+            self.controls.show_message(f"Could not make the FOV image: {exc}")
+            return
+        record["fov_image"] = str(target)
+        self.controls.show_message(
+            f"FOV image saved: {target.name} (mean of channel {channel}); "
+            "segmenting it with Cellpose."
+        )
+        self.fov_ready.emit(str(target))
 
     def _fail_block(self, run_id: str, message: str) -> None:
         self._block_channels.pop(run_id, None)

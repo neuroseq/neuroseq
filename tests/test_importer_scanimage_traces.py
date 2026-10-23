@@ -174,3 +174,17 @@ def test_recorded_probe_is_counted_from_deconvolved_spikes(tmp_path) -> None:
     assert set(spikes.spike_indices) == {7}
     assert measure_calcium_spike_count(spikes, 7, onset, 300.0, 1 / FPS) >= 1
     assert measure_calcium_spike_count(spikes, 3, onset, 300.0, 1 / FPS) == 0
+
+
+def test_fov_mean_averages_only_the_functional_channel(tmp_path) -> None:
+    from neuroseq.importers.importer_scanimage_traces import functional_channel_mean
+
+    path = tmp_path / "fov.tif"
+    _synthetic_recording(path, onset_s=10.0, frames=30)  # no transient in range
+    mean = functional_channel_mean([path], saved_channels=[1, 2], functional_channel=1)
+    assert mean.shape == (6, 8) and mean.dtype == np.float32
+    np.testing.assert_allclose(mean, 100.0)  # channel 2 (all 7) is left out
+    red = functional_channel_mean([path], saved_channels=[1, 2], functional_channel=2)
+    np.testing.assert_allclose(red, 7.0)
+    with pytest.raises(ValueError, match="Channel 3 was not saved"):
+        functional_channel_mean([path], saved_channels=[1, 2], functional_channel=3)

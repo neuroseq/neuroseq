@@ -460,6 +460,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             parent=self,
         )
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
+        # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
+        self.acquisition_controller.fov_ready.connect(
+            lambda path: self.btn_import_cellpose_data_clicked(
+                segment=pathlib.Path(path)
+            )
+        )
         # Compatibility handles for integrations using the workspace directly.
         self.scanimage_connection = self.acquisition_controller.connection
         self.scanimage_controls = self.acquisition_controller.controls
