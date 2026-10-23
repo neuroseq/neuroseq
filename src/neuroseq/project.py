@@ -1636,6 +1636,13 @@ def _place_block_spikes(
     order = np.argsort(all_times, kind="stable")
     existing.spike_indices = indices[order]
     existing.spike_times = all_times[order]
+    # Raw Cellpose ids follow their spikes; one side without them drops them all.
+    if existing.raw_cellpose_ids is not None and spikes.raw_cellpose_ids is not None:
+        existing.raw_cellpose_ids = np.concatenate(
+            [existing.raw_cellpose_ids, spikes.raw_cellpose_ids]
+        )[order]
+    else:
+        existing.raw_cellpose_ids = None
 
 
 def _place_block_trace(

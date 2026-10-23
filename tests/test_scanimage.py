@@ -920,6 +920,9 @@ def test_record_request_names_the_file_by_date_and_number(
     stem = recording_stem()
     (tmp_path / f"{stem}_00001.tif").write_text("")
     panel._update_next_file()
+    # A hidden tab does not list the folder; it catches up when shown.
+    assert panel._next_file_stale
+    panel.show()
     assert panel.next_file_label.text() == f"{stem}_00002.tif"
     requests: list[dict] = []
     panel.record_requested.connect(requests.append)

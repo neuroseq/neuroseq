@@ -30,6 +30,8 @@ from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
+from neuroseq.device_control.scanimage_files import STIMULUS_SUFFIX
+from neuroseq.device_control.scanimage_files import stimulus_file_name
 from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 from neuroseq.importers.importer_scanimage_traces import extract_recording_dff
 from neuroseq.importers.importer_scanimage_traces import functional_channel_mean
@@ -195,7 +197,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         state = self._run_states.pop(run_id, None)
         if samples_path is None or state not in {"failed", "aborted"}:
             return
-        prefix = samples_path.name.removesuffix("_stimulus.npy")
+        prefix = samples_path.name.removesuffix(STIMULUS_SUFFIX)
         if any(samples_path.parent.glob(f"{prefix}*.tif")):
             return
         samples_path.unlink(missing_ok=True)
@@ -246,8 +248,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             record["stimulus"] = stimulus_summary(stim)
             # The samples themselves beside the TIFF, so the recording folder alone
             # reproduces the stimulus even if the project is never saved.
-            samples_path = pathlib.Path(arguments["directory"]) / (
-                f"{arguments['stem']}_{int(arguments['counter']):05d}_stimulus.npy"
+            samples_path = pathlib.Path(arguments["directory"]) / stimulus_file_name(
+                arguments["stem"], int(arguments["counter"])
             )
             try:
                 np.save(samples_path, np.ascontiguousarray(stim.values))
@@ -367,7 +369,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         record.pop("error", None)
         if run_id in self._fov_runs:
             self._fov_runs.discard(run_id)
-            self._save_fov_image(result, record)
+            self._save_fov_image(run_id, result, record)
             project.mark_dirty()
             return
         name = record["name"]
@@ -395,25 +397,53 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return
         self._extract_block(run_id, block, result, name)
 
-    def _save_fov_image(self, result: dict, record: dict) -> None:
-        """Average the functional channel and save it beside the recording."""
+    def _save_fov_image(self, run_id: str, result: dict, record: dict) -> None:
+        """Average the functional channel and save it beside the recording, in the
+        background like a block's trace extraction."""
         paths = [pathlib.Path(p) for p in result["paths"]]
+        channels = list(result["channels"])
         channel = self.controls.channel_spin.value()
-        try:
+        target = paths[0].with_name(f"{paths[0].stem}_mean.tif")
+
+        def task(_report: Callable[[int], None]) -> str:
             image = functional_channel_mean(
-                paths, saved_channels=result["channels"], functional_channel=channel
+                paths, saved_channels=channels, functional_channel=channel
             )
-            target = paths[0].with_name(f"{paths[0].stem}_mean.tif")
             tifffile.imwrite(target, image)
-        except (OSError, ValueError) as exc:
-            self.controls.show_message(f"Could not make the FOV image: {exc}")
-            return
-        record["fov_image"] = str(target)
-        self.controls.show_message(
-            f"FOV image saved: {target.name} (mean of channel {channel}); "
-            "segmenting it with Cellpose."
+            return str(target)
+
+        def finished(_path: object) -> None:
+            record["fov_image"] = str(target)
+            self._project().mark_dirty()
+            self.controls.show_message(
+                f"FOV image saved: {target.name} (mean of channel {channel}); "
+                "segmenting it with Cellpose."
+            )
+            self.fov_ready.emit(str(target))
+
+        def failed(message: str) -> None:
+            self.controls.show_message(f"Could not make the FOV image: {message}")
+
+        self.controls.show_message("Averaging the field of view…")
+        self._start_job(run_id, task, finished, failed)
+
+    def _start_job(
+        self,
+        run_id: str,
+        task: Callable[[Callable[[int], None]], object],
+        finished: Callable[[object], None],
+        failed: Callable[[str], None],
+    ) -> None:
+        """Run ``task`` for recording ``run_id`` in its own background job."""
+        job = BackgroundJob(self)
+        self._extractions[run_id] = job
+        job.idle.connect(lambda: self._extraction_done(run_id))
+        job.start(
+            BackgroundIOWorker(task),
+            on_progress=lambda _value: None,
+            on_finished=finished,
+            on_failed=failed,
         )
-        self.fov_ready.emit(str(target))
 
     def _fail_block(self, run_id: str, message: str) -> None:
         self._block_channels.pop(run_id, None)
@@ -480,15 +510,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.controls.show_message(
             f"Extracting ΔF/F traces and spikes of {experiment}…"
         )
-        job = BackgroundJob(self)
-        self._extractions[run_id] = job
-        job.idle.connect(lambda: self._extraction_done(run_id))
-        job.start(
-            BackgroundIOWorker(task),
-            on_progress=lambda _value: None,
-            on_finished=finished,
-            on_failed=failed,
-        )
+        self._start_job(run_id, task, finished, failed)
 
     def _extraction_done(self, run_id: str) -> None:
         job = self._extractions.pop(run_id, None)
@@ -509,6 +531,17 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             )
         if not self._frame_rate():
             return "ScanImage has not reported its frame rate yet."
+        # Checked here too, so a bad setup is refused before anything is uploaded.
+        folder = self.controls.directory_edit.text().strip()
+        if not folder or not pathlib.Path(folder).is_dir():
+            return "Select an existing recording folder in the ScanImage tab."
+        channel = self.controls.channel_spin.value()
+        saved = self.controls.saved_channels()
+        if saved and channel not in saved:
+            return (
+                f"The functional channel {channel} is not among the saved channels "
+                f"({', '.join(map(str, saved))}) in the ScanImage tab."
+            )
         return None
 
     def _frame_rate(self) -> float | None:

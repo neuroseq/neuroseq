@@ -13,16 +13,13 @@ from typing import TYPE_CHECKING
 from qtpy import QtWidgets
 
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
-from neuroseq.export.exporter_syscon2 import _SUPPORTED_LASER_WAVELENGTHS_NM
+from neuroseq.export.exporter_syscon2 import SUPPORTED_LASER_WAVELENGTHS_NM
 from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
 
 if TYPE_CHECKING:
     from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
     from neuroseq.stimulation.stim import StimArray
-
-#: Lasers the HOLO4D export can drive (the exporter's own list).
-LASER_WAVELENGTHS_NM = _SUPPORTED_LASER_WAVELENGTHS_NM
 
 
 class HardwareSettingsWidget(QtWidgets.QGroupBox):
@@ -64,7 +61,8 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
         )
         form.addRow("Target power:", self.spn_power_mw)
         self.cmb_laser = QtWidgets.QComboBox(self)
-        for wavelength in LASER_WAVELENGTHS_NM:
+        # The lasers the HOLO4D export can drive.
+        for wavelength in SUPPORTED_LASER_WAVELENGTHS_NM:
             self.cmb_laser.addItem(f"{wavelength} nm", wavelength)
         form.addRow("Laser:", self.cmb_laser)
         self.chk_spiral = QtWidgets.QCheckBox("Spiral scanning", self)

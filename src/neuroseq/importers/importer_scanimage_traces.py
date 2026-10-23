@@ -154,9 +154,10 @@ def functional_channel_mean(
 ) -> np.ndarray:
     """Mean image of ``functional_channel`` over all frames of a recording.
 
-    ScanImage interleaves the saved channels page by page; the mean of a short
-    recording is the field-of-view image cell segmentation (Cellpose) runs on, in
-    the TIFFs' pixel coordinates.
+    ScanImage interleaves the saved channels page by page (page ``i`` holds
+    channel ``i mod len(saved_channels)``); the mean of a short recording is the
+    field-of-view image cell segmentation (Cellpose) runs on, in the TIFFs' pixel
+    coordinates.
     """
     import tifffile
 
@@ -170,18 +171,14 @@ def functional_channel_mean(
     total: np.ndarray | None = None
     count = 0
     for path in paths:
-        stack = np.asarray(tifffile.imread(Path(path)))
-        if stack.ndim == 2:
-            stack = stack[np.newaxis]
-        if stack.ndim == 4:  # (frame, channel, y, x)
-            frames = stack[:, position]
-        elif stack.ndim == 3:
-            frames = stack[position :: len(channels)]
-        else:
-            raise ValueError(f"Unexpected TIFF shape {stack.shape} in {path}.")
-        frames = frames.astype(np.float64)
-        total = frames.sum(axis=0) if total is None else total + frames.sum(axis=0)
-        count += frames.shape[0]
+        # Page by page: a long grab never has to fit in memory at once.
+        with tifffile.TiffFile(Path(path)) as tif:
+            for index, page in enumerate(tif.pages):
+                if index % len(channels) != position:
+                    continue
+                frame = np.asarray(page.asarray(), dtype=np.float64)
+                total = frame if total is None else total + frame
+                count += 1
     if total is None or count == 0:
         raise ValueError("The recording holds no frames of the functional channel.")
     return (total / count).astype(np.float32)

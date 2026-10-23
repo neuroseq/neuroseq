@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
@@ -47,6 +48,7 @@ class ScanImageControls(QtWidgets.QWidget):
         # Remembered across sessions in NeuroSeq's config file, like the Fiji path.
         self.settings = settings
         self._waiting_since: float | None = None
+        self._next_file_stale = True
         layout = QtWidgets.QVBoxLayout(self)
         connection_row = QtWidgets.QHBoxLayout()
         self.python_edit = QtWidgets.QLineEdit(settings.scanimage_python_path)
@@ -243,7 +245,18 @@ class ScanImageControls(QtWidgets.QWidget):
             self.directory_changed.emit(path)
         self._update_next_file()
 
+    def showEvent(self, event: QtGui.QShowEvent | None) -> None:
+        super().showEvent(event)
+        if self._next_file_stale:
+            self._update_next_file()
+
     def _update_next_file(self, *_args: object) -> None:
+        # Listing a folder of a day's recordings is not free: a hidden tab (every
+        # open workspace has one) waits until it is shown.
+        if not self.isVisible():
+            self._next_file_stale = True
+            return
+        self._next_file_stale = False
         text = self.directory_edit.text().strip()
         if not text:
             self.next_file_label.setText("Select a recording folder")

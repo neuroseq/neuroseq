@@ -443,12 +443,16 @@ class SysCon2StimulationHost(QtCore.QObject):
         if block.run_id is not None and self._acquisition is not None:
             self._acquisition.abort_block(block.run_id)
         self._clear()
+        # Lets the SysCon2 tab offer Upload/Run again.
+        self.progress.emit("Block cancelled.")
 
     def abort(self, message: str) -> None:
         """End the block in flight as failed (e.g. Stop in the SysCon2 tab): the
         routine is told, a running sequence is stopped, a recording aborted, and a
-        SysCon2 task waiting on the hardware returns at its next poll."""
-        if self._block is not None:
+        SysCon2 task waiting on the hardware returns at its next poll. A manual
+        block waiting for the user's import is not using the hardware and is left
+        alone: stopping the sequence the user ran is not the routine's failure."""
+        if self._block is not None and self.uses_hardware:
             self._block.cancel.set()
             self._fail(message)
 
@@ -620,7 +624,6 @@ class SysCon2StimulationHost(QtCore.QObject):
     def on_command_failed(self, name: str, message: str) -> None:
         block = self._current(name)
         if block is None:
-            return
-        if name.endswith(".stop"):
+            # Includes every stop command: they are sent after the block is gone.
             return
         self._fail(message)

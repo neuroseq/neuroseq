@@ -38,6 +38,7 @@ from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
 )
 from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
 from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
+from neuroseq.stimulation.dynamic_input.hardware_targets import hardware_start_sample
 from neuroseq.stimulation.dynamic_input.stdp_window import classify_window
 from neuroseq.stimulation.dynamic_input.stdp_window import delta_t_sweep
 from neuroseq.stimulation.dynamic_input.stdp_window import interleave_by_magnitude
@@ -1015,14 +1016,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
             self._append_log("Δt maximum must be greater than Δt minimum.")
             return
-        if choice == "clear":
-            self.editor.zero_current_stim_array()
-            self.editor.reset_stim_array()
-            self._append_start_sample = 0
-        else:
-            self._append_start_sample = (
-                self.editor.current_stim_array_last_stimulus_sample()
-            )
+        self._append_start_sample = hardware_start_sample(self.editor, choice)
         # Nothing delivered yet: ending now keeps the array up to here.
         self._delivered_end_sample = self._append_start_sample
         self._last_measured_dataset = None

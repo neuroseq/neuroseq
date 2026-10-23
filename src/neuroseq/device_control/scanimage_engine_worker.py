@@ -77,6 +77,7 @@ class EngineAdapter:
             directory = Path(arguments["directory"])
             directory.mkdir(parents=True, exist_ok=True)
             path = (
+                # Same name as scanimage_files.recording_prefix (not importable here).
                 directory / f"{arguments['stem']}_{int(arguments['counter']):05d}.json"
             )
             with path.open("x", encoding="utf-8") as file:

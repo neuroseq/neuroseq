@@ -1594,3 +1594,27 @@ def test_block_trace_is_resampled_to_the_groups_interval():
     other = TraceData("v", np.zeros((1, 5)), np.array([3]), "a.u.", 0.01)
     with pytest.raises(ValueError, match="other neurons"):
         project.place_block_data("Run", [other], 0.2, 0.05)
+
+
+def test_placed_spikes_keep_their_cellpose_ids():
+    project = Project()
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([0, 1]), np.array([0.3, 0.1]), np.array([5, 6]))],
+        0.0,
+        1.0,
+    )
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([2]), np.array([0.05]), np.array([7]))],
+        0.1,
+        1.0,
+    )
+    spikes = project.experiments["Run"].data[0]
+    np.testing.assert_allclose(spikes.spike_times, [0.1, 0.15, 0.3])
+    np.testing.assert_array_equal(spikes.spike_indices, [1, 2, 0])
+    np.testing.assert_array_equal(spikes.raw_cellpose_ids, [6, 7, 5])
+    project.place_block_data(
+        "Run", [SpikeData("s", np.array([3]), np.array([0.0]))], 2.0, 1.0
+    )
+    assert project.experiments["Run"].data[0].raw_cellpose_ids is None

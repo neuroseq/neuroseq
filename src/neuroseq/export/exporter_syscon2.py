@@ -54,7 +54,7 @@ _SPIRALLING_TTL_LEAD_TICKS = 1  # TTL fires 1 tick before SLM load completes
 # the two Holo4D TTL-out channels. Shape lanes live on row 0 (and, if more than
 # one simultaneous lane is needed, rows 6..N). The row↔lightsource binding is
 # fixed in SysCon's hardware config and must match exactly.
-_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
+SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
 _LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030, 1140: 1100}
 _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1100
 _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM = {1100: 1, 940: 2, 1030: 3}
@@ -584,10 +584,10 @@ def generate_syscon2_sequence_text(
     if power_enabled and power_lut is not None and not power_lut.tuples:
         raise ValueError("power_lut has no tuples")
     power_saturation_warnings: list[str] = []
-    if active_laser_wavelength_nm not in _SUPPORTED_LASER_WAVELENGTHS_NM:
+    if active_laser_wavelength_nm not in SUPPORTED_LASER_WAVELENGTHS_NM:
         raise ValueError(
             "active_laser_wavelength_nm must be one of "
-            f"{_SUPPORTED_LASER_WAVELENGTHS_NM}"
+            f"{SUPPORTED_LASER_WAVELENGTHS_NM}"
         )
     _require_syscon2_tick_rate(stim_array)
 

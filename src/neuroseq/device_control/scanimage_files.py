@@ -27,6 +27,23 @@ def next_recording_number(directory: Path, stem: str) -> int:
     return max(numbers, default=0) + 1
 
 
+def recording_prefix(stem: str, number: int) -> str:
+    """``<stem>_<number>``: the name of recording ``number`` of ``stem`` without an
+    extension, shared by its TIFF, its JSON metadata and its stimulus samples.
+    (The ScanImage helper and the MATLAB adapter, which cannot import NeuroSeq,
+    build the same name themselves.)"""
+    return f"{stem}_{number:05d}"
+
+
 def recording_file_name(stem: str, number: int) -> str:
     """ScanImage's name for recording ``number`` of ``stem``."""
-    return f"{stem}_{number:05d}.tif"
+    return f"{recording_prefix(stem, number)}.tif"
+
+
+#: Ending of the stimulus samples file beside a recording.
+STIMULUS_SUFFIX = "_stimulus.npy"
+
+
+def stimulus_file_name(stem: str, number: int) -> str:
+    """The stimulus samples written beside recording ``number`` of ``stem``."""
+    return f"{recording_prefix(stem, number)}{STIMULUS_SUFFIX}"

@@ -577,3 +577,20 @@ def test_failed_fov_recording_says_so(setup):
     s.controller.scanimage_status({"run": {"id": request["run_id"], "state": "failed"}})
     s.connection.run_finished.emit(request["run_id"])
     assert "without data" in s.controller.controls.message_label.text()
+
+
+def test_routine_start_is_refused_without_folder_or_saved_channel(setup, tmp_path):
+    """Review: refused before any block is uploaded, not in arm_block."""
+    s = setup
+    _ready_for_blocks(s)
+    controls = s.controller.controls
+    controls.set_directory(str(tmp_path / "missing"))
+    assert "recording folder" in s.controller.block_recording_unavailable()
+    controls.set_directory(str(s.folder))
+    controls._status(
+        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
+    )
+    controls.channel_spin.setValue(1)
+    assert "not among the saved channels" in s.controller.block_recording_unavailable()
+    controls.channel_spin.setValue(2)
+    assert s.controller.block_recording_unavailable() is None

@@ -541,3 +541,29 @@ def test_recording_armed_inside_arm_block_still_runs_the_block(
     _run(submitted, host, _FakeClient(["target\\probe_001.seq"], ["Idle"]))
     assert host.phase == "running"
     assert submitted[-1][0].endswith(".run")
+
+
+def test_cancel_announces_itself_so_the_tab_can_refresh(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    host, _submitted, _acquisition = _automatic_host(tmp_path, mocker)
+    owner = object()
+    host.send_block(Project(), stim, 0, 5, owner=owner, automatic=True)
+    with qtbot.waitSignal(host.progress):
+        host.cancel(owner)
+    assert host.phase == "idle"
+
+
+def test_stop_in_the_tab_leaves_a_manual_block_waiting_for_its_import(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    """Stopping the sequence the user ran is not the routine's failure."""
+    submitted: list = []
+    host = _host(submitted, SysconExportSettings(config_text=""), tmp_path)
+    mocker.patch.object(host_module, "export_stim_array", return_value=mocker.Mock())
+    host.send_block(Project(), stim, 0, 5, owner="routine")
+    host.on_command_finished(submitted[0][0], None)
+    assert host.phase == "awaiting_acquisition"
+    with qtbot.assertNotEmitted(host.block_failed):
+        host.abort("Stopped in the stimulation setup.")
+    assert host.phase == "awaiting_acquisition"

@@ -7,9 +7,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from typing import Any
 
 from qtpy import QtWidgets
+
+if TYPE_CHECKING:
+    from neuroseq.stimulation.stim_editor import StimEditor
 
 #: (signal, slot) pairs to connect for one host.
 Slots = list[tuple[Any, Callable]]
@@ -72,3 +76,14 @@ class PerTargetValues:
                 spin.setValue(int(value))
             else:
                 spin.setValue(float(value))
+
+
+def hardware_start_sample(editor: StimEditor, choice: str) -> int:
+    """Where a hardware routine places its first block (no simulation to catch up
+    with): at 0 after clearing the array (``choice == "clear"``), else right
+    after its last stimulus."""
+    if choice == "clear":
+        editor.zero_current_stim_array()
+        editor.reset_stim_array()
+        return 0
+    return editor.current_stim_array_last_stimulus_sample()
