@@ -736,14 +736,16 @@ def test_image_acquisition_is_a_tab_of_the_stimulation_setup_pane(qtbot):
     widgets = [toolbar.widgetForAction(action) for action in actions]
     position = widgets.index(gui.btn_design_dynamic_input)
     assert actions[position + 1].isSeparator()
-    # No separate Image acquisition button: the pane's tab is the way in.
-    assert widgets[position + 2] is gui.cmb_video
-    assert not hasattr(gui, "btn_image_acquisition")
-    assert not gui.cmb_video.isEnabled()
-    titles = [
-        gui.stimulation_setup.tabText(i) for i in range(gui.stimulation_setup.count())
+    assert widgets[position + 2 : position + 4] == [
+        gui.btn_image_acquisition,
+        gui.cmb_video,
     ]
-    assert SCANIMAGE_TAB_TITLE in titles
+    assert not gui.cmb_video.isEnabled()
+    assert not gui.stimulation_setup.isVisibleTo(gui)
+    gui.btn_image_acquisition.click()
+    assert gui.stimulation_setup.isVisibleTo(gui)
+    index = gui.stimulation_setup.currentIndex()
+    assert gui.stimulation_setup.tabText(index) == SCANIMAGE_TAB_TITLE
     gui._close_confirmed = True
     gui.close()
 

@@ -3072,6 +3072,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         toolbar.addWidget(self.btn_design_dynamic_input)
         toolbar.addSeparator()
+        self.btn_image_acquisition = QtWidgets.QPushButton("Image acquisition")
+        self.btn_image_acquisition.setToolTip(
+            "Show the ScanImage controls in the Stimulation setup pane"
+        )
+        icons.set_widget_icon(self.btn_image_acquisition, "mdi6.microscope")
+        self.btn_image_acquisition.clicked.connect(self.show_image_acquisition)
+        toolbar.addWidget(self.btn_image_acquisition)
         self.cmb_video = QtWidgets.QComboBox()
         self.cmb_video.setMinimumWidth(160)
         self.cmb_video.setToolTip("Imaging data shown in the Imaging tab")
@@ -3091,6 +3098,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
+
+    def show_image_acquisition(self) -> None:
+        """Bring the ScanImage tab of the Stimulation setup pane to the front."""
+        self._auto_show_widget(self.stimulation_setup)
+        self.stimulation_setup.show_setup(SCANIMAGE_TAB_TITLE)
 
     def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
         if widget is self.calcium_video_widget:
