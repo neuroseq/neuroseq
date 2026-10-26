@@ -38,6 +38,7 @@ from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
 )
 from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
 from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
+from neuroseq.stimulation.dynamic_input.hardware_targets import delivery_settings_note
 from neuroseq.stimulation.dynamic_input.hardware_targets import hardware_start_sample
 from neuroseq.stimulation.dynamic_input.stdp_window import classify_window
 from neuroseq.stimulation.dynamic_input.stdp_window import delta_t_sweep
@@ -1024,6 +1025,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         self._append_log(
             f"Block scripts are kept in {host.run_directory(self._run_name)}."
         )
+        self._append_log(delivery_settings_note(host))
         if self._automatic():
             self._append_log(
                 "SysCon2 target: continuous sweep, amplitudes are fractions (0-1) of the "

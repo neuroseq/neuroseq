@@ -170,15 +170,19 @@ def functional_channel_mean(
     position = channels.index(functional_channel)
     total: np.ndarray | None = None
     count = 0
+    index = 0  # frame number across files, for the channel interleave
     for path in paths:
-        # Page by page: a long grab never has to fit in memory at once.
+        # Page by page: a long grab never has to fit in memory at once. ScanImage
+        # writes one frame per page; other writers may put several in one page.
         with tifffile.TiffFile(Path(path)) as tif:
-            for index, page in enumerate(tif.pages):
-                if index % len(channels) != position:
-                    continue
-                frame = np.asarray(page.asarray(), dtype=np.float64)
-                total = frame if total is None else total + frame
-                count += 1
+            for page in tif.pages:
+                data = np.asarray(page.asarray())
+                for frame in data if data.ndim == 3 else (data,):
+                    if index % len(channels) == position:
+                        frame = frame.astype(np.float64)
+                        total = frame if total is None else total + frame
+                        count += 1
+                    index += 1
     if total is None or count == 0:
         raise ValueError("The recording holds no frames of the functional channel.")
     return (total / count).astype(np.float32)

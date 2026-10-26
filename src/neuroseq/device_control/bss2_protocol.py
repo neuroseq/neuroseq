@@ -652,6 +652,25 @@ def readback_experiment(
     )
 
 
+def bin_average_trace(trace: TraceData, dt: float) -> TraceData:
+    """``trace`` averaged in bins of ``dt`` (no change when it is not finer)."""
+    if not trace.dt < dt or trace.traces.shape[1] == 0:
+        return trace
+    per_bin = dt / float(trace.dt)
+    edges = np.floor(np.arange(0, trace.traces.shape[1], per_bin)).astype(np.int64)
+    edges = np.unique(edges)
+    sums = np.add.reduceat(trace.traces.astype(np.float64), edges, axis=1)
+    counts = np.diff(np.append(edges, trace.traces.shape[1]))
+    return TraceData(
+        trace.name,
+        (sums / counts).astype(np.float32),
+        trace.indices.copy(),
+        trace.units,
+        float(dt),
+        trace.raw_cellpose_ids,
+    )
+
+
 def add_readback_experiment(
     project: Any,
     result: Mapping[str, Any],

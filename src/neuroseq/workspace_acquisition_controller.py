@@ -107,8 +107,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._stimulus_files: dict[str, pathlib.Path] = {}
         #: Last reported state of each run started here.
         self._run_states: dict[str, str] = {}
-        #: "Grab FOV" recordings, averaged into one image for cell segmentation.
-        self._fov_runs: set[str] = set()
+        #: "Grab FOV" recordings, averaged into one image for cell segmentation, with
+        #: the functional channel chosen when the grab was requested.
+        self._fov_runs: dict[str, int] = {}
         #: Running trace extractions, one job each: a routine's next block must not
         #: wait for (or fail because of) a previous, possibly abandoned, one.
         self._extractions: dict[str, BackgroundJob] = {}
@@ -176,8 +177,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
         self._remove_metadata_without_recording(run_id)
-        if run_id in self._fov_runs:
-            self._fov_runs.discard(run_id)
+        if self._fov_runs.pop(run_id, None) is not None:
             self.controls.show_message("The FOV recording ended without data.")
         if run_id in self._extracting:
             # The connection ends the run right after recording_ready; the block
@@ -209,7 +209,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             arguments, purpose="fov_for_segmentation"
         ):
             return False
-        self._fov_runs.add(arguments["run_id"])
+        self._fov_runs[arguments["run_id"]] = self.controls.channel_spin.value()
         self.controls.show_message("Recording the field of view…")
         return True
 
@@ -359,6 +359,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if record is None:
             # The project was replaced during the recording; keep the files only.
             logger.warning("Recording %s finished for a project no longer open", run_id)
+            if self._fov_runs.pop(run_id, None) is not None:
+                self.controls.show_message(
+                    "The project changed during the FOV recording; its TIFF is kept "
+                    "in the recording folder but was not segmented."
+                )
             self._fail_block(run_id, "The project changed during the recording.")
             return
         record.update(
@@ -368,8 +373,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         )
         record.pop("error", None)
         if run_id in self._fov_runs:
-            self._fov_runs.discard(run_id)
-            self._save_fov_image(run_id, result, record)
+            channel = self._fov_runs.pop(run_id)
+            self._save_fov_image(run_id, result, record, channel)
             project.mark_dirty()
             return
         name = record["name"]
@@ -397,12 +402,13 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return
         self._extract_block(run_id, block, result, name)
 
-    def _save_fov_image(self, run_id: str, result: dict, record: dict) -> None:
-        """Average the functional channel and save it beside the recording, in the
-        background like a block's trace extraction."""
+    def _save_fov_image(
+        self, run_id: str, result: dict, record: dict, channel: int
+    ) -> None:
+        """Average ``channel`` and save it beside the recording, in the background
+        like a block's trace extraction."""
         paths = [pathlib.Path(p) for p in result["paths"]]
         channels = list(result["channels"])
-        channel = self.controls.channel_spin.value()
         target = paths[0].with_name(f"{paths[0].stem}_mean.tif")
 
         def task(_report: Callable[[int], None]) -> str:
@@ -555,13 +561,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         fps = self._frame_rate()
         assert fps is not None
         frames = max(1, math.ceil((recording.duration_s + recording.tail_s) * fps))
+        # block_recording_unavailable() checked that this channel is saved.
         channel = self.controls.channel_spin.value()
-        saved = self.controls.saved_channels()
-        if saved and channel not in saved:
-            raise ValueError(
-                f"The functional channel {channel} is not among the saved channels "
-                f"({', '.join(map(str, saved))}) in the ScanImage tab."
-            )
         arguments = self.controls.recording_request(
             frames=frames, external_trigger=True
         )

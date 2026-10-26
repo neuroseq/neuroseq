@@ -166,3 +166,17 @@ def test_unfireable_duration_brackets_the_chronaxie():
     backend._update_strength_duration_metrics()
     assert backend.chronaxie_range is None and backend.chronaxie_ms is None
     assert backend.chronaxie_upper_bound_ms == 12.0
+
+
+def test_chronaxie_bisection_never_reprobes_an_unreachable_duration():
+    """Review: a midpoint equal to a duration that could not fire is not probed
+    again (that would repeat the whole maximum-amplitude probe on hardware)."""
+    backend = RheobaseBackend(Host())
+    backend.config = _config("Amplitude and duration", 0.05, 1.0, 10.0, 50.0)
+    backend.unreached_durations = [30.0]
+    backend.duration_low_ms, backend.duration_high_ms = 10.0, 50.0
+    finished = []
+    backend.on_finished = finished.append
+    backend.on_summarize = lambda: "summary"
+    backend._bisect_strength_duration()
+    assert finished == ["summary"]

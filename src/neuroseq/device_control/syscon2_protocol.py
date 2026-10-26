@@ -189,11 +189,17 @@ def normalized_holo4d_state(state: str) -> str:
     return state.lower().removeprefix("state:").strip()
 
 
-def holo4d_ready_to_run(state: str) -> bool:
+def holo4d_ready_to_run(state: str, *, strict: bool = False) -> bool:
     """Whether an uploaded sequence can be run: the hardware reports a state and is
-    neither uploading, busy nor disconnected. Unknown states count as ready rather
-    than leaving a caller stuck on a state name it does not know."""
+    neither uploading, busy nor disconnected.
+
+    Unknown states count as ready rather than leaving the panel stuck on a state
+    name it does not know (a person is watching). ``strict`` accepts only Idle,
+    for unattended callers: an unknown state (e.g. an error) must not start a run.
+    """
     state = normalized_holo4d_state(state)
+    if strict:
+        return state == "idle"
     return (
         bool(state)
         and state not in {"busy", "disconnected"}

@@ -525,24 +525,6 @@ def test_abort_tells_the_routine_and_frees_the_worker(
     host.abort("nothing in flight")  # no block: no signal, no error
 
 
-def test_recording_armed_inside_arm_block_still_runs_the_block(
-    stim: StimArray, tmp_path, mocker
-) -> None:
-    """Review: a recorder may report 'armed' before arm_block returns."""
-    host, submitted, acquisition = _automatic_host(tmp_path, mocker)
-
-    def arm_and_report(recording):
-        acquisition.armed.append(recording)
-        acquisition.block_armed.emit("run1")
-        return "run1"
-
-    acquisition.arm_block = arm_and_report  # type: ignore[method-assign]
-    host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
-    _run(submitted, host, _FakeClient(["target\\probe_001.seq"], ["Idle"]))
-    assert host.phase == "running"
-    assert submitted[-1][0].endswith(".run")
-
-
 def test_cancel_announces_itself_so_the_tab_can_refresh(
     stim: StimArray, tmp_path, qtbot, mocker
 ) -> None:
@@ -567,3 +549,40 @@ def test_stop_in_the_tab_leaves_a_manual_block_waiting_for_its_import(
     with qtbot.assertNotEmitted(host.block_failed):
         host.abort("Stopped in the stimulation setup.")
     assert host.phase == "awaiting_acquisition"
+
+
+def test_unknown_hardware_state_fails_an_automatic_block(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    """Review: nobody watches an automatic block, so 'Error' must not count as
+    ready to run (the panel, with a person watching, stays tolerant)."""
+    host, submitted, acquisition = _automatic_host(tmp_path, mocker)
+    mocker.patch.object(host_module, "UPLOAD_TIMEOUT_S", 0.0)
+    host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
+    with qtbot.waitSignal(host.block_failed) as failed:
+        _run(submitted, host, _FakeClient(["target\\probe_001.seq"], ["Error"]))
+    assert "state: Error" in failed.args[1]
+    assert not acquisition.armed
+
+
+def test_accepted_warnings_last_one_routine_run(stim: StimArray, tmp_path, mocker):
+    asked: list[list[str]] = []
+
+    def confirm(warnings: list[str]) -> bool:
+        asked.append(warnings)
+        return True
+
+    host = _host(
+        [], SysconExportSettings(config_text=""), tmp_path, confirm_warnings=confirm
+    )
+    export = mocker.patch.object(host_module, "export_stim_array")
+    host.send_block(Project(), stim, 0, 5, run_name="rheobase_1")
+    export.call_args.kwargs["confirm_warnings"](["No power LUT"])
+    host.cancel()
+    host.send_block(Project(), stim, 0, 5, run_name="rheobase_1")
+    export.call_args.kwargs["confirm_warnings"](["No power LUT"])
+    assert len(asked) == 1  # same run: asked once
+    host.cancel()
+    host.send_block(Project(), stim, 0, 5, run_name="stdp_window_2")
+    export.call_args.kwargs["confirm_warnings"](["No power LUT"])
+    assert len(asked) == 2  # a new run asks again

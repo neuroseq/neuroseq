@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from neuroseq.data import SpikeData
+from neuroseq.data import TraceData
 from neuroseq.device_control import bss2_protocol as bp
 from neuroseq.project import Project
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
@@ -181,3 +182,16 @@ def test_a_runs_blocks_share_one_data_group(qtbot, panel):  # noqa: F811
     assert spikes.spike_times.tolist() == pytest.approx([0.35, 1.3])
     # Each payload also carries its own block's spikes, timed from the block.
     assert payloads[1]["block_spikes"].spike_times.tolist() == pytest.approx([0.3])
+    # The run's voltage is never finer than the input array's time step.
+    trace = project.get_data(payloads[0]["trace"], TraceData)
+    assert trace.dt >= stim.dt - 1e-12
+
+
+def test_bin_average_trace_reduces_to_the_input_step():
+    from neuroseq.data import TraceData
+
+    fine = TraceData("v", np.arange(10.0)[None, :], np.array([1]), "a.u.", 0.001)
+    coarse = bp.bin_average_trace(fine, 0.005)
+    assert coarse.dt == 0.005
+    np.testing.assert_allclose(coarse.traces, [[2.0, 7.0]])
+    assert bp.bin_average_trace(fine, 0.0005) is fine  # never finer

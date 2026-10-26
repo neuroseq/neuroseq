@@ -169,3 +169,9 @@ def test_holo4d_state_rules_shared_by_panel_and_routine_host() -> None:
     assert holo4d_ready_to_run("Ready")  # unknown states do not block forever
     for state in ("", "Busy", "Disconnected", "Uploading", "upload pending"):
         assert not holo4d_ready_to_run(state)
+
+
+def test_strict_readiness_accepts_only_idle() -> None:
+    assert holo4d_ready_to_run("State: Idle", strict=True)
+    for state in ("Error", "Ready", "", "Busy", "Uploading"):
+        assert not holo4d_ready_to_run(state, strict=True)

@@ -1648,13 +1648,17 @@ def _place_block_spikes(
 def _place_block_trace(
     experiment: Experiment, trace: TraceData, offset_seconds: float
 ) -> None:
+    if trace.traces.shape[1] == 0:
+        return  # an empty readback adds nothing
     existing = find_by_name_and_type(experiment.data, trace.name, TraceData)
     dt = float(existing.dt) if existing is not None else float(trace.dt)
-    values = np.asarray(trace.traces, dtype=np.float64)
+    values = np.asarray(trace.traces, dtype=np.float32)
     if not np.isclose(dt, trace.dt):
         source_t = np.arange(values.shape[1]) * float(trace.dt)
         grid = np.arange(int(np.floor(source_t[-1] / dt)) + 1) * dt
-        values = np.stack([np.interp(grid, source_t, row) for row in values])
+        values = np.stack([np.interp(grid, source_t, row) for row in values]).astype(
+            np.float32
+        )
     start = int(round(offset_seconds / dt))
     if existing is None:
         lead = np.repeat(values[:, :1], start, axis=1)
@@ -1674,10 +1678,11 @@ def _place_block_trace(
             f"Trace '{trace.name}' records other neurons than the data group's."
         )
     old = np.asarray(existing.traces)
-    if old.shape[1] < start:
+    values = values.astype(old.dtype, copy=False)
+    if start >= old.shape[1]:
+        # The usual case, a block after the last one: one copy, gap held.
         gap = np.repeat(old[:, -1:], start - old.shape[1], axis=1)
-        old = np.concatenate([old, gap], axis=1)
+        existing.traces = np.concatenate([old, gap, values], axis=1)
+        return
     stop = start + values.shape[1]
-    existing.traces = np.concatenate(
-        [old[:, :start], values.astype(old.dtype), old[:, stop:]], axis=1
-    )
+    existing.traces = np.concatenate([old[:, :start], values, old[:, stop:]], axis=1)

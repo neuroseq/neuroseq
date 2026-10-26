@@ -81,7 +81,8 @@ class BlockRecording:
 class BlockAcquisition(Protocol):
     """Records blocks for the host (implemented by the workspace's ScanImage controller).
 
-    Signals: ``block_armed(str run_id)`` once the recording waits for its trigger,
+    Signals: ``block_armed(str run_id)`` once the recording waits for its trigger
+    (emitted after :meth:`arm_block` has returned that run id, never from inside it),
     ``block_recorded(str run_id, object payload)`` once its traces are in the project
     (``payload["trace"]`` is the ΔF/F dataset name, ``payload["spikes"]`` that of its
     deconvolved spikes), ``block_recording_failed(str run_id, str message)``.
@@ -209,8 +210,10 @@ class SysCon2StimulationHost(QtCore.QObject):
         self._is_connected = is_connected
         #: Where routine runs keep their block files (one subfolder per run).
         self._run_directory_provider = run_directory_provider
-        #: Export warnings the user already accepted, so a routine asks once, not per block.
+        #: Export warnings the user already accepted, so a routine asks once, not per
+        #: block; only for that routine run (see send_block's ``run_name``).
         self._accepted_warnings: set[str] = set()
+        self._warnings_run_name: str | None = None
         self._tmpdir: tempfile.TemporaryDirectory[str] | None = None
         if output_dir is None:
             self._tmpdir = tempfile.TemporaryDirectory(prefix="neuroseq_syscon_blocks_")
@@ -219,8 +222,6 @@ class SysCon2StimulationHost(QtCore.QObject):
         self._counter = count(1)
         self._block: _Block | None = None
         self._acquisition: BlockAcquisition | None = None
-        #: Run id armed while arm_block was still running (see _on_block_armed).
-        self._armed_early: str | None = None
         self.phase = "idle"
 
     @property
@@ -328,6 +329,10 @@ class SysCon2StimulationHost(QtCore.QObject):
             return False
         if preserve_amplitude and settings.force_binary_intensity:
             settings = replace(settings, force_binary_intensity=False)
+        if run_name != self._warnings_run_name:
+            # A new routine run asks again, e.g. about a missing power LUT.
+            self._accepted_warnings.clear()
+            self._warnings_run_name = run_name
         index = next(self._counter)
         if run_name:
             folder = self.run_directory(run_name)
@@ -389,7 +394,9 @@ class SysCon2StimulationHost(QtCore.QObject):
                 state = client.holo4d.get_state()
                 _raise_if_disconnected(state)
                 seen_upload |= normalized_holo4d_state(state).startswith("upload")
-                if holo4d_ready_to_run(state) and (
+                # Strict: nobody watches an automatic block, so an unknown state
+                # fails at the timeout (naming it) instead of starting a run.
+                if holo4d_ready_to_run(state, strict=True) and (
                     seen_upload or time.monotonic() - uploaded_at >= UPLOAD_SETTLE_S
                 ):
                     break
@@ -551,11 +558,6 @@ class SysCon2StimulationHost(QtCore.QObject):
         block = self._block
         if block is None or self.phase != "arming":
             return
-        if block.run_id is None:
-            self._armed_early = (
-                run_id  # still inside arm_block; see on_command_finished
-            )
-            return
         if block.run_id == run_id:
             self._run(block)
 
@@ -607,15 +609,10 @@ class SysCon2StimulationHost(QtCore.QObject):
                 export_settings=block.settings,
             )
             self.phase = "arming"
-            self._armed_early = None
             try:
                 block.run_id = self._acquisition.arm_block(block.recording)
             except ValueError as exc:
                 self._fail(f"Could not start the recording: {exc}")
-                return
-            if self._armed_early == block.run_id:
-                # The recorder reported it armed before arm_block returned.
-                self._run(block)
                 return
             self.progress.emit("Waiting for ScanImage to arm the triggered recording…")
         elif step == "run" and self.phase == "running" and block.recording is None:

@@ -43,6 +43,7 @@ from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
 )
 from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
 from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
+from neuroseq.stimulation.dynamic_input.hardware_targets import delivery_settings_note
 from neuroseq.stimulation.dynamic_input.hardware_targets import hardware_start_sample
 from neuroseq.stimulation.dynamic_input.rheobase import bisection_converged
 from neuroseq.stimulation.dynamic_input.rheobase import next_bracket
@@ -195,6 +196,13 @@ class RheobaseBackend(RoutineBackend):
 
     def _duration_threshold_exists(self, duration_ms: float) -> bool:
         return any(abs(d - duration_ms) <= 1e-9 for d, _ in self.thresholds)
+
+    def _duration_measured(self, duration_ms: float) -> bool:
+        """A threshold was found at this duration, or none could be reached: probing
+        it again would only repeat the result."""
+        return self._duration_threshold_exists(duration_ms) or any(
+            abs(d - duration_ms) <= 1e-9 for d in self.unreached_durations
+        )
 
     def _duration_already_sampled(self, duration_ms: float) -> bool:
         return any(abs(d - duration_ms) <= 1e-9 for d, _, _ in self.samples)
@@ -450,7 +458,7 @@ class RheobaseBackend(RoutineBackend):
         if (
             self.duration_high_ms - self.duration_low_ms
             <= self._duration_tolerance_ms()
-            or self._duration_threshold_exists(
+            or self._duration_measured(
                 self._effective_duration_ms(
                     0.5 * (self.duration_low_ms + self.duration_high_ms)
                 )
@@ -1309,6 +1317,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self._append_log(
             f"Block scripts are kept in {host.run_directory(self._run_name)}."
         )
+        self._append_log(delivery_settings_note(host))
         if self._automatic():
             self._append_log(
                 "SysCon2 target: amplitudes are fractions (0-1) of the export target "
@@ -1670,16 +1679,34 @@ class RheobaseDialog(SelfRaisingDialog):
             if spikes is None:
                 self._finish(f"Spike dataset '{name}' is unavailable.")
                 return
-            frame_seconds = 0.0
-            if isinstance(payload, dict) and payload.get("trace"):
-                trace = self.project.get_data(str(payload["trace"]), TraceData)
-                frame_seconds = float(trace.dt) if trace is not None else 0.0
+            frame_seconds = self._frame_period(
+                str(payload["trace"])
+                if isinstance(payload, dict) and payload.get("trace")
+                else None,
+                name,
+            )
             response = measure_calcium_spike_count(
                 spikes, self.spn_neuron.value(), onset, window_ms, frame_seconds
             )
             self._append_log(f"Deconvolved spikes after the probe: {response}.")
         self._last_measured_dataset = name
         self._backend.record_probe_result(response)
+
+    def _frame_period(self, trace_name: str | None, spikes_name: str) -> float:
+        """Imaging frame period of deconvolved spikes (they are timed at the start of
+        their frame): from the block's trace, else from a trace in the spikes' data
+        group (as the TIFF/Suite2p import adds both); 0 when unknown."""
+        assert self.project is not None
+        if trace_name:
+            trace = self.project.get_data(trace_name, TraceData)
+            if trace is not None:
+                return float(trace.dt)
+        experiment_name = spikes_name.split(" :: ", 1)[0]
+        experiment = getattr(self.project, "experiments", {}).get(experiment_name)
+        for datum in experiment.data if experiment is not None else ():
+            if isinstance(datum, TraceData):
+                return float(datum.dt)
+        return 0.0
 
     def _is_fresh_dataset(self, name: str) -> bool:
         if self.project is None or not name or name.startswith("Simulation :: "):

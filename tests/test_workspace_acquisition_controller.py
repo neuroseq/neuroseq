@@ -594,3 +594,43 @@ def test_routine_start_is_refused_without_folder_or_saved_channel(setup, tmp_pat
     assert "not among the saved channels" in s.controller.block_recording_unavailable()
     controls.channel_spin.setValue(2)
     assert s.controller.block_recording_unavailable() is None
+
+
+def test_fov_uses_the_channel_chosen_when_it_was_grabbed(setup, qtbot):
+    import tifffile
+
+    s = setup
+    controls = s.controller.controls
+    controls.channel_spin.setValue(1)
+    request = controls.recording_request(frames=2, external_trigger=False)
+    s.controller.start_fov_recording(request)
+    controls.channel_spin.setValue(2)  # changed while recording
+    tiff = s.folder / f"{request['stem']}_{request['counter']:05d}.tif"
+    tifffile.imwrite(
+        tiff, np.stack([np.full((3, 4), v, np.int16) for v in (4, 9, 4, 9)])
+    )
+    with qtbot.waitSignal(s.controller.fov_ready, timeout=5000) as ready:
+        s.controller.scanimage_recording_ready(
+            {
+                "run_id": request["run_id"],
+                "status": "completed",
+                "paths": [str(tiff)],
+                "fps": 30.0,
+                "duration_s": 0.1,
+                "channels": [1, 2],
+            }
+        )
+    np.testing.assert_allclose(tifffile.imread(ready.args[0]), 4.0)  # channel 1
+
+
+def test_fov_interrupted_by_a_project_change_says_why(setup):
+    s = setup
+    request = s.controller.controls.recording_request(frames=2, external_trigger=False)
+    s.controller.start_fov_recording(request)
+    s.controller._project = Project  # another project now
+    s.controller.scanimage_recording_ready(
+        {"run_id": request["run_id"], "status": "completed", "paths": [], "fps": 30}
+    )
+    s.connection.run_finished.emit(request["run_id"])
+    message = s.controller.controls.message_label.text()
+    assert "project changed" in message and "without data" not in message

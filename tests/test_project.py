@@ -1618,3 +1618,11 @@ def test_placed_spikes_keep_their_cellpose_ids():
         "Run", [SpikeData("s", np.array([3]), np.array([0.0]))], 2.0, 1.0
     )
     assert project.experiments["Run"].data[0].raw_cellpose_ids is None
+
+
+def test_empty_block_trace_is_skipped():
+    project = Project()
+    empty = TraceData("v", np.zeros((1, 0)), np.array([0]), "a.u.", 0.01)
+    spikes = SpikeData("s", np.array([0]), np.array([0.1]))
+    project.place_block_data("Run", [spikes, empty], 0.0, 0.2)
+    assert [type(d) for d in project.experiments["Run"].data] == [SpikeData]

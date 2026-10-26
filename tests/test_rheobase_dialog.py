@@ -32,6 +32,8 @@ class _FakeProject:
         self.spikes: dict[str, SpikeData] = {}
         #: Imported calcium traces, by name.
         self.traces: dict[str, TraceData] = {}
+        #: Data groups by name (only their ``data`` is used here).
+        self.experiments: dict[str, SimpleNamespace] = {}
         self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
     def get_data_names(self, data_type: type) -> list[str]:
@@ -1343,3 +1345,18 @@ def test_summary_reports_a_chronaxie_bound_as_a_bound(qtbot) -> None:
     assert "chronaxie between 10 and 12.5 ms" in dialog._final_summary()
     backend.chronaxie_range = None
     assert "chronaxie ~= 11.25 ms" in dialog._final_summary()
+
+
+def test_manual_spikes_use_the_frame_period_of_their_data_group(qtbot) -> None:
+    """Review: imported Suite2p/OASIS spikes are timed at their frame's start too."""
+    project, _editor, dialog = _make_dialog(qtbot)
+    trace = TraceData("F", np.zeros((1, 10)), np.array([0]), "fluorescence", 1 / 30)
+    project.experiments = {"Rec": SimpleNamespace(data=[trace])}
+    assert dialog._frame_period(None, "Rec :: spikes") == pytest.approx(1 / 30)
+    assert dialog._frame_period(None, "Other :: spikes") == 0.0
+
+
+def test_syscon2_run_logs_the_laser_it_delivers_with(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert "Delivering on the 940 nm laser at 1 mW" in dialog.log.toPlainText()

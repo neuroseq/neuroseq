@@ -51,6 +51,8 @@ class _Run:
     group: str | None = None
     #: Where the block starts in the stim array (biological seconds).
     offset_s: float = 0.0
+    #: The stim array's time step (biological seconds).
+    stim_dt: float = 0.0
 
 
 class Bss2StimulationHost(QtCore.QObject):
@@ -203,6 +205,7 @@ class Bss2StimulationHost(QtCore.QObject):
             list(plan.warnings),
             group=group,
             offset_s=start_sample * float(stim_array.dt),
+            stim_dt=float(stim_array.dt),
         )
         self.progress.emit(
             f"Running a {plan.duration_s:g} s block on BrainScaleS-2 "
@@ -248,7 +251,9 @@ class Bss2StimulationHost(QtCore.QObject):
                 )
                 block_data: list = [readback.spikes]
                 if readback.trace is not None:
-                    block_data.append(readback.trace)
+                    # At the input array's time step: a run's voltage spans the
+                    # whole array, and the chip samples ~30x finer than needed.
+                    block_data.append(bp.bin_average_trace(readback.trace, run.stim_dt))
                 run.project.place_block_data(
                     run.group,
                     block_data,

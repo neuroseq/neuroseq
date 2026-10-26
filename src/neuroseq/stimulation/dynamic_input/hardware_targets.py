@@ -87,3 +87,16 @@ def hardware_start_sample(editor: StimEditor, choice: str) -> int:
         editor.reset_stim_array()
         return 0
     return editor.current_stim_array_last_stimulus_sample()
+
+
+def delivery_settings_note(host: Any) -> str:
+    """The laser and power a SysCon2 routine delivers with, for its log at Start,
+    so a wrong laser row is seen before the first block."""
+    settings = host.export_settings()
+    if settings is None:
+        return "No export settings: set them under Hardware settings."
+    return (
+        f"Delivering on the {settings.laser_wavelength_nm} nm laser at "
+        f"{settings.target_power_mw:g} mW (amplitude 1); change them under "
+        "Hardware settings."
+    )
