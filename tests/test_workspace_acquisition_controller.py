@@ -232,6 +232,25 @@ def test_failed_block_recording_is_reported(setup, qtbot, state):
     assert failed.args == [run_id, "no trigger"]
 
 
+@pytest.mark.parametrize(
+    ("before", "expected"),
+    [
+        ("waiting_for_first_frame", "before its first frame"),
+        ("recording", "after its first frame"),
+    ],
+)
+def test_aborted_block_says_when_scanimage_aborted(setup, qtbot, before, expected):
+    s = setup
+    _ready_for_blocks(s)
+    run_id = s.controller.arm_block(_block())
+    s.controller.scanimage_status({"run": {"id": run_id, "state": before}})
+    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
+        s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    message = failed.args[1]
+    assert expected in message
+    assert "s after it was armed" in message
+
+
 def test_armed_block_that_never_finishes_fails_at_its_deadline(
     setup, qtbot, monkeypatch
 ):

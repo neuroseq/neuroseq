@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import pathlib
+import time
 from collections.abc import Callable
 from collections.abc import Sequence
 from datetime import UTC
@@ -102,6 +103,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         #: Block recordings of dynamic input routines, by run id.
         self._blocks: dict[str, BlockRecording] = {}
         self._armed: set[str] = set()
+        #: When each block's recording started waiting for its trigger.
+        self._armed_at: dict[str, float] = {}
         #: Deadline of each armed block recording, until its recording is ready.
         self._deadlines: dict[str, QtCore.QTimer] = {}
         #: Recorded blocks whose traces are being extracted.
@@ -183,6 +186,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
+        self._armed_at.pop(run_id, None)
         self._remove_metadata_without_recording(run_id)
         if self._fov_runs.pop(run_id, None) is not None:
             self.controls.show_message("The FOV recording ended without data.")
@@ -306,17 +310,21 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if run_id not in self.run_ids:
             return
         state = run.get("state", "unknown")
+        previous_state = self._run_states.get(run_id)
         self._run_states[run_id] = state
         if run_id in self._blocks:
             if state in {"waiting_for_first_frame", "recording"} and (
                 run_id not in self._armed
             ):
                 self._armed.add(run_id)
+                self._armed_at[run_id] = time.monotonic()
                 self._start_deadline(run_id, self._blocks[run_id])
                 self.block_armed.emit(run_id)
             elif state in _FAILED_STATES:
                 self._fail_block(
-                    run_id, run.get("error") or f"ScanImage reported '{state}'."
+                    run_id,
+                    run.get("error")
+                    or self._block_failure_message(run_id, state, previous_state),
                 )
         record = self._record(run_id)
         if record is None:
@@ -486,6 +494,29 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             run_id,
             f"ScanImage did not finish the recording within {limit_s:.0f} s. Check "
             "that SysCon2's TTL Out 1 reaches ScanImage's acquisition start trigger.",
+        )
+
+    def _block_failure_message(
+        self, run_id: str, state: str, previous_state: str | None
+    ) -> str:
+        if state != "aborted":
+            return f"ScanImage reported '{state}'."
+        armed_at = self._armed_at.get(run_id)
+        after = (
+            f" {time.monotonic() - armed_at:.1f} s after it was armed"
+            if armed_at is not None
+            else ""
+        )
+        if previous_state == "recording":
+            return (
+                f"ScanImage aborted the recording{after}, after its first frame. "
+                "Check MATLAB's command window for a ScanImage error."
+            )
+        return (
+            f"ScanImage aborted the recording{after}, before its first frame. "
+            "Either no trigger reached its acquisition start trigger from SysCon2's "
+            "TTL Out 1, the ScanImage tab's first-frame timeout passed, or Abort was "
+            "pressed in ScanImage. Check MATLAB's command window for a ScanImage error."
         )
 
     def _fail_block(self, run_id: str, message: str) -> None:
