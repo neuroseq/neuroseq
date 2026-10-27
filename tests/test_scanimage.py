@@ -67,6 +67,30 @@ def test_scanimage_rejects_volume_and_reversed_files(recording):
         index_recording(paths)
 
 
+@pytest.mark.parametrize(
+    "stack",
+    [
+        # As on the rig: a 25-slice stack is configured but stacks are disabled.
+        {"SI.hStackManager.actualNumSlices": 1},
+        {"SI.hStackManager.enable": False},
+    ],
+)
+def test_scanimage_disabled_stack_records_one_plane(recording, stack):
+    paths, meta = recording
+    meta["FrameData"] |= {"SI.hStackManager.numSlices": 25, **stack}
+    assert index_recording(paths)["channels"] == [1, 2]
+
+
+def test_scanimage_rejects_an_active_stack(recording):
+    paths, meta = recording
+    meta["FrameData"] |= {
+        "SI.hStackManager.numSlices": 25,
+        "SI.hStackManager.actualNumSlices": 25,
+    }
+    with pytest.raises(ValueError, match="single-plane"):
+        index_recording(paths)
+
+
 def test_engine_connect_requires_exact_running_session(mocker):
     matlab = ModuleType("matlab")
     engine = ModuleType("matlab.engine")

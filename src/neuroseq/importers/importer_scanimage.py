@@ -12,6 +12,17 @@ import numpy as np
 import tifffile
 
 
+def _planes(settings: dict) -> int:
+    """Planes the recording acquired. ``numSlices`` keeps the configured stack size
+    while stacks are disabled (as on the rig); ``actualNumSlices`` is what Grab
+    acquires."""
+    if "SI.hStackManager.actualNumSlices" in settings:
+        return int(settings["SI.hStackManager.actualNumSlices"])
+    if str(settings.get("SI.hStackManager.enable", True)).lower() in {"false", "0"}:
+        return 1
+    return int(settings.get("SI.hStackManager.numSlices", 1))
+
+
 def index_recording(paths: list[str]) -> dict:
     frames: dict[str, list] = {
         key: [] for key in ("file", "page", "channel", "time_s", "scanimage_time_s")
@@ -30,7 +41,7 @@ def index_recording(paths: list[str]) -> dict:
             if channels and saved != channels:
                 raise ValueError("Saved channels changed within the recording")
             channels = saved
-            if int(settings.get("SI.hStackManager.numSlices", 1)) != 1:
+            if _planes(settings) != 1:
                 raise ValueError("Only single-plane ScanImage recordings are supported")
             if settings.get("SI.hRoiManager.mroiEnable", False):
                 raise ValueError("Multi-ROI recordings are not supported yet")
