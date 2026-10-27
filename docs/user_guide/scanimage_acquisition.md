@@ -66,8 +66,8 @@ idle disconnect removes its callbacks. It does not shut down MATLAB.
 Abort Focus before starting a recording.
 
 Choose a recording folder and frame count; the experiment name is optional.
-**Save channels** lists ScanImage's channels and starts with the ones ScanImage
-saves; tick several to record them together in one acquisition. ScanImage's own
+**Save channels** lists ScanImage's channels and starts with channel 1 ticked;
+tick several to record them together in one acquisition. ScanImage's own
 selection is restored after the recording, like the other settings NeuroSeq
 changes.
 
@@ -88,10 +88,10 @@ The first-frame timeout requests an abort if no acquisition start is observed.
 
 ### Field of view for cell segmentation
 
-**Grab FOV for segmentation** records a short recording (30 frames by default,
-started by software, without stimulation), averages its **Functional channel**
-into one image and saves it beside the recording as
-`<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
+**Grab FOV for segmentation** records a short recording (300 frames by default,
+started by software, without stimulation). The whole recording is kept as
+`<date>_<number>.tif`; its **Functional channel** is averaged into one image
+saved beside it as `<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
 Cellpose on it. Because the image comes from the same scan, the masks share the
 recordings' pixel grid, as the dynamic input routines need. The snapshot is
 listed in the acquisition history but adds no data group or imaging entry.
@@ -183,8 +183,8 @@ routines run each block without manual steps:
 
 A recording that has not finished 15 s after the block plus its **Record after
 block** time is aborted and the routine stops (the usual cause is a trigger that
-never reached ScanImage). The **Functional channel** measured is remembered
-across sessions; check it before a run. STDP pairing blocks need no data, so
+never reached ScanImage). The **Functional channel** measured starts at 1
+in every session; check it before a run. STDP pairing blocks need no data, so
 they are run without recording. The
 routine needs SysCon2 and ScanImage connected, ScanImage's frame rate reported,
 and a Cellpose segmentation of the same field of view whose masks share the

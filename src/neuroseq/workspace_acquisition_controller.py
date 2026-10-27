@@ -458,9 +458,10 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         def finished(_path: object) -> None:
             record["fov_image"] = str(target)
             self._project().mark_dirty()
+            recorded = ", ".join(path.name for path in paths)
             self.controls.show_message(
-                f"FOV image saved: {target.name} (mean of channel {channel}); "
-                "segmenting it with Cellpose."
+                f"FOV recording saved: {recorded}. Its mean of channel {channel}: "
+                f"{target.name}; segmenting it with Cellpose."
             )
             self.fov_ready.emit(str(target))
 

@@ -429,9 +429,9 @@ def test_block_needs_its_functional_channel_saved(setup):
     s = setup
     _ready_for_blocks(s)
     controls = s.controller.controls
-    controls._status(
-        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
-    )
+    controls._status({"acq_state": "idle", "channels_available": 2})
+    controls.save_channel_checks[1].setChecked(True)
+    controls.save_channel_checks[0].setChecked(False)
     controls.channel_spin.setValue(1)
     with pytest.raises(ValueError, match="not among the saved channels"):
         s.controller.arm_block(_block())
@@ -685,9 +685,9 @@ def test_routine_start_is_refused_without_folder_or_saved_channel(setup, tmp_pat
     controls.set_directory(str(tmp_path / "missing"))
     assert "recording folder" in s.controller.block_recording_unavailable()
     controls.set_directory(str(s.folder))
-    controls._status(
-        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
-    )
+    controls._status({"acq_state": "idle", "channels_available": 2})
+    controls.save_channel_checks[1].setChecked(True)
+    controls.save_channel_checks[0].setChecked(False)
     controls.channel_spin.setValue(1)
     assert "not among the saved channels" in s.controller.block_recording_unavailable()
     controls.channel_spin.setValue(2)

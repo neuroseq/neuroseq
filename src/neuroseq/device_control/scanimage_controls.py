@@ -120,7 +120,7 @@ class ScanImageControls(QtWidgets.QWidget):
         self._save_channels_chosen = False
         self.save_channels_widget.setToolTip(
             "Channels saved in the recording; several channels are saved "
-            "together. Starts as set in ScanImage, which keeps its own choice."
+            "together. Starts with channel 1; ScanImage keeps its own choice."
         )
         form.addRow("Save channels", self.save_channels_widget)
         self.channel_spin = QtWidgets.QSpinBox()
@@ -129,9 +129,7 @@ class ScanImageControls(QtWidgets.QWidget):
             "Channel of the calcium indicator: shown for recordings in the Imaging "
             "tab and measured by dynamic input routines."
         )
-        # Remembered across sessions: it is a property of the rig's wiring.
-        self.channel_spin.setValue(settings.scanimage_functional_channel)
-        self.channel_spin.valueChanged.connect(self._remember_channel)
+        self.channel_spin.setValue(1)
         self.channel_spin.valueChanged.connect(self.channel_changed)
         form.addRow("Functional channel", self.channel_spin)
         self.external_check = QtWidgets.QCheckBox(
@@ -176,9 +174,12 @@ class ScanImageControls(QtWidgets.QWidget):
         self.fov_button.clicked.connect(self._grab_fov)
         self.fov_frames_spin = QtWidgets.QSpinBox()
         self.fov_frames_spin.setRange(1, 10000)
-        self.fov_frames_spin.setValue(30)
+        self.fov_frames_spin.setValue(300)
         self.fov_frames_spin.setSuffix(" frames")
-        self.fov_frames_spin.setToolTip("Frames averaged into the FOV image.")
+        self.fov_frames_spin.setToolTip(
+            "Frames grabbed for the FOV: all are saved in the recording's TIFF and "
+            "averaged into the FOV image."
+        )
         fov_row.addWidget(self.fov_button)
         fov_row.addWidget(self.fov_frames_spin)
         fov_row.addStretch(1)
@@ -323,12 +324,10 @@ class ScanImageControls(QtWidgets.QWidget):
                 self._save_channels_layout.insertWidget(number - 1, check)
                 self.save_channel_checks.append(check)
         if not self._save_channels_chosen:
-            # Follow ScanImage's selection until the user picks channels here.
-            saved = status.get("saved_channels", [])
-            saved = {int(saved)} if isinstance(saved, int) else {int(c) for c in saved}
+            # Channel 1 until the user picks channels here.
             for number, check in enumerate(self.save_channel_checks, start=1):
                 check.blockSignals(True)
-                check.setChecked(number in saved)
+                check.setChecked(number == 1)
                 check.blockSignals(False)
 
     def _save_channels_toggled(self, _checked: bool) -> None:
@@ -419,9 +418,6 @@ class ScanImageControls(QtWidgets.QWidget):
                 return
             self.connection.command("abort")
             self.status_label.setText("First-frame timeout; abort requested.")
-
-    def _remember_channel(self, channel: int) -> None:
-        self.settings.scanimage_functional_channel = int(channel)
 
     def show_message(self, message: str) -> None:
         """Show a user message independently of periodic acquisition status."""

@@ -330,7 +330,7 @@ def test_controls_remember_python_and_folder_across_sessions(
     assert GuiSettings().scanimage_python_path == str(other)
 
 
-def test_controls_remember_functional_channel_across_sessions(
+def test_controls_start_at_channel_1_and_grab_300_fov_frames(
     qtbot, connection, tmp_config_dir
 ):
     from neuroseq.device_control.scanimage_controls import ScanImageControls
@@ -338,11 +338,12 @@ def test_controls_remember_functional_channel_across_sessions(
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
     assert panel.channel_spin.value() == 1
+    assert panel.fov_frames_spin.value() == 300
     panel.channel_spin.setValue(2)
 
     reopened = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(reopened)
-    assert reopened.channel_spin.value() == 2
+    assert reopened.channel_spin.value() == 1
 
 
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
@@ -945,20 +946,21 @@ def test_record_saves_the_channels_ticked_in_the_dialog(
     panel.record_requested.connect(requests.append)
     panel.directory_edit.setText(str(tmp_path))
 
-    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
+    assert panel.channel_spin.value() == 1
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 2})
     assert [c.text() for c in panel.save_channel_checks] == ["1", "2", "3", "4"]
-    assert panel.saved_channels() == [1]
+    assert panel.saved_channels() == [1]  # channel 1, whatever ScanImage saves
     panel._status(
-        {"acq_state": "idle", "channels_available": 4, "saved_channels": [1, 3]}
+        {"acq_state": "idle", "channels_available": 4, "saved_channels": [2, 3]}
     )
-    assert panel.saved_channels() == [1, 3]  # follows ScanImage until chosen here
+    assert panel.saved_channels() == [1]
 
-    panel.save_channel_checks[1].setChecked(True)
-    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
-    assert panel.saved_channels() == [1, 2, 3]  # the user's choice is kept
+    panel.save_channel_checks[2].setChecked(True)
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 2})
+    assert panel.saved_channels() == [1, 3]  # the user's choice is kept
 
     panel._record()
-    assert requests[-1]["channels"] == [1, 2, 3]
+    assert requests[-1]["channels"] == [1, 3]
 
     for check in panel.save_channel_checks:
         check.setChecked(False)
