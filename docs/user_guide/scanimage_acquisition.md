@@ -101,7 +101,9 @@ events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame
 count. Should ScanImage still split a recording into several files, they are grouped as
 one recording. Aborted recordings with readable complete
-channel groups can also be attached, labeled as aborted.
+channel groups can also be attached, labeled as aborted. An externally triggered
+Grab can end through ScanImage's abort after its last frame, so an "aborted"
+recording that holds every requested frame counts as completed.
 
 After completion, abort, or a failed start, the adapter restores the previous
 logging folder, filename stem/counter, frames per file, logging enable,

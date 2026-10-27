@@ -113,6 +113,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._block_channels: dict[str, int] = {}
         #: Frames requested from ScanImage for each block, and the rate they assumed.
         self._block_frames: dict[str, tuple[int, float]] = {}
+        #: Why ScanImage aborted a block's recording, kept until its TIFF is checked.
+        self._abort_messages: dict[str, str] = {}
         #: Stimulus samples written beside a recording that has not started yet.
         self._stimulus_files: dict[str, pathlib.Path] = {}
         #: Last reported state of each run started here.
@@ -189,6 +191,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
         self._armed_at.pop(run_id, None)
+        self._abort_messages.pop(run_id, None)
         self._remove_metadata_without_recording(run_id)
         if self._fov_runs.pop(run_id, None) is not None:
             self.controls.show_message("The FOV recording ended without data.")
@@ -323,10 +326,20 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 self._armed_at[run_id] = time.monotonic()
                 self._start_deadline(run_id, self._blocks[run_id])
                 self.block_armed.emit(run_id)
+            elif state == "aborted" and "error" not in run:
+                # A triggered Grab can end through ScanImage's abort() after its
+                # last frame; the connection then reports the saved TIFF as
+                # completed. Otherwise the recording or its finalization fails.
+                self._stop_deadline(run_id)
+                self._abort_messages.setdefault(
+                    run_id,
+                    self._block_failure_message(run_id, state, previous_state),
+                )
             elif state in _FAILED_STATES:
                 self._fail_block(
                     run_id,
                     run.get("error")
+                    or self._abort_messages.get(run_id)
                     or self._block_failure_message(run_id, state, previous_state),
                 )
         record = self._record(run_id)
@@ -418,7 +431,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if block is None:
             return
         if result["status"] != "completed":
-            self._fail_block(run_id, f"The recording was {result['status']}.")
+            self._fail_block(
+                run_id,
+                self._abort_messages.get(run_id)
+                or f"The recording was {result['status']}.",
+            )
             return
         self._extract_block(run_id, block, result, name)
 
@@ -531,6 +548,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def _fail_block(self, run_id: str, message: str) -> None:
         self._stop_deadline(run_id)
+        self._abort_messages.pop(run_id, None)
         self._block_channels.pop(run_id, None)
         self._block_frames.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
@@ -660,6 +678,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def abort_block(self, run_id: str) -> None:
         self._stop_deadline(run_id)
+        self._abort_messages.pop(run_id, None)
         self._blocks.pop(run_id, None)
         self._block_channels.pop(run_id, None)
         self._block_frames.pop(run_id, None)

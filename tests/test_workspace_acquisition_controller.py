@@ -242,11 +242,19 @@ def test_failed_block_recording_is_reported(setup, qtbot, state):
 def test_aborted_block_says_when_scanimage_aborted(setup, qtbot, before, expected):
     s = setup
     _ready_for_blocks(s)
+    failures = []
+    s.controller.block_recording_failed.connect(lambda *args: failures.append(args))
     run_id = s.controller.arm_block(_block())
     s.controller.scanimage_status({"run": {"id": run_id, "state": before}})
-    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
-        s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
-    message = failed.args[1]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    # The block waits for the saved TIFF: a full one counts as completed.
+    assert not failures
+    assert run_id not in s.controller._deadlines
+    s.controller.scanimage_status(
+        {"run": {"id": run_id, "state": "finalization_failed"}}
+    )
+    assert len(failures) == 1
+    message = failures[0][1]
     assert expected in message
     assert "s after it was armed" in message
     # 1 s block + 2 s tail at 30 Hz.
@@ -353,6 +361,42 @@ def test_block_completes_when_the_run_ends_right_after_recording_ready(
         s.connection.run_finished.emit(run_id)
     assert not failed
     assert not s.controller._blocks
+
+
+def test_aborted_block_with_a_complete_recording_is_extracted(setup, qtbot, mocker):
+    """ScanImage can fire acqAbort at the end of a triggered Grab."""
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    mocker.patch.object(controller_module, "extract_recording_dff", return_value=trace)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    failed = []
+    s.controller.block_recording_failed.connect(lambda *args: failed.append(args))
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+        s.connection.recording_ready.emit(_ready_result(run_id, arguments, s.folder))
+        s.connection.run_finished.emit(run_id)
+    assert not failed
+
+
+def test_aborted_block_with_a_partial_recording_fails(setup, qtbot):
+    s = setup
+    _ready_for_blocks(s)
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    result = _ready_result(run_id, arguments, s.folder) | {"status": "aborted"}
+    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
+        s.connection.recording_ready.emit(result)
+    assert "ScanImage aborted the recording" in failed.args[1]
 
 
 def test_block_measures_the_functional_channel_of_the_scanimage_tab(

@@ -194,11 +194,19 @@ class ScanImageConnection(QtCore.QObject):
             self.connected_changed.emit(True)
             self.timer.start()
         if operation == "index":
+            state = self._last_status["run"]["state"]
+            all_frames = self._expected_frames is not None and len(
+                result["frames"]["page"]
+            ) == self._expected_frames * len(result["channels"])
+            if state == "aborted" and all_frames:
+                # A triggered Grab can end through ScanImage's abort() after its
+                # last frame, firing acqAbort instead of acqModeDone; a recording
+                # holding every requested frame is complete.
+                state = "completed"
             if (
-                self._last_status["run"]["state"] == "completed"
+                state == "completed"
                 and self._expected_frames is not None
-                and len(result["frames"]["page"])
-                != self._expected_frames * len(result["channels"])
+                and not all_frames
             ):
                 if (
                     self._finalize_since is not None
@@ -217,7 +225,7 @@ class ScanImageConnection(QtCore.QObject):
                 self._end_run()
                 return
             result["run_id"] = self.run_id
-            result["status"] = self._last_status["run"]["state"]
+            result["status"] = state
             self.run_id = None
             self.recording_ready.emit(result)
             self.run_finished.emit(result["run_id"])

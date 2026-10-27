@@ -162,6 +162,24 @@ def test_finalization_requires_matching_run_and_stable_files(
     assert connection.run_id is None
 
 
+@pytest.mark.parametrize(
+    ("expected_frames", "status"), [(4, "completed"), (5, "aborted")]
+)
+def test_aborted_run_holding_every_requested_frame_is_completed(
+    connection, recording, mocker, expected_frames, status
+):
+    """ScanImage can fire acqAbort at the end of a triggered Grab."""
+    paths, _ = recording
+    connection.run_id = "our-run"
+    connection._expected_frames = expected_frames
+    connection._last_status = {"run": {"id": "our-run", "state": "aborted"}}
+    ready = mocker.Mock()
+    connection.recording_ready.connect(ready)
+    connection._send("index", {"paths": paths})
+    connection._reply({"id": 1, "result": index_recording(paths)})
+    assert ready.call_args.args[0]["status"] == status
+
+
 def test_record_request_waits_for_poll_and_abort_cancels_it(connection):
     connection.connected = True
     connection._poll()
