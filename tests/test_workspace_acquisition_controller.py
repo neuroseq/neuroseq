@@ -249,6 +249,8 @@ def test_aborted_block_says_when_scanimage_aborted(setup, qtbot, before, expecte
     message = failed.args[1]
     assert expected in message
     assert "s after it was armed" in message
+    # 1 s block + 2 s tail at 30 Hz.
+    assert "recording of 90 frames, 3.0 s at 30.00 Hz" in message
 
 
 def test_armed_block_that_never_finishes_fails_at_its_deadline(

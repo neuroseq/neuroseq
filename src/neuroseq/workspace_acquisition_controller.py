@@ -111,6 +111,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._extracting: set[str] = set()
         #: Functional (calcium) channel of each block recording, from the ScanImage tab.
         self._block_channels: dict[str, int] = {}
+        #: Frames requested from ScanImage for each block, and the rate they assumed.
+        self._block_frames: dict[str, tuple[int, float]] = {}
         #: Stimulus samples written beside a recording that has not started yet.
         self._stimulus_files: dict[str, pathlib.Path] = {}
         #: Last reported state of each run started here.
@@ -195,6 +197,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             # completes once its traces are extracted.
             return
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(
                 run_id, "The recording ended without producing data."
@@ -499,8 +502,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _block_failure_message(
         self, run_id: str, state: str, previous_state: str | None
     ) -> str:
+        requested = ""
+        if run_id in self._block_frames:
+            frames, fps = self._block_frames[run_id]
+            requested = (
+                f" (recording of {frames} frames, {frames / fps:.1f} s at {fps:.2f} Hz)"
+            )
         if state != "aborted":
-            return f"ScanImage reported '{state}'."
+            return f"ScanImage reported '{state}'{requested}."
         armed_at = self._armed_at.get(run_id)
         after = (
             f" {time.monotonic() - armed_at:.1f} s after it was armed"
@@ -509,19 +518,21 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         )
         if previous_state == "recording":
             return (
-                f"ScanImage aborted the recording{after}, after its first frame. "
-                "Check MATLAB's command window for a ScanImage error."
+                f"ScanImage aborted the recording{requested}{after}, after its first "
+                "frame. Check MATLAB's command window for a ScanImage error."
             )
         return (
-            f"ScanImage aborted the recording{after}, before its first frame. "
-            "Either no trigger reached its acquisition start trigger from SysCon2's "
-            "TTL Out 1, the ScanImage tab's first-frame timeout passed, or Abort was "
-            "pressed in ScanImage. Check MATLAB's command window for a ScanImage error."
+            f"ScanImage aborted the recording{requested}{after}, before its first "
+            "frame. Either no trigger reached its acquisition start trigger from "
+            "SysCon2's TTL Out 1, the ScanImage tab's first-frame timeout passed, or "
+            "Abort was pressed in ScanImage. Check MATLAB's command window for a "
+            "ScanImage error."
         )
 
     def _fail_block(self, run_id: str, message: str) -> None:
         self._stop_deadline(run_id)
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(run_id, message)
 
@@ -535,6 +546,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         fps = float(result["fps"])
         channels = list(result["channels"])
         channel = self._block_channels.pop(run_id, self.controls.channel_spin.value())
+        self._block_frames.pop(run_id, None)
 
         def task(_report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
             trace = extract_recording_dff(
@@ -638,9 +650,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         run_id = arguments["run_id"]
         self._blocks[run_id] = recording
         self._block_channels[run_id] = channel
+        self._block_frames[run_id] = (frames, fps)
         if not self.start_scanimage_recording(arguments, recording, channel):
             self._blocks.pop(run_id, None)
             self._block_channels.pop(run_id, None)
+            self._block_frames.pop(run_id, None)
             raise ValueError("ScanImage did not accept the recording.")
         return run_id
 
@@ -648,5 +662,6 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._stop_deadline(run_id)
         self._blocks.pop(run_id, None)
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self.connection.run_id == run_id:
             self.connection.command("abort")
