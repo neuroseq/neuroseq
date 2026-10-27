@@ -38,17 +38,21 @@ def tiff_frame_count(image_path: str | Path) -> int:
 
 
 def load_annotation_image(image_path: str | Path) -> np.ndarray:
-    """Load a single image, or average sampled pages from a TIFF stack."""
+    """Load a single image, or average sampled pages from a TIFF stack.
+
+    The result is writable: Cellpose normalises its input in place, and a
+    single image read through Pillow would be read-only.
+    """
     path = Path(image_path)
     if path.suffix.lower() not in TIFF_SUFFIXES:
         # A single still image (e.g. PNG) - nothing to average over.
         with Image.open(path) as image:
-            return np.asarray(image)
+            return np.array(image)
 
     frame_count = tiff_frame_count(path)
     if frame_count <= 1:
         with Image.open(path) as image:
-            return np.asarray(image)
+            return np.array(image)
 
     frame_indices = range(0, min(frame_count, MAX_SOURCE_FRAMES), FRAME_STEP)
     frames = tifffile.imread(path, key=frame_indices)
