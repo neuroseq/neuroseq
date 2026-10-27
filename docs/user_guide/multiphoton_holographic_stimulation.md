@@ -148,7 +148,10 @@ button:
 - Loading a SysCon `.lut` file maps the requested mW to the laser's
   intensity percentage at the currently selected wavelength. The exporter divides
   that percentage by 100 for the `.seq` intensity fields (0–1). Each
-  wavelength has its own LUT slot.
+  wavelength has its own LUT slot. The mW those fractions stand for are kept in
+  each Shape's and laser pulse's description, e.g.
+  `neuron=3 power_mW=12.5 target_mW=25` (the requested power for that object,
+  i.e. the target times its amplitude, and the target power).
 - LUTs are bundled into the `.nseq` archive when you save the project, so
   the export stays reproducible across machines. Loading a LUT marks the project
   as modified; save it to retain the calibration.

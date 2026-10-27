@@ -862,6 +862,7 @@ def test_export_seq_shape_intensity_remains_zero_when_non_binary_input_is_reques
 
     assert len(shapes) == 1
     assert np.isclose(shapes[0].intensity, 0.0)
+    assert shapes[0].properties["TimelineInfo0_description"] == "neuron=0"
 
 
 def test_export_seq_writes_lut_inverted_intensity_when_power_requested() -> None:
@@ -901,6 +902,14 @@ def test_export_seq_writes_lut_inverted_intensity_when_power_requested() -> None
     assert report.power_saturation_warnings == []
     assert report.target_power_mw == 25.0
     assert report.power_lut_description == ""
+    assert (
+        shapes[0].properties["TimelineInfo0_description"]
+        == "neuron=0 power_mW=25 target_mW=25"
+    )
+    assert (
+        laser_pulses[0].properties["TimelineInfo0_description"]
+        == "power_mW=25 target_mW=25"
+    )
 
 
 def test_export_seq_clamps_and_warns_when_target_power_exceeds_lut_max() -> None:
@@ -971,6 +980,10 @@ def test_export_seq_uses_window_intensity_as_multiplier_when_non_binary() -> Non
 
     assert float(shapes[0].properties["TimelineInfo0_Intensity_0"]) == pytest.approx(
         0.4
+    )
+    assert (
+        shapes[0].properties["TimelineInfo0_description"]
+        == "neuron=0 power_mW=20 target_mW=50"
     )
     assert any(
         float(pulse.properties["TimelineInfo0_Intensity_0"]) == pytest.approx(0.4)

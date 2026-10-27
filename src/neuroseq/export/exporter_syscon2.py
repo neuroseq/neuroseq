@@ -697,7 +697,15 @@ def generate_syscon2_sequence_text(
                             window.start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
                         ),
                     ),
-                    ("TimelineInfo0_description", f"neuron={window.neuron_index}"),
+                    (
+                        "TimelineInfo0_description",
+                        f"neuron={window.neuron_index}"
+                        + (
+                            " " + _power_description(target_power_mw, window.intensity)
+                            if power_enabled
+                            else ""
+                        ),
+                    ),
                     (
                         "TimelineInfo0_repeats",
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
@@ -773,6 +781,11 @@ def generate_syscon2_sequence_text(
                 lightsource_id=lightsource_id,
                 include_lightsource=True,
                 intensity_fraction=intensity_fraction,
+                description=(
+                    _power_description(target_power_mw, pulse_intensity_norm)
+                    if power_enabled
+                    else ""
+                ),
             )
         )
         laser_block_rows.append((block_object_id, (start_tick, end_tick)))
@@ -3757,6 +3770,7 @@ def _format_ttl_pulse_block(
     lightsource_id: str,
     include_lightsource: bool,
     intensity_fraction: str = "0",
+    description: str = "",
 ) -> list[str]:
     properties: list[tuple[str, str]] = [
         ("TotalTimings", "1"),
@@ -3765,7 +3779,7 @@ def _format_ttl_pulse_block(
             "TimelineInfo0_starttime",
             _format_time_us(start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US),
         ),
-        ("TimelineInfo0_description", ""),
+        ("TimelineInfo0_description", description),
         (
             "TimelineInfo0_repeats",
             str(_ttl_repeats_from_duration_ticks(duration_ticks)),
@@ -3805,6 +3819,16 @@ def _format_object_block(
 
 def _format_float(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _power_description(target_power_mw: float, intensity: float) -> str:
+    """The requested power of an object, for its description: SysCon2 stores the
+    LUT-inverted laser fraction, so this keeps the mW it stands for in the file."""
+    effective_mw = max(0.0, target_power_mw * float(intensity))
+    return (
+        f"power_mW={_format_float(effective_mw)} "
+        f"target_mW={_format_float(target_power_mw)}"
+    )
 
 
 def _shape_intensity_for_window(

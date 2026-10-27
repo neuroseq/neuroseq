@@ -2007,7 +2007,8 @@ def test_group_merges_simultaneous_multi_spot_shapes() -> None:
     assert sorted(len(g) for g in groups) == [1, 6]
 
 
-def test_group_uses_exported_neuron_tags() -> None:
+@pytest.mark.parametrize("suffix", ["", " power_mW=12.5 target_mW=25"])
+def test_group_uses_exported_neuron_tags(suffix: str) -> None:
     from neuroseq.importers.importer_syscon2 import SysconSequenceObject
     from neuroseq.importers.importer_syscon2 import _group_entities_by_center_distance
 
@@ -2017,7 +2018,7 @@ def test_group_uses_exported_neuron_tags() -> None:
             object_id=i,
             object_type="Shape",
             properties={
-                "TimelineInfo0_description": f"neuron={tag}",
+                "TimelineInfo0_description": f"neuron={tag}{suffix}",
                 "Shape0_CenterX": str(50.0 * i),
                 "Shape0_CenterY": "0",
             },
