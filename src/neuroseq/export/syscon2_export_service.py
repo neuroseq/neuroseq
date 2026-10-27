@@ -200,11 +200,18 @@ def export_stim_array(
     start_sample: int | None = None,
     stop_sample: int | None = None,
     confirm_warnings: Callable[[list[str]], bool] | None = None,
+    require_power: bool = False,
+    require_mapped_targets: bool = False,
 ) -> SysconExportResult:
     """Sanity-check and export ``stim_array`` (optionally a sample range) to ``output_dir``.
 
     Raises :class:`SysconExportError` if the sanity check fails; fixes that need user
     judgement (resampling dt, spacing out pulses, ...) stay in the generator dialog.
+    ``require_power`` (amplitude sweeps) makes a missing target power or power LUT,
+    or a target above the LUT's maximum, an error: without them every amplitude
+    would be delivered at the same power. ``require_mapped_targets`` makes an active
+    neuron without a Cellpose ROI an error rather than a warning (a routine would
+    measure a cell it never stimulated).
     """
     validate_export_name(name)
     if (
@@ -240,8 +247,30 @@ def export_stim_array(
             "Timing fixes require review. Open the export dialog and run Check Input Sanity:\n- "
             + "\n- ".join(sanity.fix_messages)
         )
+    sanity_report = sanity.export_report if require_mapped_targets else None
+    unmapped = (
+        sanity_report.unmapped_active_neurons if sanity_report is not None else []
+    )
+    if unmapped:
+        raise SysconExportError(
+            "No Cellpose ROI is mapped to neuron(s) "
+            + ", ".join(str(idx) for idx in unmapped)
+            + ": check the segmentation and its stimulus mapping."
+        )
     warnings = list(sanity.warnings)
     lut = _power_lut(project, settings.laser_wavelength_nm)
+    if require_power:
+        if settings.target_power_mw <= 0:
+            raise SysconExportError(
+                "Set a target power above 0 mW: without it the .seq carries no "
+                "power, so every amplitude would be delivered alike."
+            )
+        if lut is None:
+            raise SysconExportError(
+                f"Load a power LUT for {settings.laser_wavelength_nm} nm: without "
+                "it the .seq carries no power, so every amplitude would be "
+                "delivered alike."
+            )
     if settings.target_power_mw > 0 and lut is None:
         warnings.append(
             f"No power LUT is available for {settings.laser_wavelength_nm} nm. "
@@ -266,6 +295,17 @@ def export_stim_array(
         raise SysconExportError(
             "Power LUT must contain finite percentages in 0–100 and nonnegative mW values."
         )
+    if lut is not None and lut.tuples and settings.target_power_mw > lut.max_mw:
+        message = (
+            f"The target power {settings.target_power_mw:g} mW is above the "
+            f"{settings.laser_wavelength_nm} nm power LUT's maximum of "
+            f"{lut.max_mw:g} mW: amplitudes above "
+            f"{lut.max_mw / settings.target_power_mw:.2f} are all delivered at "
+            "the maximum."
+        )
+        if require_power:
+            raise SysconExportError(message)
+        warnings.append(message)
     if warnings and (confirm_warnings is None or not confirm_warnings(warnings)):
         raise SysconExportError(
             "Export warnings require review:\n- " + "\n- ".join(warnings)

@@ -129,6 +129,9 @@ class ScanImageControls(QtWidgets.QWidget):
             "Channel of the calcium indicator: shown for recordings in the Imaging "
             "tab and measured by dynamic input routines."
         )
+        # Remembered across sessions: it is a property of the rig's wiring.
+        self.channel_spin.setValue(settings.scanimage_functional_channel)
+        self.channel_spin.valueChanged.connect(self._remember_channel)
         self.channel_spin.valueChanged.connect(self.channel_changed)
         form.addRow("Functional channel", self.channel_spin)
         self.external_check = QtWidgets.QCheckBox(
@@ -416,6 +419,9 @@ class ScanImageControls(QtWidgets.QWidget):
                 return
             self.connection.command("abort")
             self.status_label.setText("First-frame timeout; abort requested.")
+
+    def _remember_channel(self, channel: int) -> None:
+        self.settings.scanimage_functional_channel = int(channel)
 
     def show_message(self, message: str) -> None:
         """Show a user message independently of periodic acquisition status."""

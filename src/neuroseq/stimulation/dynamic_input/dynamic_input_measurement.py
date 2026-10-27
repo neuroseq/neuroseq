@@ -102,9 +102,18 @@ def measure_calcium_spike_count(
 
     ``onset_seconds`` is relative to the start of the acquisition that produced ``spikes``.
     Spikes are timed at the start of their imaging frame, so with ``frame_seconds`` (the
-    frame period) a spike in the frame containing the onset also counts.
+    frame period) a spike in the frame containing the onset also counts, and so does
+    one in the frame after the window's end: the frames the stimulus lit up are
+    imputed from their neighbours, so a short pulse's response first shows in full
+    in the frame after it.
     """
     stop_seconds = onset_seconds + window_ms / 1000.0
+    if frame_seconds > 0:
+        # The start of the frame after the one containing the window's end (with a
+        # little slack for spike times computed as frame index x period).
+        stop_seconds = (
+            np.floor(stop_seconds / frame_seconds) + 1
+        ) * frame_seconds + 1e-9
     # The start of the frame containing the onset, not of the frame before it.
     after_onset = (
         spikes.spike_times > onset_seconds - frame_seconds

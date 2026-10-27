@@ -60,6 +60,10 @@ class PerTargetValues:
         self._target = target
         self._values: dict[str, tuple[float, ...]] = {}
 
+    def visited(self, target: str) -> bool:
+        """Whether ``target`` has been shown (its values are remembered)."""
+        return target == self._target or target in self._values
+
     def switch(self, target: str) -> None:
         if target == self._target:
             return

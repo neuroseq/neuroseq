@@ -51,6 +51,9 @@ logger = logging.getLogger(__name__)
 
 #: Run states after which a block recording yields no data.
 _FAILED_STATES = {"failed", "aborted", "interrupted", "finalization_failed", "unknown"}
+#: Slack beyond a block's length before an armed recording that has not finished
+#: is aborted (e.g. ScanImage never received the trigger).
+BLOCK_DEADLINE_MARGIN_S = 15.0
 #: Recording folder key in ``Project.device_folders``.
 RECORDING_FOLDER = "scanimage_recording"
 
@@ -99,6 +102,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         #: Block recordings of dynamic input routines, by run id.
         self._blocks: dict[str, BlockRecording] = {}
         self._armed: set[str] = set()
+        #: Deadline of each armed block recording, until its recording is ready.
+        self._deadlines: dict[str, QtCore.QTimer] = {}
         #: Recorded blocks whose traces are being extracted.
         self._extracting: set[str] = set()
         #: Functional (calcium) channel of each block recording, from the ScanImage tab.
@@ -145,6 +150,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if self._disposed:
             return
         self._disposed = True
+        for run_id in list(self._deadlines):
+            self._stop_deadline(run_id)
         self.controls.dispose()
         self.connection.status_changed.disconnect(self.scanimage_status)
         self.connection.recording_ready.disconnect(self.scanimage_recording_ready)
@@ -305,6 +312,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 run_id not in self._armed
             ):
                 self._armed.add(run_id)
+                self._start_deadline(run_id, self._blocks[run_id])
                 self.block_armed.emit(run_id)
             elif state in _FAILED_STATES:
                 self._fail_block(
@@ -351,6 +359,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def scanimage_recording_ready(self, result: dict) -> None:
         run_id = result["run_id"]
+        self._stop_deadline(run_id)
         if run_id not in self.run_ids:
             return
         self.run_ids.remove(run_id)
@@ -451,7 +460,36 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             on_failed=failed,
         )
 
+    def _start_deadline(self, run_id: str, recording: BlockRecording) -> None:
+        """Abort the block if its recording has not finished well after its length:
+        a recording that started without the trigger would otherwise wait forever."""
+        limit_s = recording.duration_s + recording.tail_s + BLOCK_DEADLINE_MARGIN_S
+        timer = QtCore.QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._deadline_passed(run_id, limit_s))
+        self._deadlines[run_id] = timer
+        timer.start(int(limit_s * 1000))
+
+    def _stop_deadline(self, run_id: str) -> None:
+        timer = self._deadlines.pop(run_id, None)
+        if timer is not None:
+            timer.stop()
+            timer.deleteLater()
+
+    def _deadline_passed(self, run_id: str, limit_s: float) -> None:
+        self._stop_deadline(run_id)
+        if run_id not in self._blocks:
+            return
+        if self.connection.run_id == run_id:
+            self.connection.command("abort")
+        self._fail_block(
+            run_id,
+            f"ScanImage did not finish the recording within {limit_s:.0f} s. Check "
+            "that SysCon2's TTL Out 1 reaches ScanImage's acquisition start trigger.",
+        )
+
     def _fail_block(self, run_id: str, message: str) -> None:
+        self._stop_deadline(run_id)
         self._block_channels.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(run_id, message)
@@ -576,6 +614,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         return run_id
 
     def abort_block(self, run_id: str) -> None:
+        self._stop_deadline(run_id)
         self._blocks.pop(run_id, None)
         self._block_channels.pop(run_id, None)
         if self.connection.run_id == run_id:

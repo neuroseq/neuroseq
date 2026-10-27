@@ -179,7 +179,11 @@ routines run each block without manual steps:
    event of at least the **Spike threshold**, in ΔF/F, is a spike), add both to
    the recording's data group, and measure the response.
 
-STDP pairing blocks need no data, so they are run without recording. The
+A recording that has not finished 15 s after the block plus its **Record after
+block** time is aborted and the routine stops (the usual cause is a trigger that
+never reached ScanImage). The **Functional channel** measured is remembered
+across sessions; check it before a run. STDP pairing blocks need no data, so
+they are run without recording. The
 routine needs SysCon2 and ScanImage connected, ScanImage's frame rate reported,
 and a Cellpose segmentation of the same field of view whose masks share the
 TIFFs' pixel grid. These recordings are marked `stimulation_trigger`

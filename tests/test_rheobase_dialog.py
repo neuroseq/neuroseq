@@ -1,3 +1,4 @@
+import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
@@ -1036,6 +1037,78 @@ def test_hardware_settings_stay_locked_while_a_manual_routine_runs(qtbot) -> Non
     assert dialog._running
     dialog.refresh()
     assert not dialog.hardware.isEnabled()
+
+
+@pytest.mark.parametrize("event", ["finished", "failed"])
+def test_simulation_during_a_hardware_run_is_ignored(qtbot, event) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    if event == "finished":
+        dialog.simulation_finished()
+    else:
+        dialog.simulation_failed("Busy")
+    assert dialog._running
+    assert host.cancelled == 0
+
+
+@pytest.mark.parametrize("amplitude", ["min", "fixed"])
+def test_syscon2_rejects_a_zero_amplitude(qtbot, amplitude) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    if amplitude == "fixed":
+        dialog.cmb_sweeping_strategy.setCurrentText(
+            dialog.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
+        )
+        dialog.spn_fixed_amplitude.setValue(0.0)
+    else:
+        dialog.spn_min_amplitude.setValue(0.0)
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+    assert "above 0" in dialog.log.toPlainText()
+
+
+def test_syscon2_starts_with_slice_timing_and_one_amplitude_search(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.stimulation_host = FakeStimulationHost()  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_sweeping_strategy.setCurrentText(dialog.AMPLITUDE_AND_DURATION_STRATEGY)
+    brian2_timing = (
+        dialog.spn_pulse_ms.value(),
+        dialog.spn_max_pulse_ms.value(),
+        dialog.spn_recovery_ms.value(),
+        dialog.spn_response_ms.value(),
+    )
+
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    timing = (
+        dialog.spn_pulse_ms.value(),
+        dialog.spn_max_pulse_ms.value(),
+        dialog.spn_recovery_ms.value(),
+        dialog.spn_response_ms.value(),
+    )
+    assert timing == pytest.approx(dialog.SYSCON2_TIMING_MS)
+    assert (
+        dialog.cmb_sweeping_strategy.currentText()
+        == dialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+    )
+
+    # The user's choices on each target are kept.
+    dialog.cmb_sweeping_strategy.setCurrentText(dialog.AMPLITUDE_AND_DURATION_STRATEGY)
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_pulse_ms.value() == pytest.approx(brian2_timing[0])
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    assert (
+        dialog.cmb_sweeping_strategy.currentText()
+        == dialog.AMPLITUDE_AND_DURATION_STRATEGY
+    )
+
+
+def test_syscon2_warns_about_pulses_shorter_than_a_spiral(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    host.settings = dataclasses.replace(host.settings, spiralling=True)
+    dialog.spn_pulse_ms.setValue(10.0)
+    dialog.start()
+    assert "shorter than one spiral" in dialog.log.toPlainText()
 
 
 def test_syscon2_automatic_needs_a_recorder(qtbot) -> None:

@@ -281,8 +281,23 @@ is only imported into SysCon2 and you run, record and import it yourself, then
 click **Calcium data imported** (rheobase can then measure the rise of an
 imported ΔF/F or raw fluorescence trace, e.g. the TIFF import's ROI averages,
 or deconvolved spikes; Suite2p's normalised traces are refused, since a rise
-relative to their baseline is meaningless). Export warnings, such as a missing power LUT, are
-asked once per routine rather than failing every block.
+relative to their baseline is meaningless). Export warnings are asked once per
+routine rather than failing every block. Since probe amplitudes are fractions of
+the target power, a routine refuses to send a block without a target power above
+0 mW and a power LUT for the chosen laser, or with a target above the LUT's
+maximum (higher amplitudes would all be delivered at that maximum); every
+stimulated neuron must have a Cellpose ROI. Amplitudes must be above 0 and at
+most 1.
+
+Choosing the SysCon2 target first gives rheobase settings for cells in a slice: a
+16.7 ms pulse (one spiral; a shorter pulse with spiral scanning on is logged as a
+warning, since only part of the spiral is delivered), up to 100 ms, 1 s recovery,
+a 300 ms post-pulse window and **Fixed duration, varying amplitude**, since every
+probe is a recording. Each target keeps its own values when you switch back and
+forth. With deconvolved spikes, a spike in the imaging frame after the
+post-pulse window still counts: the frames lit by a short pulse are imputed, so
+its response first shows in full in the next frame. Simulations finishing or
+failing meanwhile do not affect a hardware run.
 
 Each routine run keeps its block scripts in its own folder inside the project's
 export folder (the one **Export with settings…** used last), for example

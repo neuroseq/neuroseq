@@ -84,3 +84,12 @@ def test_rise_of_normalised_or_baseline_less_traces_is_refused() -> None:
     )
     with pytest.raises(ValueError, match="not positive"):
         calcium_rise_fraction(dark, 0, 1.0, 500.0, 300.0)
+
+
+def test_spike_in_the_frame_after_a_short_window_counts() -> None:
+    frame = 1 / 30
+    # Onset 0.2 s (in frame 6), 10 ms pulse + 20 ms window ends at 0.23 s, still in
+    # frame 6: the response first shows in full at the start of frame 7 (0.2333 s).
+    spikes = SpikeData("s", np.array([0, 0]), np.array([7 * frame, 8 * frame]))
+    assert measure_calcium_spike_count(spikes, 0, 0.2, 30.0) == 0
+    assert measure_calcium_spike_count(spikes, 0, 0.2, 30.0, frame) == 1

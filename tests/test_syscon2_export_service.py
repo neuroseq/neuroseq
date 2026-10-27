@@ -133,6 +133,68 @@ def test_missing_lut_cannot_silently_discard_requested_power(
     generate.assert_called_once()
 
 
+@pytest.mark.parametrize("power", [0.0, 25.0])
+def test_amplitude_sweeps_need_a_target_power_and_lut(
+    export_input, tmp_path, mocker, power
+):
+    project, stim, _, _, generate = export_input
+    mocker.patch.object(service, "_power_lut", return_value=None)
+    settings = service.SysconExportSettings("template", target_power_mw=power)
+    match = "target power above 0" if power == 0 else "Load a power LUT for"
+    with pytest.raises(service.SysconExportError, match=match):
+        service.export_stim_array(
+            project,
+            stim,
+            settings,
+            tmp_path,
+            "valid",
+            confirm_warnings=lambda _: True,
+            require_power=True,
+        )
+    generate.assert_not_called()
+
+
+def test_target_above_the_lut_maximum_is_flagged(export_input, tmp_path, mocker):
+    from neuroseq.export.power_lut import PowerLut
+
+    project, stim, _, _, generate = export_input
+    lut = PowerLut("1100 nm", ((0.0, 0.0), (100.0, 49.0)))
+    mocker.patch.object(service, "_power_lut", return_value=lut)
+    settings = service.SysconExportSettings("template", target_power_mw=60)
+    with pytest.raises(service.SysconExportError, match="amplitudes above 0.82"):
+        service.export_stim_array(
+            project, stim, settings, tmp_path, "valid", require_power=True
+        )
+    # A plain export only warns.
+    warned: list[str] = []
+    service.export_stim_array(
+        project,
+        stim,
+        settings,
+        tmp_path,
+        "valid",
+        confirm_warnings=lambda warnings: warned.extend(warnings) or True,
+    )
+    assert any("maximum of 49 mW" in warning for warning in warned)
+    generate.assert_called_once()
+
+
+def test_routine_blocks_need_every_target_mapped(export_input, tmp_path):
+    project, stim, settings, sanity, generate = export_input
+    sanity.export_report = SimpleNamespace(unmapped_active_neurons=[1])
+    with pytest.raises(service.SysconExportError, match="neuron\\(s\\) 1"):
+        service.export_stim_array(
+            project,
+            stim,
+            settings,
+            tmp_path,
+            "valid",
+            confirm_warnings=lambda _: True,
+            require_mapped_targets=True,
+        )
+    generate.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "tuples",
     [(), ((float("nan"), 1),), ((50, float("inf")),), ((101, 1),), ((20, -1),)],

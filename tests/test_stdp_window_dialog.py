@@ -805,6 +805,18 @@ def test_syscon2_failure_finishes_sweep(qtbot) -> None:
     assert not dialog._running
 
 
+def test_simulation_during_a_syscon2_sweep_is_ignored(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    sent = len(host.sent)
+    dialog.simulation_finished()
+    dialog.simulation_failed("Busy")
+    assert dialog._running
+    assert len(host.sent) == sent
+
+
 def test_syscon2_rejects_amplitude_above_one_and_wrong_dt(qtbot) -> None:
     project, editor, dialog, host = _syscon2_dialog(qtbot)
     project.traces["seed"] = project.trace

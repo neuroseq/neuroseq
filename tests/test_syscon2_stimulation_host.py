@@ -68,6 +68,9 @@ def test_send_block_full_cycle(stim: StimArray, tmp_path, qtbot, mocker) -> None
     assert host.phase == "sending"
     assert export.call_args.kwargs["start_sample"] == 2
     assert export.call_args.kwargs["stop_sample"] == 6
+    # A routine's targets must all be stimulated; power only for amplitude sweeps.
+    assert export.call_args.kwargs["require_mapped_targets"] is True
+    assert export.call_args.kwargs["require_power"] is False
     name, task = submitted[0]
     task(client)
     client.sequence_manager.import_sequence.assert_called_once_with(

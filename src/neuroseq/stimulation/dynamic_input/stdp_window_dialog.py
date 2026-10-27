@@ -1294,7 +1294,9 @@ class StdpWindowDialog(SelfRaisingDialog):
         host.acquisition_imported()
 
     def simulation_finished(self) -> None:
-        if not self._running or self.project is None:
+        # Hardware blocks complete through their host; a simulation run meanwhile
+        # is not this routine's.
+        if not self._running or self.project is None or self._target_is_syscon2():
             return
         if not self._awaiting_simulation:
             return
@@ -1651,7 +1653,11 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.window_plot.draw()
 
     def simulation_failed(self, message: str) -> None:
-        if self._running and self._awaiting_simulation:
+        if (
+            self._running
+            and self._awaiting_simulation
+            and not self._target_is_syscon2()
+        ):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:

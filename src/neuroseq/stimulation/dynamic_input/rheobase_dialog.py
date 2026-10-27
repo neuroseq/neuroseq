@@ -19,6 +19,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
+from neuroseq.export.exporter_syscon2 import SYSCON2_WINDOW_MS
 from neuroseq.qt_helpers import SelfRaisingDialog
 from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
@@ -555,6 +556,11 @@ class RheobaseDialog(SelfRaisingDialog):
     HARDWARE_AMPLITUDES = (0.1, 1.0, 0.5, 0.05)
     #: Trials per probe a hardware target starts with (its responses are noisy).
     HARDWARE_REPEATS = 3
+    #: Timing (pulse, max pulse, recovery, post-pulse window; ms) SysCon2 starts
+    #: with: a pulse spans at least one spiral (16.7 ms), the recovery leaves a
+    #: calcium baseline of several frames, and the window covers the indicator's
+    #: rise over a few 30 Hz frames.
+    SYSCON2_TIMING_MS = (16.7, 100.0, 1000.0, 300.0)
 
     def __init__(
         self,
@@ -751,6 +757,18 @@ class RheobaseDialog(SelfRaisingDialog):
         self._target_values = PerTargetValues(
             (*self._amplitude_spins(), self.spn_repeats),
             self._target_defaults,
+            self.cmb_target.currentText(),
+        )
+        #: Timing settings per target: slice cultures need longer pulses and
+        #: recoveries than a model.
+        self._target_timing = PerTargetValues(
+            (
+                self.spn_pulse_ms,
+                self.spn_max_pulse_ms,
+                self.spn_recovery_ms,
+                self.spn_response_ms,
+            ),
+            self._target_timing_defaults,
             self.cmb_target.currentText(),
         )
         self.cmb_target.currentTextChanged.connect(self._on_target_changed)
@@ -1197,10 +1215,21 @@ class RheobaseDialog(SelfRaisingDialog):
             return None
         return (*self.HARDWARE_AMPLITUDES, self.HARDWARE_REPEATS)
 
+    def _target_timing_defaults(self, target: str) -> tuple[float, ...] | None:
+        """Timing a target starts with: SysCon2 its own (cells in a slice), the
+        others keep the values shown."""
+        return self.SYSCON2_TIMING_MS if target == self.SYSCON2_TARGET else None
+
     def _on_target_changed(self, target: str) -> None:
         """Keep each target's amplitudes and repeats: Brian2 uses stim units, the
         hardware targets fractions (0-1), so one set never fits both."""
+        if target == self.SYSCON2_TARGET and not self._target_timing.visited(target):
+            # One amplitude search, not one per duration (each probe is a recording).
+            self.cmb_sweeping_strategy.setCurrentText(
+                self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+            )
         self._target_values.switch(target)
+        self._target_timing.switch(target)
         self.refresh()
         self._update_target_controls()
 
@@ -1318,6 +1347,16 @@ class RheobaseDialog(SelfRaisingDialog):
             f"Block scripts are kept in {host.run_directory(self._run_name)}."
         )
         self._append_log(delivery_settings_note(host))
+        settings = host.export_settings()
+        if (
+            settings is not None
+            and settings.spiralling
+            and self.spn_pulse_ms.value() < SYSCON2_WINDOW_MS
+        ):
+            self._append_log(
+                f"Warning: pulses shorter than one spiral ({SYSCON2_WINDOW_MS:.1f} ms) "
+                "deliver only part of it."
+            )
         if self._automatic():
             self._append_log(
                 "SysCon2 target: amplitudes are fractions (0-1) of the export target "
@@ -1381,13 +1420,15 @@ class RheobaseDialog(SelfRaisingDialog):
                 if fixed_amplitude
                 else [min_amplitude, max_amplitude]
             )
-            if min(amplitudes) < 0.0 or max(amplitudes) > 1.0:
+            # Above 0: a zero-amplitude probe is an empty block, which SysCon2
+            # cannot export.
+            if min(amplitudes) <= 0.0 or max(amplitudes) > 1.0:
                 self._finish(
-                    "For SysCon2 the amplitudes must lie within 0-1 "
+                    "For SysCon2 the amplitudes must be above 0 and at most 1 "
                     "(fraction of the export target power)."
                     if self._target_is_syscon2()
-                    else "For BrainScaleS-2 the amplitudes must lie within 0-1 "
-                    "(fraction of i_offset max)."
+                    else "For BrainScaleS-2 the amplitudes must be above 0 and at "
+                    "most 1 (fraction of i_offset max)."
                 )
                 return
         stim = self._require_stim()
@@ -1549,7 +1590,13 @@ class RheobaseDialog(SelfRaisingDialog):
         host.acquisition_imported()
 
     def simulation_finished(self) -> None:
-        if not self._running or self.project is None:
+        # Hardware blocks complete through their host; a simulation run meanwhile
+        # is not this routine's.
+        if (
+            not self._running
+            or self.project is None
+            or self.cmb_target.currentText() != self.SIMULATION_TARGET
+        ):
             return
         if not self._awaiting_simulation:
             return
@@ -1995,7 +2042,11 @@ class RheobaseDialog(SelfRaisingDialog):
         self.rheobase_plot.draw()
 
     def simulation_failed(self, message: str) -> None:
-        if self._running and self._awaiting_simulation:
+        if (
+            self._running
+            and self._awaiting_simulation
+            and self.cmb_target.currentText() == self.SIMULATION_TARGET
+        ):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:

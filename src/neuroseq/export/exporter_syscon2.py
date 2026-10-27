@@ -15,6 +15,7 @@ from scipy.ndimage import distance_transform_edt
 from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stimulation.stim import StimArray
@@ -68,7 +69,8 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
 
 _SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
-_SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
+#: One SLM window (16.67 ms): a hologram's load time and one spiral's period.
+SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
 _NEUROSEQ_DT_TOLERANCE_S = 1e-9
 
 _DEBUG_CSV_COLUMNS: tuple[str, ...] = (
@@ -1670,8 +1672,8 @@ def _build_debug_csv_text(
         used_windows.update(range(max(0, hologram.start_win - 1), hologram.end_win))
 
     for window_idx in sorted(used_windows):
-        start_neuro_ms = window_idx * _SYSCON2_WINDOW_MS
-        end_neuro_ms = (window_idx + 1) * _SYSCON2_WINDOW_MS
+        start_neuro_ms = window_idx * SYSCON2_WINDOW_MS
+        end_neuro_ms = (window_idx + 1) * SYSCON2_WINDOW_MS
         start_sys_us = window_idx * _SYSCON2_WINDOW_US
         end_sys_us = (window_idx + 1) * _SYSCON2_WINDOW_US
         rows.append(
@@ -1685,7 +1687,7 @@ def _build_debug_csv_text(
                 sys_win_count=1,
                 start_neuro_ms=start_neuro_ms,
                 end_neuro_ms_excl=end_neuro_ms,
-                duration_neuro_ms=_SYSCON2_WINDOW_MS,
+                duration_neuro_ms=SYSCON2_WINDOW_MS,
                 start_sys_us=start_sys_us,
                 end_sys_us_excl=end_sys_us,
                 duration_sys_us=_SYSCON2_WINDOW_US,
@@ -1739,9 +1741,9 @@ def _build_debug_csv_text(
                 stage="sanity",
                 object_id=segment.segment_id,
                 neuron_id=segment.neuron_index,
-                start_neuro_ms=segment.start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=segment.end_win * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=segment.win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=segment.start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=segment.end_win * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=segment.win_count * SYSCON2_WINDOW_MS,
                 neuro_win_start=segment.start_win,
                 neuro_win_count=segment.win_count,
                 start_sys_us=segment.start_win * _SYSCON2_WINDOW_US,
@@ -1765,10 +1767,10 @@ def _build_debug_csv_text(
                 hologram_id=hologram.hologram_id,
                 neuro_win_start=hologram.start_win,
                 neuro_win_count=hologram.end_win - hologram.start_win,
-                start_neuro_ms=hologram.start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=hologram.end_win * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=hologram.start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=hologram.end_win * SYSCON2_WINDOW_MS,
                 duration_neuro_ms=(hologram.end_win - hologram.start_win)
-                * _SYSCON2_WINDOW_MS,
+                * SYSCON2_WINDOW_MS,
                 sys_win_start=hologram.start_win,
                 sys_win_count=hologram.end_win - hologram.start_win,
                 start_sys_tick=hologram.start_win * _SYSCON2_WINDOW_TICKS,
@@ -1813,9 +1815,9 @@ def _build_debug_csv_text(
                 duration_sys_us=(end_tick - start_tick) * _SYSCON2_TTL_PULSE_QUANTUM_US,
                 sys_win_start=start_win,
                 sys_win_count=sys_win_count,
-                start_neuro_ms=start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=(start_win + sys_win_count) * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=sys_win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + sys_win_count) * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=sys_win_count * SYSCON2_WINDOW_MS,
             )
         )
 
@@ -1846,9 +1848,9 @@ def _build_debug_csv_text(
                 * _SYSCON2_TTL_PULSE_QUANTUM_US,
                 sys_win_start=start_win,
                 sys_win_count=win_count,
-                start_neuro_ms=start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=(start_win + win_count) * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + win_count) * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=win_count * SYSCON2_WINDOW_MS,
                 includes_load_window=True,
                 intensity_out=0.0,
             )
@@ -3191,7 +3193,9 @@ def _resolve_neuron_to_cellpose_mapping(
     n_neurons: int,
     available_cellpose_ids: set[int],
 ) -> dict[int, int]:
-    explicit_mapping = cellpose_data.stimulus_to_cellpose_mapping or {}
+    # Resolved, so a Linear mapping's offset is applied: the readout of a recorded
+    # block (importer_scanimage_traces) resolves the mapping the same way.
+    explicit_mapping = resolve_stimulus_to_cellpose_mapping(cellpose_data) or {}
     resolved: dict[int, int] = {}
 
     if explicit_mapping:

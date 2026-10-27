@@ -288,6 +288,21 @@ def test_controls_remember_python_and_folder_across_sessions(
     assert GuiSettings().scanimage_python_path == str(other)
 
 
+def test_controls_remember_functional_channel_across_sessions(
+    qtbot, connection, tmp_config_dir
+):
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    assert panel.channel_spin.value() == 1
+    panel.channel_spin.setValue(2)
+
+    reopened = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(reopened)
+    assert reopened.channel_spin.value() == 2
+
+
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
     from qtpy import QtCore
 

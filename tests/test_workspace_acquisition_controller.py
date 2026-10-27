@@ -232,6 +232,39 @@ def test_failed_block_recording_is_reported(setup, qtbot, state):
     assert failed.args == [run_id, "no trigger"]
 
 
+def test_armed_block_that_never_finishes_fails_at_its_deadline(
+    setup, qtbot, monkeypatch
+):
+    s = setup
+    _ready_for_blocks(s)
+    # Block 0.1 s + tail 2 s: a margin of -2 s leaves a 0.1 s deadline.
+    monkeypatch.setattr(controller_module, "BLOCK_DEADLINE_MARGIN_S", -2.0)
+    run_id = s.controller.arm_block(_block(0.1))
+    s.connection.run_id = run_id
+    with qtbot.waitSignal(s.controller.block_recording_failed, timeout=3000) as failed:
+        s.controller.scanimage_status(
+            {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
+        )
+    assert failed.args[0] == run_id
+    assert "TTL Out 1" in failed.args[1]
+    assert s.command.call_args.args[0] == "abort"
+    # The aborted recording arriving afterwards does not fail the block again.
+    with qtbot.assertNotEmitted(s.controller.block_recording_failed):
+        s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+
+
+def test_aborted_block_stops_its_deadline(setup):
+    s = setup
+    _ready_for_blocks(s)
+    run_id = s.controller.arm_block(_block(0.1))
+    s.controller.scanimage_status(
+        {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
+    )
+    assert run_id in s.controller._deadlines
+    s.controller.abort_block(run_id)
+    assert run_id not in s.controller._deadlines
+
+
 def test_extraction_failure_is_reported(setup, qtbot, mocker):
     s = setup
     _ready_for_blocks(s)

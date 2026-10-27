@@ -1054,6 +1054,36 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
     assert report.unmapped_active_neurons == []
 
 
+def test_export_seq_applies_the_linear_mapping_offset() -> None:
+    """The readout resolves a Linear mapping's offset; the export must stimulate
+    the same cell (stim 0 -> Cellpose ID 1 with offset 1)."""
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[20:22, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    def shape_centers(cellpose: CellposeImportResult) -> list[tuple[str, str]]:
+        seq_text, _ = generate_syscon2_sequence_text(
+            stim_array, cellpose, template_text=_template_header(), spiralling=False
+        )
+        return [
+            (obj.properties["Shape0_CenterX"], obj.properties["Shape0_CenterY"])
+            for obj in parse_syscon2_seq_text(seq_text).objects
+            if obj.object_type == "Shape"
+        ]
+
+    linear = _cellpose_result()
+    linear.mapping_strategy = "Linear"
+    linear.linear_offset = 1
+    assert shape_centers(linear) == shape_centers(_cellpose_result(mapping={0: 1}))
+    assert shape_centers(linear) != shape_centers(_cellpose_result(mapping={0: 0}))
+
+
 def test_check_syscon2_input_sanity_passes_for_valid_inputs() -> None:
     values = np.zeros((64, 1), dtype=np.float32)
     values[40:42, 0] = 1.0

@@ -349,6 +349,8 @@ class SysCon2StimulationHost(QtCore.QObject):
                 start_sample=start_sample,
                 stop_sample=stop_sample,
                 confirm_warnings=self._confirm_new_warnings,
+                require_power=preserve_amplitude,
+                require_mapped_targets=True,
             )
         except (SysconExportError, ValueError, OSError) as exc:
             self.block_failed.emit(owner, str(exc))
