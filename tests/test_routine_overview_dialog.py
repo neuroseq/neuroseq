@@ -142,3 +142,12 @@ def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
     # something to scroll.
     assert preview.sizeHint().height() > scroll.height()
     dialog.close()
+
+
+def test_default_routine_is_preselected(qtbot) -> None:
+    dialog = RoutineSelectorDialog(["A", "B", "C"], default="B")
+    qtbot.addWidget(dialog)
+    assert dialog.selected_routine == "B"
+    unknown = RoutineSelectorDialog(["A", "B"], default="Z")
+    qtbot.addWidget(unknown)
+    assert unknown.selected_routine == "A"

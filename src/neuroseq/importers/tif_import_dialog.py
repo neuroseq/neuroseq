@@ -37,24 +37,8 @@ from neuroseq.importers.importer_tif import DEFAULT_FS
 from neuroseq.importers.importer_tif import PipelineCancelled
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import TifPipelineResult
+from neuroseq.importers.importer_tif import cellpose_result_to_masks
 from neuroseq.stimulation.stim import StimArray
-
-
-def _cellpose_result_to_masks(result: CellposeImportResult) -> npt.NDArray[Any]:
-    """Convert stored masks back to Cellpose's raw label layout.
-
-    Masks share the TIFFs' pixel coordinates; only Cellpose's 1-based labels
-    and zero-valued background need restoring.
-    """
-    if result.segmentation_array is None:
-        raise ValueError("Cellpose segmentation is missing; re-run Cellpose import.")
-    seg = np.asarray(result.segmentation_array, dtype=np.int32)
-    masks = seg.copy()
-    # In CellposeImportResult: background = -1, cells = 0..N-1
-    # Suite2p / Cellpose raw layout: background = 0, cells = 1..N
-    masks[masks >= 0] += 1
-    masks[masks < 0] = 0
-    return masks
 
 
 def _load_masks_from_seg_file(path: Path) -> npt.NDArray[Any]:
@@ -766,7 +750,7 @@ class TifImportDialog(QtWidgets.QDialog):
         if self._use_loaded_radio.isChecked():
             if self._cellpose_import is None:
                 raise ValueError("No Cellpose data is loaded in the current experiment")
-            return _cellpose_result_to_masks(self._cellpose_import)
+            return cellpose_result_to_masks(self._cellpose_import)
         if self._seg_file_path is None:
             raise ValueError("No _seg.npy file selected")
         self._seg_file_background_image = _load_seg_file_background_image(

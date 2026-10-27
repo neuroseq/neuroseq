@@ -33,6 +33,8 @@ class DynamicInputController(QtCore.QObject):
         RHEOBASE_ROUTINE,
         STDP_WINDOW_ROUTINE,
     )
+    #: Preselected when the designer opens.
+    DEFAULT_ROUTINE = RHEOBASE_ROUTINE
 
     def __init__(
         self, editor: StimEditor, parent: QtCore.QObject | None = None
@@ -52,7 +54,9 @@ class DynamicInputController(QtCore.QObject):
         # preview (goal, parameters, sample plot) beneath it; the real routine
         # dialog opens only when the user clicks Continue.
         dialog = RoutineSelectorDialog(
-            list(self.DYNAMIC_INPUT_ROUTINES), self._dynamic_input_theme
+            list(self.DYNAMIC_INPUT_ROUTINES),
+            self._dynamic_input_theme,
+            default=self.DEFAULT_ROUTINE,
         )
         dialog.routine_chosen.connect(self._open_routine_dialog_for)
         dialog.finished.connect(lambda _result: self._forget_routine_selector(dialog))
@@ -121,6 +125,10 @@ class DynamicInputController(QtCore.QObject):
         ):
             dialog = getattr(self, attr_name)
             if dialog is not None:
+                # Release a SysCon2 block still in flight for this routine.
+                dispose = getattr(dialog, "dispose", None)
+                if dispose is not None:
+                    dispose()
                 dialog.close()
                 dialog.deleteLater()
                 setattr(self, attr_name, None)

@@ -154,6 +154,41 @@ added (undoable with Edit → Undo) containing
 **Stop** terminates the helper. A run already sent to the chip cannot be
 recalled; its results are discarded and you have to reconnect.
 
+## Rheobase routine
+
+The **Design dynamic input → rheobase** routine can run its probes on the chip:
+choose the target **BrainScaleS-2 (neuromorphic)**.
+The dialog shows the connection state under the target; **Connect** connects
+with this tab's settings (container image, setup, token), so a routine can start
+without opening the tab once it is configured.
+
+- Each probe block (recovery, pulse, post-pulse window) is delivered as
+  constant current, like **Deliver** does, with the tab's settings: container,
+  setup, speed-up and **i_offset max**.
+- Probe amplitudes are fractions (0-1) of **i_offset max**, so a probe of 0.5
+  drives half of it, whatever the other probes are. Stim neuron _i_ is
+  hardware neuron _i_, and the probed neuron's membrane voltage is recorded.
+- All probes of a run go into one data group, `BSS-2 rheobase <date time>`,
+  each placed at its probe's time in the input array, so the spikes and the
+  membrane voltage line up with the stimuli. The routine counts the probed
+  neuron's spikes in the pulse plus the post-pulse window and continues its
+  search.
+- Because each constant-current segment is its own hardware run starting from
+  rest (see _Constant current_ above), every probe starts from rest too; spikes
+  after the current switches off are not recorded.
+- The chip's response is noisy near threshold (the same amplitude can spike
+  in one run and not the next). **Repeats per probe** (3 by default on the
+  hardware targets, 1 for Brian2) runs every amplitude several times and counts
+  it as a response when most runs spike; the log lists each run's spikes.
+- If even the maximum amplitude cannot make a short pulse fire, the routine
+  keeps the thresholds it found and marks that duration in the plot (red
+  triangle). It goes on locating the chronaxie when the maximum is at least
+  twice the rheobase, and otherwise finishes with the rheobase and says how far
+  to raise the maximum. Raising **i_offset max** in this tab (up to 1022) gives
+  the fractions more current.
+- **Stop** ends the search and ignores a probe still running; it does not kill
+  the shared helper.
+
 ## Debug log
 
 The **Debug log** box at the bottom of the tab records every step with a

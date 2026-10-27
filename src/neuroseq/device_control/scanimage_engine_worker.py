@@ -52,23 +52,43 @@ class EngineAdapter:
             return self._call("probe", {})
         if operation == "index":
             return _load_importer().index_recording(arguments["paths"])
-        if operation == "record":
-            # Write provenance before issuing any hardware command. A sidecar
-            # survives a GUI crash even if the project has not been saved yet.
-            manifest = arguments.pop("manifest", None)
-            if manifest is not None:
-                self.manifest_path = Path(arguments["directory"]).with_suffix(
-                    ".neuroseq.json"
-                )
-                with self.manifest_path.open("x", encoding="utf-8") as file:
-                    json.dump(manifest, file)
         if operation not in {"status", "preview", "record", "abort", "disconnect"}:
             raise ValueError("Unknown ScanImage operation")
+        if operation == "record":
+            return self._record(arguments)
         result = self._call(operation, arguments)
         if self.manifest_path is not None and operation == "status":
             # Lifecycle state is available in the project; the sidecar is the
             # immutable request/snapshot and remains valid after interruption.
             result["manifest_path"] = str(self.manifest_path)
+        return result
+
+    def _record(self, arguments: dict) -> dict:
+        """Start a recording, with its metadata next to the TIFF (issue #628).
+
+        The metadata is written before the hardware command, so it survives a GUI
+        crash even if the project has not been saved yet, and removed again if
+        ScanImage refuses to start.
+        """
+        manifest = arguments.pop("manifest", None)
+        self.manifest_path = None
+        path = None
+        if manifest is not None:
+            directory = Path(arguments["directory"])
+            directory.mkdir(parents=True, exist_ok=True)
+            path = (
+                # Same name as scanimage_files.recording_prefix (not importable here).
+                directory / f"{arguments['stem']}_{int(arguments['counter']):05d}.json"
+            )
+            with path.open("x", encoding="utf-8") as file:
+                json.dump(manifest, file, indent=2)
+        try:
+            result = self._call("record", arguments)
+        except Exception:
+            if path is not None:
+                path.unlink(missing_ok=True)
+            raise
+        self.manifest_path = path
         return result
 
     def _call(self, operation: str, arguments: dict) -> dict:

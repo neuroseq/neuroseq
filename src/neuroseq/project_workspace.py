@@ -38,6 +38,7 @@ from neuroseq.data import TraceData
 from neuroseq.data_manager_dialog import DataManagerDialog
 from neuroseq.device_control.bss2_panel import Bss2Panel
 from neuroseq.device_control.stimulation_setup_widget import BSS2_TAB_TITLE
+from neuroseq.device_control.stimulation_setup_widget import SCANIMAGE_TAB_TITLE
 from neuroseq.device_control.stimulation_setup_widget import SYSCON2_TAB_TITLE
 from neuroseq.device_control.stimulation_setup_widget import StimulationSetupWidget
 from neuroseq.device_control.syscon2_panel import SysCon2Panel
@@ -452,15 +453,19 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.acquisition_controller = WorkspaceAcquisitionController(
             self.devices.scanimage,
             self.settings,
-            self.calcium_video_widget,
             project=lambda: self.project,
             current_stim=self._current_stim_array,
             export_settings=lambda: self.syscon2_panel.export_settings,
             video_widgets=lambda: self.findChildren(CalciumVideoWidget),
-            show_video=lambda: self._auto_show_widget(self.calcium_video_widget),
             parent=self,
         )
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
+        # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
+        self.acquisition_controller.fov_ready.connect(
+            lambda path: self.btn_import_cellpose_data_clicked(
+                segment=pathlib.Path(path)
+            )
+        )
         # Compatibility handles for integrations using the workspace directly.
         self.scanimage_connection = self.acquisition_controller.connection
         self.scanimage_controls = self.acquisition_controller.controls
@@ -507,6 +512,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.bss2_panel.set_current_stim_provider(self._current_stim_array)
         self.bss2_panel.experiment_added.connect(self._on_bss2_experiment_added)
         self.stimulation_setup.add_setup(self.bss2_panel, BSS2_TAB_TITLE)
+        # Acquisition sits beside stimulation, not in a window of its own (#651).
+        self.stimulation_setup.add_setup(
+            self.acquisition_controller.controls, SCANIMAGE_TAB_TITLE
+        )
+        # Dynamic input routines record their SysCon2 blocks with ScanImage.
+        self.syscon2_panel.stimulation_host.set_acquisition(self.acquisition_controller)
         self.stimulation_setup.setVisible(False)
         split_left_right.addWidget(self.stimulation_setup)
         split_left_right.setSizes([1000, 1000, 1000, 1000])
@@ -567,6 +578,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         self.stim_editor.current_stim_changed.connect(self._on_current_stim_changed)
         self.stim_editor.stimulation_host = self.syscon2_panel.stimulation_host
+        self.stim_editor.bss2_host = self.bss2_panel.stimulation_host
         self.stim_editor.trim_to_mapped_neurons_requested.connect(
             self.btn_trim_to_mapped_neurons_clicked
         )
@@ -746,7 +758,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         """Pause hidden playback without changing its position or plot state."""
         if not active:
             self.time_slider.timer.stop()
-        self.acquisition_controller.set_active(active)
 
     def update_limits(self) -> None:
         max_time_secs = float(self.project.max_time_secs)
@@ -1205,6 +1216,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
         self.bss2_panel.set_project(self.project)
+        self.acquisition_controller.project_changed()
         self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
@@ -1232,6 +1244,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.chat_widget.set_project(self.project)
         self.syscon2_panel.set_project(self.project)
         self.bss2_panel.set_project(self.project)
+        self.acquisition_controller.project_changed()
         self._refresh_video_selector()
         self._update_combo_boxes()
         self._refresh_elise_replay_action()
@@ -2258,7 +2271,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self._refresh_video_selector()
             return
         self.project.select_calcium_video(video_id)
-        self.scanimage_controls.live_check.setChecked(False)
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
 
@@ -3062,12 +3074,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         toolbar.addSeparator()
         self.btn_image_acquisition = QtWidgets.QPushButton("Image acquisition")
         self.btn_image_acquisition.setToolTip(
-            "Connect to ScanImage to preview and record imaging"
+            "Show the ScanImage controls in the Stimulation setup pane"
         )
         icons.set_widget_icon(self.btn_image_acquisition, "mdi6.microscope")
-        self.btn_image_acquisition.clicked.connect(
-            self.acquisition_controller.open_image_acquisition_dialog
-        )
+        self.btn_image_acquisition.clicked.connect(self.show_image_acquisition)
         toolbar.addWidget(self.btn_image_acquisition)
         self.cmb_video = QtWidgets.QComboBox()
         self.cmb_video.setMinimumWidth(160)
@@ -3088,6 +3098,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.setVisible(toggled)
         if toggled and widget is self.data_widget:
             self.set_data(self.cmb_data.currentText())
+
+    def show_image_acquisition(self) -> None:
+        """Bring the ScanImage tab of the Stimulation setup pane to the front."""
+        self._auto_show_widget(self.stimulation_setup)
+        self.stimulation_setup.show_setup(SCANIMAGE_TAB_TITLE)
 
     def _auto_show_widget(self, widget: QtWidgets.QWidget) -> None:
         if widget is self.calcium_video_widget:

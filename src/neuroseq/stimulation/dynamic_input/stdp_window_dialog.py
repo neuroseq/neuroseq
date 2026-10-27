@@ -16,6 +16,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.qt_helpers import SelfRaisingDialog
 from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
@@ -32,6 +33,13 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import measure
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import RoutineBackend
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import SimulationHost
 from neuroseq.stimulation.dynamic_input.dynamic_input_routine import backend_property
+from neuroseq.stimulation.dynamic_input.hardware_settings_widget import (
+    HardwareSettingsWidget,
+)
+from neuroseq.stimulation.dynamic_input.hardware_targets import HostConnections
+from neuroseq.stimulation.dynamic_input.hardware_targets import PerTargetValues
+from neuroseq.stimulation.dynamic_input.hardware_targets import delivery_settings_note
+from neuroseq.stimulation.dynamic_input.hardware_targets import hardware_start_sample
 from neuroseq.stimulation.dynamic_input.stdp_window import classify_window
 from neuroseq.stimulation.dynamic_input.stdp_window import delta_t_sweep
 from neuroseq.stimulation.dynamic_input.stdp_window import interleave_by_magnitude
@@ -309,6 +317,8 @@ class StdpWindowDialog(SelfRaisingDialog):
     SYSCON2_TARGET = "SysCon2 (calcium imaging)"
     CALCIUM_READOUT = "Calcium response (dF/F) change (%)"
     CALCIUM_BASELINE_MS = 100.0
+    #: Pulse amplitude a hardware target starts with (a fraction of target power).
+    HARDWARE_AMPLITUDE = 0.8
 
     def __init__(
         self,
@@ -345,7 +355,15 @@ class StdpWindowDialog(SelfRaisingDialog):
         self._block_range = (0, 0)
         self._last_measured_dataset: str | None = None
         self._data_before_block: dict[str, object] = {}
-        self._host_connected = False
+        #: What the host reported for the block that just completed (see
+        #: SysCon2StimulationHost.block_completed); None for a manual import.
+        self._block_payload: object = None
+        #: End of the last block delivered to hardware (samples): the stim array
+        #: keeps everything up to here when a hardware routine ends.
+        self._delivered_end_sample = 0
+        #: Names this SysCon2 run's folder and block files (see routine_run_name).
+        self._run_name: str | None = None
+        self._host_connections = HostConnections()
 
         self.setWindowTitle("STDP timing window (LTP/LTD vs Δt)")
         self.resize(640, 620)
@@ -466,7 +484,15 @@ class StdpWindowDialog(SelfRaisingDialog):
             "through SysCon2 and measure the calcium response of the postsynaptic cell "
             "in data you import (continuous sweep only - cells cannot be reset)."
         )
-        self.cmb_target.currentTextChanged.connect(self._update_target_controls)
+        #: Pulse amplitude per target: Brian2 uses stim units, SysCon2 fractions.
+        self._target_values = PerTargetValues(
+            (self.spn_amplitude,),
+            lambda target: (
+                None if target == self.SIMULATION_TARGET else (self.HARDWARE_AMPLITUDE,)
+            ),
+            self.cmb_target.currentText(),
+        )
+        self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         form.addRow("Stimulation target:", self.cmb_target)
         form.addRow("Readout:", self.cmb_readout)
         form.addRow("Sweep mode:", self.cmb_sweep_mode)
@@ -487,6 +513,10 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.lbl_response = QtWidgets.QLabel("Post-pulse window (ms):", self)
         form.addRow(self.lbl_response, self.spn_response_ms)
         parameters_layout.addLayout(form)
+        self.hardware = HardwareSettingsWidget(self)
+        self.hardware.chk_automatic.toggled.connect(self._update_target_controls)
+        parameters_layout.addWidget(self.hardware)
+        parameters_layout.addStretch(1)
 
         self.parameters_scroll = QtWidgets.QScrollArea(self)
         self.parameters_scroll.setWidget(self.parameters_panel)
@@ -689,6 +719,7 @@ class StdpWindowDialog(SelfRaisingDialog):
             if preferred_trace:
                 self.cmb_trace.setCurrentText(preferred_trace)
         syscon2_available = self.editor.stimulation_host is not None
+        self.hardware.set_host(self.editor.stimulation_host)
         syscon2_item = cast(QtGui.QStandardItemModel, self.cmb_target.model()).item(1)
         if syscon2_item is not None:
             syscon2_item.setEnabled(syscon2_available)
@@ -708,7 +739,9 @@ class StdpWindowDialog(SelfRaisingDialog):
             maximum = max(0, n_neurons - 1)
             self.spn_presynaptic.setMaximum(maximum)
             self.spn_postsynaptic.setMaximum(maximum)
-            self.lbl_units.setText(stim.units)
+            self.lbl_units.setText(
+                "× target power" if self._target_is_syscon2() else stim.units
+            )
             self.lbl_stim_name.setText(stim.name)
             self.lbl_stim_size.setText(f"{stim.values.shape[0]} samples")
             self.lbl_stim_units.setText(stim.units or "-")
@@ -773,25 +806,48 @@ class StdpWindowDialog(SelfRaisingDialog):
             and self.cmb_sweep_mode.currentText() == self.RESET_MODE
         )
 
-    def _update_target_controls(self, _text: str = "") -> None:
+    def _on_target_changed(self, target: str) -> None:
+        """Keep each target's pulse amplitude (stim units vs fraction of power)."""
+        self._target_values.switch(target)
+        self.refresh()
+        self._update_target_controls()
+
+    def _automatic(self) -> bool:
+        """SysCon2 blocks are run and recorded without the user (issue #651)."""
+        return self._target_is_syscon2() and self.hardware.automatic
+
+    def _update_target_controls(self, *_args: object) -> None:
         syscon2 = self._target_is_syscon2()
         self.btn_syscon_dt.setVisible(syscon2)
         self.btn_syscon_dt.setEnabled(not self._running)
+        self.hardware.setVisible(syscon2)
+        self.hardware.setEnabled(not self._running)
         self.cmb_readout.setEnabled(not syscon2)
         self.cmb_sweep_mode.setEnabled(not syscon2)
-        self.btn_data_imported.setVisible(syscon2)
+        self.btn_data_imported.setVisible(syscon2 and not self._automatic())
+        # The routine dispatches on the target; it must not change mid-run.
+        self.cmb_target.setEnabled(not self._running)
         if syscon2:
             self._connect_host()
         self._update_readout_controls()
 
     def _connect_host(self) -> None:
         host = self.editor.stimulation_host
-        if host is None or self._host_connected:
-            return
-        host.block_sent.connect(self._on_block_sent)
-        host.block_failed.connect(self._on_block_failed)
-        host.block_completed.connect(self._on_block_completed)
-        self._host_connected = True
+        if host is not None:
+            self._host_connections.connect(
+                host,
+                [
+                    (host.block_sent, self._on_block_sent),
+                    (host.block_failed, self._on_block_failed),
+                    (host.block_completed, self._on_block_completed),
+                ],
+            )
+
+    def dispose(self) -> None:
+        """Stop a running routine and stop following the stimulation host."""
+        if self._running:
+            self._finish("Routine closed.")
+        self._host_connections.disconnect_all()
 
     def _on_readout_changed(self, _index: int) -> None:
         self._update_readout_controls()
@@ -907,6 +963,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         if needs_init or prepare_seconds > 0.0:
             duration = max(prepare_seconds, 0.001)
             self._running = True
+            self._update_target_controls()
             self._phase = (
                 "initialize_weight" if self._weight_mode() else "initialize_trace"
             )
@@ -943,6 +1000,11 @@ class StdpWindowDialog(SelfRaisingDialog):
         if host is None or host.phase != "idle":
             self._append_log("SysCon2 is not ready (a block is still in flight).")
             return
+        if self._automatic():
+            reason = host.recording_unavailable()
+            if reason is not None:
+                self._append_log(reason)
+                return
         if self.spn_amplitude.value() > 1.0:
             self._append_log(
                 "For SysCon2 the pulse amplitude must lie within 0-1 "
@@ -955,24 +1017,31 @@ class StdpWindowDialog(SelfRaisingDialog):
         if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
             self._append_log("Δt maximum must be greater than Δt minimum.")
             return
-        if not self.cmb_trace.currentText():
-            self._append_log("Import a calcium trace and select it first.")
-            return
-        if choice == "clear":
-            self.editor.zero_current_stim_array()
-            self.editor.reset_stim_array()
-            self._append_start_sample = 0
-        else:
-            self._append_start_sample = (
-                self.editor.current_stim_array_last_stimulus_sample()
-            )
+        self._append_start_sample = hardware_start_sample(self.editor, choice)
+        # Nothing delivered yet: ending now keeps the array up to here.
+        self._delivered_end_sample = self._append_start_sample
         self._last_measured_dataset = None
+        self._run_name = routine_run_name("stdp_window")
         self._append_log(
-            "SysCon2 target: continuous sweep, amplitudes are fractions (0-1) of the "
-            "export target power. Every block is sent separately; run it, and for the "
-            "baseline/probe blocks acquire and import the calcium data whose time axis "
-            "starts with that block. Make the post-pulse window span a few imaging frames."
+            f"Block scripts are kept in {host.run_directory(self._run_name)}."
         )
+        self._append_log(delivery_settings_note(host))
+        if self._automatic():
+            self._append_log(
+                "SysCon2 target: continuous sweep, amplitudes are fractions (0-1) of the "
+                "export target power. Every block is uploaded and run separately; "
+                "ScanImage records the baseline/probe blocks, triggered by the sequence, "
+                "and their ΔF/F traces are extracted with the project's Cellpose masks. "
+                "Make the post-pulse window span a few imaging frames."
+            )
+        else:
+            self._append_log(
+                "SysCon2 target: continuous sweep, amplitudes are fractions (0-1) of the "
+                "export target power. Every block is sent separately; run it, and for the "
+                "baseline/probe blocks acquire and import the calcium data whose time "
+                "axis starts with that block. Make the post-pulse window span a few "
+                "imaging frames."
+            )
         self._begin_sweep(clear_log=True)
 
     def _begin_sweep(self, *, clear_log: bool) -> None:
@@ -1074,6 +1143,7 @@ class StdpWindowDialog(SelfRaisingDialog):
                 self._finish("Could not read the baseline synaptic weight.")
                 return
         self._backend.begin_sweep(config, delta_ts, weight_baseline=weight_baseline)
+        self._update_target_controls()
 
     def stop(self) -> None:
         self._finish("Routine stopped.")
@@ -1161,19 +1231,36 @@ class StdpWindowDialog(SelfRaisingDialog):
             for name in self.project.get_data_names(TraceData)
         }
         start, stop = self._block_range
-        self._append_log("Exporting block and sending it to SysCon2...")
+        stim = self._require_stim()
+        automatic = self._automatic()
+        # Pairing blocks need no data; baseline and probe blocks are recorded.
+        record = automatic and self._phase != "pair"
+        self._append_log(
+            "Exporting the block; SysCon2 runs it"
+            + (" while ScanImage records..." if record else "...")
+            if automatic
+            else "Exporting block and sending it to SysCon2..."
+        )
         # A failure is reported through host.block_failed -> _on_block_failed.
         host.send_block(
             self.project,
-            self._require_stim(),
+            stim,
             start,
             stop,
             "stdp_window",
             preserve_amplitude=True,
+            owner=self,
+            automatic=automatic,
+            run_name=self._run_name,
+            recording=(
+                self.hardware.block_recording(stim, start, stop, "stdp_window")
+                if record
+                else None
+            ),
         )
 
-    def _on_block_sent(self, _result: object) -> None:
-        if not (self._running and self._target_is_syscon2()):
+    def _on_block_sent(self, owner: object, _result: object) -> None:
+        if owner is not self or not self._running or self._automatic():
             return
         self.refresh()
         if self._phase == "pair":
@@ -1188,12 +1275,15 @@ class StdpWindowDialog(SelfRaisingDialog):
             )
         self.btn_data_imported.setEnabled(True)
 
-    def _on_block_failed(self, message: str) -> None:
-        if self._running and self._target_is_syscon2():
+    def _on_block_failed(self, owner: object, message: str) -> None:
+        if owner is self and self._running:
             self._finish(f"SysCon2 failed: {message}")
 
-    def _on_block_completed(self) -> None:
-        if self._running and self._target_is_syscon2():
+    def _on_block_completed(self, owner: object, payload: object) -> None:
+        if owner is self and self._running:
+            # Kept in the array when the routine ends (see _on_backend_finished).
+            self._delivered_end_sample = self._block_range[1]
+            self._block_payload = payload
             self._backend.simulation_finished()
 
     def _on_data_imported_clicked(self) -> None:
@@ -1204,7 +1294,9 @@ class StdpWindowDialog(SelfRaisingDialog):
         host.acquisition_imported()
 
     def simulation_finished(self) -> None:
-        if not self._running or self.project is None:
+        # Hardware blocks complete through their host; a simulation run meanwhile
+        # is not this routine's.
+        if not self._running or self.project is None or self._target_is_syscon2():
             return
         if not self._awaiting_simulation:
             return
@@ -1307,7 +1399,16 @@ class StdpWindowDialog(SelfRaisingDialog):
         """Calcium response from the imported trace; ``None`` to wait/finish."""
         assert self.project is not None
         self.refresh()
-        self._select_newest_if_stale(self.cmb_trace)
+        payload = self._block_payload
+        self._block_payload = None
+        if isinstance(payload, dict) and payload.get("trace"):
+            # An automatic block names the traces extracted from its recording.
+            self.cmb_trace.setCurrentText(str(payload["trace"]))
+        elif self._automatic():
+            self._finish("The recorded block produced no calcium trace.")
+            return None
+        else:
+            self._select_newest_if_stale(self.cmb_trace)
         name = self.cmb_trace.currentText()
         if not name or not self._is_fresh_dataset(name):
             self._append_log(
@@ -1356,9 +1457,16 @@ class StdpWindowDialog(SelfRaisingDialog):
 
     def _reawait_acquisition(self) -> None:
         """Stay on the current probe: ask the user to fix the import and click again."""
+        if self._automatic():
+            # Nobody imports automatic blocks by hand, so waiting would never end.
+            self._finish(
+                "The data recorded for this block is missing from the project; "
+                "the routine was stopped."
+            )
+            return
         host = self.editor.stimulation_host
         if host is not None:
-            host.phase = "awaiting_acquisition"
+            host.reawait(self)
         self._backend.awaiting_simulation = True
         self.btn_data_imported.setEnabled(True)
 
@@ -1545,16 +1653,19 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.window_plot.draw()
 
     def simulation_failed(self, message: str) -> None:
-        if self._running and self._awaiting_simulation:
+        if (
+            self._running
+            and self._awaiting_simulation
+            and not self._target_is_syscon2()
+        ):
             self._finish(f"Simulation failed: {message}")
 
     def _finish(self, message: str) -> None:
         host = self.editor.stimulation_host
         if host is not None:
-            host.cancel()
+            host.cancel(owner=self)
         self.btn_data_imported.setEnabled(False)
         self._backend.finish(message)
-        self._append_log(message)
 
     def _on_backend_finished(self, message: str) -> None:
         # The backend can call finish() on itself (e.g. sweep complete)
@@ -1567,13 +1678,20 @@ class StdpWindowDialog(SelfRaisingDialog):
         # it out of the way of the stim array/traces.
         del message
         self.showNormal()
-        self.editor.reset_stim_array()
+        if self._target_is_syscon2():
+            # Delivered blocks are not simulated: keep them, drop only the
+            # padding (and a block placed but never delivered) after them.
+            dt = float(self._require_stim().dt)
+            self.editor.trim_stim_array_after(self._delivered_end_sample * dt)
+        else:
+            self.editor.reset_stim_array()
         self._array_cursor = None
         self.btn_data_imported.setEnabled(False)
         self.btn_start.setEnabled(True)
         self.btn_stop.setEnabled(False)
         self.btn_pause.setEnabled(False)
         self.btn_pause.setText("Pause")
+        self._update_target_controls()
 
     @property
     def _running(self) -> bool:

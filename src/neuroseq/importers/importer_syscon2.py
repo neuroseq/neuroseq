@@ -607,7 +607,8 @@ def _extract_entity_center_any_shape(
 def _neuron_tag(obj: SysconSequenceObject) -> int | None:
     """Original neuron index written by the NeuroSeq exporter, if present."""
     raw = _find_property_value_by_suffix(obj.properties, ("_description",))
-    match = re.fullmatch(r"\s*neuron=(\d+)\s*", raw or "")
+    # Followed by the requested power when the export used a power LUT.
+    match = re.fullmatch(r"\s*neuron=(\d+)(?:\s.*)?", raw or "")
     return int(match.group(1)) if match else None
 
 

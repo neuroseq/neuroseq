@@ -183,6 +183,7 @@ class RoutineSelectorDialog(SelfRaisingDialog):
         self,
         routines: list[str],
         theme: str = theme_module.LIGHT,
+        default: str | None = None,
     ) -> None:
         super().__init__()
         self._theme = theme
@@ -196,6 +197,8 @@ class RoutineSelectorDialog(SelfRaisingDialog):
         selector_row.addWidget(QtWidgets.QLabel("Design routine:", self))
         self.cmb_routine = QtWidgets.QComboBox(self)
         self.cmb_routine.addItems(routines)
+        if default in routines:
+            self.cmb_routine.setCurrentText(default)
         selector_row.addWidget(self.cmb_routine, stretch=1)
         layout.addLayout(selector_row)
 

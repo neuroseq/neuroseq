@@ -1,4 +1,9 @@
-"""ScanImage acquisition controls, hosted in the Image acquisition dialog."""
+"""ScanImage acquisition controls: the "ScanImage (imaging)" tab of the Stimulation setup pane.
+
+Controls only: NeuroSeq does not stream frames (issues #628, #651); ScanImage shows its own
+display. Each recording is one TIFF in the recording folder, named after the date and a
+recording number, with a small JSON metadata file beside it.
+"""
 
 from __future__ import annotations
 
@@ -8,18 +13,24 @@ import uuid
 from collections.abc import Callable
 from pathlib import Path
 
-import numpy as np
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.device_control.scanimage_connection import ScanImageConnection
+from neuroseq.device_control.scanimage_files import next_recording_number
+from neuroseq.device_control.scanimage_files import recording_file_name
+from neuroseq.device_control.scanimage_files import recording_stem
 from neuroseq.gui_settings import GuiSettings
 
 
 class ScanImageControls(QtWidgets.QWidget):
     record_requested = QtCore.Signal(object)
-    live_changed = QtCore.Signal(bool)
+    #: Record a short FOV recording for cell segmentation (``record`` arguments).
+    fov_requested = QtCore.Signal(object)
     channel_changed = QtCore.Signal(int)
+    #: The user picked another recording folder (the path as a string).
+    directory_changed = QtCore.Signal(str)
 
     def __init__(
         self,
@@ -36,10 +47,8 @@ class ScanImageControls(QtWidgets.QWidget):
         self._owns_run = owns_run or (lambda run_id: run_id is not None)
         # Remembered across sessions in NeuroSeq's config file, like the Fiji path.
         self.settings = settings
-        self._last_frame_at: float | None = None
         self._waiting_since: float | None = None
-        self._last_frame_number = None
-        self._frame_timing: dict | None = None
+        self._next_file_stale = True
         layout = QtWidgets.QVBoxLayout(self)
         connection_row = QtWidgets.QHBoxLayout()
         self.python_edit = QtWidgets.QLineEdit(settings.scanimage_python_path)
@@ -72,6 +81,13 @@ class ScanImageControls(QtWidgets.QWidget):
         self.directory_edit = QtWidgets.QLineEdit(
             settings.scanimage_recording_directory
         )
+        #: The folder last shown or chosen, to tell a real edit from a focus-out.
+        self._shown_directory = settings.scanimage_recording_directory
+        self.directory_edit.setToolTip(
+            "Every recording is saved directly in this folder as one TIFF named "
+            "<date>_<number>.tif, with its metadata in <date>_<number>.json."
+        )
+        self.directory_edit.editingFinished.connect(self._directory_edited)
         directory_row = QtWidgets.QHBoxLayout()
         directory_row.addWidget(self.directory_edit)
         directory_button = QtWidgets.QToolButton()
@@ -79,11 +95,19 @@ class ScanImageControls(QtWidgets.QWidget):
         directory_button.clicked.connect(self._browse_directory)
         directory_row.addWidget(directory_button)
         form.addRow("Recording folder", directory_row)
-        self.name_edit = QtWidgets.QLineEdit("Acquisition")
+        self.next_file_label = QtWidgets.QLabel()
+        form.addRow("Next file", self.next_file_label)
+        self.name_edit = QtWidgets.QLineEdit()
+        self.name_edit.setPlaceholderText("Same as the file name")
+        self.name_edit.setToolTip("Name of the recording's data group in the project")
         form.addRow("Experiment name", self.name_edit)
         self.frames_spin = QtWidgets.QSpinBox()
         self.frames_spin.setRange(1, 10000000)
         self.frames_spin.setValue(300)
+        self.frames_spin.setToolTip(
+            "Frames of a manual recording. Dynamic input routines set the number "
+            "of frames of each block themselves."
+        )
         form.addRow("Frames", self.frames_spin)
         # One checkbox per ScanImage channel, filled in once connected.
         self.save_channels_widget = QtWidgets.QWidget()
@@ -99,11 +123,23 @@ class ScanImageControls(QtWidgets.QWidget):
             "together. Starts as set in ScanImage, which keeps its own choice."
         )
         form.addRow("Save channels", self.save_channels_widget)
+        self.channel_spin = QtWidgets.QSpinBox()
+        self.channel_spin.setRange(1, 32)
+        self.channel_spin.setToolTip(
+            "Channel of the calcium indicator: shown for recordings in the Imaging "
+            "tab and measured by dynamic input routines."
+        )
+        # Remembered across sessions: it is a property of the rig's wiring.
+        self.channel_spin.setValue(settings.scanimage_functional_channel)
+        self.channel_spin.valueChanged.connect(self._remember_channel)
+        self.channel_spin.valueChanged.connect(self.channel_changed)
+        form.addRow("Functional channel", self.channel_spin)
         self.external_check = QtWidgets.QCheckBox(
             "Wait for external acquisition trigger"
         )
         self.external_check.setToolTip(
-            "Configure the input terminal and polarity in ScanImage. This does not start SysCon."
+            "Configure the input terminal and polarity in ScanImage. Dynamic input "
+            "routines always wait for the trigger sent by the stimulation sequence."
         )
         form.addRow(self.external_check)
         self.timeout_spin = QtWidgets.QSpinBox()
@@ -113,87 +149,81 @@ class ScanImageControls(QtWidgets.QWidget):
         form.addRow("First-frame timeout", self.timeout_spin)
         layout.addLayout(form)
         actions = QtWidgets.QHBoxLayout()
-        self.live_check = QtWidgets.QCheckBox("Live view")
-        self.live_check.setChecked(connection.live_preview)
-        # The checkbox edits the connection's shared preview state; every
-        # workspace's checkbox and video follow it via live_preview_changed.
-        self.live_check.toggled.connect(self._live_toggled)
-        self.channel_spin = QtWidgets.QSpinBox()
-        self.channel_spin.setRange(1, 32)
-        self.channel_spin.valueChanged.connect(self._channel)
-        self.average_spin = QtWidgets.QSpinBox()
-        self.average_spin.setRange(0, 50)
-        self.average_spin.setSpecialValueText("as ScanImage")
-        self.average_spin.setToolTip(
-            "Average the last frames of the preview, like ScanImage's display "
-            "rolling average. Recordings are not affected."
+        self.preview_button = QtWidgets.QPushButton("Focus")
+        self.preview_button.setToolTip(
+            "Start ScanImage's Focus mode; the image is shown in ScanImage."
         )
-        self.average_spin.valueChanged.connect(
-            lambda value: setattr(connection, "preview_average", value or None)
-        )
-        self.preview_button = QtWidgets.QPushButton("Preview (Focus)")
         self.preview_button.clicked.connect(self._preview)
         self.record_button = QtWidgets.QPushButton("Record / Arm")
         self.record_button.clicked.connect(self._record)
         self.abort_button = QtWidgets.QPushButton("Abort acquisition")
         self.abort_button.clicked.connect(lambda: connection.command("abort"))
         for action_widget in (
-            self.live_check,
-            QtWidgets.QLabel("Channel"),
-            self.channel_spin,
-            QtWidgets.QLabel("Average"),
-            self.average_spin,
             self.preview_button,
             self.record_button,
             self.abort_button,
         ):
             actions.addWidget(action_widget)
+        actions.addStretch(1)
         layout.addLayout(actions)
+        fov_row = QtWidgets.QHBoxLayout()
+        self.fov_button = QtWidgets.QPushButton("Grab FOV for segmentation")
+        self.fov_button.setToolTip(
+            "Record a few frames, average the functional channel into one image of "
+            "the field of view, and segment the cells in it with Cellpose. The "
+            "image is saved beside the recording as <date>_<number>_mean.tif."
+        )
+        self.fov_button.clicked.connect(self._grab_fov)
+        self.fov_frames_spin = QtWidgets.QSpinBox()
+        self.fov_frames_spin.setRange(1, 10000)
+        self.fov_frames_spin.setValue(30)
+        self.fov_frames_spin.setSuffix(" frames")
+        self.fov_frames_spin.setToolTip("Frames averaged into the FOV image.")
+        fov_row.addWidget(self.fov_button)
+        fov_row.addWidget(self.fov_frames_spin)
+        fov_row.addStretch(1)
+        layout.addLayout(fov_row)
         self.message_label = QtWidgets.QLabel()
         self.message_label.setWordWrap(True)
         layout.addWidget(self.message_label)
         self.status_label = QtWidgets.QLabel("Disconnected")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
-        self.frame_label = QtWidgets.QLabel("No live frame received")
-        layout.addWidget(self.frame_label)
+        layout.addStretch(1)
         # Errors carry MATLAB file/line details worth pasting into a bug report.
-        for label in (self.message_label, self.status_label, self.frame_label):
+        for label in (self.message_label, self.status_label):
             label.setTextInteractionFlags(
                 QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
                 | QtCore.Qt.TextInteractionFlag.TextSelectableByKeyboard
             )
         connection.connected_changed.connect(self._connected)
         connection.status_changed.connect(self._status)
-        connection.frame_received.connect(self._frame)
         connection.error.connect(self.show_message)
-        connection.live_preview_changed.connect(self._live_preview_changed)
+        connection.run_finished.connect(self._update_next_file)
         self._update_connected_ui(connection.connected)
-        self._freshness_timer = QtCore.QTimer(self)
-        self._freshness_timer.setInterval(1000)
-        self._freshness_timer.timeout.connect(self._freshness)
-        self._freshness_timer.start()
+        self._update_next_file()
+        self._timeout_timer = QtCore.QTimer(self)
+        self._timeout_timer.setInterval(1000)
+        self._timeout_timer.timeout.connect(self._check_first_frame_timeout)
+        self._timeout_timer.start()
 
     def dispose(self) -> None:
         """Stop following the shared connection once the workspace closes."""
-        self._freshness_timer.stop()
+        self._timeout_timer.stop()
         for signal, slot in (
             (self.connection.connected_changed, self._connected),
             (self.connection.status_changed, self._status),
-            (self.connection.frame_received, self._frame),
             (self.connection.error, self.show_message),
-            (self.connection.live_preview_changed, self._live_preview_changed),
+            (self.connection.run_finished, self._update_next_file),
         ):
             with contextlib.suppress(TypeError, RuntimeError):
                 signal.disconnect(slot)
 
-    def _live_toggled(self, checked: bool) -> None:
-        self.connection.live_preview = checked
-
-    def _live_preview_changed(self, live: bool) -> None:
-        with QtCore.QSignalBlocker(self.live_check):
-            self.live_check.setChecked(live)
-        self.live_changed.emit(live)
+    def set_directory(self, directory: str) -> None:
+        """Show the recording folder of the workspace's project."""
+        self.directory_edit.setText(directory)
+        self._shown_directory = directory
+        self._update_next_file()
 
     def _browse_python(self) -> None:
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
@@ -207,7 +237,36 @@ class ScanImageControls(QtWidgets.QWidget):
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Recording folder")
         if path:
             self.directory_edit.setText(path)
+            self._directory_edited()
+
+    def _directory_edited(self) -> None:
+        path = self.directory_edit.text().strip()
+        # editingFinished also fires when the field merely loses focus.
+        if path and path != self._shown_directory:
+            self._shown_directory = path
             self.settings.scanimage_recording_directory = path
+            self.directory_changed.emit(path)
+        self._update_next_file()
+
+    def showEvent(self, event: QtGui.QShowEvent | None) -> None:
+        super().showEvent(event)
+        if self._next_file_stale:
+            self._update_next_file()
+
+    def _update_next_file(self, *_args: object) -> None:
+        # Listing a folder of a day's recordings is not free: a hidden tab (every
+        # open workspace has one) waits until it is shown.
+        if not self.isVisible():
+            self._next_file_stale = True
+            return
+        self._next_file_stale = False
+        text = self.directory_edit.text().strip()
+        if not text:
+            self.next_file_label.setText("Select a recording folder")
+            return
+        stem = recording_stem()
+        number = next_recording_number(Path(text), stem)
+        self.next_file_label.setText(recording_file_name(stem, number))
 
     def _connect(self) -> None:
         python = self.python_edit.text().strip()
@@ -224,7 +283,6 @@ class ScanImageControls(QtWidgets.QWidget):
     def _connected(self, connected: bool) -> None:
         self._update_connected_ui(connected)
         if not connected:
-            self.connection.live_preview = False
             self._waiting_since = None
 
     def _update_connected_ui(self, connected: bool) -> None:
@@ -235,18 +293,13 @@ class ScanImageControls(QtWidgets.QWidget):
             self.disconnect_button,
             self.preview_button,
             self.record_button,
+            self.fov_button,
             self.abort_button,
         ):
             widget.setEnabled(connected)
 
-    def _channel(self, channel: int) -> None:
-        self.connection.channel = channel
-        self.channel_changed.emit(channel)
-
     def _preview(self) -> None:
-        if self.connection.command("preview"):
-            self.live_check.setChecked(True)
-            self._last_frame_number = None
+        self.connection.command("preview")
 
     def saved_channels(self) -> list[int]:
         return [
@@ -281,39 +334,69 @@ class ScanImageControls(QtWidgets.QWidget):
     def _save_channels_toggled(self, _checked: bool) -> None:
         self._save_channels_chosen = True
 
-    def _record(self) -> None:
-        directory = Path(self.directory_edit.text().strip())
-        if not self.directory_edit.text().strip() or not directory.is_dir():
-            self.show_message("Select an existing recording folder on this PC.")
-            return
+    def recording_request(
+        self, *, frames: int, external_trigger: bool, name: str = ""
+    ) -> dict:
+        """Arguments of a ``record`` command; raises ``ValueError`` with a user message."""
+        text = self.directory_edit.text().strip()
+        directory = Path(text)
+        if not text or not directory.is_dir():
+            raise ValueError("Select an existing recording folder on this PC.")
         channels = self.saved_channels()
         if self.save_channel_checks and not channels:
-            self.show_message("Tick at least one channel to save.")
-            return
-        run_id = uuid.uuid4().hex
+            raise ValueError("Tick at least one channel to save.")
+        stem = recording_stem()
+        number = next_recording_number(directory, stem)
         self.settings.scanimage_recording_directory = str(directory)
-        self.record_requested.emit(
-            {
-                "run_id": run_id,
-                "directory": str(directory / run_id),
-                "frames": self.frames_spin.value(),
-                "external_trigger": self.external_check.isChecked(),
-                "name": self.name_edit.text().strip() or "Acquisition",
-                **({"channels": channels} if channels else {}),
-            }
-        )
+        return {
+            "run_id": uuid.uuid4().hex,
+            "directory": str(directory),
+            "stem": stem,
+            "counter": number,
+            "frames": int(frames),
+            "external_trigger": bool(external_trigger),
+            "name": name or Path(recording_file_name(stem, number)).stem,
+            **({"channels": channels} if channels else {}),
+        }
+
+    def _record(self) -> None:
+        try:
+            request = self.recording_request(
+                frames=self.frames_spin.value(),
+                external_trigger=self.external_check.isChecked(),
+                name=self.name_edit.text().strip(),
+            )
+        except ValueError as exc:
+            self.show_message(str(exc))
+            return
+        self.record_requested.emit(request)
+
+    def _grab_fov(self) -> None:
+        try:
+            request = self.recording_request(
+                frames=self.fov_frames_spin.value(), external_trigger=False
+            )
+        except ValueError as exc:
+            self.show_message(str(exc))
+            return
+        request["name"] = f"FOV {request['name']}"
+        self.fov_requested.emit(request)
 
     def _status(self, status: dict) -> None:
         self._show_save_channels(status)
         state = status.get("acq_state", "unknown")
         run = status.get("run", {})
-        text = f"ScanImage {status.get('scanimage_version', '')}: {state}; acquisition: {run.get('state', 'idle')}"
-        if status.get("preview_problem"):
-            # Why no preview frame came, e.g. a display read ScanImage rejected.
-            text += f"\nNo preview frame: {status['preview_problem']}"
-        self.status_label.setText(text)
+        self.status_label.setText(
+            f"ScanImage {status.get('scanimage_version', '')}: {state}; "
+            f"acquisition: {run.get('state', 'idle')}"
+        )
         idle = state == "idle"
-        for widget in (self.record_button, self.preview_button, self.disconnect_button):
+        for widget in (
+            self.record_button,
+            self.fov_button,
+            self.preview_button,
+            self.disconnect_button,
+        ):
             widget.setEnabled(idle and self.connection.run_id is None)
         self.abort_button.setEnabled(not idle and status.get("can_abort", False))
         if (
@@ -326,34 +409,7 @@ class ScanImageControls(QtWidgets.QWidget):
         else:
             self._waiting_since = None
 
-    def _frame(self, frame: dict) -> None:
-        number = frame.get("number")
-        if number is None or number != self._last_frame_number:
-            self._last_frame_at = time.monotonic()
-            self._last_frame_number = number
-        self._frame_timing = frame
-        self._freshness()
-
-    def _freshness(self) -> None:
-        if self._last_frame_at is not None:
-            age = time.monotonic() - self._last_frame_at
-            text = f"Preview frame {self._last_frame_number or '—'} · received {age:.0f} s ago"
-            timing = self._frame_timing or {}
-            shape = timing.get("pixels", np.empty((0, 0))).shape
-            parts = []
-            if timing.get("rate_hz"):
-                parts.append(f"{timing['rate_hz']:.1f} frames/s")
-            if timing.get("roundtrip_ms") is not None:
-                parts.append(f"{timing['roundtrip_ms']:.0f} ms per request")
-            if timing.get("averaged", 1) > 1:
-                parts.append(f"mean of {timing['averaged']} frames")
-            if timing.get("matlab_ms") is not None:
-                parts.append(f"{timing['matlab_ms']:.0f} ms in MATLAB")
-            if shape[0]:
-                parts.append(f"{shape[1]}×{shape[0]} px")
-            if parts:
-                text += "\n" + " · ".join(parts)
-            self.frame_label.setText(text)
+    def _check_first_frame_timeout(self) -> None:
         if (
             self._waiting_since is not None
             and time.monotonic() - self._waiting_since > self.timeout_spin.value()
@@ -363,6 +419,9 @@ class ScanImageControls(QtWidgets.QWidget):
                 return
             self.connection.command("abort")
             self.status_label.setText("First-frame timeout; abort requested.")
+
+    def _remember_channel(self, channel: int) -> None:
+        self.settings.scanimage_functional_channel = int(channel)
 
     def show_message(self, message: str) -> None:
         """Show a user message independently of periodic acquisition status."""

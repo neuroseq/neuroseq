@@ -134,6 +134,9 @@ stimulation setup** sets the power of that quick export. Changing only the power
 there keeps all other settings of the last export; **Export with settings…**
 starts from the same value.
 
+Export settings and the export folder belong to the project: they are saved with
+it and restored when you switch between open projects.
+
 ### Target power and power LUT
 
 The dialog has a **Target power** (mW) spinner next to a **Load LUT…**
@@ -145,7 +148,10 @@ button:
 - Loading a SysCon `.lut` file maps the requested mW to the laser's
   intensity percentage at the currently selected wavelength. The exporter divides
   that percentage by 100 for the `.seq` intensity fields (0–1). Each
-  wavelength has its own LUT slot.
+  wavelength has its own LUT slot. The mW those fractions stand for are kept in
+  each Shape's and laser pulse's description, e.g.
+  `neuron=3 power_mW=12.5 target_mW=25` (the requested power for that object,
+  i.e. the target times its amplitude, and the target power).
 - LUTs are bundled into the `.nseq` archive when you save the project, so
   the export stays reproducible across machines. Loading a LUT marks the project
   as modified; save it to retain the calibration.
@@ -255,5 +261,50 @@ without claiming measured completion. **Stop** also cancels any queued Run.
 The preview is collapsed by default; click **Show preview** to expand it.
 
 The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
-starting with the wrong timestep. The **Create input array** and **Edit input
+starting with the wrong timestep.
+
+### Dynamic input routines on the rig
+
+With the **SysCon2 (calcium imaging)** target, the rheobase and STDP window
+dialogs show **Hardware settings**: target power, laser, spiral scanning and spots
+per cell (the project's export settings, shared with the SysCon2 tab, so no
+**Export with settings…** is needed first), plus how blocks are recorded. With
+**Run blocks automatically and record them with ScanImage**, each block is
+uploaded and run by NeuroSeq while ScanImage records it, triggered by the
+sequence, and its ΔF/F traces are extracted with the project's Cellpose masks;
+see [ScanImage acquisition](scanimage_acquisition.md#dynamic-input-routines).
+Rheobase then counts a probe as evoking a response, depending on **Calcium
+readout**, when the neuron's ΔF/F rises by the **Response threshold** within
+the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
+(an event of at least the **Spike threshold**) in it. Unticked, each block
+is only imported into SysCon2 and you run, record and import it yourself, then
+click **Calcium data imported** (rheobase can then measure the rise of an
+imported ΔF/F or raw fluorescence trace, e.g. the TIFF import's ROI averages,
+or deconvolved spikes; Suite2p's normalised traces are refused, since a rise
+relative to their baseline is meaningless). Export warnings are asked once per
+routine rather than failing every block. Since probe amplitudes are fractions of
+the target power, a routine refuses to send a block without a target power above
+0 mW and a power LUT for the chosen laser, or with a target above the LUT's
+maximum (higher amplitudes would all be delivered at that maximum); every
+stimulated neuron must have a Cellpose ROI. Amplitudes must be above 0 and at
+most 1.
+
+Choosing the SysCon2 target first gives rheobase settings for cells in a slice: a
+16.7 ms pulse (one spiral; a shorter pulse with spiral scanning on is logged as a
+warning, since only part of the spiral is delivered), up to 100 ms, 1 s recovery,
+a 300 ms post-pulse window and **Fixed duration, varying amplitude**, since every
+probe is a recording. Each target keeps its own values when you switch back and
+forth. With deconvolved spikes, a spike in the imaging frame after the
+post-pulse window still counts: the frames lit by a short pulse are imputed, so
+its response first shows in full in the next frame. Simulations finishing or
+failing meanwhile do not affect a hardware run.
+
+Each routine run keeps its block scripts in its own folder inside the project's
+export folder (the one **Export with settings…** used last), for example
+`SysCon exports\rheobase_2026-10-22_143012\`. Every block is saved there as
+`rheobase_2026-10-22_143012_001.seq`, with its overview PNG and stimulus sidecar,
+and imported into SysCon2 under the same name, so names never repeat across
+runs. A recording of a block records the path of its `.seq`. Scripts exported
+with **Export current array to stimulation setup** stay temporary and are
+deleted when NeuroSeq closes. The **Create input array** and **Edit input
 array** dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

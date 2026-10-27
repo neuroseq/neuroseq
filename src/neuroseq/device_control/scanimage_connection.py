@@ -1,40 +1,28 @@
 """Asynchronous same-PC transport for the ScanImage adapter.
 
-Only one request is in flight: preview frames cannot accumulate in Qt's event
-queue. The JSON operation/reply boundary can also be implemented by a future
-remote bridge without changing acquisition or display logic.
+Only one request is in flight. The JSON operation/reply boundary can also be
+implemented by a future remote bridge without changing acquisition logic.
+NeuroSeq does not stream images (issues #628, #651): fetching frames through
+MATLAB slowed ScanImage down, and ScanImage shows its own live display.
 """
 
 from __future__ import annotations
 
-import base64
-import collections
 import json
 import time
 from pathlib import Path
 
-import numpy as np
 from qtpy import QtCore
-
-# Preview pixel types the adapter sends, with their sizes in bytes.
-_FRAME_DTYPES = {"float32": "<f4", "int16": "<i2"}
-# While previewing without a recording, the next request follows the last
-# reply instead of waiting for the regular poll, but no more often than this:
-# MATLAB answers on the thread that also runs ScanImage.
-PREVIEW_MIN_PERIOD_S = 0.1
 
 
 class ScanImageConnection(QtCore.QObject):
     status_changed = QtCore.Signal(object)
-    frame_received = QtCore.Signal(object)
     recording_ready = QtCore.Signal(object)
     #: Emitted with the run id whenever the connection stops tracking a run,
     #: whatever its outcome (ready, failed, aborted, interrupted, ...).
     run_finished = QtCore.Signal(str)
     error = QtCore.Signal(str)
     connected_changed = QtCore.Signal(bool)
-    #: Live preview is one device-wide state shared by every workspace.
-    live_preview_changed = QtCore.Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -50,17 +38,6 @@ class ScanImageConnection(QtCore.QObject):
         self._queued: tuple[str, dict | None] | None = None
         self.connected = False
         self._closing = False
-        self.channel = 1
-        self._live_preview = False
-        self._last_preview_request = float("-inf")
-        self._sent_at = 0.0
-        # Arrival times of recent preview frames, for the measured rate.
-        self._frame_times: collections.deque[float] = collections.deque(maxlen=20)
-        #: Preview frames averaged for display, like ScanImage's display
-        #: rolling average; None follows ScanImage's own setting.
-        self.preview_average: int | None = None
-        self._recent_frames: collections.deque[np.ndarray] = collections.deque()
-        self._recent_channel = 1
         self.run_id: str | None = None
         self._expected_frames: int | None = None
         self._finalize_since: float | None = None
@@ -75,15 +52,9 @@ class ScanImageConnection(QtCore.QObject):
         self.deadline.timeout.connect(self._timed_out)
 
     @property
-    def live_preview(self) -> bool:
-        return self._live_preview
-
-    @live_preview.setter
-    def live_preview(self, live: bool) -> None:
-        live = bool(live)
-        if live != self._live_preview:
-            self._live_preview = live
-            self.live_preview_changed.emit(live)
+    def last_status(self) -> dict:
+        """The latest status reply (frame rate, channels, acquisition state...)."""
+        return self._last_status
 
     def connect_session(self, python: str, session: str) -> None:
         if self.process.state() != QtCore.QProcess.ProcessState.NotRunning:
@@ -113,9 +84,6 @@ class ScanImageConnection(QtCore.QObject):
             "operation": operation,
             "arguments": arguments or {},
         }
-        self._sent_at = time.monotonic()
-        if operation == "preview":
-            self._recent_frames.clear()  # a new preview starts a new average
         self.process.write((json.dumps(request) + "\n").encode())
         self.deadline.start(30000)
         return True
@@ -140,30 +108,6 @@ class ScanImageConnection(QtCore.QObject):
             self._file_signature = None
         return True
 
-    def _averaged(self, frame: dict) -> np.ndarray:
-        """The mean of the last preview frames: single 30 Hz frames are too
-        noisy to focus on, which is why ScanImage averages its display."""
-        pixels = frame["pixels"].astype(np.float32)
-        count = self.preview_average or int(frame.get("display_average") or 1)
-        frame["averaged"] = count = max(1, count)
-        if self._recent_frames and (
-            self._recent_frames[-1].shape != pixels.shape
-            or frame.get("channel", self.channel) != self._recent_channel
-        ):
-            self._recent_frames.clear()
-        self._recent_channel = frame.get("channel", self.channel)
-        self._recent_frames.append(pixels)
-        while len(self._recent_frames) > count:
-            self._recent_frames.popleft()
-        return np.mean(np.stack(self._recent_frames), axis=0)
-
-    def preview_rate(self) -> float | None:
-        """Preview frames per second over the last few frames."""
-        if len(self._frame_times) < 2:
-            return None
-        span = self._frame_times[-1] - self._frame_times[0]
-        return (len(self._frame_times) - 1) / span if span > 0 else None
-
     def _poll(self) -> None:
         if self.connected and self._pending is None:
             if self._abort_requested:
@@ -184,14 +128,7 @@ class ScanImageConnection(QtCore.QObject):
                 self._queued = None
                 self._send(operation, arguments)
             else:
-                arguments = {}
-                now = time.monotonic()
-                if self.live_preview and (
-                    self.run_id is None or now - self._last_preview_request >= 1
-                ):
-                    arguments["channel"] = self.channel
-                    self._last_preview_request = now
-                self._send("status", arguments)
+                self._send("status")
 
     def _read(self) -> None:
         self._buffer.extend(self.process.readAllStandardOutput().data())
@@ -288,39 +225,8 @@ class ScanImageConnection(QtCore.QObject):
         if operation == "disconnect":
             self.shutdown()
             return
-        frame = result.pop("frame", None)
         self._last_status = result
         self.status_changed.emit(result)
-        if frame is not None:
-            shape = tuple(int(n) for n in frame["shape"])
-            if len(shape) != 2 or min(shape) < 1 or max(shape) > 16384:
-                raise ValueError("Invalid frame dimensions")
-            raw = base64.b64decode(frame["data"], validate=True)
-            dtype = np.dtype(_FRAME_DTYPES.get(frame["dtype"], "V1"))
-            if frame["dtype"] not in _FRAME_DTYPES or len(raw) != (
-                shape[0] * shape[1] * dtype.itemsize
-            ):
-                raise ValueError("Invalid frame payload")
-            frame["pixels"] = np.frombuffer(raw, dtype=dtype).reshape(shape, order="F")
-            lut = frame.get("lut")
-            frame["lut"] = (
-                (float(lut[0]), float(lut[1]))
-                if isinstance(lut, list) and len(lut) == 2 and lut[1] > lut[0]
-                else None
-            )
-            frame["pixels"] = self._averaged(frame)
-            now = time.monotonic()
-            self._frame_times.append(now)
-            frame["roundtrip_ms"] = 1000 * (now - self._sent_at)
-            frame["matlab_ms"] = result.get("elapsed_ms")
-            frame["rate_hz"] = self.preview_rate()
-            self.frame_received.emit(frame)
-            if self.live_preview and self.run_id is None:
-                since = now - self._last_preview_request
-                wait_s = min(
-                    PREVIEW_MIN_PERIOD_S, max(0.0, PREVIEW_MIN_PERIOD_S - since)
-                )
-                QtCore.QTimer.singleShot(max(1, round(1000 * wait_s)), self._poll)
         run = result.get("run", {})
         if (
             self.run_id

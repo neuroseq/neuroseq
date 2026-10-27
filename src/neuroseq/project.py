@@ -27,6 +27,9 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import export_settings_from_dict
+from neuroseq.export.syscon2_export_service import export_settings_to_dict
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage import compact_index
@@ -151,6 +154,12 @@ class Project:
         self.imaging_acquisitions: list[dict] = []
         self.syscon2_export_template_text: str | None = None
         self.power_luts: dict[int, PowerLut] = {}
+        # Holographic export options, shared by the SysCon2 panel and the dynamic
+        # input routines; kept with the project so switching projects keeps them.
+        self.syscon_export_settings: SysconExportSettings | None = None
+        # Folders last used by this project's device workflows, by purpose
+        # ("syscon_export", "scanimage_recording"); open projects do not share them.
+        self.device_folders: dict[str, str] = {}
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_ram_trace_plot_matrix = 256
@@ -205,6 +214,11 @@ class Project:
                             "power_luts", {}
                         ).items()
                     }
+                    if "syscon_export_settings" in _meta:
+                        self.syscon_export_settings = export_settings_from_dict(
+                            _meta["syscon_export_settings"]
+                        )
+                    self.device_folders = dict(_meta.get("device_folders", {}))
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
                     for acquisition in self.imaging_acquisitions:
                         if "recording" in acquisition:
@@ -348,6 +362,20 @@ class Project:
             self.history.record_applied(
                 ProjectCommand(label, lambda: redo(before), lambda: undo(after))
             )
+
+    def set_syscon_export_settings(self, settings: SysconExportSettings | None) -> None:
+        """Store the holographic export options used by the SysCon2 panel and routines."""
+        if settings == self.syscon_export_settings:
+            return
+        self.syscon_export_settings = settings
+        self.mark_dirty()
+
+    def set_device_folder(self, purpose: str, folder: str) -> None:
+        """Remember the folder this project's ``purpose`` workflow used last."""
+        if self.device_folders.get(purpose) == folder:
+            return
+        self.device_folders[purpose] = folder
+        self.mark_dirty()
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
@@ -1084,6 +1112,44 @@ class Project:
             self.update_limits()
             self.mark_dirty()
 
+    def place_block_data(
+        self,
+        experiment_name: str,
+        data: Sequence[TraceData | SpikeData],
+        offset_seconds: float,
+        duration_seconds: float,
+        label: str = "Add block data",
+    ) -> None:
+        """Place the data of one block of a closed-loop routine in a data group.
+
+        The group (created if needed) collects a whole routine run instead of one
+        group per block: spikes are shifted by ``offset_seconds`` (block-relative
+        times -> the stim array's timeline) and added to the spike dataset of the
+        same name; a trace is resampled to that trace's ``dt`` and written at the
+        offset, a gap before it holding the trace's last value. One undoable step.
+        """
+        if offset_seconds < 0 or duration_seconds < 0:
+            raise ValueError("Block offset and duration must not be negative.")
+        with self.edit_experiments([experiment_name], label):
+            experiment = self.experiments.get(experiment_name)
+            if experiment is None:
+                experiment = Experiment(experiment_name, 0.0, [0.0], [])
+                self.experiments[experiment_name] = experiment
+            for datum in data:
+                if isinstance(datum, SpikeData):
+                    _place_block_spikes(experiment, datum, offset_seconds)
+                elif isinstance(datum, TraceData):
+                    _place_block_trace(experiment, datum, offset_seconds)
+                else:
+                    raise TypeError(f"Cannot place {type(datum).__name__} data.")
+            end = offset_seconds + duration_seconds
+            experiment.duration = max(experiment.duration, end)
+            experiment.timepoints = sorted(
+                set(experiment.timepoints) | {offset_seconds, end}
+            )
+            self.update_limits()
+            self.mark_dirty()
+
     def pad_stim_arrays(
         self, total_time_seconds: float, only_stim_name: str | None = None
     ):
@@ -1516,6 +1582,12 @@ class Project:
                 metadata["calcium_video_fps"] = self.calcium_video_fps
             if self.imaging_acquisitions:
                 metadata["imaging_acquisitions"] = self.imaging_acquisitions
+            if self.syscon_export_settings is not None:
+                metadata["syscon_export_settings"] = export_settings_to_dict(
+                    self.syscon_export_settings
+                )
+            if self.device_folders:
+                metadata["device_folders"] = self.device_folders
             zf.writestr("project_metadata.json", json.dumps(metadata))
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()
@@ -1544,3 +1616,73 @@ class Project:
                     )
         self.filepath = pathlib.Path(filepath)
         self.dirty = False
+
+
+def _place_block_spikes(
+    experiment: Experiment, spikes: SpikeData, offset_seconds: float
+) -> None:
+    times = np.asarray(spikes.spike_times, dtype=np.float64) + offset_seconds
+    existing = find_by_name_and_type(experiment.data, spikes.name, SpikeData)
+    if existing is None:
+        experiment.data.append(
+            SpikeData(
+                spikes.name, spikes.spike_indices.copy(), times, spikes.raw_cellpose_ids
+            )
+        )
+        return
+    # New buffers, never in place: the undo history keeps the old ones.
+    indices = np.concatenate([existing.spike_indices, spikes.spike_indices])
+    all_times = np.concatenate([np.asarray(existing.spike_times, np.float64), times])
+    order = np.argsort(all_times, kind="stable")
+    existing.spike_indices = indices[order]
+    existing.spike_times = all_times[order]
+    # Raw Cellpose ids follow their spikes; one side without them drops them all.
+    if existing.raw_cellpose_ids is not None and spikes.raw_cellpose_ids is not None:
+        existing.raw_cellpose_ids = np.concatenate(
+            [existing.raw_cellpose_ids, spikes.raw_cellpose_ids]
+        )[order]
+    else:
+        existing.raw_cellpose_ids = None
+
+
+def _place_block_trace(
+    experiment: Experiment, trace: TraceData, offset_seconds: float
+) -> None:
+    if trace.traces.shape[1] == 0:
+        return  # an empty readback adds nothing
+    existing = find_by_name_and_type(experiment.data, trace.name, TraceData)
+    dt = float(existing.dt) if existing is not None else float(trace.dt)
+    values = np.asarray(trace.traces, dtype=np.float32)
+    if not np.isclose(dt, trace.dt):
+        source_t = np.arange(values.shape[1]) * float(trace.dt)
+        grid = np.arange(int(np.floor(source_t[-1] / dt)) + 1) * dt
+        values = np.stack([np.interp(grid, source_t, row) for row in values]).astype(
+            np.float32
+        )
+    start = int(round(offset_seconds / dt))
+    if existing is None:
+        lead = np.repeat(values[:, :1], start, axis=1)
+        experiment.data.append(
+            TraceData(
+                trace.name,
+                np.concatenate([lead, values], axis=1),
+                trace.indices.copy(),
+                trace.units,
+                dt,
+                trace.raw_cellpose_ids,
+            )
+        )
+        return
+    if not np.array_equal(existing.indices, trace.indices):
+        raise ValueError(
+            f"Trace '{trace.name}' records other neurons than the data group's."
+        )
+    old = np.asarray(existing.traces)
+    values = values.astype(old.dtype, copy=False)
+    if start >= old.shape[1]:
+        # The usual case, a block after the last one: one copy, gap held.
+        gap = np.repeat(old[:, -1:], start - old.shape[1], axis=1)
+        existing.traces = np.concatenate([old, gap, values], axis=1)
+        return
+    stop = start + values.shape[1]
+    existing.traces = np.concatenate([old[:, :start], values, old[:, stop:]], axis=1)

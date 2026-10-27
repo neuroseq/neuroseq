@@ -96,18 +96,68 @@ def measure_calcium_spike_count(
     neuron_id: int,
     onset_seconds: float,
     window_ms: float,
+    frame_seconds: float = 0.0,
 ) -> int:
     """Count deconvolved spikes of ``neuron_id`` in ``[onset, onset + window]``.
 
     ``onset_seconds`` is relative to the start of the acquisition that produced ``spikes``.
+    Spikes are timed at the start of their imaging frame, so with ``frame_seconds`` (the
+    frame period) a spike in the frame containing the onset also counts, and so does
+    one in the frame after the window's end: the frames the stimulus lit up are
+    imputed from their neighbours, so a short pulse's response first shows in full
+    in the frame after it.
     """
     stop_seconds = onset_seconds + window_ms / 1000.0
+    if frame_seconds > 0:
+        # The start of the frame after the one containing the window's end (with a
+        # little slack for spike times computed as frame index x period).
+        stop_seconds = (
+            np.floor(stop_seconds / frame_seconds) + 1
+        ) * frame_seconds + 1e-9
+    # The start of the frame containing the onset, not of the frame before it.
+    after_onset = (
+        spikes.spike_times > onset_seconds - frame_seconds
+        if frame_seconds > 0
+        else spikes.spike_times >= onset_seconds
+    )
     in_window = (
         (spikes.spike_indices == neuron_id)
-        & (spikes.spike_times >= onset_seconds)
+        & after_onset
         & (spikes.spike_times <= stop_seconds)
     )
     return int(np.count_nonzero(in_window))
+
+
+#: Trace units measured as ΔF/F directly.
+DFF_UNITS = frozenset({"df/f", "δf/f", "dff"})
+#: Units of raw fluorescence, measured relative to their pre-probe baseline.
+RAW_FLUORESCENCE_UNITS = frozenset({"fluorescence", "f", "a.u."})
+
+
+def _calcium_row(trace: TraceData, neuron_id: int) -> np.ndarray:
+    matches = np.flatnonzero(trace.indices == neuron_id)
+    if matches.size == 0:
+        raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
+    return trace.traces[int(matches[0])]
+
+
+def _calcium_baseline_and_peak(
+    values: np.ndarray, dt: float, onset: float, baseline_ms: float, response_ms: float
+) -> tuple[float, float]:
+    """Mean of the ``baseline_ms`` before ``onset`` and peak of the ``response_ms`` after."""
+    onset_idx = int(np.floor(onset / dt))
+    if onset_idx >= values.size:
+        raise ValueError(
+            f"The selected trace ends at {values.size * dt:.3f} s, "
+            f"before the probe at {onset:.3f} s. Select the newly imported "
+            "recording and try again."
+        )
+    onset_idx = max(onset_idx, 0)
+    base_start = max(0, int(np.floor((onset - baseline_ms / 1000.0) / dt)))
+    baseline = values[base_start : max(onset_idx, base_start + 1)]
+    stop = min(values.size, int(np.ceil((onset + response_ms / 1000.0) / dt)) + 1)
+    window = values[onset_idx : max(stop, onset_idx + 1)]
+    return float(np.mean(baseline)), float(np.max(window))
 
 
 def measure_calcium_response(
@@ -123,27 +173,49 @@ def measure_calcium_response(
     ``baseline_ms`` immediately before the onset. Times are relative to the start of the
     acquisition that produced ``trace``; the amplitude is in the trace's own units.
     """
-    matches = np.flatnonzero(trace.indices == neuron_id)
-    if matches.size == 0:
-        raise ValueError(f"Neuron {neuron_id} is not recorded in the trace.")
-    values = trace.traces[int(matches[0])]
+    values = _calcium_row(trace, neuron_id)
     amplitudes: list[float] = []
     for onset in probe_pulse_times_s:
-        onset_idx = int(np.floor(onset / trace.dt))
-        if onset_idx >= values.size:
-            raise ValueError(
-                f"The selected trace ends at {values.size * trace.dt:.3f} s, "
-                f"before the probe at {onset:.3f} s. Select the newly imported "
-                "recording and try again."
-            )
-        onset_idx = max(onset_idx, 0)
-        base_start = max(0, int(np.floor((onset - baseline_ms / 1000.0) / trace.dt)))
-        baseline = values[base_start : max(onset_idx, base_start + 1)]
-        stop = min(
-            values.size, int(np.ceil((onset + response_ms / 1000.0) / trace.dt)) + 1
+        baseline, peak = _calcium_baseline_and_peak(
+            values, trace.dt, onset, baseline_ms, response_ms
         )
-        window = values[onset_idx : max(stop, onset_idx + 1)]
-        amplitudes.append(float(np.max(window) - np.mean(baseline)))
+        amplitudes.append(peak - baseline)
     return EPSPMeasurement(
         float(np.mean(amplitudes)), tuple(amplitudes), units=trace.units
     )
+
+
+def calcium_rise_fraction(
+    trace: TraceData,
+    neuron_id: int,
+    onset_seconds: float,
+    baseline_ms: float,
+    response_ms: float,
+) -> float:
+    """Rise of ``neuron_id``'s calcium signal after ``onset_seconds`` as a fraction:
+    the ΔF/F change of a ΔF/F trace, or the change relative to the baseline of a raw
+    fluorescence trace. Times are relative to the start of the acquisition."""
+    baseline, peak = _calcium_baseline_and_peak(
+        _calcium_row(trace, neuron_id),
+        trace.dt,
+        onset_seconds,
+        baseline_ms,
+        response_ms,
+    )
+    rise = peak - baseline
+    units = str(trace.units).strip().lower()
+    if units in DFF_UNITS:
+        return rise
+    if units not in RAW_FLUORESCENCE_UNITS:
+        # e.g. Suite2p traces normalised to 0-1: a rise relative to their baseline
+        # means nothing, and would make every probe a response.
+        raise ValueError(
+            f"Trace units '{trace.units}' are neither ΔF/F nor raw fluorescence; "
+            "select a ΔF/F trace (or the raw ROI averages of the TIFF import)."
+        )
+    if baseline <= 0:
+        raise ValueError(
+            "The fluorescence baseline before the probe is not positive, so no "
+            "relative rise can be computed."
+        )
+    return rise / baseline

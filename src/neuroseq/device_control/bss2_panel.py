@@ -37,6 +37,7 @@ from neuroseq.device_control.bss2_connection import STATE_CONNECTED
 from neuroseq.device_control.bss2_connection import STATE_CONNECTING
 from neuroseq.device_control.bss2_connection import STATE_DISCONNECTED
 from neuroseq.device_control.bss2_connection import STATE_STARTING
+from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
 from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.stimulation.stim import StimArray
 
@@ -96,6 +97,15 @@ class Bss2Panel(QtWidgets.QWidget):
         self._load_settings()
         self._wire_session()
         self._update_ui()
+        #: Runs dynamic input routine blocks with this tab's settings.
+        self.stimulation_host = Bss2StimulationHost(
+            session,
+            self.current_settings,
+            parent=self,
+            connect_hardware=self.connect_hardware,
+        )
+        self.stimulation_host.progress.connect(self._log)
+        self.stimulation_host.experiment_added.connect(self._on_host_experiment_added)
 
     # ---- workspace API --------------------------------------------------------
 
@@ -112,8 +122,9 @@ class Bss2Panel(QtWidgets.QWidget):
 
     @property
     def run_in_progress(self) -> bool:
-        """Whether this tab's hardware run is still executing."""
-        return self._run is not None
+        """Whether a run of this workspace (this tab's or a dynamic input routine's,
+        even one the routine stopped waiting for) is still executing."""
+        return self._run is not None or self._session.owns_run
 
     def shutdown(self) -> None:
         """Detach from the shared helper (it keeps running for other tabs)."""
@@ -644,7 +655,7 @@ class Bss2Panel(QtWidgets.QWidget):
             widget.setEnabled(disconnected)
         self.btn_deliver.setEnabled(state == STATE_CONNECTED and not self._session.busy)
         # Stop also aborts a slow container start or connection attempt.
-        self.btn_stop.setEnabled(self._run is not None or state in _STARTING_STATES)
+        self.btn_stop.setEnabled(self.run_in_progress or state in _STARTING_STATES)
 
     def _on_mode_changed(self, *_args: object) -> None:
         spikes = self.mode_combo.currentData() == bp.INPUT_SPIKES
@@ -758,30 +769,32 @@ class Bss2Panel(QtWidgets.QWidget):
         self._update_ui()
 
     def stop(self) -> None:
-        if self._run is not None or self._session.state in _STARTING_STATES:
+        if self.run_in_progress or self._session.state in _STARTING_STATES:
             self._session.stop()
         self._update_ui()
 
     def _on_run_progress(self, message: str) -> None:
         self.status_label.setText(message)
 
+    def _on_host_experiment_added(self, name: str) -> None:
+        """A routine's readback: show it like this tab's own deliveries."""
+        self._refresh_experiments()
+        self.experiment_added.emit(name)
+
     def _on_run_finished(self, request_id: str, result: object) -> None:
         if self._run is None or request_id != self._run[0]:
+            self._update_ui()  # a routine's run ended: Stop no longer applies
             return
         _, name, speedup = self._run
         self._run = None
         self._update_ui()
         try:
             assert isinstance(result, dict)
-            readback = bp.decode_run_result(result, speedup)
-            experiment = bp.readback_experiment(readback, name)
             if self._project is None:
                 raise ValueError("No project is open.")
-            base, suffix = experiment.name, 2
-            while experiment.name in self._project.experiments:
-                experiment.name = f"{base} ({suffix})"
-                suffix += 1
-            self._project.add_experiment(experiment)
+            experiment, readback = bp.add_readback_experiment(
+                self._project, result, speedup, name
+            )
         except (AssertionError, KeyError, TypeError, ValueError) as exc:
             logger.exception("Could not add the BrainScaleS-2 readback")
             QtWidgets.QMessageBox.warning(
@@ -797,6 +810,7 @@ class Bss2Panel(QtWidgets.QWidget):
 
     def _on_run_failed(self, request_id: str, message: str) -> None:
         if self._run is None or request_id != self._run[0]:
+            self._update_ui()
             return
         self._run = None
         self._update_ui()

@@ -15,6 +15,7 @@ from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.example_projects import default_project
 from neuroseq.export.power_lut import PowerLut
+from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
@@ -1522,3 +1523,106 @@ def test_import_project_marks_dirty(tmp_path: Path) -> None:
     assert project.dirty is False
     project.import_project(tmp_file, SaveLoadOptions(True, True, True, True))
     assert project.dirty is True
+
+
+def test_device_settings_are_saved_with_the_project(tmp_path):
+    project = Project()
+    project.syscon_export_settings = SysconExportSettings(
+        config_text="cfg", target_power_mw=23.0, laser_wavelength_nm=1100
+    )
+    project.device_folders = {"scanimage_recording": "D:/data", "syscon_export": "E:/"}
+    path = tmp_path / "devices.nseq"
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    loaded = Project(path)
+    assert loaded.syscon_export_settings == project.syscon_export_settings
+    assert loaded.device_folders == project.device_folders
+
+
+def test_device_settings_setters_mark_the_project_dirty_only_on_change():
+    project = Project()
+    project.dirty = False
+    settings = SysconExportSettings(config_text="cfg")
+    project.set_syscon_export_settings(settings)
+    project.set_device_folder("syscon_export", "E:/exports")
+    assert project.dirty
+    assert project.syscon_export_settings is settings
+    assert project.device_folders == {"syscon_export": "E:/exports"}
+    project.dirty = False
+    project.set_syscon_export_settings(SysconExportSettings(config_text="cfg"))
+    project.set_device_folder("syscon_export", "E:/exports")
+    assert not project.dirty
+
+
+def test_block_data_of_a_run_is_collected_in_one_group():
+    """Each block of a routine run lands in one group at its own time."""
+    project = Project()
+    for offset, spike_time in ((0.0, 0.05), (0.3, 0.1)):
+        spikes = SpikeData("chip spikes", np.array([1]), np.array([spike_time]))
+        trace = TraceData(
+            "v", np.full((1, 10), offset + 1.0), np.array([1]), "a.u.", 0.01
+        )
+        project.place_block_data("Run", [spikes, trace], offset, 0.2)
+    experiment = project.experiments["Run"]
+    assert experiment.duration == pytest.approx(0.5)
+    spikes = next(d for d in experiment.data if isinstance(d, SpikeData))
+    np.testing.assert_allclose(spikes.spike_times, [0.05, 0.4])
+    trace = next(d for d in experiment.data if isinstance(d, TraceData))
+    # 10 samples, a gap held at the last value, then the second block at 0.3 s.
+    assert trace.traces.shape == (1, 40)
+    np.testing.assert_allclose(trace.traces[0, 10:30], 1.0)
+    np.testing.assert_allclose(trace.traces[0, 30:], 1.3)
+    project.history.undo()
+    spikes = next(
+        d for d in project.experiments["Run"].data if isinstance(d, SpikeData)
+    )
+    np.testing.assert_allclose(spikes.spike_times, [0.05])
+    project.history.undo()
+    assert "Run" not in project.experiments
+
+
+def test_block_trace_is_resampled_to_the_groups_interval():
+    project = Project()
+    first = TraceData("v", np.zeros((1, 10)), np.array([0]), "a.u.", 0.01)
+    project.place_block_data("Run", [first], 0.0, 0.1)
+    second = TraceData(
+        "v", np.linspace(0, 1, 21)[None, :], np.array([0]), "a.u.", 0.005
+    )
+    project.place_block_data("Run", [second], 0.1, 0.1)
+    trace = project.experiments["Run"].data[0]
+    assert trace.dt == 0.01
+    np.testing.assert_allclose(trace.traces[0, 10:], np.linspace(0, 1, 11), atol=1e-6)
+    other = TraceData("v", np.zeros((1, 5)), np.array([3]), "a.u.", 0.01)
+    with pytest.raises(ValueError, match="other neurons"):
+        project.place_block_data("Run", [other], 0.2, 0.05)
+
+
+def test_placed_spikes_keep_their_cellpose_ids():
+    project = Project()
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([0, 1]), np.array([0.3, 0.1]), np.array([5, 6]))],
+        0.0,
+        1.0,
+    )
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([2]), np.array([0.05]), np.array([7]))],
+        0.1,
+        1.0,
+    )
+    spikes = project.experiments["Run"].data[0]
+    np.testing.assert_allclose(spikes.spike_times, [0.1, 0.15, 0.3])
+    np.testing.assert_array_equal(spikes.spike_indices, [1, 2, 0])
+    np.testing.assert_array_equal(spikes.raw_cellpose_ids, [6, 7, 5])
+    project.place_block_data(
+        "Run", [SpikeData("s", np.array([3]), np.array([0.0]))], 2.0, 1.0
+    )
+    assert project.experiments["Run"].data[0].raw_cellpose_ids is None
+
+
+def test_empty_block_trace_is_skipped():
+    project = Project()
+    empty = TraceData("v", np.zeros((1, 0)), np.array([0]), "a.u.", 0.01)
+    spikes = SpikeData("s", np.array([0]), np.array([0.1]))
+    project.place_block_data("Run", [spikes, empty], 0.0, 0.2)
+    assert [type(d) for d in project.experiments["Run"].data] == [SpikeData]

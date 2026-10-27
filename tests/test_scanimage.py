@@ -1,7 +1,5 @@
-import base64
 import json
 import sys
-import time
 from pathlib import Path
 from types import ModuleType
 from zipfile import ZipFile
@@ -118,29 +116,6 @@ def connection(qtbot, mocker):
     qtbot.wait(1)
 
 
-def test_preview_protocol_decodes_matlab_column_order(connection, mocker):
-    received = mocker.Mock()
-    statuses = []
-    connection.status_changed.connect(lambda status: statuses.append(dict(status)))
-    connection.frame_received.connect(received)
-    pixels = np.arange(12, dtype="<f4").reshape(3, 4)
-    connection._send("status")
-    connection._reply(
-        {
-            "id": 1,
-            "result": {
-                "frame": {
-                    "shape": [3, 4],
-                    "dtype": "float32",
-                    "data": base64.b64encode(pixels.tobytes(order="F")).decode(),
-                }
-            },
-        }
-    )
-    np.testing.assert_array_equal(received.call_args.args[0]["pixels"], pixels)
-    assert "frame" not in statuses[0]
-
-
 def test_poll_is_bounded_and_abort_has_priority(connection):
     connection.connected = True
     connection._poll()
@@ -199,59 +174,6 @@ def test_record_request_waits_for_poll_and_abort_cancels_it(connection):
     assert connection.process.write.call_count == 1
 
 
-def test_live_video_ignores_playback_slider_and_preserves_orientation(qtbot, recording):
-    from pathlib import Path
-
-    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
-
-    paths, _ = recording
-    widget = CalciumVideoWidget()
-    qtbot.addWidget(widget)
-    widget.set_video_paths(
-        [Path(p) for p in paths],
-        10,
-        warn_if_missing_cellpose=False,
-        scanimage_index=index_recording(paths),
-    )
-    assert len(widget._frame_refs) == 4
-    # ScanImage recordings pick channels from their metadata instead.
-    assert widget.channel_controls.isHidden()
-    widget.set_recorded_channel(2)
-    widget.set_time_ms(250)
-    assert widget.current_frame_index == 2
-    widget.set_live(True)
-    pixels = np.arange(20, dtype=np.float32).reshape(4, 5)
-    widget.show_live_frame({"pixels": pixels})
-    expected = widget._to_rgb(pixels)  # kept as scanned; the camera flips
-    widget.set_time_ms(0)
-    np.testing.assert_array_equal(widget.current_frame, expected)
-    assert not widget.save_button.isEnabled()
-    widget.set_live(False)
-    assert widget.current_frame_index == 0
-
-
-def test_live_frame_of_other_shape_replaces_recorded_image(qtbot, recording):
-    from pathlib import Path
-
-    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
-
-    paths, _ = recording
-    widget = CalciumVideoWidget()
-    qtbot.addWidget(widget)
-    widget.set_video_paths(
-        [Path(p) for p in paths],
-        10,
-        warn_if_missing_cellpose=False,
-        scanimage_index=index_recording(paths),
-    )
-    recorded_shape = widget._frame_graphic.data.value.shape
-    widget.set_live(True)
-    widget.show_live_frame({"pixels": np.zeros((2, 3), dtype=np.float32)})
-    assert widget._frame_graphic.data.value.shape[:2] == (2, 3)
-    widget.set_live(False)
-    assert widget._frame_graphic.data.value.shape == recorded_shape
-
-
 def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path, recording):
     from neuroseq.project import Project
     from neuroseq.save_load_options import SaveLoadOptions
@@ -272,7 +194,7 @@ def test_acquisition_persistence_marks_unfinished_runs_interrupted(tmp_path, rec
     assert loaded.calcium_scanimage_index == project.calcium_scanimage_index
 
 
-def test_recording_stays_with_originating_project(qtbot, mocker, recording):
+def test_recording_stays_with_originating_project(qtbot, mocker, recording, tmp_path):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
 
@@ -282,7 +204,14 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording):
     original = gui.project
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "one",
+            "name": "Test",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     assert original.imaging_acquisitions[0]["status"] == "requested"
     other = window._add_workspace(Project())
@@ -319,7 +248,7 @@ def test_controls_trigger_timeout_and_foreign_acquisition(
         }
     )
     panel._waiting_since = 1
-    panel._freshness()
+    panel._check_first_frame_timeout()
     command.assert_called_once_with("abort")
     assert "timeout" in panel.status_label.text()
 
@@ -359,6 +288,21 @@ def test_controls_remember_python_and_folder_across_sessions(
     assert GuiSettings().scanimage_python_path == str(other)
 
 
+def test_controls_remember_functional_channel_across_sessions(
+    qtbot, connection, tmp_config_dir
+):
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    assert panel.channel_spin.value() == 1
+    panel.channel_spin.setValue(2)
+
+    reopened = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(reopened)
+    assert reopened.channel_spin.value() == 2
+
+
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
     from qtpy import QtCore
 
@@ -366,23 +310,10 @@ def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
 
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
-    for label in (panel.message_label, panel.status_label, panel.frame_label):
+    for label in (panel.message_label, panel.status_label):
         assert (
             label.textInteractionFlags()
             & QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
-        )
-
-
-def test_protocol_rejects_corrupt_pixels(connection):
-    connection._send("status")
-    with pytest.raises(ValueError, match="payload"):
-        connection._reply(
-            {
-                "id": 1,
-                "result": {
-                    "frame": {"shape": [2, 2], "dtype": "float32", "data": "AAAA"}
-                },
-            }
         )
 
 
@@ -404,18 +335,32 @@ def test_record_failure_releases_run_and_timeout_stops_only_helper(connection, m
     assert "unknown" in error.call_args.args[0]
 
 
-def test_worker_writes_provenance_before_starting(tmp_path, mocker):
+def test_worker_writes_metadata_next_to_the_recording_before_starting(tmp_path, mocker):
     adapter = EngineAdapter()
     call = mocker.patch.object(adapter, "_call", return_value={})
-    directory = tmp_path / "run"
-    adapter.dispatch(
-        "record", {"directory": str(directory), "manifest": {"run_id": "run"}}
-    )
-    assert directory.with_suffix(".neuroseq.json").is_file()
+    arguments = {"directory": str(tmp_path / "rec"), "stem": "2026-10-22", "counter": 3}
+    adapter.dispatch("record", {**arguments, "manifest": {"run_id": "run"}})
+    sidecar = tmp_path / "rec" / "2026-10-22_00003.json"
+    # Human-readable, beside the TIFF ScanImage will write (#628).
+    assert json.loads(sidecar.read_text()) == {"run_id": "run"}
+    assert "\n  " in sidecar.read_text()
     assert "manifest" not in call.call_args.args[1]
+    assert adapter.dispatch("status", {})["manifest_path"] == str(sidecar)
     with pytest.raises(FileExistsError):
-        adapter.dispatch("record", {"directory": str(directory), "manifest": {}})
-    assert call.call_count == 1
+        adapter.dispatch("record", {**arguments, "manifest": {}})
+    assert call.call_count == 2
+
+
+def test_worker_removes_metadata_when_scanimage_refuses(tmp_path, mocker):
+    adapter = EngineAdapter()
+    adapter.manifest_path = tmp_path / "earlier.json"
+    mocker.patch.object(adapter, "_call", side_effect=RuntimeError("busy"))
+    arguments = {"directory": str(tmp_path), "stem": "2026-10-22", "counter": 1}
+    with pytest.raises(RuntimeError):
+        adapter.dispatch("record", {**arguments, "manifest": {}})
+    assert not (tmp_path / "2026-10-22_00001.json").exists()
+    # A later status must not report the previous run's metadata.
+    assert adapter.manifest_path is None
 
 
 def test_reconnect_releases_untracked_run_without_claiming_completion(
@@ -460,14 +405,23 @@ def test_completed_count_mismatch_does_not_attach_recording(
     assert connection.run_id is None
 
 
-def test_recording_completion_attaches_and_reopens_movie(qtbot, mocker, recording):
+def test_recording_completion_attaches_and_reopens_movie(
+    qtbot, mocker, recording, tmp_path
+):
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "one", "name": "Test", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "one",
+            "name": "Test",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     gui.scanimage_connection.run_id = "one"
     gui.acquisition_controller.scanimage_status(
@@ -627,34 +581,9 @@ def test_recorded_channel_uses_file_indices_through_symlink(qtbot, recording, tm
         )
 
 
-def test_preview_is_opt_in_and_throttled_during_recording(connection, mocker):
-    connection.connected = True
-
-    def poll_args():
-        connection._poll()
-        request = json.loads(connection.process.write.call_args.args[0])
-        connection._reply({"id": request["id"], "result": {}})
-        return request["arguments"]
-
-    assert poll_args() == {}
-    connection.live_preview = True
-    connection.run_id = "recording"
-    clock = mocker.patch(
-        "neuroseq.device_control.scanimage_connection.time.monotonic", return_value=10
-    )
-    assert poll_args() == {"channel": 1}
-    clock.return_value = 10.2
-    assert poll_args() == {}
-    clock.return_value = 11.0
-    assert poll_args() == {"channel": 1}
-    connection.live_preview = False
-    clock.return_value = 12.0
-    assert poll_args() == {}
-
-
 @pytest.mark.parametrize("switch_project", [False, True])
 def test_new_recording_preserves_imported_movie(
-    qtbot, mocker, recording, switch_project
+    qtbot, mocker, recording, switch_project, tmp_path
 ):
     from neuroseq.gui import Gui
     from neuroseq.project import Project
@@ -667,7 +596,14 @@ def test_new_recording_preserves_imported_movie(
     project.add_calcium_video([imported], 20, name="Imported")
     mocker.patch.object(gui.scanimage_connection, "command", return_value=True)
     gui.acquisition_controller.start_scanimage_recording(
-        {"run_id": "new", "name": "New", "directory": "/unused", "frames": 4}
+        {
+            "run_id": "new",
+            "name": "New",
+            "directory": str(tmp_path),
+            "stem": "2026-10-22",
+            "counter": 1,
+            "frames": 4,
+        }
     )
     if switch_project:
         window._add_workspace(Project())
@@ -693,7 +629,8 @@ def test_new_recording_preserves_imported_movie(
     assert gui.calcium_video_widget.recorded_channel == 2
     gui.scanimage_controls.channel_spin.setValue(3)
     assert gui.calcium_video_widget.recorded_channel == 1
-    assert gui.scanimage_controls.channel_spin.value() == 1
+    # Only the display falls back; routines still measure the chosen channel.
+    assert gui.scanimage_controls.channel_spin.value() == 3
     assert "was not saved" in gui.scanimage_controls.message_label.text()
     project.dirty = False
     window.close()
@@ -795,16 +732,18 @@ def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording)
     assert "description" not in json.dumps(metadata["imaging_acquisitions"])
 
 
-def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
+def test_image_acquisition_is_a_tab_of_the_stimulation_setup_pane(qtbot):
     from qtpy import QtWidgets
 
+    from neuroseq.device_control.stimulation_setup_widget import SCANIMAGE_TAB_TITLE
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    # The Video tab must keep mirroring the Cell segmentation tab, so no
-    # acquisition controls may be inserted above its canvas.
-    assert gui.scanimage_controls.window() is gui.acquisition_controller.dialog
+    # Not a window of its own (#651), and not above the Video tab's canvas,
+    # which must keep mirroring the Cell segmentation tab.
+    assert gui.scanimage_controls.window() is gui.window()
+    assert gui.stimulation_setup.isAncestorOf(gui.scanimage_controls)
     assert not gui.calcium_video_widget.isAncestorOf(gui.scanimage_controls)
     toolbar = gui.btn_design_dynamic_input.parentWidget()
     assert isinstance(toolbar, QtWidgets.QToolBar)
@@ -817,9 +756,11 @@ def test_image_acquisition_lives_in_a_dialog_next_to_the_video_selector(qtbot):
         gui.cmb_video,
     ]
     assert not gui.cmb_video.isEnabled()
+    assert not gui.stimulation_setup.isVisibleTo(gui)
     gui.btn_image_acquisition.click()
-    assert gui.acquisition_controller.dialog.isVisible()
-    assert not gui.acquisition_controller.dialog.isModal()
+    assert gui.stimulation_setup.isVisibleTo(gui)
+    index = gui.stimulation_setup.currentIndex()
+    assert gui.stimulation_setup.tabText(index) == SCANIMAGE_TAB_TITLE
     gui._close_confirmed = True
     gui.close()
 
@@ -949,230 +890,6 @@ def test_exported_imaging_keeps_the_recording_orientation(qtbot, tmp_path, suffi
     assert not bright[4:].any()
 
 
-def test_live_preview_and_recorded_playback_share_orientation(
-    qtbot, connection, tmp_path
-):
-    """The same scan lines must look identical live and when played back from TIFF.
-
-    MATLAB sends img(:) column-major (encoding confirmed against the adapter in
-    MATLAB R2025b); a transpose or an extra flip on either path breaks this.
-    """
-    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
-
-    rows, cols = np.mgrid[0:12, 0:18]
-    raw = (rows * 50 + cols).astype(np.float32)
-    raw[:3, :4] = 5000  # asymmetric marker at the top-left scan corner
-    frame = {
-        "shape": list(raw.shape),
-        "dtype": "float32",
-        "order": "F",
-        "data": base64.b64encode(raw.tobytes(order="F")).decode(),
-    }
-    received = []
-    connection.frame_received.connect(received.append)
-    connection._pending = (1, "status")
-    connection._reply(
-        {"id": 1, "result": {"acq_state": "focus", "run": {}, "frame": frame}}
-    )
-
-    movie = tmp_path / "recorded.tif"
-    tifffile.imwrite(movie, raw[None])
-    widget = CalciumVideoWidget()
-    qtbot.addWidget(widget)
-    widget.set_video_paths([movie], 10, warn_if_missing_cellpose=False)
-    recorded = widget.current_frame.copy()
-    widget.set_live(True)
-    widget.show_live_frame(received[0])
-    np.testing.assert_array_equal(widget.current_frame, recorded)
-
-
-def test_live_preview_is_shared_and_reflected_in_every_workspace(
-    qtbot, mocker, recording
-):
-    from neuroseq.gui import Gui
-    from neuroseq.project import Project
-
-    window = Gui()
-    qtbot.addWidget(window)
-    first = window.active_workspace
-    second = window._add_workspace(Project())
-    connection = window.devices.scanimage
-
-    def ready(run_id):
-        result = index_recording(recording[0])
-        result.update(run_id=run_id, status="completed")
-        first.acquisition_controller.scanimage_recording_ready(result)
-
-    second.scanimage_controls.live_check.setChecked(True)
-    assert connection.live_preview
-    assert first.scanimage_controls.live_check.isChecked()
-    assert first.calcium_video_widget._live and second.calcium_video_widget._live
-    third = window._add_workspace(Project())
-    assert third.scanimage_controls.live_check.isChecked()
-    assert third.calcium_video_widget._live
-
-    # A recording finishing in one tab keeps a preview another tab turned on.
-    mocker.patch.object(connection, "command", return_value=True)
-    first.acquisition_controller.start_scanimage_recording(
-        {"run_id": "a", "name": "A", "directory": "/x", "frames": 4}
-    )
-    ready("a")
-    assert connection.live_preview
-    assert second.scanimage_controls.live_check.isChecked()
-
-    # A preview the recording itself switched on is switched off afterwards.
-    first.scanimage_controls.live_check.setChecked(False)
-    assert not connection.live_preview and not second.calcium_video_widget._live
-    first.acquisition_controller.start_scanimage_recording(
-        {"run_id": "b", "name": "B", "directory": "/x", "frames": 4}
-    )
-    assert connection.live_preview and third.scanimage_controls.live_check.isChecked()
-    ready("b")
-    assert not connection.live_preview
-    assert not third.scanimage_controls.live_check.isChecked()
-    for workspace in window.workspaces:
-        workspace.project.dirty = False
-    window.close()
-
-
-def _int16_frame_reply(request_id: int, pixels: np.ndarray, **extra) -> dict:
-    return {
-        "id": request_id,
-        "result": {
-            "acq_state": "focus",
-            "elapsed_ms": 12.5,
-            "frame": {
-                "shape": list(pixels.shape),
-                "dtype": "int16",
-                "data": base64.b64encode(
-                    pixels.astype("<i2").tobytes(order="F")
-                ).decode(),
-                **extra,
-            },
-        },
-    }
-
-
-def test_preview_frames_arrive_at_full_resolution_with_scanimage_contrast(
-    connection, mocker
-):
-    """The preview is the recorded int16 frame, with ScanImage's display
-    window for the channel, so it looks like the ScanImage window."""
-    received = mocker.Mock()
-    connection.frame_received.connect(received)
-    pixels = (
-        np.arange(512 * 512, dtype=np.int32).reshape(512, 512) % 3000 - 500
-    ).astype(np.int16)
-    connection._send("status", {"channel": 1})
-    connection._reply(_int16_frame_reply(1, pixels, lut=[-88, 436]))
-
-    frame = received.call_args.args[0]
-    np.testing.assert_array_equal(frame["pixels"], pixels)
-    assert frame["lut"] == (-88.0, 436.0)
-    assert frame["matlab_ms"] == 12.5
-    assert frame["roundtrip_ms"] >= 0
-
-
-def test_live_preview_requests_the_next_frame_right_away(connection, qtbot):
-    connection.connected = True
-    connection.live_preview = True
-    pixels = np.zeros((4, 4), dtype=np.int16)
-    connection._poll()
-    assert connection._pending == (1, "status")
-    connection._reply(_int16_frame_reply(1, pixels))
-    # Without waiting for the regular 200 ms poll, but at most 10 per second.
-    sent = time.monotonic()
-    qtbot.waitUntil(lambda: connection._pending == (2, "status"), timeout=190)
-    assert time.monotonic() - sent >= 0.05
-
-    connection.run_id = "recording"  # during a recording: at most once a second
-    connection._reply(_int16_frame_reply(2, pixels))
-    qtbot.wait(100)
-    assert connection._pending is None
-
-
-def test_live_frame_uses_the_scanimage_display_window(qtbot):
-    from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
-
-    widget = CalciumVideoWidget()
-    qtbot.addWidget(widget)
-    widget.set_live(True)
-    pixels = np.array([[-1000, -88], [174, 20000]], dtype=np.float32)
-    widget.show_live_frame({"pixels": pixels, "lut": (-88.0, 436.0)})
-    grey = widget.current_frame[..., 0]
-    # Clipped below and above the window, mid-window is mid-grey.
-    assert grey[0, 0] == 0 and grey[0, 1] == 0
-    assert grey[1, 1] == 255
-    assert abs(int(grey[1, 0]) - 127) <= 1
-
-
-def test_controls_show_the_measured_preview_rate(qtbot, connection, tmp_config_dir):
-    from neuroseq.device_control.scanimage_controls import ScanImageControls
-
-    panel = ScanImageControls(connection, GuiSettings())
-    qtbot.addWidget(panel)
-    connection.frame_received.emit(
-        {
-            "number": 7,
-            "pixels": np.zeros((512, 256)),
-            "rate_hz": 9.5,
-            "roundtrip_ms": 85.0,
-            "matlab_ms": 40.0,
-            "averaged": 10,
-        }
-    )
-    assert (
-        "9.5 frames/s · 85 ms per request · mean of 10 frames · 40 ms in MATLAB"
-        " · 256×512 px"
-    ) in (panel.frame_label.text())
-
-
-def test_preview_averages_like_the_scanimage_display(connection, mocker):
-    """Single frames are too noisy to focus on; the preview averages the last
-    frames, by default as many as ScanImage's display does."""
-    received = mocker.Mock()
-    connection.frame_received.connect(received)
-    for request_id, value in enumerate([0, 10, 20, 30], start=1):
-        connection._send("status", {"channel": 1})
-        connection._reply(
-            _int16_frame_reply(
-                request_id, np.full((2, 2), value, np.int16), display_average=3
-            )
-        )
-    frame = received.call_args.args[0]
-    assert frame["averaged"] == 3
-    np.testing.assert_allclose(frame["pixels"], 20.0)  # mean of 10, 20, 30
-
-    connection.preview_average = 1  # chosen in the dialog
-    connection._send("status", {"channel": 1})
-    connection._reply(_int16_frame_reply(5, np.full((2, 2), 7, np.int16)))
-    np.testing.assert_allclose(received.call_args.args[0]["pixels"], 7.0)
-
-    connection.preview_average = 4
-    connection._send("preview")  # a new preview starts a new average
-    connection._reply({"id": 6, "result": {}})
-    connection._send("status", {"channel": 1})
-    connection._reply(_int16_frame_reply(7, np.full((2, 2), 100, np.int16)))
-    np.testing.assert_allclose(received.call_args.args[0]["pixels"], 100.0)
-
-
-def test_controls_say_why_no_preview_frame_came(qtbot, connection, tmp_config_dir):
-    from neuroseq.device_control.scanimage_controls import ScanImageControls
-
-    panel = ScanImageControls(connection, GuiSettings())
-    qtbot.addWidget(panel)
-    connection.status_changed.emit(
-        {
-            "acq_state": "focus",
-            "preview_problem": "ScanImage display frame not readable: Brace indexing",
-        }
-    )
-    assert (
-        "No preview frame: ScanImage display frame not readable: Brace indexing"
-        in panel.status_label.text()
-    )
-
-
 def test_record_saves_the_channels_ticked_in_the_dialog(
     qtbot, connection, tmp_path, tmp_config_dir
 ):
@@ -1206,3 +923,49 @@ def test_record_saves_the_channels_ticked_in_the_dialog(
     panel._record()
     assert len(requests) == 1
     assert "at least one channel" in panel.message_label.text()
+
+
+def test_record_request_names_the_file_by_date_and_number(
+    qtbot, connection, tmp_path, tmp_config_dir
+):
+    from neuroseq.device_control.scanimage_controls import ScanImageControls
+    from neuroseq.device_control.scanimage_files import recording_stem
+
+    panel = ScanImageControls(connection, GuiSettings())
+    qtbot.addWidget(panel)
+    panel.set_directory(str(tmp_path))
+    stem = recording_stem()
+    (tmp_path / f"{stem}_00001.tif").write_text("")
+    panel._update_next_file()
+    # A hidden tab does not list the folder; it catches up when shown.
+    assert panel._next_file_stale
+    panel.show()
+    assert panel.next_file_label.text() == f"{stem}_00002.tif"
+    requests: list[dict] = []
+    panel.record_requested.connect(requests.append)
+    panel.name_edit.setText("Slice 3 CA3")
+    panel._record()
+    request = requests[-1]
+    # Directly in the folder (#628), not in a per-run subfolder.
+    assert request["directory"] == str(tmp_path)
+    assert (request["stem"], request["counter"]) == (stem, 2)
+    assert request["name"] == "Slice 3 CA3"  # capitals kept
+    panel.name_edit.clear()
+    panel._record()
+    assert requests[-1]["name"] == f"{stem}_00002"
+    with pytest.raises(ValueError, match="recording folder"):
+        panel.set_directory(str(tmp_path / "missing"))
+        panel.recording_request(frames=1, external_trigger=True)
+
+
+def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    segment = mocker.patch.object(gui, "btn_import_cellpose_data_clicked")
+    image = tmp_path / "2026-10-23_00001_mean.tif"
+    gui.acquisition_controller.fov_ready.emit(str(image))
+    segment.assert_called_once_with(segment=image)
+    gui._close_confirmed = True
+    gui.close()

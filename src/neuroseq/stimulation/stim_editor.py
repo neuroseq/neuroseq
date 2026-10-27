@@ -4,6 +4,7 @@ import logging
 import math
 from collections.abc import Callable
 from enum import Enum
+from typing import TYPE_CHECKING
 from typing import Literal
 from typing import overload
 
@@ -13,7 +14,6 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 from qtpy.compat import getsavefilename
 
-from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
@@ -40,6 +40,10 @@ from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+
+if TYPE_CHECKING:
+    from neuroseq.device_control.bss2_stimulation_host import Bss2StimulationHost
+    from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 
 
 class DrawMode(Enum):
@@ -91,6 +95,8 @@ class StimEditor(QtWidgets.QWidget):
         self.copy_values = np.zeros((0, 0))
         #: Set by the main window; routine dialogs offer a SysCon2 target when present.
         self.stimulation_host: SysCon2StimulationHost | None = None
+        #: Runs dynamic input blocks on BrainScaleS-2 (set by the workspace).
+        self.bss2_host: Bss2StimulationHost | None = None
         # Captures the time index the user clicked at, so a Ramp drag can
         # use it as the ramp's left edge for every subsequent mouse_dragged
         # emit (the signal's `initial_time_index` is the *previous* position
@@ -451,6 +457,25 @@ class StimEditor(QtWidgets.QWidget):
         target_secs = max(self.project.b2_model.get_sim_time_secs(), float(stim.dt))
         if current_secs <= target_secs + float(stim.dt) * 0.5:
             return  # already at (or within a sample of) the simulation head
+        self._apply_trim(target_secs, only_stim_name=stim.name)
+
+    def trim_stim_array_after(self, end_seconds: float) -> None:
+        """Trim the current stim array to ``end_seconds`` (never below the
+        simulation head), removing only the tail after it.
+
+        Hardware routines (SysCon2, BrainScaleS-2) use this instead of
+        :meth:`reset_stim_array`: their delivered blocks are not simulated, so the
+        simulation head would discard them.
+        """
+        if self.current_stim_modifier is None or self.project is None:
+            return
+        stim = self.current_stim_modifier.stim_array
+        current_secs = float(stim.dt) * stim.values.shape[0]
+        target_secs = max(
+            end_seconds, self.project.b2_model.get_sim_time_secs(), float(stim.dt)
+        )
+        if current_secs <= target_secs + float(stim.dt) * 0.5:
+            return
         self._apply_trim(target_secs, only_stim_name=stim.name)
 
     def current_stim_array_has_unsimulated_tail(self) -> bool:

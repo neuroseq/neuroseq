@@ -86,41 +86,49 @@ following details matter when testing the current implementation.
    **Target power** box beside it overrides only the power. It
    opens the full export dialog if settings are unavailable. As above, verify
    the import, then select and use Upload then Run for the changed sequence.
-7. For rheobase, select the SysCon2 target, disable binary intensity export, use
-   amplitudes within 0–1, and choose
-   the response window from the actual acquisition frame rate. At 30 Hz,
-   100–150 ms spans several frames; neither 30 Hz nor a particular useful response
-   window is guaranteed by the SCI protocol. For raw TIFF import, use the Suite2p
-   processing option to obtain deconvolved spike data. Verify the sample rate,
-   spike threshold, and neuron mapping in the import dialog.
-8. Start the routine. For **every** block, refresh the sequence list, select the
-   newly imported block, set **Runs = 1**, then **Upload**, **Run** and acquire. The host only
-   imports; it does not select, upload, or run. Arm a triggered run before firing
-   the acquisition trigger, and verify its alignment with the recording. Manual
-   clicks alone do not establish a shared time origin.
-9. Import each probe into a **new experiment with a unique name**, starting at
-   time zero for that block. Avoid appending it after a prior recording: the
-   routine measures times relative to the current block, without subtracting an
-   import offset. A repeated experiment name can make the import dialog select
-   **Apply to existing experiment** automatically; check this choice explicitly.
-10. Return to the routine and click **Calcium data imported**. Fresh-data selection
-    is resolved when that button is clicked, so a new recording need not already
-    be selected immediately after import. Existing recordings are rejected,
-    including on the first probe. Importing data must preserve the open routine,
-    selected stimulus, and export settings; this now has a GUI regression test.
-11. Check pause, stale-data rejection, and stopping. **Routine Stop** ends the
-    software search and discards its pending result; it does not send a hardware
-    Stop command or retract an already queued/imported block. Use **Holo4D Stop**
-    to request a hardware stop, and verify it on the rig. If communication stalls,
-    a queued Stop cannot be assumed delivered; Disconnect cancels communication,
-    not stimulation.
+7. For rheobase, select the SysCon2 target and use amplitudes within 0–1. Set
+   power, laser and spots under **Hardware settings**; they are the project's
+   export settings, so no prior **Export with settings…** is needed. Choose
+   the post-pulse window from the actual acquisition frame rate: at 30 Hz,
+   100–300 ms spans several frames; neither 30 Hz nor a particular useful
+   response window is guaranteed by the SCI protocol.
+8. **Automatic blocks** (default): connect ScanImage in the **ScanImage
+   (imaging)** tab, set its recording folder, and load a Cellpose segmentation
+   of the field of view. Wire the sequence's TTL output (the configuration's
+   `TargetConnectorPort`) to ScanImage's acquisition trigger. Start the routine:
+   for every block NeuroSeq imports, selects and uploads it, arms a triggered
+   recording (block plus **Record after block**), runs it and extracts ΔF/F.
+   The routine log names the run's folder; check that every block's `.seq`,
+   overview and sidecar are kept there and that each recording's `.json`
+   names the right `.seq`. Verify the recording starts with the block (sequence
+   start to first frame),
+   that each `<date>_<number>.tif` holds the requested frames, and that the
+   logged ΔF/F rise (ΔF/F readout) or deconvolved spike count (spike readout)
+   matches the cell's visible response. Tune the spike threshold on a few probes
+   first: OASIS event sizes are in ΔF/F, so it depends on expression level.
+9. **Manual blocks** (automatic unticked): for **every** block, refresh the
+   sequence list, select the newly imported block, set **Runs = 1**, then
+   **Upload**, **Run** and acquire. The host only imports. Import each probe into a
+   **new experiment with a unique name**, starting at time zero for that block,
+   and return to the routine to click **Calcium data imported**. Fresh-data
+   selection is resolved when that button is clicked, and existing recordings
+   are rejected, including on the first probe. For raw TIFF import, use the
+   Suite2p option if you measure deconvolved spikes.
+10. Check pause, stale-data rejection, and stopping. **Routine Stop** ends the
+    software search and cancels only its own block: a running sequence gets a
+    Stop command and an armed recording is aborted, but a block whose import is
+    already queued still completes on the hardware. Use **Holo4D Stop** and
+    verify the hardware state on the rig. If communication stalls, a queued Stop
+    cannot be assumed delivered; Disconnect cancels communication, not
+    stimulation.
 
 Record the script/debug CSV, selected sequence, Runs, trigger settings, wavelength,
 power settings, actual frame rate, import threshold, and per-probe response.
 Confirm the Runs wire representation on the real system; the Sequence Manager
 instance name is documented in the manual and is no longer an unresolved naming
-assumption. The same per-block import/time-origin rules apply to the STDP target;
-pairing blocks require acknowledgement after execution, but no new recording.
+assumption. The same per-block rules apply to the STDP target; pairing blocks
+need no recording (automatic pairings are run without one; manual ones need
+acknowledgement after execution).
 
 ## Linux teardown crash with Conda
 

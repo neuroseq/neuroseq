@@ -652,6 +652,49 @@ def readback_experiment(
     )
 
 
+def bin_average_trace(trace: TraceData, dt: float) -> TraceData:
+    """``trace`` averaged in bins of ``dt`` (no change when it is not finer)."""
+    if not trace.dt < dt or trace.traces.shape[1] == 0:
+        return trace
+    per_bin = dt / float(trace.dt)
+    edges = np.floor(np.arange(0, trace.traces.shape[1], per_bin)).astype(np.int64)
+    edges = np.unique(edges)
+    sums = np.add.reduceat(trace.traces.astype(np.float64), edges, axis=1)
+    counts = np.diff(np.append(edges, trace.traces.shape[1]))
+    return TraceData(
+        trace.name,
+        (sums / counts).astype(np.float32),
+        trace.indices.copy(),
+        trace.units,
+        float(dt),
+        trace.raw_cellpose_ids,
+    )
+
+
+def add_readback_experiment(
+    project: Any,
+    result: Mapping[str, Any],
+    speedup: float,
+    name: str,
+    *,
+    label: str = "BSS-2",
+) -> tuple[Experiment, RunReadback]:
+    """Decode a ``run`` result and add it to ``project`` as a new data group.
+
+    Shared by the BrainScaleS-2 tab and the routine host. The group is named after
+    ``name`` (see :func:`readback_experiment`), with ``(2)``, ``(3)``... when taken.
+    Raises ``ValueError`` (or ``KeyError``/``TypeError``) for a malformed result.
+    """
+    readback = decode_run_result(result, speedup, label=label)
+    experiment = readback_experiment(readback, name)
+    base, suffix = experiment.name, 2
+    while experiment.name in project.experiments:
+        experiment.name = f"{base} ({suffix})"
+        suffix += 1
+    project.add_experiment(experiment)
+    return experiment, readback
+
+
 # ---- quiggeldy setups ------------------------------------------------------
 
 

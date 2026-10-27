@@ -19,6 +19,7 @@ from neuroseq.stimulation.dynamic_input.stdp_window_dialog import _NoEpspDetecte
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from tests.fake_stimulation_host import FakeStimulationHost
 
 
 class _FakeProject:
@@ -61,6 +62,7 @@ class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
         self.stimulation_host = None
+        self.bss2_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -99,6 +101,9 @@ class _FakeEditor:
 
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
+
+    def trim_stim_array_after(self, end_seconds: float) -> None:
+        self.trimmed_after = end_seconds
 
     def current_stim_array_has_unsimulated_tail(self) -> bool:
         stim = self.current_stim_modifier.stim_array
@@ -693,39 +698,15 @@ def test_stdp_pause_defers_next_simulation_and_resets_on_finish(qtbot) -> None:
     assert dialog.btn_pause.text() == "Pause"
 
 
-class _FakeHost(QtCore.QObject):
-    block_sent = QtCore.Signal(object)
-    block_failed = QtCore.Signal(str)
-    block_completed = QtCore.Signal()
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.phase = "idle"
-        self.sent: list[tuple[int, int, bool]] = []
-
-    def send_block(
-        self, project, stim, start, stop, label="block", *, preserve_amplitude=False
-    ):
-        self.sent.append((start, stop, preserve_amplitude))
-        self.phase = "awaiting_acquisition"
-        self.block_sent.emit(None)
-        return True
-
-    def acquisition_imported(self) -> None:
-        self.phase = "idle"
-        self.block_completed.emit()
-
-    def cancel(self) -> None:
-        self.phase = "idle"
-
-
 def _syscon2_dialog(qtbot):
     project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-    host = _FakeHost()
+    host = FakeStimulationHost()
     editor.stimulation_host = host  # type: ignore[assignment]
     dialog.refresh()
     dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    # Manual delivery: the user runs, records and imports each block.
+    dialog.hardware.chk_automatic.setChecked(False)
     dialog.spn_amplitude.setValue(0.8)
     dialog.spn_dt_points.setValue(2)
     dialog.chk_include_zero.setChecked(True)
@@ -820,8 +801,20 @@ def test_syscon2_failure_finishes_sweep(qtbot) -> None:
     project.traces["seed"] = project.trace
     dialog.cmb_trace.setCurrentText("seed")
     dialog.start()
-    host.block_failed.emit("pipe closed")
+    host.block_failed.emit(dialog, "pipe closed")
     assert not dialog._running
+
+
+def test_simulation_during_a_syscon2_sweep_is_ignored(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces["seed"] = project.trace
+    dialog.cmb_trace.setCurrentText("seed")
+    dialog.start()
+    sent = len(host.sent)
+    dialog.simulation_finished()
+    dialog.simulation_failed("Busy")
+    assert dialog._running
+    assert len(host.sent) == sent
 
 
 def test_syscon2_rejects_amplitude_above_one_and_wrong_dt(qtbot) -> None:
@@ -908,3 +901,59 @@ def test_dynamic_syscon_dt_button_resamples_before_start(qtbot, mocker):
     dialog.btn_syscon_dt.click()
     prepare.assert_called_once_with(dialog)
     assert "0.5208125" in dialog.lbl_stim_dt.text()
+
+
+def test_syscon2_automatic_records_only_baseline_and_probe_blocks(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.hardware.chk_automatic.setChecked(True)
+    assert not dialog.btn_data_imported.isVisibleTo(dialog)
+    dialog.start()
+    assert dialog._running
+
+    responses = iter([1.0, 1.5, 0.5])  # baseline, then one probe per dt point
+    for i in range(30):
+        if not dialog._running:
+            break
+        if dialog._phase == "pair":
+            assert host.recordings[-1] is None
+            host.complete({})
+            continue
+        assert host.recordings[-1] is not None
+        name = f"Block {i} :: dF/F"
+        _import_calcium(project, dialog, name, next(responses))
+        dialog.cmb_trace.setCurrentText("")  # the payload names the trace
+        host.complete({"trace": name})
+
+    assert not dialog._running
+    assert [round(p) for _dt, p in dialog._backend.results] == [50, -67]
+    assert host.automatic == [True] * 5
+    assert [r is not None for r in host.recordings] == [True, False, True, False, True]
+
+
+def test_syscon2_start_no_longer_needs_a_selected_trace(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    project.traces.clear()
+    dialog.refresh()
+    dialog.start()
+    assert dialog._running
+    assert len(host.sent) == 1
+
+
+def test_target_is_locked_while_the_sweep_runs(qtbot) -> None:
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running and not dialog.cmb_target.isEnabled()
+    dialog.stop()
+    assert dialog.cmb_target.isEnabled()
+
+
+def test_syscon2_pulse_amplitude_is_a_fraction_of_its_own(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.stimulation_host = FakeStimulationHost()  # type: ignore[assignment]
+    dialog.refresh()
+    assert dialog.spn_amplitude.value() == 100.0
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    assert dialog.spn_amplitude.value() == dialog.HARDWARE_AMPLITUDE
+    assert dialog.lbl_units.text() == "× target power"
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_amplitude.value() == 100.0

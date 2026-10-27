@@ -269,8 +269,8 @@ def test_run_roi_average_pipeline_uses_channel_axis(tmp_path):
 def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_path):
     import tifffile
 
+    from neuroseq.importers.importer_tif import cellpose_result_to_masks
     from neuroseq.importers.importer_tif import run_roi_average_pipeline
-    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
 
     raw_masks = np.array([[1, 1], [0, 2], [0, 2]], dtype=np.int32)
     stack = np.array(
@@ -288,7 +288,7 @@ def test_spatial_import_masks_extract_same_traces_as_direct_cellpose_masks(tmp_p
     spatial_result = MagicMock()
     spatial_result.segmentation_array = raw_masks - 1
     via_spatial_import = run_roi_average_pipeline(
-        [path], _cellpose_result_to_masks(spatial_result), params
+        [path], cellpose_result_to_masks(spatial_result), params
     )
 
     np.testing.assert_allclose(via_spatial_import.F, direct.F)
@@ -329,7 +329,7 @@ def test_run_suite2p_pipeline_accepts_none_masks_but_rejects_bad_ndim(monkeypatc
 
 
 def test_cellpose_result_to_masks_round_trips_background_and_labels():
-    from neuroseq.importers.tif_import_dialog import _cellpose_result_to_masks
+    from neuroseq.importers.importer_tif import cellpose_result_to_masks
 
     seg = np.array(
         [
@@ -342,7 +342,7 @@ def test_cellpose_result_to_masks_round_trips_background_and_labels():
     result = MagicMock()
     result.segmentation_array = seg
 
-    masks = _cellpose_result_to_masks(result)
+    masks = cellpose_result_to_masks(result)
     # Map 0-based -> 1-based and -1 -> background zero; orientation is kept.
     np.testing.assert_array_equal(
         masks,
@@ -1039,3 +1039,24 @@ def test_roi_average_pipeline_stops_when_progress_raises_cancelled(tmp_path):
             [path], masks, TifPipelineParams(nchannels=1), progress=progress
         )
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "seg, expected",
+    [
+        (
+            np.array([[-1, 0], [1, -1]], dtype=np.int32),
+            np.array([[0, 1], [2, 0]], dtype=np.int32),
+        ),
+        (
+            np.array([[-1, -1], [-1, -1]], dtype=np.int32),
+            np.array([[0, 0], [0, 0]], dtype=np.int32),
+        ),
+    ],
+)
+def test_cellpose_result_to_masks_round_trip(seg, expected):
+    from neuroseq.importers.importer_tif import cellpose_result_to_masks
+
+    fake_result = MagicMock()
+    fake_result.segmentation_array = seg
+    np.testing.assert_array_equal(cellpose_result_to_masks(fake_result), expected)

@@ -15,6 +15,7 @@ from scipy.ndimage import distance_transform_edt
 from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stimulation.stim import StimArray
@@ -54,7 +55,7 @@ _SPIRALLING_TTL_LEAD_TICKS = 1  # TTL fires 1 tick before SLM load completes
 # the two Holo4D TTL-out channels. Shape lanes live on row 0 (and, if more than
 # one simultaneous lane is needed, rows 6..N). The row↔lightsource binding is
 # fixed in SysCon's hardware config and must match exactly.
-_SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
+SUPPORTED_LASER_WAVELENGTHS_NM = (940, 1030, 1100)
 _LEGACY_LASER_WAVELENGTH_ALIASES_NM = {1040: 1030, 1140: 1100}
 _DEFAULT_ACTIVE_LASER_WAVELENGTH_NM = 1100
 _LASER_TIMELINE_INDEX_BY_WAVELENGTH_NM = {1100: 1, 940: 2, 1030: 3}
@@ -68,7 +69,8 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
 
 _SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
-_SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
+#: One SLM window (16.67 ms): a hologram's load time and one spiral's period.
+SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
 _NEUROSEQ_DT_TOLERANCE_S = 1e-9
 
 _DEBUG_CSV_COLUMNS: tuple[str, ...] = (
@@ -584,10 +586,10 @@ def generate_syscon2_sequence_text(
     if power_enabled and power_lut is not None and not power_lut.tuples:
         raise ValueError("power_lut has no tuples")
     power_saturation_warnings: list[str] = []
-    if active_laser_wavelength_nm not in _SUPPORTED_LASER_WAVELENGTHS_NM:
+    if active_laser_wavelength_nm not in SUPPORTED_LASER_WAVELENGTHS_NM:
         raise ValueError(
             "active_laser_wavelength_nm must be one of "
-            f"{_SUPPORTED_LASER_WAVELENGTHS_NM}"
+            f"{SUPPORTED_LASER_WAVELENGTHS_NM}"
         )
     _require_syscon2_tick_rate(stim_array)
 
@@ -697,7 +699,15 @@ def generate_syscon2_sequence_text(
                             window.start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US
                         ),
                     ),
-                    ("TimelineInfo0_description", f"neuron={window.neuron_index}"),
+                    (
+                        "TimelineInfo0_description",
+                        f"neuron={window.neuron_index}"
+                        + (
+                            " " + _power_description(target_power_mw, window.intensity)
+                            if power_enabled
+                            else ""
+                        ),
+                    ),
                     (
                         "TimelineInfo0_repeats",
                         str(_shape_repeats_from_duration_quanta(duration_shape_quanta)),
@@ -773,6 +783,11 @@ def generate_syscon2_sequence_text(
                 lightsource_id=lightsource_id,
                 include_lightsource=True,
                 intensity_fraction=intensity_fraction,
+                description=(
+                    _power_description(target_power_mw, pulse_intensity_norm)
+                    if power_enabled
+                    else ""
+                ),
             )
         )
         laser_block_rows.append((block_object_id, (start_tick, end_tick)))
@@ -1657,8 +1672,8 @@ def _build_debug_csv_text(
         used_windows.update(range(max(0, hologram.start_win - 1), hologram.end_win))
 
     for window_idx in sorted(used_windows):
-        start_neuro_ms = window_idx * _SYSCON2_WINDOW_MS
-        end_neuro_ms = (window_idx + 1) * _SYSCON2_WINDOW_MS
+        start_neuro_ms = window_idx * SYSCON2_WINDOW_MS
+        end_neuro_ms = (window_idx + 1) * SYSCON2_WINDOW_MS
         start_sys_us = window_idx * _SYSCON2_WINDOW_US
         end_sys_us = (window_idx + 1) * _SYSCON2_WINDOW_US
         rows.append(
@@ -1672,7 +1687,7 @@ def _build_debug_csv_text(
                 sys_win_count=1,
                 start_neuro_ms=start_neuro_ms,
                 end_neuro_ms_excl=end_neuro_ms,
-                duration_neuro_ms=_SYSCON2_WINDOW_MS,
+                duration_neuro_ms=SYSCON2_WINDOW_MS,
                 start_sys_us=start_sys_us,
                 end_sys_us_excl=end_sys_us,
                 duration_sys_us=_SYSCON2_WINDOW_US,
@@ -1726,9 +1741,9 @@ def _build_debug_csv_text(
                 stage="sanity",
                 object_id=segment.segment_id,
                 neuron_id=segment.neuron_index,
-                start_neuro_ms=segment.start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=segment.end_win * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=segment.win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=segment.start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=segment.end_win * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=segment.win_count * SYSCON2_WINDOW_MS,
                 neuro_win_start=segment.start_win,
                 neuro_win_count=segment.win_count,
                 start_sys_us=segment.start_win * _SYSCON2_WINDOW_US,
@@ -1752,10 +1767,10 @@ def _build_debug_csv_text(
                 hologram_id=hologram.hologram_id,
                 neuro_win_start=hologram.start_win,
                 neuro_win_count=hologram.end_win - hologram.start_win,
-                start_neuro_ms=hologram.start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=hologram.end_win * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=hologram.start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=hologram.end_win * SYSCON2_WINDOW_MS,
                 duration_neuro_ms=(hologram.end_win - hologram.start_win)
-                * _SYSCON2_WINDOW_MS,
+                * SYSCON2_WINDOW_MS,
                 sys_win_start=hologram.start_win,
                 sys_win_count=hologram.end_win - hologram.start_win,
                 start_sys_tick=hologram.start_win * _SYSCON2_WINDOW_TICKS,
@@ -1800,9 +1815,9 @@ def _build_debug_csv_text(
                 duration_sys_us=(end_tick - start_tick) * _SYSCON2_TTL_PULSE_QUANTUM_US,
                 sys_win_start=start_win,
                 sys_win_count=sys_win_count,
-                start_neuro_ms=start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=(start_win + sys_win_count) * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=sys_win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + sys_win_count) * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=sys_win_count * SYSCON2_WINDOW_MS,
             )
         )
 
@@ -1833,9 +1848,9 @@ def _build_debug_csv_text(
                 * _SYSCON2_TTL_PULSE_QUANTUM_US,
                 sys_win_start=start_win,
                 sys_win_count=win_count,
-                start_neuro_ms=start_win * _SYSCON2_WINDOW_MS,
-                end_neuro_ms_excl=(start_win + win_count) * _SYSCON2_WINDOW_MS,
-                duration_neuro_ms=win_count * _SYSCON2_WINDOW_MS,
+                start_neuro_ms=start_win * SYSCON2_WINDOW_MS,
+                end_neuro_ms_excl=(start_win + win_count) * SYSCON2_WINDOW_MS,
+                duration_neuro_ms=win_count * SYSCON2_WINDOW_MS,
                 includes_load_window=True,
                 intensity_out=0.0,
             )
@@ -3178,7 +3193,9 @@ def _resolve_neuron_to_cellpose_mapping(
     n_neurons: int,
     available_cellpose_ids: set[int],
 ) -> dict[int, int]:
-    explicit_mapping = cellpose_data.stimulus_to_cellpose_mapping or {}
+    # Resolved, so a Linear mapping's offset is applied: the readout of a recorded
+    # block (importer_scanimage_traces) resolves the mapping the same way.
+    explicit_mapping = resolve_stimulus_to_cellpose_mapping(cellpose_data) or {}
     resolved: dict[int, int] = {}
 
     if explicit_mapping:
@@ -3757,6 +3774,7 @@ def _format_ttl_pulse_block(
     lightsource_id: str,
     include_lightsource: bool,
     intensity_fraction: str = "0",
+    description: str = "",
 ) -> list[str]:
     properties: list[tuple[str, str]] = [
         ("TotalTimings", "1"),
@@ -3765,7 +3783,7 @@ def _format_ttl_pulse_block(
             "TimelineInfo0_starttime",
             _format_time_us(start_tick * _SYSCON2_TTL_PULSE_QUANTUM_US),
         ),
-        ("TimelineInfo0_description", ""),
+        ("TimelineInfo0_description", description),
         (
             "TimelineInfo0_repeats",
             str(_ttl_repeats_from_duration_ticks(duration_ticks)),
@@ -3805,6 +3823,16 @@ def _format_object_block(
 
 def _format_float(value: float) -> str:
     return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def _power_description(target_power_mw: float, intensity: float) -> str:
+    """The requested power of an object, for its description: SysCon2 stores the
+    LUT-inverted laser fraction, so this keeps the mW it stands for in the file."""
+    effective_mw = max(0.0, target_power_mw * float(intensity))
+    return (
+        f"power_mW={_format_float(effective_mw)} "
+        f"target_mW={_format_float(target_power_mw)}"
+    )
 
 
 def _shape_intensity_for_window(

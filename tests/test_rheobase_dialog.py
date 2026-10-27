@@ -1,19 +1,22 @@
+import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
-from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
 from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from tests.fake_stimulation_host import FakeBss2Host
+from tests.fake_stimulation_host import FakeStimulationHost
 
 
 class _FakeProject:
@@ -28,19 +31,25 @@ class _FakeProject:
         )
         self.stim_arrays: dict[str, StimArray] = {}
         self.spikes: dict[str, SpikeData] = {}
+        #: Imported calcium traces, by name.
+        self.traces: dict[str, TraceData] = {}
+        #: Data groups by name (only their ``data`` is used here).
+        self.experiments: dict[str, SimpleNamespace] = {}
         self.b2_model = SimpleNamespace(get_sim_time_secs=lambda: 0.0)
 
     def get_data_names(self, data_type: type) -> list[str]:
         if data_type is SpikeData:
             return list(self.spikes)
         assert data_type is TraceData
-        return [self.trace.name] if self.trace_available else []
+        return ([self.trace.name] if self.trace_available else []) + list(self.traces)
 
     def get_data(self, name: str, data_type: type):
         if data_type is SpikeData:
-            return self.spikes[name]
-        assert name == self.trace.name
+            return self.spikes.get(name)
         assert data_type is TraceData
+        if name in self.traces:
+            return self.traces[name]
+        assert name == self.trace.name
         return self.trace
 
 
@@ -48,6 +57,7 @@ class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
         self.stimulation_host = None
+        self.bss2_host = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -86,6 +96,9 @@ class _FakeEditor:
 
     def reset_stim_array(self) -> None:
         self.reset_count = getattr(self, "reset_count", 0) + 1
+
+    def trim_stim_array_after(self, end_seconds: float) -> None:
+        self.trimmed_after = end_seconds
 
     def current_stim_array_has_unsimulated_tail(self) -> bool:
         stim = self.current_stim_modifier.stim_array
@@ -288,7 +301,7 @@ def test_rheobase_reports_when_no_spike_at_max(qtbot, monkeypatch) -> None:
 
     assert not dialog._running
     assert len(editor.calls) == 1
-    assert "increase the range" in dialog.log.toPlainText()
+    assert "Increase the maximum amplitude." in dialog.log.toPlainText()
 
 
 def test_rheobase_reports_when_spikes_at_min(qtbot, monkeypatch) -> None:
@@ -745,46 +758,22 @@ def test_rheobase_plot_window_is_scrollable(qtbot) -> None:
     assert scroll_areas[0].widgetResizable()
 
 
-class _FakeHost(QtCore.QObject):
-    block_sent = QtCore.Signal(object)
-    block_failed = QtCore.Signal(str)
-    block_completed = QtCore.Signal()
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.phase = "idle"
-        self.sent: list[tuple[int, int, bool]] = []
-        self.cancelled = 0
-
-    def send_block(
-        self, project, stim, start, stop, label="block", *, preserve_amplitude=False
-    ):
-        self.sent.append((start, stop, preserve_amplitude))
-        self.phase = "awaiting_acquisition"
-        self.block_sent.emit(None)
-        return True
-
-    def acquisition_imported(self) -> None:
-        self.phase = "idle"
-        self.block_completed.emit()
-
-    def cancel(self) -> None:
-        self.cancelled += 1
-        self.phase = "idle"
-
-
 def _syscon2_dialog(qtbot):
     project, editor, dialog = _make_dialog(qtbot)
     editor.current_stim_modifier.stim_array.dt = _SYSCON2_TTL_PULSE_QUANTUM_S
-    host = _FakeHost()
+    host = FakeStimulationHost()
     editor.stimulation_host = host  # type: ignore[assignment]
     dialog.refresh()
     dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    # Manual delivery: the user runs, records and imports each block.
+    dialog.hardware.chk_automatic.setChecked(False)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.SPIKES_READOUT)
     _use_fixed_duration_strategy(dialog)
     dialog.spn_min_amplitude.setValue(0.1)
     dialog.spn_max_amplitude.setValue(1.0)
     dialog.spn_tolerance.setValue(0.3)
     dialog.spn_recovery_ms.setValue(100.0)
+    dialog.spn_repeats.setValue(1)  # one trial per probe unless a test says
     return project, editor, dialog, host
 
 
@@ -854,7 +843,7 @@ def test_syscon2_reused_dataset_does_not_advance_search(qtbot) -> None:
 def test_syscon2_failure_finishes_routine(qtbot) -> None:
     _project, _editor, dialog, host = _syscon2_dialog(qtbot)
     dialog.start()
-    host.block_failed.emit("pipe closed")
+    host.block_failed.emit(dialog, "pipe closed")
     assert not dialog._running
     assert not dialog.btn_data_imported.isEnabled()
 
@@ -942,3 +931,505 @@ def test_dynamic_syscon_dt_button_resamples_before_start(qtbot, mocker):
     dialog.btn_syscon_dt.click()
     prepare.assert_called_once_with(dialog)
     assert "0.5208125" in dialog.lbl_stim_dt.text()
+
+
+def _dff_trace(dialog, name: str, *, responding: bool) -> TraceData:
+    """ΔF/F of a recording starting with the probe block, as automatic blocks yield."""
+    dt = 1 / 30
+    onset = (
+        dialog._pulse_onset_seconds
+        - dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+    )
+    values = np.zeros((1, 120), dtype=np.float32)
+    if responding:
+        values[0, int(onset / dt) + 1 :] = 0.5
+    return TraceData("dF/F", values, np.array([0]), "dF/F", dt)
+
+
+def _automatic_dialog(qtbot):
+    project, editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.hardware.chk_automatic.setChecked(True)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.DFF_READOUT)
+    dialog.spn_response_ms.setValue(300.0)
+    return project, editor, dialog, host
+
+
+def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
+    project, _editor, dialog, host = _automatic_dialog(qtbot)
+    assert not dialog.btn_data_imported.isVisibleTo(dialog)
+    dialog.hardware.spn_tail_s.setValue(2.0)
+
+    dialog.start()
+
+    assert host.automatic == [True]
+    recording = host.recordings[0]
+    start, stop = dialog._block_range
+    assert recording.stim_block.values.shape[0] == stop - start
+    assert recording.tail_s == 2.0
+    assert host.owner is dialog
+    run_name = host.run_names[0]
+    assert run_name.startswith("rheobase_")
+    assert f"runs/{run_name}" in dialog.log.toPlainText()
+    for i in range(20):
+        if not dialog._running:
+            break
+        name = f"Block {i} :: dF/F"
+        project.traces[name] = _dff_trace(
+            dialog, name, responding=dialog._pending_amplitude >= 0.5
+        )
+        host.complete({"trace": name})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert all(host.automatic)
+    assert set(host.run_names) == {run_name}  # one folder for the whole run
+
+
+def test_syscon2_automatic_probe_can_be_measured_from_deconvolved_spikes(
+    qtbot,
+) -> None:
+    project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.SPIKES_READOUT)
+    assert dialog.cmb_calcium_readout.isEnabled()
+    assert not dialog.cmb_spikes.isEnabled()  # the block names its spikes
+    assert dialog.hardware.spn_spike_threshold.isVisibleTo(dialog)
+    assert not dialog.hardware.spn_threshold.isVisibleTo(dialog)
+    dialog.hardware.spn_spike_threshold.setValue(0.25)
+    dialog.start()
+    assert host.recordings[0].spike_threshold == 0.25
+    frame = 1 / 30
+    for i in range(20):
+        if not dialog._running:
+            break
+        onset = (
+            dialog._pulse_onset_seconds
+            - dialog._block_range[0] * _SYSCON2_TTL_PULSE_QUANTUM_S
+        )
+        trace_name, spikes_name = f"Block {i} :: dF/F", f"Block {i} :: spikes"
+        project.traces[trace_name] = _dff_trace(dialog, trace_name, responding=False)
+        # Timed at the start of the frame holding the onset: counts with tolerance.
+        times = [frame * int(onset / frame)] if dialog._pending_amplitude >= 0.5 else []
+        project.spikes[spikes_name] = SpikeData(
+            spikes_name, np.zeros(len(times)), np.array(times)
+        )
+        host.complete({"trace": trace_name, "spikes": spikes_name})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert "Deconvolved spikes after the probe: 1." in dialog.log.toPlainText()
+
+
+def test_syscon2_automatic_block_whose_data_vanished_stops_instead_of_waiting(
+    qtbot,
+) -> None:
+    """Review finding 6: there is no import button to press in automatic mode."""
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    host.complete({"trace": "Removed :: dF/F"})  # not in the project
+    assert not dialog._running
+    assert "missing from the project" in dialog.log.toPlainText()
+
+
+def test_hardware_settings_stay_locked_while_a_manual_routine_runs(qtbot) -> None:
+    """Review finding 2: refresh() during a run must not unlock the box."""
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running
+    dialog.refresh()
+    assert not dialog.hardware.isEnabled()
+
+
+@pytest.mark.parametrize("event", ["finished", "failed"])
+def test_simulation_during_a_hardware_run_is_ignored(qtbot, event) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    if event == "finished":
+        dialog.simulation_finished()
+    else:
+        dialog.simulation_failed("Busy")
+    assert dialog._running
+    assert host.cancelled == 0
+
+
+@pytest.mark.parametrize("amplitude", ["min", "fixed"])
+def test_syscon2_rejects_a_zero_amplitude(qtbot, amplitude) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    if amplitude == "fixed":
+        dialog.cmb_sweeping_strategy.setCurrentText(
+            dialog.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
+        )
+        dialog.spn_fixed_amplitude.setValue(0.0)
+    else:
+        dialog.spn_min_amplitude.setValue(0.0)
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+    assert "above 0" in dialog.log.toPlainText()
+
+
+def test_syscon2_starts_with_slice_timing_and_one_amplitude_search(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.stimulation_host = FakeStimulationHost()  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_sweeping_strategy.setCurrentText(dialog.AMPLITUDE_AND_DURATION_STRATEGY)
+    brian2_timing = (
+        dialog.spn_pulse_ms.value(),
+        dialog.spn_max_pulse_ms.value(),
+        dialog.spn_recovery_ms.value(),
+        dialog.spn_response_ms.value(),
+    )
+
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    timing = (
+        dialog.spn_pulse_ms.value(),
+        dialog.spn_max_pulse_ms.value(),
+        dialog.spn_recovery_ms.value(),
+        dialog.spn_response_ms.value(),
+    )
+    assert timing == pytest.approx(dialog.SYSCON2_TIMING_MS)
+    assert (
+        dialog.cmb_sweeping_strategy.currentText()
+        == dialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+    )
+
+    # The user's choices on each target are kept.
+    dialog.cmb_sweeping_strategy.setCurrentText(dialog.AMPLITUDE_AND_DURATION_STRATEGY)
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_pulse_ms.value() == pytest.approx(brian2_timing[0])
+    dialog.cmb_target.setCurrentText(dialog.SYSCON2_TARGET)
+    assert (
+        dialog.cmb_sweeping_strategy.currentText()
+        == dialog.AMPLITUDE_AND_DURATION_STRATEGY
+    )
+
+
+def test_syscon2_warns_about_pulses_shorter_than_a_spiral(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    host.settings = dataclasses.replace(host.settings, spiralling=True)
+    dialog.spn_pulse_ms.setValue(10.0)
+    dialog.start()
+    assert "shorter than one spiral" in dialog.log.toPlainText()
+
+
+def test_syscon2_automatic_needs_a_recorder(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    host.unavailable = "Connect to ScanImage first."
+    dialog.start()
+    assert not host.sent
+    assert not dialog._running
+    assert "Connect to ScanImage first." in dialog.log.toPlainText()
+
+
+def test_syscon2_automatic_block_without_trace_finishes(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    host.complete({})
+    assert not dialog._running
+    assert "no calcium trace" in dialog.log.toPlainText()
+
+
+def test_syscon2_ignores_blocks_of_other_routines(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    other = object()
+    host.block_failed.emit(other, "someone else's block failed")
+    host.block_completed.emit(other, None)
+    assert dialog._running
+    assert len(host.sent) == 1
+
+
+def test_syscon2_stop_cancels_only_its_own_block(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    host.owner = object()  # another routine's block is in flight now
+    dialog.stop()
+    assert host.cancelled == 0
+    assert not dialog._running
+
+
+def test_syscon2_dispose_stops_the_routine_and_releases_the_host(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    dialog.dispose()
+    assert not dialog._running
+    assert host.cancelled == 1
+    host.block_completed.emit(dialog, None)  # no longer connected
+    assert not dialog._running
+
+
+def test_syscon2_manual_dff_readout_uses_the_imported_trace(qtbot) -> None:
+    project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.cmb_calcium_readout.setCurrentText(dialog.DFF_READOUT)
+    dialog.spn_response_ms.setValue(300.0)
+    assert dialog.cmb_trace.isEnabled()
+    assert not dialog.cmb_spikes.isEnabled()
+    dialog.start()
+    project.traces["rec0"] = _dff_trace(dialog, "rec0", responding=True)
+    dialog.btn_data_imported.click()
+    assert dialog._last_measured_dataset == "rec0"
+    assert len(host.sent) == 2
+
+
+def _bss2_dialog(qtbot):
+    project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    _use_fixed_duration_strategy(dialog)
+    dialog.spn_neuron.setValue(1)
+    dialog.spn_min_amplitude.setValue(0.1)
+    dialog.spn_max_amplitude.setValue(1.0)
+    dialog.spn_tolerance.setValue(0.3)
+    dialog.spn_recovery_ms.setValue(100.0)
+    dialog.spn_repeats.setValue(1)  # one trial per probe unless a test says
+    return project, editor, dialog, host
+
+
+def test_bss2_target_needs_a_host(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    assert not dialog.cmb_target.model().item(2).isEnabled()
+    _project, _editor, dialog, _host = _bss2_dialog(qtbot)
+    assert dialog.cmb_target.currentText() == dialog.BSS2_TARGET
+    assert not dialog.hardware.isVisibleTo(dialog)
+    assert not dialog.btn_data_imported.isVisibleTo(dialog)
+    assert not dialog.cmb_trace.isEnabled()
+
+
+def test_bss2_search_converges_from_chip_spikes(qtbot) -> None:
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    assert dialog._running
+    assert host.owner is dialog
+    assert "i_offset max (500)" in dialog.log.toPlainText()
+    for _ in range(20):
+        if not dialog._running:
+            break
+        start, stop, record_neuron = host.sent[-1]
+        assert (start, stop) == dialog._block_range
+        assert record_neuron == 1
+        onset = dialog._pulse_onset_seconds - start * 0.001
+        # Like the chip readback: times relative to the block, neuron 1 fires
+        # during strong enough pulses.
+        times = [onset + 0.002] if dialog._pending_amplitude >= 0.5 else []
+        spikes = SpikeData(
+            "BSS-2 rheobase spikes", np.ones(len(times)), np.array(times)
+        )
+        host.complete(
+            {"spikes": "run :: BSS-2 rheobase spikes", "block_spikes": spikes}
+        )
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert "Spikes after the probe on BrainScaleS-2: 1." in dialog.log.toPlainText()
+    # All probes of the run go to one data group, not one group each.
+    assert len(set(host.groups)) == 1
+    assert host.groups[0].startswith("BSS-2 rheobase ")
+
+
+def test_bss2_rejects_amplitudes_above_one_and_unavailable_hardware(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.spn_max_amplitude.setValue(5.0)
+    dialog.start()
+    assert not host.sent and not dialog._running
+    assert "fraction of i_offset max" in dialog.log.toPlainText()
+    dialog.spn_max_amplitude.setValue(1.0)
+    host.unavailable_reason = "Connect to BrainScaleS-2 first."
+    dialog.start()
+    assert not host.sent and not dialog._running
+
+
+def test_bss2_failure_or_missing_readback_stops_the_routine(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    host.block_failed.emit(object(), "someone else's block")
+    assert dialog._running
+    host.block_failed.emit(dialog, "chip went away")
+    assert not dialog._running
+    assert "BrainScaleS-2 failed: chip went away" in dialog.log.toPlainText()
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    host.complete({"spikes": "Removed :: spikes"})  # no block_spikes
+    assert not dialog._running
+    assert "readback of this probe is missing" in dialog.log.toPlainText()
+
+
+def test_bss2_stop_cancels_its_block(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    dialog.stop()
+    assert host.cancelled == 1
+    assert not host.busy
+
+
+def test_bss2_routine_keeps_one_scale_and_locks_its_target(qtbot) -> None:
+    """Review: the tab's settings may change mid-search, and the target must not."""
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    assert not dialog.cmb_target.isEnabled()
+    snapshot = host.sent_settings[0]
+    assert snapshot.i_offset_max == 500
+    host.settings = Bss2Settings(i_offset_max=900)  # changed in the tab
+    onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
+    spikes = SpikeData("spikes", np.ones(1), np.array([onset + 0.002]))
+    host.complete(
+        {
+            "block_spikes": spikes,
+            "warnings": ["Only the first 512 channels are delivered."],
+        }
+    )
+    assert host.sent_settings[1] is snapshot
+    spikes = SpikeData("spikes", np.ones(0), np.array([]))
+    host.complete(
+        {
+            "block_spikes": spikes,
+            "warnings": ["Only the first 512 channels are delivered."],
+        }
+    )
+    log = dialog.log.toPlainText()
+    assert log.count("BrainScaleS-2: Only the first 512 channels are delivered.") == 1
+    dialog.stop()
+    assert dialog.cmb_target.isEnabled()
+
+
+def test_calcium_readout_is_locked_while_running(qtbot) -> None:
+    _project, _editor, dialog, _host = _syscon2_dialog(qtbot)
+    assert dialog.cmb_calcium_readout.isEnabled()
+    dialog.start()
+    assert not dialog.cmb_calcium_readout.isEnabled()
+    dialog.stop()
+    assert dialog.cmb_calcium_readout.isEnabled()
+
+
+def test_dispose_disconnects_exactly_what_it_connected(qtbot) -> None:
+    """Review: a host replaced after connecting must still be disconnected."""
+    _project, editor, dialog, old = _syscon2_dialog(qtbot)
+    dialog.start()
+    editor.stimulation_host = FakeStimulationHost()  # rewired meanwhile
+    dialog.dispose()
+    old.block_sent.emit(dialog, None)
+    old.block_completed.emit(dialog, None)
+    assert not dialog._running
+
+
+def test_each_target_keeps_its_own_amplitudes(qtbot) -> None:
+    """Brian2 amplitudes are stim units; hardware ones fractions (0-1)."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    dialog.refresh()
+    assert (dialog.spn_min_amplitude.value(), dialog.spn_max_amplitude.value()) == (
+        1.0,
+        100.0,
+    )
+    dialog.spn_max_amplitude.setValue(80.0)
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert (
+        dialog.spn_min_amplitude.value(),
+        dialog.spn_max_amplitude.value(),
+        dialog.spn_fixed_amplitude.value(),
+    ) == dialog.HARDWARE_AMPLITUDES[:3]
+    assert dialog.lbl_units.text() == "× i_offset max"
+    dialog.spn_max_amplitude.setValue(0.7)
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_max_amplitude.value() == 80.0
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.spn_max_amplitude.value() == 0.7
+
+
+def test_bss2_starts_with_valid_amplitudes_and_logs_once(qtbot) -> None:
+    """The reported run: switching target and pressing Start must not be refused,
+    and a refusal is logged once."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    dialog.start()
+    assert dialog._running and len(host.sent) == 1
+    dialog.stop()
+    assert dialog.log.toPlainText().count("Routine stopped.") == 1
+
+
+def test_bss2_can_be_connected_from_the_dialog(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    host = FakeBss2Host()
+    editor.bss2_host = host  # type: ignore[assignment]
+    dialog.refresh()
+    assert not dialog.bss2_row.isVisibleTo(dialog)
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.bss2_row.isVisibleTo(dialog)
+    assert dialog.lbl_bss2_status.text() == "Not connected"
+    assert dialog.btn_bss2_connect.isEnabled()
+    dialog.btn_bss2_connect.click()
+    assert host.connect_calls == 1
+    assert dialog.lbl_bss2_status.text() == "Starting the container…"
+    assert not dialog.btn_bss2_connect.isEnabled()
+    host.status = "Connected to chip_a"
+    host.connection_changed.emit(host.status)
+    assert dialog.lbl_bss2_status.text() == "Connected to chip_a"
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert not dialog.bss2_row.isVisibleTo(dialog)
+
+
+def test_hardware_targets_repeat_probes_and_brian2_does_not(qtbot) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    dialog.refresh()
+    assert dialog.spn_repeats.value() == 1
+    estimate = dialog._estimated_probe_count()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+    assert dialog.spn_repeats.value() == dialog.HARDWARE_REPEATS
+    assert dialog._estimated_probe_count() == 3 * dialog._estimated_probe_amplitudes()
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_repeats.value() == 1
+    assert dialog._estimated_probe_count() == estimate
+
+
+def test_bss2_repeats_each_probe_and_takes_the_majority(qtbot) -> None:
+    project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.spn_repeats.setValue(3)
+    dialog.start()
+    for i in range(80):
+        if not dialog._running:
+            break
+        onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
+        above = dialog._pending_amplitude >= 0.5
+        fires = above != (i % 3 == 2)  # every third trial disagrees
+        times = [onset + 0.002] if fires else []
+        spikes = SpikeData("spikes", np.ones(len(times)), np.array(times))
+        host.complete({"block_spikes": spikes})
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+    assert len(host.sent) == 3 * len(dialog._samples)
+
+
+def test_summary_reports_a_chronaxie_bound_as_a_bound(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    backend = dialog._backend
+    backend.rheobase = 0.381
+    backend.chronaxie_ms = None
+    backend.chronaxie_upper_bound_ms = 10.0
+    summary = dialog._final_summary()
+    assert "chronaxie <= 10 ms" in summary
+    assert "lower the minimum pulse duration" in summary
+    backend.chronaxie_upper_bound_ms = None
+    backend.chronaxie_range = (10.0, 12.5)
+    backend.chronaxie_ms = 11.25
+    assert "chronaxie between 10 and 12.5 ms" in dialog._final_summary()
+    backend.chronaxie_range = None
+    assert "chronaxie ~= 11.25 ms" in dialog._final_summary()
+
+
+def test_manual_spikes_use_the_frame_period_of_their_data_group(qtbot) -> None:
+    """Review: imported Suite2p/OASIS spikes are timed at their frame's start too."""
+    project, _editor, dialog = _make_dialog(qtbot)
+    trace = TraceData("F", np.zeros((1, 10)), np.array([0]), "fluorescence", 1 / 30)
+    project.experiments = {"Rec": SimpleNamespace(data=[trace])}
+    assert dialog._frame_period(None, "Rec :: spikes") == pytest.approx(1 / 30)
+    assert dialog._frame_period(None, "Other :: spikes") == 0.0
+
+
+def test_syscon2_run_logs_the_laser_it_delivers_with(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    dialog.start()
+    assert "Delivering on the 940 nm laser at 1 mW" in dialog.log.toPlainText()

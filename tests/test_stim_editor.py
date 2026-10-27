@@ -1776,6 +1776,8 @@ def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -
 
     selector = dynamic_input._routine_selector_dialog
     assert selector is not None
+    # Rheobase is preselected; the others stay in their menu order.
+    assert selector.selected_routine == DynamicInputController.RHEOBASE_ROUTINE
     assert selector.isVisible()
     assert selector.windowTitle() == "Design dynamic input"
     assert _routine_combo_items(selector) == [
@@ -1784,9 +1786,12 @@ def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -
         "STDP timing window (LTP/LTD vs Δt)",
     ]
     # The preview is always on: the initial selection already shows goal text
-    # and a sample plot in the same window as the dropdown.
+    # and its diagram (rheobase/chronaxie) in the same window as the dropdown.
     assert selector.lbl_goal.text()
     assert selector.lbl_params.text()
+    assert selector.image_widget.isVisibleTo(selector)
+    # A plotted preview for a routine that has one.
+    selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     assert selector._axes.lines
 
     # Selecting a routine and clicking Continue opens the matching dialog.

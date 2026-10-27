@@ -26,13 +26,15 @@ if exist(testCase.TestData.directory,'dir'), rmdir(testCase.TestData.directory,'
 end
 
 function args = request(testCase)
-args = struct('run_id','run', 'directory',testCase.TestData.directory, 'frames',100, 'external_trigger',true);
+args = struct('run_id','run', 'directory',testCase.TestData.directory, 'frames',100, ...
+    'external_trigger',true, 'stem','2026-10-22', 'counter',3);
 end
 
 function old = settings(rig)
 old = {rig.hScan2D.logFilePath,rig.hScan2D.logFileStem,rig.hScan2D.logFileCounter, ...
     rig.extTrigEnable,rig.hStackManager.framesPerSlice,rig.hChannels.loggingEnable, ...
-    rig.hScan2D.logAverageFactor,rig.acqsPerLoop,rig.hChannels.channelSave};
+    rig.hScan2D.logAverageFactor,rig.acqsPerLoop,rig.hChannels.channelSave, ...
+    rig.hScan2D.logFramesPerFile};
 end
 
 function testRestoreOnCompletion(testCase)
@@ -145,61 +147,38 @@ verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase)
 verifyEqual(testCase,settings(rig),old);
 end
 
-function testPreviewOnlyOnRequestAtFullResolution(testCase)
-neuroseq_scanimage('preview','{}');
-status = jsondecode(neuroseq_scanimage('status','{}'));
-verifyFalse(testCase,isfield(status,'frame'));
-verifyGreaterThanOrEqual(testCase,status.elapsed_ms,0);
-status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
-verifyEqual(testCase,status.frame.shape,[512;512]);
-verifyEqual(testCase,status.frame.dtype,'int16');
-verifyEqual(testCase,status.frame.lut,[-88;436]);
-verifyEqual(testCase,status.frame.display_average,10);
-raw = matlab.net.base64decode(status.frame.data);
-pixels = reshape(typecast(raw,'int16'),512,512);
-rig = testCase.TestData.rig;
-verifyEqual(testCase,pixels,rig.hDisplay.lastFrame{1});
-end
-
-function testPreviewSurvivesFailingChannelRead(testCase)
-% ScanImage 2023.1.0 can raise from Display.get.lastFrameChannels.
-rig = testCase.TestData.rig;
-rig.hDisplay.failLastFrameChannels = true;
-neuroseq_scanimage('preview','{}');
-status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
-verifyEqual(testCase,status.frame.shape,[512;512]);
-verifyFalse(testCase,isfield(status,'preview_problem'));
-end
-
-function testPreviewReportsUnreadableFrame(testCase)
-rig = testCase.TestData.rig;
-rig.hDisplay.failLastFrameChannels = true;
-rig.hDisplay.failLastFrame = true;
+function testStatusCarriesNoPreviewFrame(testCase)
+% Frames are no longer fetched: that slowed ScanImage down (#628, #651).
 neuroseq_scanimage('preview','{}');
 status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
 verifyFalse(testCase,isfield(status,'frame'));
-verifySubstring(testCase,status.preview_problem,'Brace indexing');
 verifyEqual(testCase,status.acq_state,'focus');
+verifyGreaterThanOrEqual(testCase,status.elapsed_ms,0);
 end
 
-function testPreviewOfUndisplayedChannel(testCase)
-neuroseq_scanimage('preview','{}');
-status = jsondecode(neuroseq_scanimage('status','{"channel":3}'));
-verifyFalse(testCase,isfield(status,'frame'));
-verifySubstring(testCase,status.preview_problem,'Channel 3 is not displayed');
-end
-
-function testLargePreviewIsBlockAveraged(testCase)
+function testRecordingIsOneDatedNumberedTiffInTheFolder(testCase)
 rig = testCase.TestData.rig;
-rig.hDisplay.lastFrame{1} = reshape(single(1:1024^2),1024,1024);
-neuroseq_scanimage('preview','{}');
-status = jsondecode(neuroseq_scanimage('status','{"channel":1}'));
-verifyEqual(testCase,status.frame.shape,[512;512]);
-raw = matlab.net.base64decode(status.frame.data);
-pixels = reshape(typecast(raw,'single'),512,512);
-source = rig.hDisplay.lastFrame{1};
-verifyEqual(testCase,pixels(1,1),mean(source(1:2,1:2),'all'),'AbsTol',1e-3);
-verifyEqual(testCase,pixels(3,5),mean(source(5:6,9:10),'all'),'AbsTol',1e-3);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+verifyEqual(testCase,rig.hScan2D.logFilePath,testCase.TestData.directory);
+verifyEqual(testCase,rig.hScan2D.logFileStem,'2026-10-22');
+verifyEqual(testCase,rig.hScan2D.logFileCounter,3);
+verifyEqual(testCase,rig.hScan2D.logFramesPerFile,Inf);
+% As ScanImage would: this recording, plus an earlier one in the same folder.
+fclose(fopen(fullfile(testCase.TestData.directory,'2026-10-22_00003.tif'),'w'));
+fclose(fopen(fullfile(testCase.TestData.directory,'2026-10-22_00002.tif'),'w'));
+rig.complete(false);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,numel(cellstr(status.files)),1);
+verifySubstring(testCase,char(status.files),'2026-10-22_00003.tif');
+verifyEqual(testCase,rig.hScan2D.logFramesPerFile,1000);
+end
+
+function testExistingRecordingIsNotOverwritten(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+mkdir(testCase.TestData.directory);
+fclose(fopen(fullfile(testCase.TestData.directory,'2026-10-22_00003.tif'),'w'));
+verifyError(testCase,@()neuroseq_scanimage('record',jsonencode(request(testCase))), 'NeuroSeq:FileExists');
+verifyEqual(testCase,settings(rig),old);
 end
 
 function testReconnectWhileRecordingDoesNotChangeCallbacks(testCase)
@@ -230,8 +209,7 @@ function testNextRecordAfterMissingEventKeepsOriginalSettings(testCase)
 rig = testCase.TestData.rig; old = settings(rig);
 neuroseq_scanimage('record',jsonencode(request(testCase)));
 rig.acqState = 'idle';
-second = request(testCase); second.run_id = 'second'; second.directory = [testCase.TestData.directory '_2'];
-testCase.addTeardown(@() rmdir(second.directory,'s'));
+second = request(testCase); second.run_id = 'second'; second.counter = 4;
 neuroseq_scanimage('record',jsonencode(second));
 rig.complete(false);
 neuroseq_scanimage('status','{}');

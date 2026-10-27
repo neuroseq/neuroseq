@@ -3,8 +3,15 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import NoEpspDetected
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
+    calcium_rise_fraction,
+)
+from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
+    measure_calcium_spike_count,
+)
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import measure_epsp
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
     measure_spike_count,
@@ -39,3 +46,50 @@ def test_measure_spike_count_handles_simulated_volt_traces_labelled_mv() -> None
     values[0, 5:8] = 0.02
     trace = TraceData("trace", values, np.array([4]), "mV", 0.001)
     assert measure_spike_count(trace, 4, 0.004, 5.0, -20.0) == 1
+
+
+def test_raw_fluorescence_rise_is_relative_to_its_baseline() -> None:
+    trace = TraceData(
+        "F", np.array([[100.0] * 10 + [130.0] * 5]), np.array([0]), "fluorescence", 0.1
+    )
+    assert calcium_rise_fraction(trace, 0, 1.0, 500.0, 300.0) == pytest.approx(0.3)
+
+
+def test_spike_in_the_onset_frame_counts_only_with_frame_tolerance() -> None:
+    frame = 1 / 30
+    # Timed at the start of frame 15, which contains an onset at 0.51 s.
+    spikes = SpikeData("s", np.array([0, 0]), np.array([14 * frame, 15 * frame]))
+    assert measure_calcium_spike_count(spikes, 0, 0.51, 100.0) == 0
+    assert measure_calcium_spike_count(spikes, 0, 0.51, 100.0, frame) == 1
+
+
+def test_dff_rise_is_the_change_itself() -> None:
+    trace = TraceData(
+        "dF/F", np.array([[0.0] * 10 + [0.4] * 5]), np.array([3]), "dF/F", 0.1
+    )
+    assert calcium_rise_fraction(trace, 3, 1.0, 500.0, 300.0) == pytest.approx(0.4)
+    with pytest.raises(ValueError, match="not recorded"):
+        calcium_rise_fraction(trace, 4, 1.0, 500.0, 300.0)
+
+
+def test_rise_of_normalised_or_baseline_less_traces_is_refused() -> None:
+    """Review: Suite2p traces are normalised to 0-1, so a relative rise is noise."""
+    normalised = TraceData(
+        "Suite2p", np.array([[0.02] * 10 + [0.03] * 5]), np.array([0]), "units", 0.1
+    )
+    with pytest.raises(ValueError, match="neither"):
+        calcium_rise_fraction(normalised, 0, 1.0, 500.0, 300.0)
+    dark = TraceData(
+        "F", np.array([[0.0] * 10 + [5.0] * 5]), np.array([0]), "fluorescence", 0.1
+    )
+    with pytest.raises(ValueError, match="not positive"):
+        calcium_rise_fraction(dark, 0, 1.0, 500.0, 300.0)
+
+
+def test_spike_in_the_frame_after_a_short_window_counts() -> None:
+    frame = 1 / 30
+    # Onset 0.2 s (in frame 6), 10 ms pulse + 20 ms window ends at 0.23 s, still in
+    # frame 6: the response first shows in full at the start of frame 7 (0.2333 s).
+    spikes = SpikeData("s", np.array([0, 0]), np.array([7 * frame, 8 * frame]))
+    assert measure_calcium_spike_count(spikes, 0, 0.2, 30.0) == 0
+    assert measure_calcium_spike_count(spikes, 0, 0.2, 30.0, frame) == 1

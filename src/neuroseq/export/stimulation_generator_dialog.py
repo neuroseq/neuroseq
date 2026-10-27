@@ -43,6 +43,7 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.power_lut import parse_power_lut_text
 from neuroseq.export.power_lut import resolve_power_lut
 from neuroseq.export.syscon2_export_service import SysconExportSettings
+from neuroseq.export.syscon2_export_service import default_syscon2_config_text
 from neuroseq.export.syscon2_export_service import export_stim_array
 from neuroseq.export.syscon2_export_service import generate_sequence_text
 from neuroseq.export.syscon2_export_service import validate_export_name
@@ -1280,25 +1281,4 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:
-        imported_template = getattr(
-            self.project,
-            "syscon2_export_template_text",
-            None,
-        )
-        if imported_template:
-            return imported_template
-        return """nohash
-version=3
-scanmode=Accurate
-runs=1
-invertedportcnt=0
-AutoTriggerRulesEnabled=False
-AutoTriggerRulesCount=1
-SourceConnectorPort0=dummy_1_0 RMI In
-TargetConnectorPort0=Holo4D TTL Out 2
-PreTiming_us0=20000
-PostTiming_us0=20000
-timelinezoomfactor=10
-timelineviewposx=0
-timelineviewposy=0
-"""
+        return default_syscon2_config_text(self.project)
