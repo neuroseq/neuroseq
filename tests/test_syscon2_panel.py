@@ -1138,3 +1138,16 @@ def test_routine_blocks_count_as_execution_and_stop_reaches_them(panel, mocker):
     assert not panel.execution_in_progress
     assert panel.btn_holo4d_upload.isEnabled()
     host.phase = "idle"
+
+
+def test_routine_block_failures_do_not_pop_up(panel, mocker):
+    """Rig test: a routine's failed run also showed "stim_host.1.run: Sequence not
+    uploaded" and "stim_host.1.stop: ..." dialogs; the routine's log reports them."""
+    warning = mocker.patch(
+        "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
+    )
+    panel._on_command_failed("stim_host.1.run", "Sequence not uploaded")
+    panel._on_command_failed("stim_host.1.stop", "Could not stop current sequence")
+    warning.assert_not_called()
+    panel._on_command_failed("sequence_manager.get_sequences", "pipe closed")
+    warning.assert_called_once()

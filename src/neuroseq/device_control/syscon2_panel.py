@@ -28,6 +28,9 @@ from neuroseq.device_control.syscon2_client import SysCon2Client
 from neuroseq.device_control.syscon2_connection_manager import SysCon2ConnectionManager
 from neuroseq.device_control.syscon2_protocol import holo4d_ready_to_run
 from neuroseq.device_control.syscon2_protocol import normalized_holo4d_state
+from neuroseq.device_control.syscon2_stimulation_host import (
+    COMMAND_PREFIX as STIM_HOST_COMMAND_PREFIX,
+)
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.export.exporter_syscon2 import generate_syscon2_timeline_overview_png
 from neuroseq.export.stimulation_generator_dialog import StimulationGeneratorDialog
@@ -788,6 +791,9 @@ class SysCon2Panel(QtWidgets.QWidget):
             handler(result)
 
     def _on_command_failed(self, name: str, message: str) -> None:
+        if name.startswith(f"{STIM_HOST_COMMAND_PREFIX}."):
+            # A routine's block: the stimulation host reports it in the routine's log.
+            return
         if name == "laser.get_lightsources":
             self._discover_for_status = False
         if name.startswith("holo4d.execute."):
