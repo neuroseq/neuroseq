@@ -985,6 +985,30 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert set(host.run_names) == {run_name}  # one folder for the whole run
 
 
+def test_syscon2_automatic_run_is_measured_on_each_blocks_own_trace(qtbot) -> None:
+    """All blocks join one data group whose trace is updated in place, so each
+    probe is measured on the trace its block hands over."""
+    project, _editor, dialog, host = _automatic_dialog(qtbot)
+    dialog.start()
+    run_name = host.run_names[0]
+    recording = host.recordings[0]
+    assert recording.group == run_name
+    start = dialog._block_range[0]
+    assert recording.offset_s == pytest.approx(start * float(dialog._require_stim().dt))
+    name = f"{run_name} :: dF/F"
+    project.traces[name] = _dff_trace(dialog, name, responding=False)
+    for _ in range(20):
+        if not dialog._running:
+            break
+        block_trace = _dff_trace(
+            dialog, name, responding=dialog._pending_amplitude >= 0.5
+        )
+        host.complete({"trace": name, "block_trace": block_trace})
+
+    assert not dialog._running
+    assert 0.5 <= dialog._rheobase <= 0.5 + dialog.spn_tolerance.value()
+
+
 def test_syscon2_automatic_probe_can_be_measured_from_deconvolved_spikes(
     qtbot,
 ) -> None:

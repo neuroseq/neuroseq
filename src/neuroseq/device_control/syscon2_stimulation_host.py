@@ -77,6 +77,10 @@ class BlockRecording:
     syscon_sequence: str = ""
     #: The export options the block was delivered with (set by the host).
     export_settings: SysconExportSettings | None = None
+    #: Data group collecting a routine run's blocks, each placed at ``offset_s`` in
+    #: the stim array (None: the recording's traces get a data group of their own).
+    group: str | None = None
+    offset_s: float = 0.0
 
     @property
     def duration_s(self) -> float:

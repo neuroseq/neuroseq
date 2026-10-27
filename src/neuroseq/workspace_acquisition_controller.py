@@ -411,12 +411,19 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             project.mark_dirty()
             return
         name = record["name"]
-        if name in project.experiments:
-            name = f"{name} ({run_id[:8]})"
-        project.add_experiment(
-            Experiment(name=name, duration=result["duration_s"], timepoints=[], data=[])
-        )
-        record["experiment_name"] = name
+        block = self._blocks.get(run_id)
+        if block is not None and block.group is not None:
+            # Its traces join the routine run's data group (see _extract_block).
+            record["experiment_name"] = block.group
+        else:
+            if name in project.experiments:
+                name = f"{name} ({run_id[:8]})"
+            project.add_experiment(
+                Experiment(
+                    name=name, duration=result["duration_s"], timepoints=[], data=[]
+                )
+            )
+            record["experiment_name"] = name
         project.add_calcium_video(
             [pathlib.Path(p) for p in result["paths"]],
             result["fps"],
@@ -427,7 +434,6 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         project.mark_dirty()
         project.update_limits()
         self.recording_added.emit()
-        block = self._blocks.get(run_id)
         if block is None:
             return
         if result["status"] != "completed":
@@ -583,14 +589,26 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._extracting.discard(run_id)
             if self._blocks.pop(run_id, None) is None:
                 return
-            if experiment not in project.experiments:
+            group = block.group or experiment
+            if block.group is None and experiment not in project.experiments:
                 self.block_recording_failed.emit(
                     run_id, "The recording's data group was removed."
                 )
                 return
             try:
-                project.add_data_to_experiment(experiment, trace)
-                project.add_data_to_experiment(experiment, spikes)
+                if block.group is not None:
+                    # One continuous trace and spike dataset for the routine run.
+                    project.place_block_data(
+                        block.group,
+                        [trace, spikes],
+                        block.offset_s,
+                        trace.traces.shape[1] * float(trace.dt),
+                        f"Add recording {experiment}",
+                        replace_spikes=True,
+                    )
+                else:
+                    project.add_data_to_experiment(experiment, trace)
+                    project.add_data_to_experiment(experiment, spikes)
             except Exception as exc:
                 # The routine must hear about it, or it waits for this block forever.
                 logger.exception("Could not add the traces of recording %s", run_id)
@@ -602,9 +620,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self.block_recorded.emit(
                 run_id,
                 {
-                    "trace": f"{experiment} :: {trace.name}",
-                    "spikes": f"{experiment} :: {spikes.name}",
-                    "experiment": experiment,
+                    "trace": f"{group} :: {trace.name}",
+                    "spikes": f"{group} :: {spikes.name}",
+                    "experiment": group,
+                    # This block's own data, timed from the block's start.
+                    "block_trace": trace,
+                    "block_spikes": spikes,
                 },
             )
 

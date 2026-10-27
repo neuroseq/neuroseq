@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -208,6 +209,8 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
             "trace": f"{name} :: dF/F",
             "spikes": f"{name} :: Deconvolved spikes",
             "experiment": name,
+            "block_trace": trace,
+            "block_spikes": spikes,
         },
     ]
     data = s.project.experiments[name].data
@@ -397,6 +400,47 @@ def test_aborted_block_with_a_partial_recording_fails(setup, qtbot):
     with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
         s.connection.recording_ready.emit(result)
     assert "ScanImage aborted the recording" in failed.args[1]
+
+
+def test_blocks_of_a_run_make_one_continuous_trace_and_spike_dataset(
+    setup, qtbot, mocker
+):
+    s = setup
+    _ready_for_blocks(s)
+    mocker.patch.object(
+        controller_module,
+        "extract_recording_dff",
+        side_effect=lambda *_a, **_k: TraceData(
+            "dF/F", np.ones((1, 90)), np.array([0]), "dF/F", 1 / 30
+        ),
+    )
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        side_effect=lambda *_a, **_k: SpikeData(
+            "Deconvolved spikes", np.array([0]), np.array([0.5])
+        ),
+    )
+    experiments_before = set(s.project.experiments)
+    payloads = []
+    for offset in (0.0, 2.0):
+        block = dataclasses.replace(_block(), group="rheobase_run", offset_s=offset)
+        run_id = s.controller.arm_block(block)
+        arguments = s.command.call_args.args[1]
+        with qtbot.waitSignal(s.controller.block_recorded, timeout=5000) as recorded:
+            s.controller.scanimage_recording_ready(
+                _ready_result(run_id, arguments, s.folder)
+            )
+        payloads.append(recorded.args[1])
+    # One data group for the run; no group per recording.
+    assert set(s.project.experiments) - experiments_before == {"rheobase_run"}
+    assert payloads[1]["trace"] == "rheobase_run :: dF/F"
+    assert payloads[1]["block_trace"].traces.shape == (1, 90)
+    trace = s.project.get_data("rheobase_run :: dF/F", TraceData)
+    # The second block (at 2 s) overwrites the first recording's tail.
+    assert trace.traces.shape == (1, 60 + 90)
+    spikes = s.project.get_data("rheobase_run :: Deconvolved spikes", SpikeData)
+    np.testing.assert_allclose(spikes.spike_times, [0.5, 2.5])
 
 
 def test_block_measures_the_functional_channel_of_the_scanimage_tab(

@@ -178,8 +178,13 @@ routines run each block without manual steps:
    project's Cellpose masks (frames lit by the stimulation laser are
    interpolated; F0 is the mean before the block's first stimulus), deconvolve
    it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
-   event of at least the **Spike threshold**, in ΔF/F, is a spike), add both to
-   the recording's data group, and measure the response.
+   event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
+   the response on this block's trace.
+5. Place both in the run's data group, named after the run folder (e.g.
+   `rheobase_2026-10-27_153313`), at the block's time in the stim array. The
+   run thus has one continuous ΔF/F trace and one spike dataset; a block
+   overwrites the previous recording's tail where it starts. Each recording is
+   still listed as imaging data, without a data group of its own.
 
 A recording that has not finished 15 s after the block plus its **Record after
 block** time is aborted and the routine stops (the usual cause is a trigger that

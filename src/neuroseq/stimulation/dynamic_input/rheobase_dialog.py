@@ -1534,7 +1534,10 @@ class RheobaseDialog(SelfRaisingDialog):
             automatic=automatic,
             run_name=self._run_name,
             recording=(
-                self.hardware.block_recording(stim, start, stop, "rheobase")
+                # One data group for the whole run, not one per probe.
+                self.hardware.block_recording(
+                    stim, start, stop, "rheobase", group=self._run_name
+                )
                 if automatic
                 else None
             ),
@@ -1671,6 +1674,9 @@ class RheobaseDialog(SelfRaisingDialog):
         dff = self._dff_readout()
         combo = self.cmb_trace if dff else self.cmb_spikes
         key = "trace" if dff else "spikes"
+        # An automatic block also hands over its own data, timed from its start;
+        # the named dataset is the whole run's, updated in place.
+        block_data = payload.get(f"block_{key}") if isinstance(payload, dict) else None
         if isinstance(payload, dict) and payload.get(key):
             # An automatic block names the datasets extracted from its recording.
             combo.setCurrentText(str(payload[key]))
@@ -1693,7 +1699,7 @@ class RheobaseDialog(SelfRaisingDialog):
             )
             self._reawait_acquisition()
             return
-        if not self._is_fresh_dataset(name):
+        if block_data is None and not self._is_fresh_dataset(name):
             self._append_log(
                 f"'{name}' predates this probe or was already used; import the new "
                 "recording, select it, and click again."
@@ -1704,7 +1710,11 @@ class RheobaseDialog(SelfRaisingDialog):
         onset = self._pulse_onset_seconds - block_start_seconds
         window_ms = self._current_duration_ms + self.spn_response_ms.value()
         if dff:
-            trace = self.project.get_data(name, TraceData)
+            trace = (
+                block_data
+                if isinstance(block_data, TraceData)
+                else self.project.get_data(name, TraceData)
+            )
             if trace is None:
                 self._finish(f"Trace '{name}' is unavailable.")
                 return
@@ -1722,7 +1732,11 @@ class RheobaseDialog(SelfRaisingDialog):
             self._append_log(f"Calcium rise after the probe: {100 * rise:.1f} % ΔF/F.")
             response = int(rise >= self.hardware.response_threshold)
         else:
-            spikes = self.project.get_data(name, SpikeData)
+            spikes = (
+                block_data
+                if isinstance(block_data, SpikeData)
+                else self.project.get_data(name, SpikeData)
+            )
             if spikes is None:
                 self._finish(f"Spike dataset '{name}' is unavailable.")
                 return
