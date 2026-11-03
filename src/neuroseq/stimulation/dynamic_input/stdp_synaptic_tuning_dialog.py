@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import MaxNLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
 from qtpy import QtGui
@@ -943,7 +943,7 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
             for spine in axes.spines.values():
                 spine.set_color(text)
         self.epsp_plot.getFigure().set_facecolor(face)
-        self.pairing_time_axes.xaxis.set_major_locator(MultipleLocator(1))
+        self.pairing_time_axes.xaxis.set_major_locator(MaxNLocator(integer=True))
         self.epsp_axes.tick_params(labelbottom=False)
         self.difference_axes.tick_params(labelbottom=False)
         self.epsp_axes.set_xlabel("")

@@ -8,7 +8,7 @@ from typing import Any
 from typing import cast
 
 import brian2.numpy_ as np
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import MaxNLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
 from qtpy import QtGui
@@ -1849,6 +1849,16 @@ class RheobaseDialog(SelfRaisingDialog):
     def _final_summary(self) -> str:
         if self._rheobase is None:
             return "Duration sweep finished without a rheobase estimate."
+        config = self._backend.config
+        if (
+            config is not None
+            and config.strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+        ):
+            # One duration says nothing about the chronaxie.
+            return (
+                f"Amplitude search finished; threshold at {config.pulse_ms:.6g} ms "
+                f"~= {self._rheobase:.6g} {self._unit_label()}."
+            )
         summary = f"Duration sweep finished; rheobase ~= {self._rheobase:.6g} {self._unit_label()}"
         summary += self._chronaxie_text()
         unreached = self._backend.unreached_durations
@@ -2093,7 +2103,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.rheobase_axes.set_xlabel("Input duration (ms)", color=text)
         self.search_axes.set_title("")
         self.search_axes.set_xlabel("Probe", color=text)
-        self.search_axes.xaxis.set_major_locator(MultipleLocator(1))
+        self.search_axes.xaxis.set_major_locator(MaxNLocator(integer=True))
         self.rheobase_plot.getFigure().set_facecolor(face)
 
     def apply_theme(self, theme: str) -> None:

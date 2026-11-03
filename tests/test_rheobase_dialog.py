@@ -1476,6 +1476,32 @@ def test_bss2_repeats_each_probe_and_takes_the_majority(qtbot) -> None:
     assert len(host.sent) == 3 * len(dialog._samples)
 
 
+def test_fixed_duration_summary_reports_only_its_threshold(qtbot) -> None:
+    """A single duration gives a threshold, not a chronaxie."""
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.spn_pulse_ms.setValue(25.0)
+    dialog.start()
+    for _ in range(20):
+        if not dialog._running:
+            break
+        onset = dialog._pulse_onset_seconds - dialog._block_range[0] * 0.001
+        times = [onset + 0.002] if dialog._pending_amplitude >= 0.5 else []
+        host.complete(
+            {"block_spikes": SpikeData("s", np.ones(len(times)), np.array(times))}
+        )
+    log = dialog.log.toPlainText()
+    assert "Amplitude search finished; threshold at 25 ms ~= " in log
+    assert "chronaxie" not in log.split("Amplitude search finished")[1]
+
+
+def test_probe_axis_labels_stay_readable_over_many_probes(qtbot) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    dialog.search_axes.set_xlim(-1, 52)
+    ticks = dialog.search_axes.xaxis.get_major_locator()()
+    assert len(ticks) <= 12
+    assert all(float(t).is_integer() for t in ticks)
+
+
 def test_summary_reports_a_chronaxie_bound_as_a_bound(qtbot) -> None:
     _project, _editor, dialog = _make_dialog(qtbot)
     backend = dialog._backend

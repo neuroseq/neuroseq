@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from typing import cast
 
 import brian2.numpy_ as np
-from matplotlib.ticker import MultipleLocator
+from matplotlib.ticker import MaxNLocator
 from pyqtgraph.widgets.MatplotlibWidget import MatplotlibWidget
 from qtpy import QtCore
 from qtpy import QtGui
@@ -1654,7 +1654,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.trajectory_axes.set_ylabel(
             "Synaptic weight" if weight else "EPSP (mV)", color=text
         )
-        self.trajectory_axes.xaxis.set_major_locator(MultipleLocator(1))
+        self.trajectory_axes.xaxis.set_major_locator(MaxNLocator(integer=True))
         self.window_plot.getFigure().set_facecolor(face)
 
     def apply_theme(self, theme: str) -> None:
