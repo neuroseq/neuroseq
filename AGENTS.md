@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`src/neuroseq/` contains the installable package and most application code. GUI entry lives in `__main__.py`; visualization widgets and their plotting base classes live in `visualization/`, including `stim_widget.py`. Stimulation editing logic lives in `stimulation/` (with `static_input/` for drawn patterns and `dynamic_input/` for closed-loop routines such as STDP and rheobase), import code in `importers/`, export code in `export/`, ScanImage/SysCon2 connections and the SysCon2 panel in `device_control/`, the chat assistant in `llm/`, and ELiSe helpers in `elise_support/`. Other shared modules, widgets, and dialogs remain directly under `src/neuroseq/`, using names like `*_widget.py` and `*_dialog.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds MkDocs content, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `example_data/`, and `notebooks/` are supporting material, not core package code.
+`src/neuroseq/` contains the installable package and most application code. GUI entry lives in `__main__.py`; visualization widgets and their plotting base classes live in `visualization/`, including `stim_widget.py`. Stimulation editing logic lives in `stimulation/` (with `static_input/` for drawn patterns and `dynamic_input/` for closed-loop routines such as STDP and rheobase), import code in `importers/`, export code in `export/`, ScanImage/SysCon2 connections and the SysCon2 panel in `device_control/`, the chat assistant in `llm/`, and ELiSe helpers in `elise_support/`. Other shared modules, widgets, and dialogs remain directly under `src/neuroseq/`, using names like `*_widget.py` and `*_dialog.py`. `tests/` mirrors that surface area with `test_*.py` files, shared fixtures in `tests/conftest.py`, and sample inputs in `tests/sampledata/`. `docs/` holds Zensical content, configured by `zensical.toml`, with developer notes under `docs/developer/`, user docs under `docs/user_guide/`, and images in `docs/images/`. `external_simulation_example/`, `example_data/`, and `notebooks/` are supporting material, not core package code.
 
 `visualization_support/` contains shared plot navigation, gridlines, selection regions, trace/spatial view state, Cellpose id helpers, neuron selection, and brightness/contrast controls. It must not import `visualization/` (enforced by `tests/test_import_layering.py`); the playback time slider lives in `visualization/`.
 
@@ -35,7 +35,7 @@ Use `uv` for the fastest local workflow:
 - `uv run pytest --cov --cov-report=xml` generates coverage data used in CI.
 - `uv run diff-cover coverage.xml -c pyproject.toml` checks the 75% diff-coverage gate.
 - `prek run -a` or `pre-commit run -a` runs lint, format, mypy, notebook cleanup, and workflow checks.
-- `uv run mkdocs serve` serves the docs locally.
+- `uv run zensical serve` serves the docs locally.
 
 Without `uv`, install in editable mode with `pip install -e . --group dev`.
 

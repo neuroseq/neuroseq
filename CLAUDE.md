@@ -68,7 +68,7 @@ uv run pytest -n auto
 uv run pytest tests/test_gui.py
 
 # Serve docs locally
-uv run mkdocs serve   # → http://127.0.0.1:8000/neuroseq
+uv run zensical serve   # open the URL shown in the terminal
 ```
 
 Pre-commit hooks use **ruff** (lint + format), **mypy**, **prettier**, and **nbstripout**. Run `pre-commit install` to set them up.
