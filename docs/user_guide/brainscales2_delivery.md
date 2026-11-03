@@ -189,6 +189,25 @@ without opening the tab once it is configured.
 - **Stop** ends the search and ignores a probe still running; it does not kill
   the shared helper.
 
+### Starting values
+
+The dialog starts the BrainScaleS-2 target with values measured on the chip
+(see _Rheobase on the chip_ below). They assume **i_offset max** 1000 in this
+tab; with a lower value the routine warns at Start, because most neurons'
+rheobase then lies near or above amplitude 1.
+
+| Strategy                          | Amplitudes              | Pulse duration            |
+| --------------------------------- | ----------------------- | ------------------------- |
+| Fixed duration, varying amplitude | 0.2–1.0, tolerance 0.02 | 25 ms                     |
+| Fixed amplitude, varying duration | 0.8                     | 1–30 ms, tolerance 0.5 ms |
+| Amplitude and duration            | 0.2–1.0, tolerance 0.02 | 1–50 ms, tolerance 1 ms   |
+
+All three use a 10 ms recovery, a 5 ms post-pulse window and 3 repeats per
+probe. Every probe starts from rest and nothing spikes after the current
+switches off, so a longer recovery or window only adds hardware runs. The
+values are kept per strategy, so changing one strategy's values leaves the
+others as they were.
+
 ## Debug log
 
 The **Debug log** box at the bottom of the tab records every step with a
@@ -258,3 +277,26 @@ Measured on `hxcube7fpga0chip57_1` (quiggeldy.bioai.eu:11750, October 2026):
 - Neurons differ: at the same `i_offset` they fire at different rates
   (2–9 spikes per 100 ms pulse at `i_offset` 500 in the staircase test), as
   expected for analog circuits.
+
+### Rheobase on the chip
+
+Single constant-current pulses on neurons 0–15 of `hxcube7fpga0chip57_1`
+(November 2026, speed-up 1000, two runs each; times are biological). The
+table gives the share of neuron runs that spiked:
+
+| Pulse   | i_offset 300 | 400  | 500  | 600  | 800  | 1000 |
+| ------- | ------------ | ---- | ---- | ---- | ---- | ---- |
+| 2 ms    | 0.03         | 0.03 | 0.12 | 0.03 | 0.19 | 0.34 |
+| 5 ms    | 0            | 0.12 | 0.28 | 0.38 | 0.47 | 0.78 |
+| 10 ms   | 0            | 0.09 | 0.50 | 0.81 | 0.94 | 1    |
+| 16.7 ms | 0.06         | 0.34 | 0.84 | 1    | 1    | 1    |
+| 25 ms   | 0.06         | 0.44 | 0.94 | 1    | 1    | 1    |
+| 200 ms  | 0.06         | 0.47 | 0.94 | 1    | 1    | 1    |
+
+- Nothing fired at `i_offset` 250 or below. The long-pulse rheobase of single
+  neurons lies between 350 and 600 (neuron 0: 400–500).
+- From about 25 ms on, a longer pulse no longer lowers the rheobase, so a
+  25 ms pulse is enough to find it.
+- At 800, about twice the rheobase, most neurons need 5–10 ms to fire, which
+  puts the shortest firing duration well inside 1–30 ms.
+- Near threshold the same neuron can fire in one run and not the next.

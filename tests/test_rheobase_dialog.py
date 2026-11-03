@@ -1109,6 +1109,7 @@ def test_syscon2_starts_with_slice_timing_and_one_amplitude_search(qtbot) -> Non
         dialog.spn_max_pulse_ms.value(),
         dialog.spn_recovery_ms.value(),
         dialog.spn_response_ms.value(),
+        dialog.spn_duration_tolerance_ms.value(),
     )
     assert timing == pytest.approx(dialog.SYSCON2_TIMING_MS)
     assert (
@@ -1218,6 +1219,54 @@ def test_bss2_target_needs_a_host(qtbot) -> None:
     assert not dialog.hardware.isVisibleTo(dialog)
     assert not dialog.btn_data_imported.isVisibleTo(dialog)
     assert not dialog.cmb_trace.isEnabled()
+
+
+def test_bss2_starts_with_chip_timing_for_each_strategy(qtbot) -> None:
+    """A fixed pulse is long enough for the long-pulse rheobase; duration
+    searches start from 1 ms. The user's values stay with their strategy."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
+    dialog.refresh()
+    brian2_pulse = dialog.spn_pulse_ms.value()
+    dialog.cmb_target.setCurrentText(dialog.BSS2_TARGET)
+
+    def timing() -> tuple[float, ...]:
+        return (
+            dialog.spn_pulse_ms.value(),
+            dialog.spn_max_pulse_ms.value(),
+            dialog.spn_recovery_ms.value(),
+            dialog.spn_response_ms.value(),
+            dialog.spn_duration_tolerance_ms.value(),
+        )
+
+    for strategy, expected in dialog.BSS2_TIMING_MS.items():
+        dialog.cmb_sweeping_strategy.setCurrentText(strategy)
+        assert timing() == pytest.approx(expected)
+    dialog.cmb_sweeping_strategy.setCurrentText(
+        dialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+    )
+    dialog.spn_pulse_ms.setValue(40.0)
+    dialog.cmb_sweeping_strategy.setCurrentText(
+        dialog.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
+    )
+    assert dialog.spn_pulse_ms.value() == 1.0
+    dialog.cmb_sweeping_strategy.setCurrentText(
+        dialog.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+    )
+    assert dialog.spn_pulse_ms.value() == 40.0
+    dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
+    assert dialog.spn_pulse_ms.value() == brian2_pulse
+
+
+def test_bss2_warns_when_i_offset_max_is_too_low_to_fire(qtbot) -> None:
+    _project, _editor, dialog, host = _bss2_dialog(qtbot)
+    dialog.start()
+    assert "Set i_offset max to 1000" in dialog.log.toPlainText()
+    host.settings = dataclasses.replace(host.settings, i_offset_max=1000)
+    dialog.stop()
+    dialog.log.clear()
+    dialog.start()
+    assert "Set i_offset max to 1000" not in dialog.log.toPlainText()
 
 
 def test_bss2_search_converges_from_chip_spikes(qtbot) -> None:
@@ -1351,7 +1400,7 @@ def test_each_target_keeps_its_own_amplitudes(qtbot) -> None:
         dialog.spn_min_amplitude.value(),
         dialog.spn_max_amplitude.value(),
         dialog.spn_fixed_amplitude.value(),
-    ) == dialog.HARDWARE_AMPLITUDES[:3]
+    ) == dialog.BSS2_AMPLITUDES[:3]
     assert dialog.lbl_units.text() == "× i_offset max"
     dialog.spn_max_amplitude.setValue(0.7)
     dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)

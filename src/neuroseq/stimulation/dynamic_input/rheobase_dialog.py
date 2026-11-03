@@ -556,11 +556,29 @@ class RheobaseDialog(SelfRaisingDialog):
     HARDWARE_AMPLITUDES = (0.1, 1.0, 0.5, 0.05)
     #: Trials per probe a hardware target starts with (its responses are noisy).
     HARDWARE_REPEATS = 3
-    #: Timing (pulse, max pulse, recovery, post-pulse window; ms) SysCon2 starts
-    #: with: a pulse spans at least one spiral (16.7 ms), the recovery leaves a
-    #: calcium baseline of several frames, and the window covers the indicator's
-    #: rise over a few 30 Hz frames.
-    SYSCON2_TIMING_MS = (16.7, 100.0, 1000.0, 300.0)
+    #: Amplitudes (min, max, fixed, tolerance) BrainScaleS-2 starts with, as
+    #: fractions of an i_offset max of 1000. Measured on hxcube7fpga0chip57_1
+    #: (November 2026, 16 neurons): long pulses fire from i_offset 350-600, and 800
+    #: is about twice that, where the shortest firing pulse is a few ms.
+    BSS2_AMPLITUDES = (0.2, 1.0, 0.8, 0.02)
+    #: i_offset max below which the BrainScaleS-2 rheobase of most neurons lies
+    #: near or above amplitude 1.
+    BSS2_MIN_I_OFFSET_MAX = 800
+    #: Timing (pulse, max pulse, recovery, post-pulse window, duration tolerance;
+    #: ms) SysCon2 starts with: a pulse spans at least one spiral (16.7 ms), the
+    #: recovery leaves a calcium baseline of several frames, and the window covers
+    #: the indicator's rise over a few 30 Hz frames.
+    SYSCON2_TIMING_MS = (16.7, 100.0, 1000.0, 300.0, 1.0)
+    #: Timing BrainScaleS-2 starts with, per sweeping strategy. Each probe starts
+    #: from rest and no spike follows the pulse, so recovery and window are short.
+    #: A fixed 25 ms pulse already finds the long-pulse rheobase (longer pulses
+    #: fire at the same i_offset); the duration searches start at 1 ms, which
+    #: rarely fires even at full current.
+    BSS2_TIMING_MS = {
+        FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY: (25.0, 50.0, 10.0, 5.0, 0.5),
+        FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY: (1.0, 30.0, 10.0, 5.0, 0.5),
+        AMPLITUDE_AND_DURATION_STRATEGY: (1.0, 50.0, 10.0, 5.0, 1.0),
+    }
 
     def __init__(
         self,
@@ -759,17 +777,21 @@ class RheobaseDialog(SelfRaisingDialog):
             self._target_defaults,
             self.cmb_target.currentText(),
         )
-        #: Timing settings per target: slice cultures need longer pulses and
-        #: recoveries than a model.
+        #: Timing settings per target and sweeping strategy: slice cultures need
+        #: longer pulses and recoveries than a model, and a duration search starts
+        #: shorter than a fixed pulse.
+        timing_spins = (
+            self.spn_pulse_ms,
+            self.spn_max_pulse_ms,
+            self.spn_recovery_ms,
+            self.spn_response_ms,
+            self.spn_duration_tolerance_ms,
+        )
+        self._simulation_timing_ms = tuple(spin.value() for spin in timing_spins)
         self._target_timing = PerTargetValues(
-            (
-                self.spn_pulse_ms,
-                self.spn_max_pulse_ms,
-                self.spn_recovery_ms,
-                self.spn_response_ms,
-            ),
+            timing_spins,
             self._target_timing_defaults,
-            self.cmb_target.currentText(),
+            self._timing_key(),
         )
         self.cmb_target.currentTextChanged.connect(self._on_target_changed)
         self.cmb_spikes = QtWidgets.QComboBox(self)
@@ -1035,6 +1057,7 @@ class RheobaseDialog(SelfRaisingDialog):
         strategy = self.cmb_sweeping_strategy.currentText()
         fixed_amplitude = strategy == self.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
         fixed_duration = strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
+        self._target_timing.switch(self._timing_key())
         self.lbl_amplitude_range.setVisible(not fixed_amplitude)
         self.spn_min_amplitude.setVisible(not fixed_amplitude)
         self.spn_max_amplitude.setVisible(not fixed_amplitude)
@@ -1213,23 +1236,39 @@ class RheobaseDialog(SelfRaisingDialog):
         trials on hardware; Brian2 keeps the values it was built with."""
         if target == self.SIMULATION_TARGET:
             return None
-        return (*self.HARDWARE_AMPLITUDES, self.HARDWARE_REPEATS)
+        amplitudes = (
+            self.BSS2_AMPLITUDES
+            if target == self.BSS2_TARGET
+            else self.HARDWARE_AMPLITUDES
+        )
+        return (*amplitudes, self.HARDWARE_REPEATS)
 
-    def _target_timing_defaults(self, target: str) -> tuple[float, ...] | None:
-        """Timing a target starts with: SysCon2 its own (cells in a slice), the
-        others keep the values shown."""
-        return self.SYSCON2_TIMING_MS if target == self.SYSCON2_TARGET else None
+    def _timing_key(self, target: str | None = None) -> str:
+        """Timing is kept per target and sweeping strategy."""
+        if target is None:
+            target = self.cmb_target.currentText()
+        return f"{target}\n{self.cmb_sweeping_strategy.currentText()}"
+
+    def _target_timing_defaults(self, key: str) -> tuple[float, ...]:
+        """Timing a target starts with: the hardware targets their own (cells in a
+        slice, the chip), Brian2 the values the dialog was built with."""
+        target, strategy = key.split("\n")
+        if target == self.SYSCON2_TARGET:
+            return self.SYSCON2_TIMING_MS
+        if target == self.BSS2_TARGET:
+            return self.BSS2_TIMING_MS[strategy]
+        return self._simulation_timing_ms
 
     def _on_target_changed(self, target: str) -> None:
         """Keep each target's amplitudes and repeats: Brian2 uses stim units, the
         hardware targets fractions (0-1), so one set never fits both."""
-        if target == self.SYSCON2_TARGET and not self._target_timing.visited(target):
+        if target == self.SYSCON2_TARGET and not self._target_values.visited(target):
             # One amplitude search, not one per duration (each probe is a recording).
             self.cmb_sweeping_strategy.setCurrentText(
                 self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
             )
         self._target_values.switch(target)
-        self._target_timing.switch(target)
+        self._target_timing.switch(self._timing_key(target))
         self.refresh()
         self._update_target_controls()
 
@@ -1397,6 +1436,13 @@ class RheobaseDialog(SelfRaisingDialog):
             "constant-current block on the chip, starting from rest; stim neuron i is "
             "hardware neuron i, and its spikes after the pulse are counted."
         )
+        if self._bss2_settings.i_offset_max < self.BSS2_MIN_I_OFFSET_MAX:
+            self._append_log(
+                f"Warning: most neurons need an i_offset of 350-600 to fire, so with "
+                f"i_offset max {self._bss2_settings.i_offset_max} the rheobase lies "
+                "near or above amplitude 1. Set i_offset max to 1000 in the "
+                "BrainScaleS-2 tab."
+            )
         self._begin_search(clear_log=False)
 
     def _begin_search(self, *, clear_log: bool) -> None:
