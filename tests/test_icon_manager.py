@@ -82,6 +82,17 @@ def test_icon_manager_forgets_deleted_targets_without_theme_change(
     assert owner_ref() is None
 
 
+def test_icon_manager_can_be_collected_before_its_targets(qtbot: QtBot) -> None:
+    with qtbot.captureExceptions() as exceptions:
+        manager = IconManager()
+        action = QtWidgets.QAction("x")
+        manager.set_action_icon(action, "mdi6.file")
+        del manager, action
+        gc.collect()
+        qtbot.wait(10)
+    assert not exceptions
+
+
 def test_icon_manager_widget_and_window_icons(qtbot: QtBot) -> None:
     manager = IconManager()
     button = QtWidgets.QPushButton()

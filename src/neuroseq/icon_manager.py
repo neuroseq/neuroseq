@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import weakref
 from collections.abc import Callable
 
 import qtawesome as qta
@@ -49,8 +50,16 @@ class IconManager:
         if destroyed is not None:
             # Forget the target once Qt deletes it: the entry otherwise keeps
             # its Python wrapper, and everything its slots capture, alive.
+            # The manager is held weakly, so it can be garbage collected while
+            # its targets still exist.
             key = id(target)
-            destroyed.connect(lambda *_: self._forget(key))
+            manager = weakref.ref(self)
+
+            def forget(*_: object) -> None:
+                if (alive := manager()) is not None:
+                    alive._forget(key)
+
+            destroyed.connect(forget)
 
     def _forget(self, key: int) -> None:
         self._entries = [entry for entry in self._entries if id(entry[0]) != key]
