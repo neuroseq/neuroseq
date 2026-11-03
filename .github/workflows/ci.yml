@@ -30,6 +30,8 @@ jobs:
         uses: pyvista/setup-headless-display-action@v5
         with:
           qt: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y mesa-vulkan-drivers
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-file: environment.yml
@@ -58,6 +60,8 @@ jobs:
         uses: pyvista/setup-headless-display-action@v5
         with:
           qt: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y mesa-vulkan-drivers
       - run: uv run pytest -sv --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
