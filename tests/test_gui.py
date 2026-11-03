@@ -4320,7 +4320,7 @@ def test_gui_simulate_external_model(
         MockAddExperimentDataDialog,
     )
     gui.btn_do_external_simulation_clicked()
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=30000)
     simulation_time_ms = simulation_time_secs * 1000
     # stim array should be padded to simulation time + default padding of 5 secs
     assert (

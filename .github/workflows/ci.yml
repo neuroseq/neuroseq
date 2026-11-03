@@ -26,6 +26,10 @@ jobs:
         shell: bash -leo pipefail {0}
     steps:
       - uses: actions/checkout@v7
+      - if: runner.os == 'Linux'
+        uses: pyvista/setup-headless-display-action@v5
+        with:
+          qt: true
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-file: environment.yml
@@ -50,6 +54,10 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v7
+      - if: runner.os == 'Linux'
+        uses: pyvista/setup-headless-display-action@v5
+        with:
+          qt: true
       - run: uv run pytest -sv --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
