@@ -101,7 +101,8 @@ def test_compute_cycle_performance_periodic_signal_is_optimal() -> None:
     assert shifts.shape == (3,)
     np.testing.assert_array_almost_equal(mses, np.zeros(3), decimal=8)
     np.testing.assert_array_almost_equal(corrs, np.ones(3), decimal=8)
-    np.testing.assert_array_equal(shifts, np.zeros(3, dtype=np.int64))
+    # Shifts should be zero - modulo the period of 64
+    np.testing.assert_array_equal(shifts % 64, np.zeros(3, dtype=np.int64))
 
 
 def test_compute_cycle_performance_recovers_time_shifted_cycle() -> None:
