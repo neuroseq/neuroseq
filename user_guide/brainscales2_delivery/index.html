@@ -1,0 +1,1841 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ssciwr.github.io/neuroseq/user_guide/brainscales2_delivery/">
+      
+      
+        <link rel="prev" href="../multiphoton_holographic_stimulation/">
+      
+      
+        <link rel="next" href="../chat_assistant/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../images/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Deliver stimuli to BrainScaleS-2 - Neuroseq</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#deliver-stimuli-to-brainscales-2" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Neuroseq" class="md-header__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Neuroseq
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Deliver stimuli to BrainScaleS-2
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Neuroseq" class="md-nav__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Neuroseq
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/windows_shortcut/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows desktop shortcut
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stdp_synaptic_tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design dynamic input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run_external_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run External Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analysis_and_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis tools and plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations_and_experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting simulations and experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_igor2_waves/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Igor2 Waves
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_imaging_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Imaging Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanimage_acquisition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ScanImage Acquisition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export_patch_clamp_stimuli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export stimuli for patch clamp recordings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multiphoton_holographic_stimulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiphoton Holographic Stimulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deliver stimuli to BrainScaleS-2
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deliver stimuli to BrainScaleS-2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Input modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#constant-current-stim-array-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constant current (stim array) — default
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spike-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spike input
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#time-base-speed-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time base (speed-up)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-and-readback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery and readback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rheobase-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rheobase routine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debug-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verified-against-the-ebrains-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified against the EBRAINS container
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verified against the EBRAINS container">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#start-up-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start-up time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results-on-the-chip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results on the chip
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat_assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-App LLM Assistant (Experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer_installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/custom_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation of Custom Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/analysis_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/project_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project data history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/miscellaneous/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Miscellaneous
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../common_issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How it works
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input modes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Input modes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#constant-current-stim-array-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Constant current (stim array) — default
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spike-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spike input
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#time-base-speed-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Time base (speed-up)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#delivery-and-readback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Delivery and readback
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#rheobase-routine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rheobase routine
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debug-log" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Debug log
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#verified-against-the-ebrains-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Verified against the EBRAINS container
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Verified against the EBRAINS container">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#start-up-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start-up time
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#results-on-the-chip" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Results on the chip
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="deliver-stimuli-to-brainscales-2">Deliver stimuli to BrainScaleS-2</h1>
+<p>The <strong>Stimulation setup</strong> pane (View → Show Stimulation setup) has one tab per
+stimulus-delivery target. Next to <strong>SysCon2 (HOLO4D)</strong>, which drives the
+holographic stimulation rig, the <strong>BrainScaleS-2</strong> tab delivers the current
+stim array to the BrainScaleS-2 (BSS-2) accelerated neuromorphic chip and adds
+the chip's response to the project as a new data group.</p>
+<p>!!! note "Verified on hardware"</p>
+<div class="language-text highlight"><pre><span></span><code>Connection and constant-current delivery work on the real system (chip
+`hxcube7fpga0chip57_1` through `quiggeldy.bioai.eu:11750`, October 2026):
+a 10-neuron staircase made every neuron fire only during its own pulse,
+with the membrane of the recorded neuron read back over the whole run.
+See [Results on the chip](#results-on-the-chip).
+</code></pre></div>
+<h2 id="how-it-works">How it works</h2>
+<p>NeuroSeq does not import the BSS-2 software stack (<code>pynn_brainscales</code>,
+<code>dlens_vx_v3</code>); it only exists inside the EBRAINS container image. On
+<strong>Connect</strong>, NeuroSeq starts a small helper script inside the container:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>singularity<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>--bind<span class="w"> </span>&lt;neuroseq&gt;/resources/bss2<span class="w"> </span><span class="o">[</span>--app<span class="w"> </span>&lt;app&gt;<span class="o">]</span><span class="w"> </span>&lt;image&gt;<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s1">'{ export SYSTEMNAME="ebrainslab";</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="s1">             source /esd/vendor/spack/share/spack/setup-env.sh;</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="s1">             spack env activate esd; } 1&gt;&amp;2 &amp;&amp; exec python -u neuroseq_bss2_helper.py'</span>
+</span></code></pre></div>
+<p>NeuroSeq and the helper exchange JSON lines over stdin/stdout. The helper
+opens a connection to the chip through <em>quiggeldy</em> (the BSS-2 job server)
+and runs the network with <code>pynn_brainscales</code>. The connection is shared by all
+open project tabs, but each tab only receives the results of its own runs.</p>
+<h2 id="setup">Setup</h2>
+<ol>
+<li><strong>Get the container image.</strong> On lab machines the image is
+   <code>/containers/stable/latest</code> (use the app name <code>dls</code>). Elsewhere, download the
+   EBRAINS image, for example:</li>
+</ol>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>tmp
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">SINGULARITY_TMPDIR</span><span class="o">=</span><span class="nv">$PWD</span>/tmp<span class="w"> </span>singularity<span class="w"> </span>pull<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span>docker://docker-registry.ebrains.eu/esd/master/image:lab_latest.oci
+</span></code></pre></div>
+<p>and choose the resulting <code>.sif</code> file with <strong>Browse…</strong> (leave <strong>Container
+   app</strong> empty for such an image unless it defines apps).</p>
+<ol>
+<li>
+<p><strong>Choose a setup.</strong> The picker always lists the quiggeldy instances on
+   <code>quiggeldy.bioai.eu</code>, which run different software versions:
+   <strong>11717 (stable)</strong>, <strong>11750 (experimental)</strong> and <strong>11780 (special)</strong>. They
+   are reachable only from allow-listed addresses; ask the BSS-2 team to add
+   your computer's IP. With the EBRAINS <code>lab_latest</code> image only the
+   <strong>experimental</strong> instance accepted the connection (October 2026); it is
+   the default. The others fail with <code>Could not submit request</code>. <strong>Refresh</strong>
+   keeps the selected instance when it is still listed. <strong>Refresh</strong> additionally downloads
+   the EBRAINS setup list
+   (<code>https://quiggeldy.bioai.eu/nmpi/quiggeldy_setups.csv</code>, columns
+   <code>Host,Port,Identifier</code>); its default entry is the one the EBRAINS examples
+   pick: <code>sha256(user name) mod number of setups</code>, where the user name is
+   <code>$USER</code>. Host, port and expected identifier stay editable.</p>
+</li>
+<li>
+<p><strong>Token (optional).</strong> From an allow-listed IP, the quiggeldy instances
+   accept the connection with your user name alone; leave <strong>Token</strong> empty.
+   For token-based access (e.g. through EBRAINS), paste the output of
+   <code>clb_oauth.get_token()</code> (EBRAINS Lab) into <strong>Token</strong>. If the field is
+   empty, an existing <code>QUIGGELDY_TOKEN</code> environment variable is used. The
+   token is kept in memory
+   for this session only: it is passed to the container through the helper's
+   environment (<code>QUIGGELDY_TOKEN</code>, also with the <code>SINGULARITYENV_</code> and <code>APPTAINERENV_</code> prefixes), never
+   on the command line, and it is not saved in the settings or written to the
+   log. Anything that looks like the token in helper output is masked.</p>
+</li>
+<li>
+<p><strong>Connect.</strong> The first activation of the container's software environment
+   takes around 50 seconds; later connections start in under a second (see
+   <a href="#start-up-time">Start-up time</a>). The status line reports each step. Once quiggeldy
+   answers, <strong>Connected chip</strong> shows the chip identifier. If it differs from the
+   selected setup's identifier, the status says so.</p>
+</li>
+</ol>
+<p>The tab settings (image, app, setup, input mode and its parameters, recorded
+neuron, speed-up) are saved for next time; the token is not.</p>
+<h2 id="input-modes">Input modes</h2>
+<p><strong>Neurons</strong> sets how many hardware neurons are driven; <em>auto</em> uses one neuron
+per stim channel. Stim channel <code>i</code> drives hardware neuron <code>i</code>. Extra channels
+are dropped and missing ones receive no input, both with a warning. A
+single-channel stim array drives every neuron. <strong>Max neurons</strong> (default 512, one
+chip) caps the count.</p>
+<h3 id="constant-current-stim-array-default">Constant current (stim array) — default</h3>
+<p>The stim array is split into segments wherever any channel's value changes;
+runs of identical samples form one segment. For each segment and neuron the
+helper sets</p>
+<ul>
+<li><code>constant_current_enable = value &gt; 0</code>, and</li>
+<li><code>constant_current_i_offset = round(clip(value / value_at_max, 0, 1) * max_i_offset)</code></li>
+</ul>
+<p>and runs the segment as its own hardware run (<code>pynn.reset()</code> before every
+segment but the first, then <code>pynn.run(duration)</code>), reading spikes and membrane
+voltage right after it and shifting them to the segment's start time. Each
+segment therefore starts from the neurons' resting state. (Chaining segments
+with <code>RunCommand.APPEND</code>, as in the AdEx tutorial, executed and recorded only
+the first chained part on the chip.) <strong>Max i_offset</strong> is in hardware
+units (0–1022); <strong>Stim value at max</strong> defaults to the array maximum. Segments
+that become identical after rounding are merged. Every segment costs about 0.5 s of hardware time (20 segments ≈ 12 s); very many segments (more than 1000) are allowed but slow, so the confirmation warns about them.</p>
+<h3 id="spike-input">Spike input</h3>
+<p>Spike trains are fed through a <code>SpikeSourceArray</code> population, one source per
+hardware neuron, with one-to-one excitatory projections of the chosen
+<strong>Weight</strong> (0–63). The spike source is either</p>
+<ul>
+<li><strong>From stim array</strong>: the stim array is sampled every <strong>Event interval</strong>
+  (biological ms); a spike is emitted wherever a channel exceeds
+  <strong>Threshold</strong>, as in the PyNN example model, or</li>
+<li><strong>From project spike data</strong>: a spike dataset from a data group of the
+  project; neuron <code>i</code>'s spikes drive hardware neuron <code>i</code>.</li>
+</ul>
+<h2 id="time-base-speed-up">Time base (speed-up)</h2>
+<p>BSS-2 runs about 1000 times faster than biological neurons, and
+<code>pynn_brainscales</code> run durations and recorded times are in hardware
+milliseconds. NeuroSeq works in biological seconds and converts with the
+<strong>Speed-up</strong> factor (default 1000):</p>
+<ul>
+<li>hardware ms = biological s × 1000 / speed-up — 1 s of stimulus is a 1 ms run;</li>
+<li>biological s = hardware ms / 1000 × speed-up — a spike at 0.5 ms on the chip is
+  stored at 0.5 s.</li>
+</ul>
+<h2 id="delivery-and-readback">Delivery and readback</h2>
+<p><strong>Deliver current stim array</strong> shows a summary (neurons, segments or spikes,
+biological and hardware duration, recorded neuron) and asks for confirmation.
+While the run executes, the status line shows the helper's progress. The
+neurons are <code>HXNeuron</code>s configured from the chip's nightly calibration (as in
+the BrainScaleS-2 demos), which the helper loads once per connection with
+<code>pynn.helper.chip_from_nightly()</code>, falling back to the EBRAINS calibration
+download for the connected chip. A running BSS-2 run keeps the project tab
+from closing.</p>
+<p>When the run finishes, a data group named <code>BSS-2 &lt;stim name&gt; &lt;date time&gt;</code> is
+added (undoable with Edit → Undo) containing</p>
+<ul>
+<li><strong>BSS-2 spikes</strong>: spikes of all driven neurons (hardware neuron indices,
+  biological time), and</li>
+<li><strong>BSS-2 membrane voltage (neuron <em>n</em>)</strong>: the membrane voltage of the neuron
+  chosen under <strong>Record v of neuron</strong>. BSS-2 has a single MADC, so only one
+  neuron's voltage is recorded per run. Its irregular samples are resampled to
+  a regular time step; the values are raw MADC readings (<code>a.u.</code>).</li>
+</ul>
+<p><strong>Stop</strong> terminates the helper. A run already sent to the chip cannot be
+recalled; its results are discarded and you have to reconnect.</p>
+<h2 id="rheobase-routine">Rheobase routine</h2>
+<p>The <strong>Design dynamic input → rheobase</strong> routine can run its probes on the chip:
+choose the target <strong>BrainScaleS-2 (neuromorphic)</strong>.
+The dialog shows the connection state under the target; <strong>Connect</strong> connects
+with this tab's settings (container image, setup, token), so a routine can start
+without opening the tab once it is configured.</p>
+<ul>
+<li>Each probe block (recovery, pulse, post-pulse window) is delivered as
+  constant current, like <strong>Deliver</strong> does, with the tab's settings: container,
+  setup, speed-up and <strong>i_offset max</strong>.</li>
+<li>Probe amplitudes are fractions (0-1) of <strong>i_offset max</strong>, so a probe of 0.5
+  drives half of it, whatever the other probes are. Stim neuron <em>i</em> is
+  hardware neuron <em>i</em>, and the probed neuron's membrane voltage is recorded.</li>
+<li>All probes of a run go into one data group, <code>BSS-2 rheobase &lt;date time&gt;</code>,
+  each placed at its probe's time in the input array, so the spikes and the
+  membrane voltage line up with the stimuli. The routine counts the probed
+  neuron's spikes in the pulse plus the post-pulse window and continues its
+  search.</li>
+<li>Because each constant-current segment is its own hardware run starting from
+  rest (see <em>Constant current</em> above), every probe starts from rest too; spikes
+  after the current switches off are not recorded.</li>
+<li>The chip's response is noisy near threshold (the same amplitude can spike
+  in one run and not the next). <strong>Repeats per probe</strong> (3 by default on the
+  hardware targets, 1 for Brian2) runs every amplitude several times and counts
+  it as a response when most runs spike; the log lists each run's spikes.</li>
+<li>If even the maximum amplitude cannot make a short pulse fire, the routine
+  keeps the thresholds it found and marks that duration in the plot (red
+  triangle). It goes on locating the chronaxie when the maximum is at least
+  twice the rheobase, and otherwise finishes with the rheobase and says how far
+  to raise the maximum. Raising <strong>i_offset max</strong> in this tab (up to 1022) gives
+  the fractions more current.</li>
+<li><strong>Stop</strong> ends the search and ignores a probe still running; it does not kill
+  the shared helper.</li>
+</ul>
+<h2 id="debug-log">Debug log</h2>
+<p>The <strong>Debug log</strong> box at the bottom of the tab records every step with a
+timestamp: the exact <code>singularity exec …</code> launch command and the variables
+NeuroSeq passes into the container, the helper process start and exit code,
+everything the container prints while its software environment activates,
+the helper's Python/package versions and quiggeldy settings, and (with
+<strong>Show protocol traffic</strong> on) every message exchanged with the helper, with
+arrays summarised by type and shape.</p>
+<p>The EBRAINS token never appears in the log: NeuroSeq and the helper only
+report whether it was given and how many characters it has.</p>
+<p>To report a connection problem, click <strong>Copy log</strong>. It copies the log
+together with the NeuroSeq version, host, Singularity version, connection
+state and the tab's settings, ready to paste into a message. The text in the
+log can also be selected and copied directly. <strong>Clear</strong> empties the log.</p>
+<h2 id="verified-against-the-ebrains-container">Verified against the EBRAINS container</h2>
+<p>Checked in <code>image_lab_latest.oci.sif</code> (Python 3.11, PyNN 0.12.3, neo 0.13.3):</p>
+<ul>
+<li><code>pynn.run(runtime)</code> durations are hardware milliseconds; consecutive runs
+  need <code>pynn.reset()</code> in between.</li>
+<li><code>constant_current_enable</code>, <code>constant_current_i_offset</code> (and
+  <code>constant_current_type</code>) are <code>HXNeuron</code> parameters; <code>CalibHXNeuronCoba</code> does
+  not have them, so delivery uses <code>HXNeuron</code> on top of the nightly calibration
+  (<code>pynn.setup(initial_config=calib)</code>).</li>
+<li><code>HXNeuron</code> records <code>spikes</code>, <code>v</code>, <code>exc_synin</code>, <code>inh_synin</code>, <code>adaptation</code>;
+  <code>SpikeSourceArray</code>, <code>OneToOneConnector</code> and <code>StaticSynapse</code> exist.</li>
+<li><code>hxcomm.ManagedConnection().get_unique_identifier()</code> returns a list; the
+  first entry is the chip identifier.</li>
+<li>The helper starts through NeuroSeq's launch command and answers <code>ping</code>.</li>
+</ul>
+<h3 id="start-up-time">Start-up time</h3>
+<ul>
+<li>Without <code>squashfuse</code> on the host, Singularity unpacks the whole <code>.sif</code> on
+  every start (about 1.5 minutes). Build an unpacked copy once and choose that
+  folder as the container image instead (the container then starts in about
+  1 s):</li>
+</ul>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>singularity<span class="w"> </span>build<span class="w"> </span>--sandbox<span class="w"> </span>image_lab_latest_sandbox<span class="w"> </span>image_lab_latest.oci.sif
+</span></code></pre></div>
+<ul>
+<li>Activating the container's spack environment takes about 50 s. NeuroSeq
+  caches the activation (<code>spack env activate --sh</code>) per image in the user
+  cache folder (<code>~/.cache/neuroseq/bss2</code> on Linux), so only the first
+  connection after installing or updating an image pays this; later
+  connections start in seconds.</li>
+</ul>
+<h2 id="results-on-the-chip">Results on the chip</h2>
+<p>Measured on <code>hxcube7fpga0chip57_1</code> (quiggeldy.bioai.eu:11750, October 2026):</p>
+<ul>
+<li><strong>Chained APPEND runs do not work with this software version</strong>: only the
+  first chained part was executed and recorded (membrane data stopped after
+  it; later pulses produced no spikes), whether only <code>constant_current_enable</code>
+  or also <code>constant_current_i_offset</code> changed between parts. Delivery
+  therefore runs one hardware run per segment.</li>
+<li><strong>One run per segment works</strong>: each neuron fires only while its current is
+  on, and <code>constant_current_i_offset</code> can change from segment to segment
+  (one neuron: 200 → 0 spikes, 500 → 5, 1000 → 15 spikes per 0.1 ms).</li>
+<li>Recording <code>spikes</code> of the population and <code>v</code> of one neuron in the same run
+  works; the membrane is sampled every ≈32 ns of hardware time
+  (≈32 µs biological at speed-up 1000).</li>
+<li>Neurons differ: at the same <code>i_offset</code> they fire at different rates
+  (2–9 spikes per 100 ms pulse at <code>i_offset</code> 500 in the staircase test), as
+  expected for analog circuits.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1719 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ssciwr.github.io/neuroseq/user_guide/importing_imaging_data/">
+      
+      
+        <link rel="prev" href="../importing_igor2_waves/">
+      
+      
+        <link rel="next" href="../scanimage_acquisition/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../images/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Importing Imaging Data - Neuroseq</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#importing-imaging-data" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Neuroseq" class="md-header__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Neuroseq
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Importing Imaging Data
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Neuroseq" class="md-nav__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Neuroseq
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/windows_shortcut/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows desktop shortcut
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stdp_synaptic_tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design dynamic input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run_external_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run External Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analysis_and_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis tools and plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations_and_experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting simulations and experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_igor2_waves/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Igor2 Waves
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Imaging Data
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Imaging Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cellpose-segmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cellpose segmentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cellpose segmentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dialog-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dialog sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-overlay-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell overlay widget
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showing-one-channel-of-a-movie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Showing one channel of a movie
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving-imaging-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving imaging data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generating-test-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating test data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-acceleration-cellpose-suite2p" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU acceleration (Cellpose &amp; Suite2p)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-calcium-imaging-tiffs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw calcium imaging TIFFs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suite2p-calcium-imaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suite2p calcium imaging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#patch-clamp-electrophysiology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patch-clamp electrophysiology
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanimage_acquisition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ScanImage Acquisition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export_patch_clamp_stimuli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export stimuli for patch clamp recordings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multiphoton_holographic_stimulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiphoton Holographic Stimulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../brainscales2_delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deliver stimuli to BrainScaleS-2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat_assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-App LLM Assistant (Experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer_installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/custom_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation of Custom Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/analysis_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/project_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project data history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/miscellaneous/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Miscellaneous
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../common_issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#cellpose-segmentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cellpose segmentation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cellpose segmentation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dialog-sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dialog sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cell-overlay-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell overlay widget
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#showing-one-channel-of-a-movie" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Showing one channel of a movie
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#saving-imaging-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving imaging data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#generating-test-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating test data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gpu-acceleration-cellpose-suite2p" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GPU acceleration (Cellpose &amp; Suite2p)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#raw-calcium-imaging-tiffs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Raw calcium imaging TIFFs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suite2p-calcium-imaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Suite2p calcium imaging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#patch-clamp-electrophysiology" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patch-clamp electrophysiology
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="importing-imaging-data">Importing imaging data</h1>
+<p>NeuroSeq accepts imaging data from two distinct sources:</p>
+<ul>
+<li><strong>Cellpose</strong> — spatial cell segmentation (which pixels belong to which
+  neuron). This is what NeuroSeq needs to map drawn stimuli back onto the
+  physical sample for holographic export.</li>
+<li><strong>Suite2p</strong> — fluorescence traces extracted from a calcium imaging
+  recording. These appear as <code>TraceData</code> in the project alongside any
+  simulated traces.</li>
+</ul>
+<p>Patch-clamp electrophysiology imports are also covered here for completeness.</p>
+<h2 id="cellpose-segmentation">Cellpose segmentation</h2>
+<p>Open <strong>File → Cell segmentation</strong>. Dropping a TIFF or PNG on the Cell
+segmentation tab opens the same dialog and segments the image right away.</p>
+<h3 id="dialog-sections">Dialog sections</h3>
+<ul>
+<li><strong>File Selection</strong> — point at the Cellpose output (a NumPy <code>.npy</code> array of
+  per-pixel segmentation IDs, or the <code>_seg.npy</code> file produced by the Cellpose
+  GUI).</li>
+<li><strong>Select file for segmentation…</strong> — segments a mean-fluorescence TIFF or
+  PNG with the chosen Cellpose model and loads the result. The files are saved
+  beside the image with the model in their name, e.g. <code>fov_cpsam_seg.npy</code> and
+  <code>fov_cpsam_cp_masks.png</code>, so segmenting with another model keeps the
+  earlier results, and an <code>fov_seg.npy</code> made in the Cellpose GUI is not
+  overwritten. With <strong>Adjust brightness first</strong> ticked, the image is shown
+  with the Brightness/Contrast controls of the Spatial Footprints panel before
+  Cellpose runs, and Cellpose segments the adjusted image; <strong>Reset</strong> keeps the
+  original. The window used is stored in the <code>_seg.npy</code>.</li>
+<li><strong>Data Information</strong> — read-only summary: image dimensions, number of
+  detected cells, value range.</li>
+<li><strong>ID Mapping Options</strong> — choose how Cellpose IDs are mapped onto the
+  project's neuron indices:</li>
+<li><strong>By ID</strong> — use the segmentation IDs as-is.</li>
+<li><strong>By order</strong> — renumber sequentially in the order Cellpose found cells.</li>
+<li><strong>Custom shape mapping</strong> — assign each cell to a target neuron index via
+    a <code>SquareAOI</code> or <code>CircleAOI</code> overlay role. Use this when the project's
+    neuron layout (e.g. a grid of square AOIs) does not match Cellpose's
+    discovery order.</li>
+<li><strong>Areas of Interest</strong> — optional roles drawn on top of the segmentation
+  (square/circle AOIs). Cells that fall inside an AOI inherit its role. The
+  <strong>Linear</strong> strategy shows the same shapes, which can be moved and resized
+  there too, but they do not change its mapping; they are kept with the
+  imported segmentation.</li>
+</ul>
+<p>After import, the cell footprints are available in the cell overlay widget
+and are bundled into the project file. They are required for the
+<a href="../multiphoton_holographic_stimulation/">SysCon2 holographic export</a>.</p>
+<h3 id="cell-overlay-widget">Cell overlay widget</h3>
+<p>The cell overlay widget visualizes the imported segmentation on top of the
+sample image. You can:</p>
+<ul>
+<li>Pan and zoom with the mouse wheel and middle-button drag, matching the
+  other widgets.</li>
+<li>See cells that have been mapped to project neurons highlighted relative
+  to unmapped ones.</li>
+<li>Drag the corner/edge handles of square and circle AOI overlays to refine
+  their position after import — the cell-to-neuron assignment recomputes
+  whenever an AOI moves.</li>
+</ul>
+<h3 id="showing-one-channel-of-a-movie">Showing one channel of a movie</h3>
+<p>Movies recorded with several channels store them interleaved frame by frame,
+so playing every frame makes the Imaging tab flicker between channels. Set
+<strong>Channels</strong> in the Imaging tab's bottom bar to the number of channels and pick
+the one to watch under <strong>Show</strong>; <strong>All frames</strong> plays every frame in file
+order. The frame rate entered on import is the rate of each channel, so one
+channel plays in step with the time slider. Imports through the TIFF pipeline
+start with its channel count and functional channel. The choice is saved per
+imaging data entry. ScanImage recordings use <strong>Functional channel</strong> in the
+<strong>ScanImage (imaging)</strong> tab of the Stimulation setup pane instead.</p>
+<h3 id="saving-imaging-data">Saving imaging data</h3>
+<p><strong>Save imaging data…</strong> in the Imaging tab first asks which frames to save.
+Frames are counted from 1, as in the time slider tooltip and in Fiji; <strong>Current
+frame</strong> fills in the frame shown at the slider position, so a short period found
+by scrubbing can be saved directly. Choose what to save:</p>
+<ul>
+<li><strong>Original frames (TIFF substack)</strong> — the recorded pixel values of the shown
+  channel, as one stack that Fiji opens with its frame interval.</li>
+<li><strong>With stimulation marks (TIFF or GIF)</strong> — the frames as displayed, with the
+  stimulated cells marked by a red "x" sized to the image. All saved frames
+  share one grey scale, taken from robust percentiles of the saved frames, so
+  the background does not flicker from frame to frame.</li>
+</ul>
+<h3 id="generating-test-data">Generating test data</h3>
+<p>If you do not have a real recording yet, NeuroSeq can synthesize a Cellpose
+test image with a clean grid of cells:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>neuroseq<span class="w"> </span>--generate-cellpose-test-data<span class="w"> </span>./cellpose_test_grid.tif<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--cellpose-grid-rows<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>--cellpose-grid-cols<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>--cellpose-radius<span class="w"> </span><span class="m">11</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>--cellpose-gap<span class="w"> </span><span class="m">30</span>
+</span></code></pre></div>
+<p>See <a href="../multiphoton_holographic_stimulation/#generating-test-data-cli">Multiphoton Holographic Stimulation → Generating test data</a>
+for the full set of options.</p>
+<h2 id="gpu-acceleration-cellpose-suite2p">GPU acceleration (Cellpose &amp; Suite2p)</h2>
+<p>Both Cellpose segmentation and the Suite2p extraction/deconvolution step run on
+<strong>PyTorch</strong> and are dramatically faster on a GPU. NeuroSeq uses the GPU
+automatically when one is available — <strong>CUDA</strong> on NVIDIA cards or <strong>MPS</strong> on
+Apple Silicon — and otherwise falls back to the CPU (which can be unusably slow
+for segmentation).</p>
+<p>Two things are required: a GPU that these tools support, and a GPU build of
+PyTorch. <strong>Cellpose can use only NVIDIA (CUDA) and Apple (MPS) GPUs — Intel
+integrated graphics (Iris Xe / UHD) are not supported.</strong></p>
+<p><strong>Check what you have</strong> (in the NeuroSeq environment):</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"import torch; print(torch.__version__, torch.cuda.is_available())"</span>
+</span></code></pre></div>
+<p>A version ending in <code>+cpu</code> (e.g. <code>2.13.0+cpu</code>), or <code>False</code>, means a CPU-only
+build is installed — the Cellpose "use GPU" option will be greyed out.</p>
+<p><strong>Enable the GPU</strong> (on a machine with an NVIDIA or Apple-Silicon GPU) by
+installing a GPU build of PyTorch into the NeuroSeq environment:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>--torch-backend<span class="o">=</span>auto<span class="w"> </span>torch
+</span></code></pre></div>
+<p><code>uv</code> auto-detects the machine's CUDA driver and installs the matching wheel.
+On <strong>Windows this step is required</strong>, because PyPI's default <code>torch</code> wheel is
+CPU-only there (on Linux the default PyPI wheel is already CUDA-enabled). A
+later <code>uv sync</code> can revert to the CPU build; re-run the command, or set
+<code>UV_TORCH_BACKEND=auto</code> in the environment. Verify with the check command above
+(expect e.g. <code>2.x.x+cu128 True</code>), then relaunch NeuroSeq.</p>
+<p>If NeuroSeq is installed into an environment <code>uv</code> doesn't manage (e.g. a conda
+environment), install a CUDA build directly with pip instead:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>torch<span class="w"> </span>torchvision<span class="w"> </span>torchaudio<span class="w"> </span>--index-url<span class="w"> </span>https://download.pytorch.org/whl/cu128
+</span></code></pre></div>
+<p>Pick the <code>cuXXX</code> index matching your NVIDIA driver if <code>cu128</code> doesn't fit
+(check the <a href="https://pytorch.org/get-started/locally/">PyTorch install page</a>).</p>
+<p><strong>No supported GPU</strong> (e.g. an Intel-only laptop)? GPU segmentation is not
+possible on that machine. Instead, run Cellpose on one machine that <em>does</em> have
+an NVIDIA/Apple GPU and import its <code>_seg.npy</code> output (the file-selection path
+above needs only the segmentation, not a GPU), and/or use a lighter Cellpose
+model or downsample the image before segmenting.</p>
+<p>When a GPU is unavailable, NeuroSeq shows a one-time hint after launching
+Cellpose and logs the same information before running the Suite2p pipeline.</p>
+<h2 id="raw-calcium-imaging-tiffs">Raw calcium imaging TIFFs</h2>
+<p><strong>File → Import data → Output → Calcium Imaging (raw .tif)</strong> extracts traces
+directly from one or more 2-photon TIFF stacks. Choose the Cellpose masks
+(those already loaded in the project, a <code>_seg.npy</code> file, or Suite2p
+auto-detection), the pipeline (Suite2p, or a simple ROI average) and the
+acquisition parameters, then <strong>Run pipeline</strong>. The pipeline runs in the
+background; the resulting traces are imported like Suite2p outputs.</p>
+<h2 id="suite2p-calcium-imaging">Suite2p calcium imaging</h2>
+<p><strong>File → Import data → Output → Calcium Imaging (Suite2p outputs)</strong> opens the
+Suite2p importer.</p>
+<ul>
+<li><strong>File Selection</strong> — point at a Suite2p output folder (the directory that
+  contains <code>F.npy</code>, <code>Fneu.npy</code>, <code>iscell.npy</code>, …). Individual file paths can
+  also be supplied directly via the <strong>Individual File Selection</strong> group when
+  the folder layout is non-standard.</li>
+<li><strong>Data Preview</strong> — shows a few representative traces so you can confirm
+  the right cells are being imported before committing.</li>
+<li><strong>Import Options</strong> — neuropil subtraction, dF/F normalization, decimation,
+  and which Suite2p classification mask (<code>iscell</code>) to apply.</li>
+</ul>
+<p>Imported traces become a new <code>TraceData</code> entry under the project's experiments
+and appear in the <strong>Neuron data</strong> dropdown.</p>
+<h2 id="patch-clamp-electrophysiology">Patch-clamp electrophysiology</h2>
+<p><strong>File → Import data → Output → Patch Clamp</strong> loads recorded traces (voltage
+in current clamp, current in voltage clamp):</p>
+<ul>
+<li><strong>File Selection</strong> — an Igor2 <code>.ibw</code> / <code>.pxp</code> file, or a <code>.csv</code> / <code>.txt</code>
+  table with one trace per column. Packed experiments list their waves in a
+  <strong>Wave Selection</strong> panel; import as many as you need, then click <strong>Close</strong>.</li>
+<li><strong>Wave Preview</strong> and <strong>Source Wave Settings</strong> — check the wave and set the
+  source sampling rate where the file does not store it.</li>
+<li><strong>Import Target</strong> — create new trace data or add to existing trace data.
+  If the existing data uses a different sample interval, NeuroSeq offers to
+  resample the wave (default) or remap the target, as described in
+  <a href="../importing_igor2_waves/#import-targets">Importing Igor2 Waves</a>.</li>
+<li><strong>Spike detection</strong> — optional peak detection to derive a <code>SpikeData</code>
+  alongside the trace.</li>
+</ul>
+<p>For patch-clamp input (command) waveforms use
+<strong>File → Import data → Input → Patch Clamp</strong>; see
+<a href="../importing_igor2_waves/">Importing Igor2 Waves</a>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

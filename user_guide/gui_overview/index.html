@@ -1,0 +1,2001 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ssciwr.github.io/neuroseq/user_guide/gui_overview/">
+      
+      
+        <link rel="prev" href="../../getting_started/windows_shortcut/">
+      
+      
+        <link rel="next" href="../simulations/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../images/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>GUI Overview - Neuroseq</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#gui-overview" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Neuroseq" class="md-header__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Neuroseq
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              GUI Overview
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Neuroseq" class="md-nav__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Neuroseq
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/windows_shortcut/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows desktop shortcut
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Overview
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-tabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project tabs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-menu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File menu
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File menu">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#undo-and-redo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Undo and redo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dropping-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dropping files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#general-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        General Layout
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="General Layout">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#saving-and-loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving and loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stimulation-editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stimulation editor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#neuron-data-and-spike-data-widgets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Neuron data and spike data widgets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cell-spatial-footprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell spatial footprints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synaptic-data-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synaptic data widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#universal-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Universal widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#playback-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-menu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings menu
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analysis-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analysis widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gui-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI Console
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GUI Console">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stimuli-editing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stimuli Editing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-and-brian2-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model and brian2 objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stdp_synaptic_tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design dynamic input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run_external_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run External Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analysis_and_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis tools and plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations_and_experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting simulations and experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_igor2_waves/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Igor2 Waves
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_imaging_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Imaging Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanimage_acquisition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ScanImage Acquisition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export_patch_clamp_stimuli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export stimuli for patch clamp recordings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../multiphoton_holographic_stimulation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiphoton Holographic Stimulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../brainscales2_delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deliver stimuli to BrainScaleS-2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat_assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-App LLM Assistant (Experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer_installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/custom_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation of Custom Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/analysis_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/project_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project data history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/miscellaneous/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Miscellaneous
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../common_issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#project-tabs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project tabs
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#file-menu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        File menu
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="File menu">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#undo-and-redo" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Undo and redo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dropping-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dropping files
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#general-layout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        General Layout
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="General Layout">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#saving-and-loading" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Saving and loading
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#stimulation-editor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stimulation editor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#neuron-data-and-spike-data-widgets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Neuron data and spike data widgets
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cell-spatial-footprints" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cell spatial footprints
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#synaptic-data-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Synaptic data widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#universal-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Universal widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#playback-controls" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Playback controls
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#settings-menu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Settings menu
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analysis-widget" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Analysis widget
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#gui-console" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        GUI Console
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="GUI Console">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stimuli-editing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Stimuli Editing
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-and-brian2-objects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model and brian2 objects
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="gui-overview">GUI Overview</h1>
+<h2 id="project-tabs">Project tabs</h2>
+<p>Every open project lives in its own tab. <code>New</code>, <code>Open Project</code>, opening an
+example project and dropping a <code>.nseq</code> file each open a new tab and leave the
+other tabs untouched; closing a tab with unsaved changes asks whether to save
+first. Menus and toolbars always act on the current tab. Only one simulation
+can run at a time across all tabs (Brian2's random seed and code-generation
+settings are shared), so starting a second one shows a notice instead.</p>
+<h2 id="file-menu">File menu</h2>
+<p>All data import and export actions are grouped under two sub-menus:</p>
+<ul>
+<li><code>File → Import data</code></li>
+<li><code>Input → Optogenetics</code> — SysCon2 <code>.seq</code> import (see <a href="../multiphoton_holographic_stimulation/">Multiphoton Holographic Stimulation</a>)</li>
+<li><code>Input → Patch Clamp</code> — Igor2 <code>.ibw</code> / <code>.pxp</code> or <code>.csv</code> / <code>.txt</code> input waveform import (see <a href="../importing_igor2_waves/">Importing Igor2 Waves</a>)</li>
+<li><code>Output → Calcium Imaging (raw .tif)</code> — raw 2-photon TIFF through the Cellpose + Suite2p pipeline</li>
+<li><code>Output → Calcium Imaging (Suite2p outputs)</code> — Suite2p fluorescence import</li>
+<li><code>Output → Patch Clamp</code> — patch-clamp recording (trace) import</li>
+<li><code>File → Export</code></li>
+<li><code>Patch Clamp Input</code> — Igor2 stimulus CSV/<code>.ibw</code>/<code>.pxp</code> export for SutterPatch (see <a href="../export_patch_clamp_stimuli/">Export stimuli for patch clamp recordings</a>)</li>
+<li><code>Optogenetic Input</code> — SysCon2 <code>.seq</code> (or Igor2) export for holographic hardware (see <a href="../multiphoton_holographic_stimulation/">Multiphoton Holographic Stimulation</a>). This only writes files; to also import the sequence into a connected SysCon2, use <strong>Export with settings…</strong> in the Stimulation setup panel.</li>
+</ul>
+<p><code>File → Cell segmentation</code> imports or runs Cellpose segmentation, and
+<code>File → Manage Data</code> lists the imported and simulated data groups so they can
+be deleted.</p>
+<h3 id="undo-and-redo">Undo and redo</h3>
+<p>Undo/redo covers input-array edits, deleting data groups in
+<code>File → Manage Data</code>, and imports into the project. The history belongs to the
+project tab and lasts for the session; it is not saved in the <code>.nseq</code> file.</p>
+<h3 id="dropping-files">Dropping files</h3>
+<p>Files can also be dragged from the file explorer onto the NeuroSeq window.
+Each opens its usual import dialog with the file already loaded, so the
+imported data can be named and checked first:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Dropped on</th>
+<th>Import</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>.nseq</code></td>
+<td>anywhere</td>
+<td>opens the project in a new tab</td>
+</tr>
+<tr>
+<td><code>.seq</code></td>
+<td>anywhere</td>
+<td>SysCon2 sequence as an input array</td>
+</tr>
+<tr>
+<td><code>.ibw</code>, <code>.pxp</code>, <code>.csv</code>, <code>.txt</code></td>
+<td>the input array editor</td>
+<td>patch-clamp input wave</td>
+</tr>
+<tr>
+<td><code>.ibw</code>, <code>.pxp</code>, <code>.csv</code>, <code>.txt</code></td>
+<td>anywhere else</td>
+<td>patch-clamp traces</td>
+</tr>
+<tr>
+<td>TIFF or PNG</td>
+<td>the Cell segmentation tab</td>
+<td>asks for the Cellpose model, then segments</td>
+</tr>
+<tr>
+<td>TIFF</td>
+<td>the traces</td>
+<td>calcium trace extraction (Suite2p or ROI)</td>
+</tr>
+<tr>
+<td>TIFF, GIF or movie</td>
+<td>the Imaging tab</td>
+<td>adds it as imaging data</td>
+</tr>
+<tr>
+<td>TIFF, PNG, GIF or movie</td>
+<td>anywhere else</td>
+<td>asks which of the three imaging imports</td>
+</tr>
+</tbody>
+</table>
+<h2 id="general-layout">General Layout</h2>
+<p><img alt="GUI layout" src="../../images/layout.png" /></p>
+<p>The main layout of NeuroSeq consist of several widgets: the main widget for modification (drawing) of stimulation patterns (1), the widgets for visulisation of neuronal activity in form of traces (2) or spikes (3), monitor of synaptic connectivity (4). It also include a pad to quickly show some relevant analysis plots (5) and a GUI console (6).</p>
+<p>The navigation in widgets (1-3) can be done with scrolling sliders or by holding a middle mouse button and moving the field of view of a given widget. By default, the field of new in all widgets is connected.</p>
+<p>Zooming in and zooming out is done by corresponding "+" and "-" buttons or by holding "ctrl" or "shift" buttons and rotating mouse wheel for x- and y-axis, respectively.</p>
+<p>Each widget can be shown or hidden in menu "View" by using the corresponding toolbar:</p>
+<p><img alt="Show/hide widgets" src="../../images/toggle_widgets.png" /></p>
+<p>In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor — turn it off when the per-pixel coordinate label gets in the way of dense plots, and back on when you need it for precise selection.</p>
+<p><strong>View → Show Stimulation setup</strong> opens the stimulus-delivery pane, with one tab per target: <strong>SysCon2 (HOLO4D)</strong> for the holographic stimulation rig (see <a href="../multiphoton_holographic_stimulation/">Multiphoton Holographic Stimulation</a>) and <strong>BrainScaleS-2</strong> for the neuromorphic chip (see <a href="../brainscales2_delivery/">Deliver stimuli to BrainScaleS-2</a>).</p>
+<p><strong>View → Toggle Grid</strong> turns the time/neuron grid overlays on or off for the stim editor. The grid spacing follows the stim array's <code>dt</code>, so it doubles as a sample ruler.</p>
+<h3 id="saving-and-loading">Saving and loading</h3>
+<p><code>Open project</code> (<code>Ctrl+O</code>) and <code>Save project</code> (<code>Ctrl+S</code>) operate on <code>.nseq</code>
+archives. Both run in a background worker thread, so the main window stays
+responsive while large projects serialize. A progress dialog appears for any
+operation that takes more than a fraction of a second and exposes a
+<strong>Cancel</strong> button — cancelling a save leaves the original file untouched.</p>
+<p>Once a project has been saved at least once, <code>Save project</code> (<code>Ctrl+S</code>) writes
+straight back to that same file — no dialogs, everything included. Use
+<code>Save project As...</code> to instead pick a new file (or different components to
+include, via the save-options dialog) without touching the original file. A
+brand-new, never-saved project always goes through <code>Save project As...</code>'s
+dialogs the first time, regardless of which of the two actions triggered it.</p>
+<p>The project may contrain not only one, but several stimulation arrays. The user can select which one to show in the widget one, using a drop down manu in the "Stim data:" section of the folloing toolbar:</p>
+<p><img alt="Data selection" src="../../images/data_selection.png" />.</p>
+<p>Similarly, the trace, spike and synapce data may contain a list of different data entries (generated in computational, biologial or neuromorphic experiments) with corresponding drop down menues. "All data" corresponds to a universal widget where any data in a form of traces or spikes can be independently selected.</p>
+<p><img alt="Data selection" src="../../images/data_selection.png" />.</p>
+<h2 id="stimulation-editor">Stimulation editor</h2>
+<p>The stimulatation pattern can be edited using the toolbar located at the left side of a main window. The editing can be operated in draw and select modes.</p>
+<p><img alt="Draw mode" src="../../images/draw_mode.png" /></p>
+<p><img alt="Select mode" src="../../images/select_mode.png" /></p>
+<p>In the drawing mode, the user can switch between "draw stimulus" and "erise stimulus" regimes and choose the amplitude and duration of the a drawn stimuli. The amplitude of a stimulus can be constant, gradient and log-gradient and random.</p>
+<p><img alt="Amplitude selection" src="../../images/amplitude_selection.png" />.</p>
+<p>Mouse can be used for drawing stimuli: left click is drawing and right click is erising. In erise mode, the functionality of the left and right buttons is inverted.
+A longer stimulus can be drawing by holding a mouse button.</p>
+<p>The intensity of stimulation is coded with transparency and normalized on the maximum value in an array. In the following example the relative ampitudes of stimuli are shown as 1 : 0.75 : 0.5 : 0.25 : 0.125 :</p>
+<p><img alt="Stimulus intensity" src="../../images/stimulus_intensity.png" />.</p>
+<p>If "select mode" is active, the drawing options are not availible anymore, insteed other options are availible for selecting, copying, cutting, saving selected region and so on. The user can "do" and "undo" modifications in the editor using the corresponding buttons.</p>
+<p>The toolbar also contains a pad with for creating/deleting new stim arrays, modifying the properties of the existing stimulation array (name, type, number of neurons and physical units) and padding/trimming the duration of an existing array.</p>
+<p>The option "show all stim arrays" gives a possibility to show all stim arrays at the same time in one widget. In this case, the selected array remains the same, while other arrays will be shown in background with additional transparency applied.</p>
+<h2 id="neuron-data-and-spike-data-widgets">Neuron data and spike data widgets</h2>
+<p>Once the simulation is run or trace data is exported, it became availible in drop down menu "Neuron data". Natigation is done as described above. Normalization of traces can be set with buttons next it with a possibility to normalize traces on a median value and clip/upclip them to permit to restrict traces to the provided space for each neuron or provide a possibility to occupy an unlimited space within the widget. Spike data widget is analogous to the neuron data widget but constructed to represent binary spike events.</p>
+<p>The data-selection toolbar has dedicated <strong>Trace normalization</strong> and
+<strong>Synapse normalization</strong> buttons (vertical-double-arrow icons) that open
+the per-widget normalization dialogs — median normalization, clip/unclip
+range, and per-neuron scaling all live in those dialogs rather than in the
+Settings menu.</p>
+<h2 id="cell-spatial-footprints">Cell spatial footprints</h2>
+<p>The <strong>Cell segmentation</strong> tab shows the imported Cellpose cells, labelled with
+their neuron ids. With the mouse:</p>
+<ul>
+<li><strong>Left click</strong> a cell to select it; the trace, input array and spike plots
+  then show only the selected neurons. Click it again to deselect it.</li>
+<li><strong>Right drag</strong> around cells to select several at once (lasso).</li>
+<li><strong>Double-click</strong> empty space to clear the selection.</li>
+<li><strong>Right click</strong> a cell to scroll the traces to its neuron. The vertical zoom
+  stays the same and all other traces stay visible. A neuron whose trace is
+  hidden by the current selection is not scrolled to.</li>
+</ul>
+<h2 id="synaptic-data-widget">Synaptic data widget</h2>
+<p>The synaptic data widget contains the information about the states of synaptic connections in a given time point. Using the replay mechanism described below one can access the modifications of synapic changes.</p>
+<p>For large networks the full synapse matrix can be too big to render in real
+time. <strong>Settings → Synapse matrix RAM limit</strong> sets the memory budget (in
+MB); when the matrix would exceed it, the widget transparently downsamples
+along the time axis before rendering. The accompanying <strong>Heatmap</strong> widget
+(toggled via <strong>View → Show Heatmap</strong>) gives a 2D heatmap view of the same
+synaptic weight matrix.</p>
+<h2 id="universal-widget">Universal widget</h2>
+<p>During analysis, it may be desirable to show an additional copy of the widget, for example, to compare two different periods or neuronal populations within the same widget and at the same time. For this a universal "all data" widget was constructed.</p>
+<h2 id="playback-controls">Playback controls</h2>
+<p>The <strong>Playback</strong> menu (and its mirror in the toolbar) drives the time
+cursor across every visualization widget simultaneously:</p>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Shortcut</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Set playback speed</td>
+<td></td>
+<td>Opens a dialog to choose a playback rate multiplier.</td>
+</tr>
+<tr>
+<td>Skip to start</td>
+<td></td>
+<td>Jumps the cursor to t = 0 without affecting play/pause state.</td>
+</tr>
+<tr>
+<td>Stop</td>
+<td></td>
+<td>Pauses playback and rewinds the cursor to t = 0.</td>
+</tr>
+<tr>
+<td>Play / Pause</td>
+<td><code>Space</code></td>
+<td>Toggles continuous playback at the configured speed.</td>
+</tr>
+<tr>
+<td>Skip to end</td>
+<td></td>
+<td>Jumps the cursor to the last simulated/recorded timepoint.</td>
+</tr>
+</tbody>
+</table>
+<p>The time slider underneath the widgets stays clickable while playback is
+running, so you can scrub manually at any time.</p>
+<h2 id="settings-menu">Settings menu</h2>
+<p>The <strong>Settings</strong> menu groups preferences that affect the rest of the
+application:</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Brian2 simulation backend</td>
+<td>Pick <code>cython</code> (default) or <code>numpy</code> (see <a href="../simulations/#choosing-a-brian2-backend">Simulations</a>).</td>
+</tr>
+<tr>
+<td>Input automatic padding</td>
+<td>Default duration (seconds) used when creating new stim arrays and as a prefill for the <em>Pad stim array</em> dialog.</td>
+</tr>
+<tr>
+<td>LLM assistant</td>
+<td>Configure provider, model, and API key for the <a href="../chat_assistant/">in-app chat assistant</a> (experimental).</td>
+</tr>
+<tr>
+<td>Synapse matrix RAM limit</td>
+<td>Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.</td>
+</tr>
+<tr>
+<td>Theme</td>
+<td>Switch between a <strong>Light</strong>, <strong>Dark</strong> and <strong>Retro light theme (beta)</strong> (the default) appearance. The choice is remembered and re-applied on the next launch.</td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>Retro light theme (beta)</strong> is the default on a fresh install. It is a
+skin in the spirit of the classic Winamp light skins: brushed-metal chrome
+with bevelled buttons, and dark LCD read-outs for the plot canvases, the
+console and the status bar. It is still marked beta — some dialogs are less
+polished than under the light and dark themes — and switching to <strong>Light</strong>
+or <strong>Dark</strong> is remembered like any other theme choice.</p>
+<h2 id="analysis-widget">Analysis widget</h2>
+<p>The user can select a given region of the "neuron data" widget and access an analysis menu by right click of a mouse, and choosing a desired analysis plot/routine.
+The result lands in the dedicated <strong>Custom analysis</strong> dock widget — toggled
+from <strong>View → Show Custom analysis</strong> — or, with the <code>(new window)</code> variant
+of the action, in a separate window. See
+<a href="../analysis_and_plugins/">Analysis Tools and Custom Plugins</a> for the full
+list of built-in analyses and how to write your own plugin.</p>
+<h2 id="gui-console">GUI Console</h2>
+<p>The GUI console is a text box at the bottom of the GUI that can be used to run a custom Python code.</p>
+<p>A <strong>"Sample python code"</strong> button sits directly below the console input box.
+Clicking it opens a reference dialog with ready-to-use code snippets covering the most common tasks: listing and accessing stimulus arrays, editing values (zeroing, range assignment, generating waveforms), and accessing experiment and trace data.
+All snippets can be selected and copied directly into the console input box.</p>
+<p>The code is executed in the same Python environment as the GUI, with the following variables/objects made available (run dir() command to see the list):</p>
+<ul>
+<li><code>np</code>: numpy</li>
+<li><code>b2</code>: brian2</li>
+<li><code>stims</code>: a dict of stimuli, each of which is a 2d numpy array</li>
+<li><code>model</code>: a class that defines the entire model</li>
+</ul>
+<p>The console also has a history feature, which can be accessed by pressing the up and down arrow keys.</p>
+<h3 id="stimuli-editing">Stimuli Editing</h3>
+<p>One of the purposes of the console is to allow users to modify the numpy arrays of stimuli using numpy and Python code.
+Any changes you make to the stimuli will be checked for validity, and if valid then they will be updated in the model and the changes will be displayed in the GUI, e.g.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">stims</span><span class="p">[</span><span class="s1">'stimulus'</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="mi">500</span><span class="p">,</span> <span class="mi">24</span><span class="p">))</span>
+</span></code></pre></div>
+<p>Example for generating a simple sequential stimulation pattern:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="o">...</span>     <span class="n">project</span><span class="o">.</span><span class="n">stim_arrays</span><span class="p">[</span><span class="s1">'stimulus'</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">[</span><span class="mi">0</span><span class="o">+</span><span class="n">i</span><span class="o">*</span><span class="mi">10</span><span class="p">:</span><span class="mi">10</span><span class="o">+</span><span class="n">i</span><span class="o">*</span><span class="mi">10</span><span class="p">,</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+</span></code></pre></div>
+<p>If the changes are invalid, then an error message will be displayed in the console, and the model will not be modified, e.g.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">stims</span><span class="p">[</span><span class="s1">'stimulus'</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="n">size</span><span class="o">=</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">))</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    <span class="n">Invalid</span> <span class="n">stims</span><span class="p">:</span> <span class="n">expected</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="mi">1</span><span class="n">d</span> <span class="ow">or</span> <span class="mi">2</span><span class="n">d</span> <span class="n">numpy</span> <span class="n">array</span><span class="p">],</span> <span class="n">found</span> <span class="nb">dict</span> <span class="k">with</span> <span class="mi">3</span><span class="n">d</span> <span class="n">numpy</span> <span class="n">array</span> <span class="k">for</span> <span class="n">key</span> <span class="s1">'stimulus'</span>
+</span></code></pre></div>
+<h3 id="model-and-brian2-objects">Model and brian2 objects</h3>
+<p>The objects from the underlying brian2 model can also be accessed. For example, you can get a list of monitors with</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">project</span><span class="o">.</span><span class="n">b2_model</span><span class="o">.</span><span class="n">monitors</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">dict_keys</span><span class="p">([</span><span class="s1">'Traces_v'</span><span class="p">,</span> <span class="s1">'spikemon'</span><span class="p">,</span> <span class="s1">'synmon'</span><span class="p">])</span>
+</span></code></pre></div>
+<p>And you can then get the underlying brian2 monitor object with e.g.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="o">&gt;&gt;&gt;</span> <span class="n">monitor</span> <span class="o">=</span> <span class="n">project</span><span class="o">.</span><span class="n">b2_model</span><span class="o">.</span><span class="n">get_monitor</span><span class="p">(</span><span class="s1">'Traces_v'</span><span class="p">)[</span><span class="s1">'object'</span><span class="p">]</span>
+</span></code></pre></div>
+<p>Note that these objects should not be directly modified using the console, as it will cause the GUI and <code>model</code> to become out of sync with the underlying brian2 model.</p>
+<p>It is also possible to modify other aspects of the model using the console, by interacting with the <code>project.b2_model</code> object.
+Try <code>help(project.b2_model)</code> to see what methods and attributes are available.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1937 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://ssciwr.github.io/neuroseq/user_guide/multiphoton_holographic_stimulation/">
+      
+      
+        <link rel="prev" href="../export_patch_clamp_stimuli/">
+      
+      
+        <link rel="next" href="../brainscales2_delivery/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../images/favicon.svg">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+    
+    
+      
+        <title>Multiphoton Holographic Stimulation - Neuroseq</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#multiphoton-holographic-stimulation-syscon2-export" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Neuroseq" class="md-header__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Neuroseq
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Multiphoton Holographic Stimulation
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Neuroseq" class="md-nav__button md-logo" aria-label="Neuroseq" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Neuroseq
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/ssciwr/neuroseq" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    GitHub
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting_started/windows_shortcut/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Windows desktop shortcut
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    User Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../gui_overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GUI Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Simulations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../stdp_synaptic_tuning/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Design dynamic input
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../run_external_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Run External Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../analysis_and_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis tools and plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../simulations_and_experiments/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Connecting simulations and experiments
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_igor2_waves/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Igor2 Waves
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../importing_imaging_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Importing Imaging Data
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../scanimage_acquisition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ScanImage Acquisition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../export_patch_clamp_stimuli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export stimuli for patch clamp recordings
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiphoton Holographic Stimulation
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Multiphoton Holographic Stimulation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drawing-ttl-pulses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drawing TTL pulses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-shape-objects-are-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How shape objects are derived
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ttl-pulse-timing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TTL pulse timing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hologram-boundary-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hologram boundary rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sanity-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sanity checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exporting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#target-power-and-power-lut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target power and power LUT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-test-data-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating test data (CLI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#importing-a-seq-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Importing a .seq file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup-panel-and-hardware-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup panel and hardware execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setup panel and hardware execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-input-routines-on-the-rig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic input routines on the rig
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../brainscales2_delivery/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Deliver stimuli to BrainScaleS-2
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../chat_assistant/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-App LLM Assistant (Experimental)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../examples/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Developer Guide
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/developer_installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation and use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/documentation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Documentation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/custom_simulators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Implementation of Custom Simulators
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/analysis_plugins/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Analysis plugins
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/project_history/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Project data history
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/miscellaneous/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Miscellaneous
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../developer/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../common_issues/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#required-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Required setup
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#drawing-ttl-pulses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Drawing TTL pulses
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-shape-objects-are-derived" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How shape objects are derived
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ttl-pulse-timing" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TTL pulse timing
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#hologram-boundary-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Hologram boundary rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sanity-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sanity checks
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#exporting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exporting
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Exporting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#target-power-and-power-lut" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Target power and power LUT
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#generating-test-data-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Generating test data (CLI)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#importing-a-seq-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Importing a .seq file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setup-panel-and-hardware-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Setup panel and hardware execution
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setup panel and hardware execution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dynamic-input-routines-on-the-rig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Dynamic input routines on the rig
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="multiphoton-holographic-stimulation-syscon2-export">Multiphoton Holographic Stimulation (SysCon2 Export)</h1>
+<p>NeuroSeq can export stimulation patterns as SysCon2 <code>.seq</code> files for use with
+Holo4D multiphoton holographic stimulation hardware.</p>
+<hr />
+<h2 id="overview">Overview</h2>
+<p>The stim array you draw in NeuroSeq represents <strong>laser TTL pulses</strong> directly.
+Each sample corresponds to one SysCon2 hardware tick
+(<code>dt = 0.0005208125 s = 520.8125 µs</code>). NeuroSeq infers the SLM shape objects
+needed for each neuron from the drawn TTL pulse positions — you do not need to
+manually define hologram boundaries.</p>
+<hr />
+<h2 id="required-setup">Required setup</h2>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Required value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>stim_array.dt</code></td>
+<td><code>0.0005208125</code> s (one SysCon2 tick)</td>
+</tr>
+<tr>
+<td>Cellpose segmentation</td>
+<td>loaded and mapped to stimulus channels</td>
+</tr>
+<tr>
+<td>SysCon2 template</td>
+<td>a previously imported <code>.seq</code> file in the same session</td>
+</tr>
+</tbody>
+</table>
+<p>The dialog will reject (or offer to fix) stim arrays whose <code>dt</code> does not match
+the SysCon2 tick quantum.</p>
+<hr />
+<h2 id="drawing-ttl-pulses">Drawing TTL pulses</h2>
+<p>Draw active samples in the stimulation editor exactly where you want the laser
+to fire. A few rules apply:</p>
+<ul>
+<li><strong>No minimum duration</strong>: pulses can be as short as one tick (520.8 µs).</li>
+<li><strong>dt must be the SysCon2 tick</strong>: use the <em>Fix dt</em> button in the sanity-check
+  dialog if you need to convert an existing array.</li>
+<li><strong>Blank lead-in required</strong>: the SLM hardware needs one full 16.666 ms window
+  (32 ticks) of blank time before the first laser pulse to load the hologram.
+  The sanity fixer inserts this automatically if it is missing, but you can also
+  add it yourself with <em>Shift right for initial SLM load</em>.</li>
+</ul>
+<hr />
+<h2 id="how-shape-objects-are-derived">How shape objects are derived</h2>
+<p>The export pipeline maps your raw TTL pulses onto SLM shape objects as follows:</p>
+<ol>
+<li><strong>Window coverage</strong> — each raw pulse is mapped to the 32-tick window(s) it
+   falls in. This determines which SLM pattern windows must be loaded.</li>
+<li><strong>Hologram grouping</strong> — active windows are grouped into holograms. A new
+   hologram starts when the active neuron set changes relative to the previous
+   non-empty window: either a neuron disappears or a new neuron appears.
+   Gaps (fully empty windows) do <strong>not</strong> break the hologram — the pattern stays
+   loaded across the gap.</li>
+<li><strong>Pre-load blank window</strong> — a blank 16.666 ms window is placed immediately
+   before the first active window of each hologram. The SLM uses this time to
+   load the pattern before any laser pulse fires. If the blank is missing the
+   sanitizer inserts one by shifting the tail right.</li>
+<li><strong>Shape object bounds</strong> — for each neuron within a hologram:</li>
+<li>shape starts at <code>(first_active_window - 1) × 32</code> ticks (the blank load window),</li>
+<li>shape ends at <code>last_active_window_excl × 32</code> ticks (minimum span: load + 1 active window).</li>
+</ol>
+<hr />
+<h2 id="ttl-pulse-timing">TTL pulse timing</h2>
+<p>Laser TTL pulses are emitted at <strong>exact tick positions</strong>, not at window
+boundaries. If a pulse was drawn at tick 100, the exported <code>.seq</code> file
+contains a <code>TTLPulse</code> starting at tick 100 (= 52.08 ms).</p>
+<p>If the sanitizer inserted a blank window before the first active window (because
+the first pulse was too early), all raw pulse positions are shifted by 32 ticks
+per inserted blank. The shift preserves the sub-window offset of each drawn
+pulse relative to its containing window.</p>
+<p><strong>Roundtrip accuracy</strong> — when a <code>.seq</code> file exported in this mode is imported
+back into NeuroSeq with <code>dt = 0.0005208125 s</code>, each pulse reconstructs at the
+same sample index it was exported from (<code>sample_idx == tick_idx</code>).</p>
+<hr />
+<h2 id="hologram-boundary-rule">Hologram boundary rule</h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same neuron set, contiguous windows</td>
+<td>continue same hologram</td>
+</tr>
+<tr>
+<td>Same neuron set, gap between windows</td>
+<td>continue same hologram (SLM stays loaded)</td>
+</tr>
+<tr>
+<td>A neuron that was active in the <strong>last</strong> non-empty window disappears</td>
+<td>start new hologram</td>
+</tr>
+<tr>
+<td>A neuron that was <strong>never</strong> in the current hologram appears</td>
+<td>start new hologram</td>
+</tr>
+</tbody>
+</table>
+<p>A new hologram is triggered whenever the active neuron set changes — either a neuron
+leaves or a new one joins relative to the last non-empty window. Gaps (fully empty
+windows) are ignored when checking for disappearances; only transitions between
+consecutive non-empty windows matter.</p>
+<hr />
+<h2 id="sanity-checks">Sanity checks</h2>
+<p>Run <strong>Check Input Sanity</strong> in the stimulation generator dialog before exporting.
+The checker validates:</p>
+<ul>
+<li><code>dt</code> is the SysCon2 tick quantum (offers <em>Fix dt</em> button if not),</li>
+<li>first active sample is at least 32 ticks from the start (SLM lead-in),</li>
+<li>no SLM gap violations between successive neuron groups,</li>
+<li>no off→on SLM overlap violations,</li>
+<li>no simultaneous neurons with mismatched durations (optional; use
+  <em>Equalize durations</em>),</li>
+<li>all active neurons have a valid Cellpose mapping.</li>
+</ul>
+<p>Feedback is shown in a scrollable dialog. If fixes were applied you can write
+the corrected values back to the stim array via <em>Apply fixes</em>.</p>
+<hr />
+<h2 id="exporting">Exporting</h2>
+<ol>
+<li>Open <strong>File → Export → Optogenetic Input</strong> and choose <code>SysCon2</code> in the pre-dialog. This writes the files only; to also import the generated sequence into a connected SysCon2, use <strong>Export with settings…</strong> in the Stimulation setup panel instead.</li>
+<li>Select the stim array and Cellpose segmentation.</li>
+<li>Choose laser wavelength (<code>940 nm</code>, <code>1030 nm</code>, or <code>1100 nm</code> digital; default <code>940 nm</code>).</li>
+<li>Optionally set a <strong>Target power</strong> and load a power LUT (see below).</li>
+<li>Click <strong>Check Input Sanity</strong> and resolve any errors.</li>
+<li>Enter an output script name and click <strong>Export</strong>.</li>
+</ol>
+<p>The output folder starts as the one used last, or <code>Documents\NeuroSeq\SysCon
+exports</code> the first time, so scripts can be generated without browsing for a
+folder. Scripts imported into SysCon2 go to its <strong>Target directory</strong>, which
+defaults to one folder per day, <code>neuroseq\&lt;date&gt;</code> (e.g. <code>neuroseq\2026-10-15</code>).</p>
+<p>In the SysCon2 panel, the <strong>Target power</strong> box next to <strong>Export current array to
+stimulation setup</strong> sets the power of that quick export. Changing only the power
+there keeps all other settings of the last export; <strong>Export with settings…</strong>
+starts from the same value.</p>
+<p>Export settings and the export folder belong to the project: they are saved with
+it and restored when you switch between open projects.</p>
+<h3 id="target-power-and-power-lut">Target power and power LUT</h3>
+<p>The dialog has a <strong>Target power</strong> (mW) spinner next to a <strong>Load LUT…</strong>
+button:</p>
+<ul>
+<li>Setting <strong>Target power</strong> to <code>0</code> disables power control — the exported
+  <code>Intensity_0</code> fields are written as zero, which matches the historical
+  default behaviour.</li>
+<li>Loading a SysCon <code>.lut</code> file maps the requested mW to the laser's
+  intensity percentage at the currently selected wavelength. The exporter divides
+  that percentage by 100 for the <code>.seq</code> intensity fields (0–1). Each
+  wavelength has its own LUT slot. The mW those fractions stand for are kept in
+  each Shape's and laser pulse's description, e.g.
+  <code>neuron=3 power_mW=12.5 target_mW=25</code> (the requested power for that object,
+  i.e. the target times its amplitude, and the target power).</li>
+<li>LUTs are bundled into the <code>.nseq</code> archive when you save the project, so
+  the export stays reproducible across machines. Loading a LUT marks the project
+  as modified; save it to retain the calibration.</li>
+</ul>
+<p>The <strong>status label</strong> next to the button shows which LUT (if any) is
+currently loaded for the active wavelength. Switching the wavelength
+combobox swaps to that wavelength's LUT slot.</p>
+<p>The exporter writes:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>&lt;name&gt;.seq</code></td>
+<td>SysCon2 sequence — Shape objects + TTLPulse objects</td>
+</tr>
+<tr>
+<td><code>&lt;name&gt;_original_stim.npz</code></td>
+<td>the exported input array, restored on re-import</td>
+</tr>
+<tr>
+<td><code>&lt;name&gt;_overview.png</code></td>
+<td>timeline overview image</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="generating-test-data-cli">Generating test data (CLI)</h2>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 512 × 512 image with 10 × 10 grid</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>neuroseq<span class="w"> </span>--generate-cellpose-test-data<span class="w"> </span>./cellpose_512.tif<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w"> </span>--cellpose-grid-rows<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w"> </span>--cellpose-grid-cols<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w"> </span>--cellpose-radius<span class="w"> </span><span class="m">11</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w"> </span>--cellpose-gap<span class="w"> </span><span class="m">30</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># 1300 × 1300 with auto-fitted radius/gap</span>
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>neuroseq<span class="w"> </span>--generate-cellpose-test-data<span class="w"> </span>./cellpose_1300.tif<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w"> </span>--cellpose-grid-rows<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w"> </span>--cellpose-grid-cols<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="se">\</span>
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="w"> </span>--cellpose-square-size<span class="w"> </span><span class="m">1300</span>
+</span></code></pre></div>
+<h2 id="importing-a-seq-file">Importing a <code>.seq</code> file</h2>
+<p>Use <strong>File → Import data → Input → Optogenetics</strong> to reconstruct a
+sequence in a new or existing input array. Browsing and cancelling do not change the
+project. Import applies the file's header as the session's export template only
+after conversion succeeds. The imported input uses 520.8125 µs samples. If an
+existing target input uses a different interval, only that input is resampled
+after confirmation. Other input arrays and trace datasets keep their own intervals
+and align by time in the plots.</p>
+<p>Targets map to consecutive channels starting at <strong>Target neuron offset</strong>, in their
+first-occurrence order for Holo4D sequences. They are not matched to project neuron
+IDs or Cellpose identities. Repeated point Shapes at identical coordinates and
+with the same lightsource share a channel; nearby legacy Entities retain the
+1 µm grouping rule. Multiple spots in one ROI may therefore import as separate
+channels. The preview shows the same grouping used for conversion.</p>
+<p><strong>Replace mapped target channels</strong> clears only channels receiving imported data;
+other channels are preserved. Disable it to merge using the maximum value at
+each sample. Dropped channels, clipped duration, and capped legacy repeats require
+confirmation before the project changes. Files that reconstruct no stimulation
+are rejected, as are arrays exceeding the 512 MiB import allocation limit.</p>
+<p>Holo4D timing is reconstructed from each target's laser TTL pulses and SLM
+availability windows. The <strong>Legacy repeat tick</strong> setting does not change Holo4D's
+520.8125 µs TTL quantum. One sequence pass is imported; the header's <code>runs</code> count
+is not expanded. Imported amplitudes are raw file intensity values, with a nominal
+1 used for zero-intensity shapes, rather than recovered optical power or the
+original drawing amplitudes. Spiralling latency and hardware behavior cannot be
+inferred from the file, so this is not a measurement of delivered stimulation.
+Objects with multiple timing entries or multiple lightsources are rejected rather
+than partially imported.</p>
+<p>Every export also writes <code>&lt;name&gt;_original_stim.npz</code> next to the <code>.seq</code>: the exact
+input array, including silent neurons. The <code>.seq</code> holds hardware-adjusted timings
+(SLM load delays), so importing it alone reproduces those adjusted timings. When
+the sidecar sits next to the file and still matches it, the import restores the
+original array with its exact timings and neuron rows. Keep the two files together.</p>
+<h2 id="setup-panel-and-hardware-execution">Setup panel and hardware execution</h2>
+<p>Export defaults are <strong>940 nm</strong>, <strong>Force binary export intensity off</strong>,
+<strong>Spiralling off</strong>, <strong>Exact stimulus timing on</strong>, and <strong>Use 10 input spots per ROI on</strong>.
+With exact timing, each hologram shape starts one 16.7 ms SLM load window before
+its first pulse instead of on the window grid, and stimuli are delayed only where
+the previous hologram leaves no room for that load (the first stimulus is always
+delayed by one window). Untick it to snap shapes to the window grid, which can
+delay stimuli by up to a window per hologram. Previously remembered
+settings still apply to quick exports. With a linear 85 mW maximum calibration,
+5 mW is exported as approximately <code>0.058824</code>, not <code>5.8824</code>, in both Shape and
+laser TTL intensity fields. Use the rig's measured wavelength-specific LUT;
+the linear example is not a replacement calibration.</p>
+<p>Main-menu exports populate the setup panel's generated preview without importing
+into hardware. Exports from the setup panel import when connected. Routine blocks
+also update the preview after import acknowledgement. Preview images resize with
+the panel and remain distinct from hardware status.</p>
+<p>Laser controls are currently read-only: <strong>Get Status</strong> discovers lightsources on
+its first use, preferring 940 nm, and retrieves status. The single selector displays
+friendly names while retaining the original SCI identifiers internally. Set power,
+shutter, and emission in SysCon2 itself.</p>
+<p>Select the imported sequence, choose Runs and trigger settings, and click
+<strong>Upload</strong>. After confirmation of an endless upload, NeuroSeq uploads and waits for
+hardware Idle. Then click <strong>Run</strong> and confirm to start the sequence. The panel shows
+phases, elapsed time, and hardware Busy/Idle state; SCI provides no
+percentage-complete measurement. A triggered run remains waiting until Busy is
+observed. A short automatic run can finish between polls; that case is reported
+without claiming measured completion. <strong>Stop</strong> also cancels any queued Run.</p>
+<p>The preview is collapsed by default; click <strong>Show preview</strong> to expand it.</p>
+<p>The dynamic-routine dialogs offer <strong>Use SysCon2 dt</strong> and prompt for resampling when
+starting with the wrong timestep.</p>
+<h3 id="dynamic-input-routines-on-the-rig">Dynamic input routines on the rig</h3>
+<p>With the <strong>SysCon2 (calcium imaging)</strong> target, the rheobase and STDP window
+dialogs show <strong>Hardware settings</strong>: target power, laser, spiral scanning and spots
+per cell (the project's export settings, shared with the SysCon2 tab, so no
+<strong>Export with settings…</strong> is needed first), plus how blocks are recorded. With
+<strong>Run blocks automatically and record them with ScanImage</strong>, each block is
+uploaded and run by NeuroSeq while ScanImage records it, triggered by the
+sequence, and its ΔF/F traces are extracted with the project's Cellpose masks;
+see <a href="../scanimage_acquisition/#dynamic-input-routines">ScanImage acquisition</a>.
+Rheobase then counts a probe as evoking a response, depending on <strong>Calcium
+readout</strong>, when the neuron's ΔF/F rises by the <strong>Response threshold</strong> within
+the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
+(an event of at least the <strong>Spike threshold</strong>) in it. Unticked, each block
+is only imported into SysCon2 and you run, record and import it yourself, then
+click <strong>Calcium data imported</strong> (rheobase can then measure the rise of an
+imported ΔF/F or raw fluorescence trace, e.g. the TIFF import's ROI averages,
+or deconvolved spikes; Suite2p's normalised traces are refused, since a rise
+relative to their baseline is meaningless). Export warnings are asked once per
+routine rather than failing every block. Since probe amplitudes are fractions of
+the target power, a routine refuses to send a block without a target power above
+0 mW and a power LUT for the chosen laser, or with a target above the LUT's
+maximum (higher amplitudes would all be delivered at that maximum); every
+stimulated neuron must have a Cellpose ROI. Amplitudes must be above 0 and at
+most 1.</p>
+<p>Choosing the SysCon2 target first gives rheobase settings for cells in a slice: a
+16.7 ms pulse (one spiral; a shorter pulse with spiral scanning on is logged as a
+warning, since only part of the spiral is delivered), up to 100 ms, 1 s recovery,
+a 300 ms post-pulse window and <strong>Fixed duration, varying amplitude</strong>, since every
+probe is a recording. Each target keeps its own values when you switch back and
+forth. With deconvolved spikes, a spike in the imaging frame after the
+post-pulse window still counts: the frames lit by a short pulse are imputed, so
+its response first shows in full in the next frame. Simulations finishing or
+failing meanwhile do not affect a hardware run.</p>
+<p>Each routine run keeps its block scripts in its own folder inside the project's
+export folder (the one <strong>Export with settings…</strong> used last), for example
+<code>SysCon exports\rheobase_2026-10-22_143012\</code>. Every block is saved there as
+<code>rheobase_2026-10-22_143012_001.seq</code>, with its overview PNG and stimulus sidecar,
+and imported into SysCon2 under the same name, so names never repeat across
+runs. A recording of a block records the path of its <code>.seq</code>. Scripts exported
+with <strong>Export current array to stimulation setup</strong> stay temporary and are
+deleted when NeuroSeq closes. The <strong>Create input array</strong> and <strong>Edit input
+array</strong> dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["content.code.copy"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
