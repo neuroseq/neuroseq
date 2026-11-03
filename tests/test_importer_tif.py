@@ -28,19 +28,8 @@ def _make_mask_image(shape=(32, 32)) -> np.ndarray:
     return masks
 
 
-def _suite2p_available() -> bool:
-    """Suite2p 0.x raises ValueError at import on Python 3.11 — be defensive."""
-    try:
-        import suite2p.detection  # noqa: F401
-
-        return True
-    except Exception:
-        return False
-
-
 def test_masks_to_stat_emits_one_entry_per_cell():
-    if not _suite2p_available():
-        pytest.skip("suite2p v1.x not installed")
+    pytest.importorskip("suite2p.detection")
 
     masks = _make_mask_image()
     stat = _masks_to_stat(masks, masks.shape[0], masks.shape[1])
@@ -61,8 +50,7 @@ def _mask_partitions(masks: np.ndarray) -> set[frozenset[tuple[int, int]]]:
 
 
 def test_stat_to_masks_round_trips_with_masks_to_stat():
-    if not _suite2p_available():
-        pytest.skip("suite2p v1.x not installed")
+    pytest.importorskip("suite2p.detection")
 
     masks = _make_mask_image()
     stat = _masks_to_stat(masks, masks.shape[0], masks.shape[1])
