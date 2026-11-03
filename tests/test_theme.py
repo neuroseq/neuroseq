@@ -242,3 +242,8 @@ def test_apply_app_theme_propagates_to_menu_bar(qtbot: QtBot) -> None:
     assert dark != light
     assert dark == theme.qt_palette(theme.DARK).color(role).name()
     assert light == theme.qt_palette(theme.LIGHT).color(role).name()
+
+    for name in (theme.RETRO, theme.DARK, theme.LIGHT, theme.RETRO, theme.LIGHT):
+        theme.apply_app_theme(app, name)
+        expected = theme.qt_palette(name).color(role).name()
+        assert menu_bar.palette().color(role).name() == expected, name

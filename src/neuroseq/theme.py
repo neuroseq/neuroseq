@@ -339,10 +339,11 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     # forces it to re-resolve against the new palette (otherwise the top bar
     # lags one theme behind).
     for widget in app.allWidgets():
-        widget.setPalette(palette)
         style_sheet = widget.styleSheet()
         if style_sheet:
             widget.setStyleSheet(style_sheet)
+        # Set after re-polishing, which can restore the previous palette
+        widget.setPalette(palette)
     # Re-assert the Fusion style last so every widget is repolished and
     # repainted with the new palette already in place.
     app.setStyle("Fusion")
