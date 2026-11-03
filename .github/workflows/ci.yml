@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["macos-arm64-ssc"]
+        os: ["macos-latest"]
     defaults:
       run:
         shell: bash -leo pipefail {0}
@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["macos-arm64-ssc"]
+        os: ["macos-latest"]
         python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v7
@@ -55,7 +55,7 @@ jobs:
           NEUROSEQ_HEADLESS_TEST: TRUE
       - run: uv run diff-cover coverage.xml -c pyproject.toml
   pre-commit:
-    runs-on: "macos-arm64-ssc"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
