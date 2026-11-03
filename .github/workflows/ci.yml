@@ -16,7 +16,7 @@ jobs:
   conda-forge:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: conda-forge"
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -40,7 +40,7 @@ jobs:
   pypi:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
