@@ -174,11 +174,17 @@ def mouse_click_and_drag(
         )
     qtbot.wait(delay_ms)
     qtbot.mouseRelease(
-        widget,
+        get_event_target(widget),
         button,
         pos=end,
     )
-    qtbot.wait(delay_ms)
+    # rendercanvas queues events and only dispatches them once per frame,
+    # which can take a while (e.g. on Windows): wait until it has done so
+    events = getattr(getattr(widget, "_subwidget", widget), "_events", None)
+    if events is not None:
+        qtbot.waitUntil(lambda: not events._pending_events, timeout=5000)
+    else:
+        qtbot.wait(delay_ms)
 
 
 @pytest.fixture
@@ -737,6 +743,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitExposed(stim_widget)
     stim_widget.set_mode(InteractMode.SELECT)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
@@ -775,7 +782,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     start = QtCore.QPoint(x0, y0)
     end = QtCore.QPoint(x0 * 3, y0 * 3)
     wait_for_canvas(qtbot, stim_widget, start, end)
-    mouse_click_and_drag(qtbot, stim_widget, start, end)
+    mouse_click_and_drag(qtbot, stim_widget.figure.canvas, start, end)
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
     # A quarter-to-three-quarters drag should land roughly in the middle
@@ -807,6 +814,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitExposed(stim_widget)
     stim_widget.set_mode(InteractMode.DRAW)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
@@ -864,9 +872,10 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
         lambda n0, n1, t0, t1, btn: drag_signals.append((n0, n1, t0, t1, btn))
     )
     mouse_click_and_drag(
-        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
+        qtbot, stim_widget.figure.canvas, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
     )
-    assert len(drag_signals) > 2
+    # moves between start and end may be merged into one event
+    assert len(drag_signals) >= 2
     # first signal on start of drag
     n0, n1, t0, t1, btn = drag_signals[0]
     assert btn == 1
