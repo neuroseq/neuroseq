@@ -212,10 +212,8 @@ def test_progress_dialog_cancel_button_text_lifecycle(
     assert cancel_button is not None
     assert cancel_button.isEnabled()
 
-    finished: list[bool] = []
-    worker.finished.connect(lambda *_: finished.append(True))
     block.set()
-    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=5000)
 
     cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
     assert cancel_button is None or not cancel_button.isVisible()
