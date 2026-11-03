@@ -1,4 +1,5 @@
 import dataclasses
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -969,7 +970,7 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert host.owner is dialog
     run_name = host.run_names[0]
     assert run_name.startswith("rheobase_")
-    assert f"runs/{run_name}" in dialog.log.toPlainText()
+    assert str(Path("runs", run_name)) in dialog.log.toPlainText()
     for i in range(20):
         if not dialog._running:
             break

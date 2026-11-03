@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 from datetime import datetime
 from pathlib import Path
 
@@ -507,9 +508,11 @@ def test_launch_caches_the_spack_activation(tmp_path) -> None:
     script = command.arguments[-1]
     cache = bp.activation_cache_file(cache_dir, str(image))
     assert cache.parent == cache_dir and cache.name.startswith("esd-activate-")
-    assert f"if [ -s {cache} ]; then source {cache};" in script
-    assert f"spack env activate --sh esd > {cache}.partial" in script
-    assert script.endswith(f"exec python -u {bp.HELPER_PATH}")
+    quoted = shlex.quote(str(cache))
+    assert f"if [ -s {quoted} ]; then source {quoted};" in script
+    partial = shlex.quote(f"{cache}.partial")
+    assert f"spack env activate --sh esd > {partial}" in script
+    assert script.endswith(f"exec python -u {shlex.quote(str(bp.HELPER_PATH))}")
     # Updating the image changes the cache key.
     import os
 

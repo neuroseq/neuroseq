@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -1188,7 +1189,8 @@ def test_hdf5(
 
     assert np.allclose(data, project_ornstein.b2_model.network["M"].y)
 
-    with pytest.raises(ValueError, match="Path fakepath/data.h5 does not exist"):
+    message = f"Path {Path('fakepath', 'data.h5')} does not exist"
+    with pytest.raises(ValueError, match=re.escape(message)):
         project_ornstein.b2_model.save_to_h5("fakepath/data.h5")
 
     project_ornstein.b2_model.monitors = {}
