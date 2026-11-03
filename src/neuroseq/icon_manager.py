@@ -45,6 +45,15 @@ class IconManager:
     ) -> None:
         apply_fn(target, self._build(names, kwargs))
         self._entries.append((target, apply_fn, names, kwargs))
+        destroyed = getattr(target, "destroyed", None)
+        if destroyed is not None:
+            # Forget the target once Qt deletes it: the entry otherwise keeps
+            # its Python wrapper, and everything its slots capture, alive.
+            key = id(target)
+            destroyed.connect(lambda *_: self._forget(key))
+
+    def _forget(self, key: int) -> None:
+        self._entries = [entry for entry in self._entries if id(entry[0]) != key]
 
     def set_action_icon(self, action: object, *names: str, **kwargs: object) -> None:
         self._register(

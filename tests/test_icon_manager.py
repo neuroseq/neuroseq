@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import gc
+import weakref
+
 from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
@@ -50,6 +53,33 @@ def test_icon_manager_prunes_deleted_targets(qtbot: QtBot) -> None:
     # must not grow the registry with dead entries.
     manager.apply_theme(theme.DARK)
     assert len(manager._entries) <= 1
+
+
+def test_icon_manager_forgets_deleted_targets_without_theme_change(
+    qtbot: QtBot,
+) -> None:
+    class Owner:
+        pass
+
+    def make_action(parent: QtWidgets.QWidget, owner: Owner) -> QtWidgets.QAction:
+        action = QtWidgets.QAction("x", parent)
+        action.triggered.connect(lambda: owner)
+        return action
+
+    manager = IconManager()
+    parent = QtWidgets.QWidget()
+    owner = Owner()
+    action = make_action(parent, owner)
+    manager.set_action_icon(action, "mdi6.file")
+    assert len(manager._entries) == 1
+    owner_ref = weakref.ref(owner)
+
+    parent.deleteLater()
+    del parent, action, owner
+    qtbot.waitUntil(lambda: not manager._entries)
+    gc.collect()
+    # The registry no longer keeps the action, or what its slots capture, alive.
+    assert owner_ref() is None
 
 
 def test_icon_manager_widget_and_window_icons(qtbot: QtBot) -> None:
