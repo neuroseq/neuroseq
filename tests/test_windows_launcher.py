@@ -1,22 +1,25 @@
 """Desktop launcher update rules (scripts/windows/launch_neuroseq.ps1, #617).
 
 Runs the real script with PowerShell 7 against throwaway git repositories and
-a stand-in for uv; skipped where `pwsh` is not installed.
+a stand-in for uv; Windows only, as that is the only platform it runs on.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 LAUNCHER = Path(__file__).parents[1] / "scripts" / "windows" / "launch_neuroseq.ps1"
 PWSH = shutil.which("pwsh")
-pytestmark = pytest.mark.skipif(PWSH is None, reason="PowerShell 7 (pwsh) not found")
+pytestmark = pytest.mark.skipif(
+    sys.platform != "win32" or PWSH is None,
+    reason="Windows launcher; needs PowerShell 7 (pwsh)",
+)
 
 
 def _git(cwd: Path, *args: str) -> str:
@@ -54,15 +57,14 @@ def rig(tmp_path: Path) -> dict[str, Path]:
     _git(seed, "push", "-q", str(origin), "main")
 
     # Records the commit it was started at, then exits with $FAKE_EXIT.
-    uv = tmp_path / "uv"
+    # %~n strips the quotes the launcher puts around the --project path.
+    uv = tmp_path / "uv.cmd"
     uv.write_text(
-        "#!/bin/sh\n"
-        'echo "$@" > "$FAKE_RECORD"\n'
-        'git -C "$FAKE_CLONE" rev-parse HEAD >> "$FAKE_RECORD"\n'
-        'echo "boom" >&2\n'
-        'exit "${FAKE_EXIT:-0}"\n'
+        '@>"%FAKE_RECORD%" echo %~1 %~2 %~3 %~4\n'
+        '@git -C "%FAKE_CLONE%" rev-parse HEAD >> "%FAKE_RECORD%"\n'
+        "@echo boom 1>&2\n"
+        "@exit /b %FAKE_EXIT%\n"
     )
-    uv.chmod(uv.stat().st_mode | stat.S_IEXEC)
     return {
         "origin": origin,
         "clone": clone,
@@ -156,7 +158,7 @@ def test_missing_uv_is_reported(rig) -> None:
     rig["uv"].unlink()
     env_path = os.environ["PATH"]
     os.environ["PATH"] = os.pathsep.join(
-        p for p in env_path.split(os.pathsep) if not (Path(p) / "uv").exists()
+        p for p in env_path.split(os.pathsep) if not (Path(p) / "uv.exe").exists()
     )
     try:
         result = _launch(rig)

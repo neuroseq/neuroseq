@@ -2228,7 +2228,7 @@ def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None
     assert _starts(imported[:, 2]) == [900]
 
 
-# SysCon2 runs on Windows, where text files are written with \r\n line endings.
+# check this works with both LF (linux) and CRLF (windows) line endings
 @pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
 def test_original_stim_sidecar_restores_exact_timings_and_rows(
     tmp_path: Path, newline: str
