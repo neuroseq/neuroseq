@@ -1119,6 +1119,8 @@ class Project:
         offset_seconds: float,
         duration_seconds: float,
         label: str = "Add block data",
+        *,
+        replace_spikes: bool = False,
     ) -> None:
         """Place the data of one block of a closed-loop routine in a data group.
 
@@ -1126,7 +1128,10 @@ class Project:
         group per block: spikes are shifted by ``offset_seconds`` (block-relative
         times -> the stim array's timeline) and added to the spike dataset of the
         same name; a trace is resampled to that trace's ``dt`` and written at the
-        offset, a gap before it holding the trace's last value. One undoable step.
+        offset, a gap before it holding the trace's last value. A trace overwrites
+        what an earlier block left in its span; with ``replace_spikes`` the spikes
+        there are replaced too (a recording's tail running into the next block).
+        One undoable step.
         """
         if offset_seconds < 0 or duration_seconds < 0:
             raise ValueError("Block offset and duration must not be negative.")
@@ -1137,7 +1142,12 @@ class Project:
                 self.experiments[experiment_name] = experiment
             for datum in data:
                 if isinstance(datum, SpikeData):
-                    _place_block_spikes(experiment, datum, offset_seconds)
+                    _place_block_spikes(
+                        experiment,
+                        datum,
+                        offset_seconds,
+                        duration_seconds if replace_spikes else 0.0,
+                    )
                 elif isinstance(datum, TraceData):
                     _place_block_trace(experiment, datum, offset_seconds)
                 else:
@@ -1619,7 +1629,10 @@ class Project:
 
 
 def _place_block_spikes(
-    experiment: Experiment, spikes: SpikeData, offset_seconds: float
+    experiment: Experiment,
+    spikes: SpikeData,
+    offset_seconds: float,
+    replaced_seconds: float,
 ) -> None:
     times = np.asarray(spikes.spike_times, dtype=np.float64) + offset_seconds
     existing = find_by_name_and_type(experiment.data, spikes.name, SpikeData)
@@ -1630,16 +1643,21 @@ def _place_block_spikes(
             )
         )
         return
+    # Spikes an earlier block put in [offset, offset + replaced) are replaced.
+    old_times = np.asarray(existing.spike_times, np.float64)
+    keep = (old_times < offset_seconds) | (
+        old_times >= offset_seconds + replaced_seconds
+    )
     # New buffers, never in place: the undo history keeps the old ones.
-    indices = np.concatenate([existing.spike_indices, spikes.spike_indices])
-    all_times = np.concatenate([np.asarray(existing.spike_times, np.float64), times])
+    indices = np.concatenate([existing.spike_indices[keep], spikes.spike_indices])
+    all_times = np.concatenate([old_times[keep], times])
     order = np.argsort(all_times, kind="stable")
     existing.spike_indices = indices[order]
     existing.spike_times = all_times[order]
     # Raw Cellpose ids follow their spikes; one side without them drops them all.
     if existing.raw_cellpose_ids is not None and spikes.raw_cellpose_ids is not None:
         existing.raw_cellpose_ids = np.concatenate(
-            [existing.raw_cellpose_ids, spikes.raw_cellpose_ids]
+            [existing.raw_cellpose_ids[keep], spikes.raw_cellpose_ids]
         )[order]
     else:
         existing.raw_cellpose_ids = None

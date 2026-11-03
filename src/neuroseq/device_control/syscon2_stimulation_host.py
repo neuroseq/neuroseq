@@ -26,6 +26,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from dataclasses import replace
 from itertools import count
 from typing import Protocol
@@ -33,6 +34,7 @@ from typing import Protocol
 from qtpy import QtCore
 
 from neuroseq.device_control.syscon2_client import SysCon2Client
+from neuroseq.device_control.syscon2_protocol import SysCon2Error
 from neuroseq.device_control.syscon2_protocol import holo4d_ready_to_run
 from neuroseq.device_control.syscon2_protocol import normalized_holo4d_state
 from neuroseq.export.syscon2_export_service import SysconExportError
@@ -50,6 +52,9 @@ UPLOAD_TIMEOUT_S = 60.0
 #: An "Idle" reply this soon after UploadSequence, before any "Uploading" was seen,
 #: may predate the upload, so it is not taken as ready.
 UPLOAD_SETTLE_S = 1.0
+#: Settle time of the second upload, after RunSequence found none: longer, since the
+#: first one evidently had not started (or taken effect) within UPLOAD_SETTLE_S.
+REUPLOAD_SETTLE_S = 3.0
 #: Extra time allowed for an unrecorded block to finish after its nominal duration.
 RUN_MARGIN_S = 30.0
 _POLL_S = 0.1
@@ -72,6 +77,10 @@ class BlockRecording:
     syscon_sequence: str = ""
     #: The export options the block was delivered with (set by the host).
     export_settings: SysconExportSettings | None = None
+    #: Data group collecting a routine run's blocks, each placed at ``offset_s`` in
+    #: the stim array (None: the recording's traces get a data group of their own).
+    group: str | None = None
+    offset_s: float = 0.0
 
     @property
     def duration_s(self) -> float:
@@ -118,6 +127,8 @@ class _Block:
     remote_path: str = ""
     run_id: str | None = None
     run_submitted: bool = False
+    #: Holo4D states seen while uploading (changes only), for error messages.
+    upload_states: list[str] = field(default_factory=list)
 
     def command(self, step: str) -> str:
         return f"{COMMAND_PREFIX}.{self.index}.{step}"
@@ -160,6 +171,43 @@ def next_block_name(folder: pathlib.Path, run_name: str) -> str:
 def _raise_if_disconnected(state: str) -> None:
     if normalized_holo4d_state(state) == "disconnected":
         raise RuntimeError("SysCon2 reports the Holo4D hardware as disconnected.")
+
+
+def _select_and_upload(
+    client: SysCon2Client,
+    remote: str,
+    cancel: threading.Event,
+    settle_s: float,
+    states: list[str],
+) -> None:
+    """Select ``remote``, upload it for one run and wait until Holo4D is Idle again,
+    appending each new state seen to ``states`` (for error messages)."""
+    client.sequence_manager.select_sequence(remote)
+    client.holo4d.upload_sequence(1)
+    uploaded_at = time.monotonic()
+    deadline = uploaded_at + UPLOAD_TIMEOUT_S
+    seen_upload = False
+    while True:
+        state = client.holo4d.get_state()
+        _raise_if_disconnected(state)
+        normalized = normalized_holo4d_state(state)
+        if not states or states[-1] != normalized:
+            states.append(normalized)
+        seen_upload |= normalized.startswith("upload")
+        # Strict: nobody watches an automatic block, so an unknown state
+        # fails at the timeout (naming it) instead of starting a run.
+        if holo4d_ready_to_run(state, strict=True) and (
+            seen_upload or time.monotonic() - uploaded_at >= settle_s
+        ):
+            return
+        if cancel.is_set():
+            raise _Cancelled
+        if time.monotonic() > deadline:
+            raise RuntimeError(
+                f"The uploaded sequence was not ready after {UPLOAD_TIMEOUT_S:.0f} s "
+                f"(state: {state or 'unknown'})."
+            )
+        time.sleep(_POLL_S)
 
 
 class SysCon2StimulationHost(QtCore.QObject):
@@ -387,29 +435,9 @@ class SysCon2StimulationHost(QtCore.QObject):
             remote = remote_sequence_path(
                 client.sequence_manager.get_sequences(), name, target
             )
-            client.sequence_manager.select_sequence(remote)
-            client.holo4d.upload_sequence(1)
-            uploaded_at = time.monotonic()
-            deadline = uploaded_at + UPLOAD_TIMEOUT_S
-            seen_upload = False
-            while True:
-                state = client.holo4d.get_state()
-                _raise_if_disconnected(state)
-                seen_upload |= normalized_holo4d_state(state).startswith("upload")
-                # Strict: nobody watches an automatic block, so an unknown state
-                # fails at the timeout (naming it) instead of starting a run.
-                if holo4d_ready_to_run(state, strict=True) and (
-                    seen_upload or time.monotonic() - uploaded_at >= UPLOAD_SETTLE_S
-                ):
-                    break
-                if cancel.is_set():
-                    raise _Cancelled
-                if time.monotonic() > deadline:
-                    raise RuntimeError(
-                        f"The uploaded sequence was not ready after {UPLOAD_TIMEOUT_S:.0f} s "
-                        f"(state: {state or 'unknown'})."
-                    )
-                time.sleep(_POLL_S)
+            _select_and_upload(
+                client, remote, cancel, UPLOAD_SETTLE_S, block.upload_states
+            )
             return remote
 
         self.phase = "preparing"
@@ -524,7 +552,37 @@ class SysCon2StimulationHost(QtCore.QObject):
         def run_task(client: SysCon2Client) -> object:
             if cancel.is_set():
                 return None
-            client.holo4d.run_sequence("auto", "rising")
+            try:
+                client.holo4d.run_sequence("auto", "rising")
+            except SysCon2Error as exc:
+                if "not uploaded" not in str(exc).lower():
+                    raise
+                # The upload had not started, or not taken effect, when Holo4D
+                # reported Idle: upload once more and give it longer to show.
+                logger.warning(
+                    "RunSequence found no uploaded sequence (states after upload: "
+                    "%s); uploading again",
+                    block.upload_states,
+                )
+                first_states = list(block.upload_states)
+                block.upload_states.clear()
+                _select_and_upload(
+                    client,
+                    block.remote_path,
+                    cancel,
+                    REUPLOAD_SETTLE_S,
+                    block.upload_states,
+                )
+                if cancel.is_set():
+                    return None
+                try:
+                    client.holo4d.run_sequence("auto", "rising")
+                except SysCon2Error as again:
+                    raise SysCon2Error(
+                        f"{again} (Holo4D states after UploadSequence: "
+                        f"{' -> '.join(first_states) or 'none'}; after a second "
+                        f"upload: {' -> '.join(block.upload_states) or 'none'})"
+                    ) from again
             if wait_s is None:
                 return None
             started = time.monotonic()
@@ -625,4 +683,7 @@ class SysCon2StimulationHost(QtCore.QObject):
         if block is None:
             # Includes every stop command: they are sent after the block is gone.
             return
+        if name == block.command("run"):
+            # RunSequence was refused, so there is no sequence to stop.
+            block.run_submitted = False
         self._fail(message)

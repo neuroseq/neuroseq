@@ -70,8 +70,6 @@ class GuiSettings:
     fiji_executable_path: str = ""
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
-    #: ScanImage channel of the calcium indicator (1-based).
-    scanimage_functional_channel: int = 1
     syscon_export_directory: str = ""
     #: BrainScaleS-2 tab settings (``bss2_protocol.Bss2Settings.to_dict()``).
     #: Never contains the EBRAINS token.
@@ -120,7 +118,6 @@ class GuiSettings:
                         "fiji_executable_path": self.fiji_executable_path,
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
-                        "scanimage_functional_channel": self.scanimage_functional_channel,
                         "syscon_export_directory": self.syscon_export_directory,
                         "bss2_settings": _without_secrets(self.bss2_settings),
                         "recent_projects": self.recent_projects,
@@ -172,7 +169,6 @@ class GuiSettings:
             scanimage_recording_directory = config.get(
                 "scanimage_recording_directory", ""
             )
-            scanimage_functional_channel = config.get("scanimage_functional_channel", 1)
             syscon_export_directory = config.get("syscon_export_directory", "")
             recent_projects = config.get("recent_projects", [])
             bss2_settings = config.get("bss2_settings", {})
@@ -257,12 +253,6 @@ class GuiSettings:
             self.__dict__["scanimage_python_path"] = str(scanimage_python_path or "")
             self.__dict__["scanimage_recording_directory"] = str(
                 scanimage_recording_directory or ""
-            )
-            self.__dict__["scanimage_functional_channel"] = (
-                scanimage_functional_channel
-                if isinstance(scanimage_functional_channel, int)
-                and 1 <= scanimage_functional_channel <= 32
-                else 1
             )
             self.__dict__["syscon_export_directory"] = str(
                 syscon_export_directory or ""

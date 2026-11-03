@@ -7,6 +7,7 @@ import pytest
 from qtpy import QtCore
 
 import neuroseq.device_control.syscon2_stimulation_host as host_module
+from neuroseq.device_control.syscon2_protocol import SysCon2Error
 from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
 from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
 from neuroseq.device_control.syscon2_stimulation_host import next_block_name
@@ -159,6 +160,8 @@ class _FakeClient:
         self.calls: list[tuple] = []
         self.states = list(states)
         self.state_polls = 0
+        #: Errors RunSequence raises, one per call, before it succeeds.
+        self.run_errors: list[str] = []
         outer = self
 
         class _Manager:
@@ -181,6 +184,8 @@ class _FakeClient:
 
             def run_sequence(self, start, edge):
                 outer.calls.append(("run", start, edge))
+                if outer.run_errors:
+                    raise SysCon2Error(outer.run_errors.pop(0))
 
             def stop_sequence(self):
                 outer.calls.append(("stop",))
@@ -198,6 +203,7 @@ def _automatic_host(tmp_path, mocker, *, acquisition=True):
     mocker.patch.object(host_module, "export_stim_array", return_value=result)
     mocker.patch.object(host_module, "_POLL_S", 0.0)
     mocker.patch.object(host_module, "UPLOAD_SETTLE_S", 0.0)
+    mocker.patch.object(host_module, "REUPLOAD_SETTLE_S", 0.0)
     fake = _FakeAcquisition() if acquisition else None
     host.set_acquisition(fake)
     return host, submitted, fake
@@ -254,6 +260,73 @@ def test_automatic_block_is_uploaded_recorded_and_run(
         acquisition.block_recorded.emit("run1", {"trace": "Rec :: dF/F"})
     assert completed.args == [owner, {"trace": "Rec :: dF/F"}]
     assert host.phase == "idle"
+
+
+def _armed_block(stim, tmp_path, qtbot, mocker, client):
+    host, submitted, acquisition = _automatic_host(tmp_path, mocker)
+    owner = object()
+    host.send_block(
+        Project(), stim, 0, 5, owner=owner, automatic=True, recording=_recording(stim)
+    )
+    _run(submitted, host, client)  # import, select, upload
+    acquisition.block_armed.emit("run1")
+    return host, submitted, acquisition, owner
+
+
+def test_run_without_an_upload_uploads_again_and_runs(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    """Rig test: RunSequence answered "Sequence not uploaded" after an upload that
+    Holo4D never reported (Idle throughout)."""
+    client = _FakeClient(["target\\probe_001.seq"], ["Idle"])
+    client.run_errors = ["Sequence not uploaded"]
+    host, submitted, _acquisition, _owner = _armed_block(
+        stim, tmp_path, qtbot, mocker, client
+    )
+
+    _run(submitted, host, client)
+
+    assert client.calls[-4:] == [
+        ("run", "auto", "rising"),
+        ("select", "target\\probe_001.seq"),
+        ("upload", 1),
+        ("run", "auto", "rising"),
+    ]
+    assert host.phase == "running"
+
+
+def test_run_failing_twice_names_the_states_and_stops_nothing(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    client = _FakeClient(["target\\probe_001.seq"], ["Idle"])
+    client.run_errors = ["Sequence not uploaded", "Sequence not uploaded"]
+    host, submitted, acquisition, owner = _armed_block(
+        stim, tmp_path, qtbot, mocker, client
+    )
+
+    with qtbot.waitSignal(host.block_failed) as failed:
+        _run(submitted, host, client)
+
+    assert failed.args[0] is owner
+    assert "Sequence not uploaded" in failed.args[1]
+    assert "after UploadSequence: idle" in failed.args[1]
+    # RunSequence was refused, so nothing is stopped; the recording is aborted.
+    assert not any(name.endswith(".stop") for name, _task in submitted)
+    assert acquisition.aborted == ["run1"]
+
+
+def test_other_run_errors_are_not_retried(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    client = _FakeClient(["target\\probe_001.seq"], ["Idle"])
+    client.run_errors = ["Laser interlock open"]
+    host, submitted, _acquisition, _owner = _armed_block(
+        stim, tmp_path, qtbot, mocker, client
+    )
+    with qtbot.waitSignal(host.block_failed) as failed:
+        _run(submitted, host, client)
+    assert failed.args[1] == "Laser interlock open"
+    assert [call[0] for call in client.calls].count("upload") == 1
 
 
 def test_automatic_block_without_recording_waits_for_the_sequence(

@@ -204,12 +204,20 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             self._host.set_export_settings(replace(settings, **change))  # type: ignore[arg-type]
 
     def block_recording(
-        self, stim: StimArray, start: int, stop: int, label: str
+        self,
+        stim: StimArray,
+        start: int,
+        stop: int,
+        label: str,
+        group: str | None = None,
     ) -> BlockRecording:
-        """How to record the block ``stim[start:stop]``."""
+        """How to record the block ``stim[start:stop]``; with ``group``, its traces
+        join that data group at the block's time in ``stim``."""
         return BlockRecording(
             label=label,
             stim_block=slice_stim_array(stim, start, stop),
             tail_s=self.spn_tail_s.value(),
             spike_threshold=self.spn_spike_threshold.value(),
+            group=group,
+            offset_s=start * float(stim.dt),
         )

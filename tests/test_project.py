@@ -1620,6 +1620,28 @@ def test_placed_spikes_keep_their_cellpose_ids():
     assert project.experiments["Run"].data[0].raw_cellpose_ids is None
 
 
+def test_placed_block_can_replace_spikes_in_its_span():
+    """A recording's tail running into the next block is replaced by that block."""
+    project = Project()
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([0, 1]), np.array([0.2, 1.5]), np.array([5, 6]))],
+        0.0,
+        2.0,
+    )
+    project.place_block_data(
+        "Run",
+        [SpikeData("s", np.array([2]), np.array([0.1]), np.array([7]))],
+        1.0,
+        2.0,
+        replace_spikes=True,
+    )
+    spikes = project.experiments["Run"].data[0]
+    np.testing.assert_allclose(spikes.spike_times, [0.2, 1.1])
+    np.testing.assert_array_equal(spikes.spike_indices, [0, 2])
+    np.testing.assert_array_equal(spikes.raw_cellpose_ids, [5, 7])
+
+
 def test_empty_block_trace_is_skipped():
     project = Project()
     empty = TraceData("v", np.zeros((1, 0)), np.array([0]), "a.u.", 0.01)

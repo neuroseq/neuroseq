@@ -67,6 +67,30 @@ def test_scanimage_rejects_volume_and_reversed_files(recording):
         index_recording(paths)
 
 
+@pytest.mark.parametrize(
+    "stack",
+    [
+        # As on the rig: a 25-slice stack is configured but stacks are disabled.
+        {"SI.hStackManager.actualNumSlices": 1},
+        {"SI.hStackManager.enable": False},
+    ],
+)
+def test_scanimage_disabled_stack_records_one_plane(recording, stack):
+    paths, meta = recording
+    meta["FrameData"] |= {"SI.hStackManager.numSlices": 25, **stack}
+    assert index_recording(paths)["channels"] == [1, 2]
+
+
+def test_scanimage_rejects_an_active_stack(recording):
+    paths, meta = recording
+    meta["FrameData"] |= {
+        "SI.hStackManager.numSlices": 25,
+        "SI.hStackManager.actualNumSlices": 25,
+    }
+    with pytest.raises(ValueError, match="single-plane"):
+        index_recording(paths)
+
+
 def test_engine_connect_requires_exact_running_session(mocker):
     matlab = ModuleType("matlab")
     engine = ModuleType("matlab.engine")
@@ -160,6 +184,24 @@ def test_finalization_requires_matching_run_and_stable_files(
     finished.assert_called_once_with("our-run")
     assert ready.call_args.args[0]["status"] == "completed"
     assert connection.run_id is None
+
+
+@pytest.mark.parametrize(
+    ("expected_frames", "status"), [(4, "completed"), (5, "aborted")]
+)
+def test_aborted_run_holding_every_requested_frame_is_completed(
+    connection, recording, mocker, expected_frames, status
+):
+    """ScanImage can fire acqAbort at the end of a triggered Grab."""
+    paths, _ = recording
+    connection.run_id = "our-run"
+    connection._expected_frames = expected_frames
+    connection._last_status = {"run": {"id": "our-run", "state": "aborted"}}
+    ready = mocker.Mock()
+    connection.recording_ready.connect(ready)
+    connection._send("index", {"paths": paths})
+    connection._reply({"id": 1, "result": index_recording(paths)})
+    assert ready.call_args.args[0]["status"] == status
 
 
 def test_record_request_waits_for_poll_and_abort_cancels_it(connection):
@@ -288,7 +330,7 @@ def test_controls_remember_python_and_folder_across_sessions(
     assert GuiSettings().scanimage_python_path == str(other)
 
 
-def test_controls_remember_functional_channel_across_sessions(
+def test_controls_start_at_channel_1_and_grab_300_fov_frames(
     qtbot, connection, tmp_config_dir
 ):
     from neuroseq.device_control.scanimage_controls import ScanImageControls
@@ -296,11 +338,12 @@ def test_controls_remember_functional_channel_across_sessions(
     panel = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(panel)
     assert panel.channel_spin.value() == 1
+    assert panel.fov_frames_spin.value() == 300
     panel.channel_spin.setValue(2)
 
     reopened = ScanImageControls(connection, GuiSettings())
     qtbot.addWidget(reopened)
-    assert reopened.channel_spin.value() == 2
+    assert reopened.channel_spin.value() == 1
 
 
 def test_controls_messages_are_selectable(qtbot, connection, tmp_config_dir):
@@ -903,20 +946,21 @@ def test_record_saves_the_channels_ticked_in_the_dialog(
     panel.record_requested.connect(requests.append)
     panel.directory_edit.setText(str(tmp_path))
 
-    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
+    assert panel.channel_spin.value() == 1
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 2})
     assert [c.text() for c in panel.save_channel_checks] == ["1", "2", "3", "4"]
-    assert panel.saved_channels() == [1]
+    assert panel.saved_channels() == [1]  # channel 1, whatever ScanImage saves
     panel._status(
-        {"acq_state": "idle", "channels_available": 4, "saved_channels": [1, 3]}
+        {"acq_state": "idle", "channels_available": 4, "saved_channels": [2, 3]}
     )
-    assert panel.saved_channels() == [1, 3]  # follows ScanImage until chosen here
+    assert panel.saved_channels() == [1]
 
-    panel.save_channel_checks[1].setChecked(True)
-    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 1})
-    assert panel.saved_channels() == [1, 2, 3]  # the user's choice is kept
+    panel.save_channel_checks[2].setChecked(True)
+    panel._status({"acq_state": "idle", "channels_available": 4, "saved_channels": 2})
+    assert panel.saved_channels() == [1, 3]  # the user's choice is kept
 
     panel._record()
-    assert requests[-1]["channels"] == [1, 2, 3]
+    assert requests[-1]["channels"] == [1, 3]
 
     for check in panel.save_channel_checks:
         check.setChecked(False)

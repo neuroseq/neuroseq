@@ -14,6 +14,7 @@ import json
 import logging
 import math
 import pathlib
+import time
 from collections.abc import Callable
 from collections.abc import Sequence
 from datetime import UTC
@@ -102,12 +103,18 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         #: Block recordings of dynamic input routines, by run id.
         self._blocks: dict[str, BlockRecording] = {}
         self._armed: set[str] = set()
+        #: When each block's recording started waiting for its trigger.
+        self._armed_at: dict[str, float] = {}
         #: Deadline of each armed block recording, until its recording is ready.
         self._deadlines: dict[str, QtCore.QTimer] = {}
         #: Recorded blocks whose traces are being extracted.
         self._extracting: set[str] = set()
         #: Functional (calcium) channel of each block recording, from the ScanImage tab.
         self._block_channels: dict[str, int] = {}
+        #: Frames requested from ScanImage for each block, and the rate they assumed.
+        self._block_frames: dict[str, tuple[int, float]] = {}
+        #: Why ScanImage aborted a block's recording, kept until its TIFF is checked.
+        self._abort_messages: dict[str, str] = {}
         #: Stimulus samples written beside a recording that has not started yet.
         self._stimulus_files: dict[str, pathlib.Path] = {}
         #: Last reported state of each run started here.
@@ -183,6 +190,8 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
         self._armed.discard(run_id)
+        self._armed_at.pop(run_id, None)
+        self._abort_messages.pop(run_id, None)
         self._remove_metadata_without_recording(run_id)
         if self._fov_runs.pop(run_id, None) is not None:
             self.controls.show_message("The FOV recording ended without data.")
@@ -191,6 +200,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             # completes once its traces are extracted.
             return
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(
                 run_id, "The recording ended without producing data."
@@ -306,17 +316,31 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         if run_id not in self.run_ids:
             return
         state = run.get("state", "unknown")
+        previous_state = self._run_states.get(run_id)
         self._run_states[run_id] = state
         if run_id in self._blocks:
             if state in {"waiting_for_first_frame", "recording"} and (
                 run_id not in self._armed
             ):
                 self._armed.add(run_id)
+                self._armed_at[run_id] = time.monotonic()
                 self._start_deadline(run_id, self._blocks[run_id])
                 self.block_armed.emit(run_id)
+            elif state == "aborted" and "error" not in run:
+                # A triggered Grab can end through ScanImage's abort() after its
+                # last frame; the connection then reports the saved TIFF as
+                # completed. Otherwise the recording or its finalization fails.
+                self._stop_deadline(run_id)
+                self._abort_messages.setdefault(
+                    run_id,
+                    self._block_failure_message(run_id, state, previous_state),
+                )
             elif state in _FAILED_STATES:
                 self._fail_block(
-                    run_id, run.get("error") or f"ScanImage reported '{state}'."
+                    run_id,
+                    run.get("error")
+                    or self._abort_messages.get(run_id)
+                    or self._block_failure_message(run_id, state, previous_state),
                 )
         record = self._record(run_id)
         if record is None:
@@ -387,12 +411,19 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             project.mark_dirty()
             return
         name = record["name"]
-        if name in project.experiments:
-            name = f"{name} ({run_id[:8]})"
-        project.add_experiment(
-            Experiment(name=name, duration=result["duration_s"], timepoints=[], data=[])
-        )
-        record["experiment_name"] = name
+        block = self._blocks.get(run_id)
+        if block is not None and block.group is not None:
+            # Its traces join the routine run's data group (see _extract_block).
+            record["experiment_name"] = block.group
+        else:
+            if name in project.experiments:
+                name = f"{name} ({run_id[:8]})"
+            project.add_experiment(
+                Experiment(
+                    name=name, duration=result["duration_s"], timepoints=[], data=[]
+                )
+            )
+            record["experiment_name"] = name
         project.add_calcium_video(
             [pathlib.Path(p) for p in result["paths"]],
             result["fps"],
@@ -403,11 +434,14 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         project.mark_dirty()
         project.update_limits()
         self.recording_added.emit()
-        block = self._blocks.get(run_id)
         if block is None:
             return
         if result["status"] != "completed":
-            self._fail_block(run_id, f"The recording was {result['status']}.")
+            self._fail_block(
+                run_id,
+                self._abort_messages.get(run_id)
+                or f"The recording was {result['status']}.",
+            )
             return
         self._extract_block(run_id, block, result, name)
 
@@ -430,9 +464,10 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         def finished(_path: object) -> None:
             record["fov_image"] = str(target)
             self._project().mark_dirty()
+            recorded = ", ".join(path.name for path in paths)
             self.controls.show_message(
-                f"FOV image saved: {target.name} (mean of channel {channel}); "
-                "segmenting it with Cellpose."
+                f"FOV recording saved: {recorded}. Its mean of channel {channel}: "
+                f"{target.name}; segmenting it with Cellpose."
             )
             self.fov_ready.emit(str(target))
 
@@ -488,9 +523,41 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             "that SysCon2's TTL Out 1 reaches ScanImage's acquisition start trigger.",
         )
 
+    def _block_failure_message(
+        self, run_id: str, state: str, previous_state: str | None
+    ) -> str:
+        requested = ""
+        if run_id in self._block_frames:
+            frames, fps = self._block_frames[run_id]
+            requested = (
+                f" (recording of {frames} frames, {frames / fps:.1f} s at {fps:.2f} Hz)"
+            )
+        if state != "aborted":
+            return f"ScanImage reported '{state}'{requested}."
+        armed_at = self._armed_at.get(run_id)
+        after = (
+            f" {time.monotonic() - armed_at:.1f} s after it was armed"
+            if armed_at is not None
+            else ""
+        )
+        if previous_state == "recording":
+            return (
+                f"ScanImage aborted the recording{requested}{after}, after its first "
+                "frame. Check MATLAB's command window for a ScanImage error."
+            )
+        return (
+            f"ScanImage aborted the recording{requested}{after}, before its first "
+            "frame. Either no trigger reached its acquisition start trigger from "
+            "SysCon2's TTL Out 1, the ScanImage tab's first-frame timeout passed, or "
+            "Abort was pressed in ScanImage. Check MATLAB's command window for a "
+            "ScanImage error."
+        )
+
     def _fail_block(self, run_id: str, message: str) -> None:
         self._stop_deadline(run_id)
+        self._abort_messages.pop(run_id, None)
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self._blocks.pop(run_id, None) is not None:
             self.block_recording_failed.emit(run_id, message)
 
@@ -504,6 +571,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         fps = float(result["fps"])
         channels = list(result["channels"])
         channel = self._block_channels.pop(run_id, self.controls.channel_spin.value())
+        self._block_frames.pop(run_id, None)
 
         def task(_report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
             trace = extract_recording_dff(
@@ -521,14 +589,26 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._extracting.discard(run_id)
             if self._blocks.pop(run_id, None) is None:
                 return
-            if experiment not in project.experiments:
+            group = block.group or experiment
+            if block.group is None and experiment not in project.experiments:
                 self.block_recording_failed.emit(
                     run_id, "The recording's data group was removed."
                 )
                 return
             try:
-                project.add_data_to_experiment(experiment, trace)
-                project.add_data_to_experiment(experiment, spikes)
+                if block.group is not None:
+                    # One continuous trace and spike dataset for the routine run.
+                    project.place_block_data(
+                        block.group,
+                        [trace, spikes],
+                        block.offset_s,
+                        trace.traces.shape[1] * float(trace.dt),
+                        f"Add recording {experiment}",
+                        replace_spikes=True,
+                    )
+                else:
+                    project.add_data_to_experiment(experiment, trace)
+                    project.add_data_to_experiment(experiment, spikes)
             except Exception as exc:
                 # The routine must hear about it, or it waits for this block forever.
                 logger.exception("Could not add the traces of recording %s", run_id)
@@ -540,9 +620,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self.block_recorded.emit(
                 run_id,
                 {
-                    "trace": f"{experiment} :: {trace.name}",
-                    "spikes": f"{experiment} :: {spikes.name}",
-                    "experiment": experiment,
+                    "trace": f"{group} :: {trace.name}",
+                    "spikes": f"{group} :: {spikes.name}",
+                    "experiment": group,
+                    # This block's own data, timed from the block's start.
+                    "block_trace": trace,
+                    "block_spikes": spikes,
                 },
             )
 
@@ -607,15 +690,19 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         run_id = arguments["run_id"]
         self._blocks[run_id] = recording
         self._block_channels[run_id] = channel
+        self._block_frames[run_id] = (frames, fps)
         if not self.start_scanimage_recording(arguments, recording, channel):
             self._blocks.pop(run_id, None)
             self._block_channels.pop(run_id, None)
+            self._block_frames.pop(run_id, None)
             raise ValueError("ScanImage did not accept the recording.")
         return run_id
 
     def abort_block(self, run_id: str) -> None:
         self._stop_deadline(run_id)
+        self._abort_messages.pop(run_id, None)
         self._blocks.pop(run_id, None)
         self._block_channels.pop(run_id, None)
+        self._block_frames.pop(run_id, None)
         if self.connection.run_id == run_id:
             self.connection.command("abort")

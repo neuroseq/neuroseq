@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -208,6 +209,8 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
             "trace": f"{name} :: dF/F",
             "spikes": f"{name} :: Deconvolved spikes",
             "experiment": name,
+            "block_trace": trace,
+            "block_spikes": spikes,
         },
     ]
     data = s.project.experiments[name].data
@@ -230,6 +233,35 @@ def test_failed_block_recording_is_reported(setup, qtbot, state):
             {"run": {"id": run_id, "state": state, "error": "no trigger"}}
         )
     assert failed.args == [run_id, "no trigger"]
+
+
+@pytest.mark.parametrize(
+    ("before", "expected"),
+    [
+        ("waiting_for_first_frame", "before its first frame"),
+        ("recording", "after its first frame"),
+    ],
+)
+def test_aborted_block_says_when_scanimage_aborted(setup, qtbot, before, expected):
+    s = setup
+    _ready_for_blocks(s)
+    failures = []
+    s.controller.block_recording_failed.connect(lambda *args: failures.append(args))
+    run_id = s.controller.arm_block(_block())
+    s.controller.scanimage_status({"run": {"id": run_id, "state": before}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    # The block waits for the saved TIFF: a full one counts as completed.
+    assert not failures
+    assert run_id not in s.controller._deadlines
+    s.controller.scanimage_status(
+        {"run": {"id": run_id, "state": "finalization_failed"}}
+    )
+    assert len(failures) == 1
+    message = failures[0][1]
+    assert expected in message
+    assert "s after it was armed" in message
+    # 1 s block + 2 s tail at 30 Hz.
+    assert "recording of 90 frames, 3.0 s at 30.00 Hz" in message
 
 
 def test_armed_block_that_never_finishes_fails_at_its_deadline(
@@ -334,6 +366,83 @@ def test_block_completes_when_the_run_ends_right_after_recording_ready(
     assert not s.controller._blocks
 
 
+def test_aborted_block_with_a_complete_recording_is_extracted(setup, qtbot, mocker):
+    """ScanImage can fire acqAbort at the end of a triggered Grab."""
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+    mocker.patch.object(controller_module, "extract_recording_dff", return_value=trace)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    failed = []
+    s.controller.block_recording_failed.connect(lambda *args: failed.append(args))
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+        s.connection.recording_ready.emit(_ready_result(run_id, arguments, s.folder))
+        s.connection.run_finished.emit(run_id)
+    assert not failed
+
+
+def test_aborted_block_with_a_partial_recording_fails(setup, qtbot):
+    s = setup
+    _ready_for_blocks(s)
+    run_id = s.controller.arm_block(_block())
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
+    s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+    result = _ready_result(run_id, arguments, s.folder) | {"status": "aborted"}
+    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
+        s.connection.recording_ready.emit(result)
+    assert "ScanImage aborted the recording" in failed.args[1]
+
+
+def test_blocks_of_a_run_make_one_continuous_trace_and_spike_dataset(
+    setup, qtbot, mocker
+):
+    s = setup
+    _ready_for_blocks(s)
+    mocker.patch.object(
+        controller_module,
+        "extract_recording_dff",
+        side_effect=lambda *_a, **_k: TraceData(
+            "dF/F", np.ones((1, 90)), np.array([0]), "dF/F", 1 / 30
+        ),
+    )
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        side_effect=lambda *_a, **_k: SpikeData(
+            "Deconvolved spikes", np.array([0]), np.array([0.5])
+        ),
+    )
+    experiments_before = set(s.project.experiments)
+    payloads = []
+    for offset in (0.0, 2.0):
+        block = dataclasses.replace(_block(), group="rheobase_run", offset_s=offset)
+        run_id = s.controller.arm_block(block)
+        arguments = s.command.call_args.args[1]
+        with qtbot.waitSignal(s.controller.block_recorded, timeout=5000) as recorded:
+            s.controller.scanimage_recording_ready(
+                _ready_result(run_id, arguments, s.folder)
+            )
+        payloads.append(recorded.args[1])
+    # One data group for the run; no group per recording.
+    assert set(s.project.experiments) - experiments_before == {"rheobase_run"}
+    assert payloads[1]["trace"] == "rheobase_run :: dF/F"
+    assert payloads[1]["block_trace"].traces.shape == (1, 90)
+    trace = s.project.get_data("rheobase_run :: dF/F", TraceData)
+    # The second block (at 2 s) overwrites the first recording's tail.
+    assert trace.traces.shape == (1, 60 + 90)
+    spikes = s.project.get_data("rheobase_run :: Deconvolved spikes", SpikeData)
+    np.testing.assert_allclose(spikes.spike_times, [0.5, 2.5])
+
+
 def test_block_measures_the_functional_channel_of_the_scanimage_tab(
     setup, qtbot, mocker
 ):
@@ -364,9 +473,9 @@ def test_block_needs_its_functional_channel_saved(setup):
     s = setup
     _ready_for_blocks(s)
     controls = s.controller.controls
-    controls._status(
-        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
-    )
+    controls._status({"acq_state": "idle", "channels_available": 2})
+    controls.save_channel_checks[1].setChecked(True)
+    controls.save_channel_checks[0].setChecked(False)
     controls.channel_spin.setValue(1)
     with pytest.raises(ValueError, match="not among the saved channels"):
         s.controller.arm_block(_block())
@@ -620,9 +729,9 @@ def test_routine_start_is_refused_without_folder_or_saved_channel(setup, tmp_pat
     controls.set_directory(str(tmp_path / "missing"))
     assert "recording folder" in s.controller.block_recording_unavailable()
     controls.set_directory(str(s.folder))
-    controls._status(
-        {"acq_state": "idle", "channels_available": 2, "saved_channels": 2}
-    )
+    controls._status({"acq_state": "idle", "channels_available": 2})
+    controls.save_channel_checks[1].setChecked(True)
+    controls.save_channel_checks[0].setChecked(False)
     controls.channel_spin.setValue(1)
     assert "not among the saved channels" in s.controller.block_recording_unavailable()
     controls.channel_spin.setValue(2)

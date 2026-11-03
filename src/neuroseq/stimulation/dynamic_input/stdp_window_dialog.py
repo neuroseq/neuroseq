@@ -1253,7 +1253,10 @@ class StdpWindowDialog(SelfRaisingDialog):
             automatic=automatic,
             run_name=self._run_name,
             recording=(
-                self.hardware.block_recording(stim, start, stop, "stdp_window")
+                # One data group for the whole run, not one per block.
+                self.hardware.block_recording(
+                    stim, start, stop, "stdp_window", group=self._run_name
+                )
                 if record
                 else None
             ),
@@ -1401,6 +1404,9 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.refresh()
         payload = self._block_payload
         self._block_payload = None
+        # An automatic block also hands over its own trace, timed from its start;
+        # the named dataset is the whole run's, updated in place.
+        block_trace = payload.get("block_trace") if isinstance(payload, dict) else None
         if isinstance(payload, dict) and payload.get("trace"):
             # An automatic block names the traces extracted from its recording.
             self.cmb_trace.setCurrentText(str(payload["trace"]))
@@ -1410,7 +1416,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         else:
             self._select_newest_if_stale(self.cmb_trace)
         name = self.cmb_trace.currentText()
-        if not name or not self._is_fresh_dataset(name):
+        if not name or (block_trace is None and not self._is_fresh_dataset(name)):
             self._append_log(
                 "Import the new recording, select its trace, and click again."
                 if name
@@ -1418,7 +1424,11 @@ class StdpWindowDialog(SelfRaisingDialog):
             )
             self._reawait_acquisition()
             return None
-        trace = self.project.get_data(name, TraceData)
+        trace = (
+            block_trace
+            if isinstance(block_trace, TraceData)
+            else self.project.get_data(name, TraceData)
+        )
         if trace is None:
             self._finish(f"Trace '{name}' is unavailable.")
             return None

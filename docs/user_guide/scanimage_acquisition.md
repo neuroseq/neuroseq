@@ -66,8 +66,8 @@ idle disconnect removes its callbacks. It does not shut down MATLAB.
 Abort Focus before starting a recording.
 
 Choose a recording folder and frame count; the experiment name is optional.
-**Save channels** lists ScanImage's channels and starts with the ones ScanImage
-saves; tick several to record them together in one acquisition. ScanImage's own
+**Save channels** lists ScanImage's channels and starts with channel 1 ticked;
+tick several to record them together in one acquisition. ScanImage's own
 selection is restored after the recording, like the other settings NeuroSeq
 changes.
 
@@ -88,10 +88,10 @@ The first-frame timeout requests an abort if no acquisition start is observed.
 
 ### Field of view for cell segmentation
 
-**Grab FOV for segmentation** records a short recording (30 frames by default,
-started by software, without stimulation), averages its **Functional channel**
-into one image and saves it beside the recording as
-`<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
+**Grab FOV for segmentation** records a short recording (300 frames by default,
+started by software, without stimulation). The whole recording is kept as
+`<date>_<number>.tif`; its **Functional channel** is averaged into one image
+saved beside it as `<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
 Cellpose on it. Because the image comes from the same scan, the masks share the
 recordings' pixel grid, as the dynamic input routines need. The snapshot is
 listed in the acquisition history but adds no data group or imaging entry.
@@ -101,7 +101,9 @@ events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame
 count. Should ScanImage still split a recording into several files, they are grouped as
 one recording. Aborted recordings with readable complete
-channel groups can also be attached, labeled as aborted.
+channel groups can also be attached, labeled as aborted. An externally triggered
+Grab can end through ScanImage's abort after its last frame, so an "aborted"
+recording that holds every requested frame counts as completed.
 
 After completion, abort, or a failed start, the adapter restores the previous
 logging folder, filename stem/counter, frames per file, logging enable,
@@ -176,13 +178,18 @@ routines run each block without manual steps:
    project's Cellpose masks (frames lit by the stimulation laser are
    interpolated; F0 is the mean before the block's first stimulus), deconvolve
    it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
-   event of at least the **Spike threshold**, in ΔF/F, is a spike), add both to
-   the recording's data group, and measure the response.
+   event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
+   the response on this block's trace.
+5. Place both in the run's data group, named after the run folder (e.g.
+   `rheobase_2026-10-27_153313`), at the block's time in the stim array. The
+   run thus has one continuous ΔF/F trace and one spike dataset; a block
+   overwrites the previous recording's tail where it starts. Each recording is
+   still listed as imaging data, without a data group of its own.
 
 A recording that has not finished 15 s after the block plus its **Record after
 block** time is aborted and the routine stops (the usual cause is a trigger that
-never reached ScanImage). The **Functional channel** measured is remembered
-across sessions; check it before a run. STDP pairing blocks need no data, so
+never reached ScanImage). The **Functional channel** measured starts at 1
+in every session; check it before a run. STDP pairing blocks need no data, so
 they are run without recording. The
 routine needs SysCon2 and ScanImage connected, ScanImage's frame rate reported,
 and a Cellpose segmentation of the same field of view whose masks share the

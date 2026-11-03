@@ -117,6 +117,16 @@ def test_load_annotation_image_accepts_a_png_snapshot(tmp_path: Path) -> None:
     np.testing.assert_array_equal(image, pixels)
 
 
+@pytest.mark.parametrize("name", ["fov_mean.tif", "snapshot.png"])
+def test_single_annotation_image_is_writable(tmp_path: Path, name: str) -> None:
+    """Cellpose normalises in place; the FOV mean TIFF failed with
+    'output array is read-only'."""
+    image_path = tmp_path / name
+    Image.fromarray(np.arange(12, dtype=np.uint8).reshape(3, 4)).save(image_path)
+
+    assert load_annotation_image(image_path).flags.writeable
+
+
 def test_adjusted_annotation_image() -> None:
     """Issue #611: the window applies to the image's 8-bit display version;
     without one, Cellpose gets the original image."""
