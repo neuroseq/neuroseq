@@ -1938,20 +1938,25 @@ def test_wheel_scrolling_moves_the_traces_at_once(
     trace_widget.set_data(make_trace_data(n_neurons=40, n_timestamps=10))
     controller.set_limits(0.01, 40)
     controller.set_vertical_view((8.0, 20.0))
-    qtbot.wait(100)
-
-    x, y, width, height = trace_widget.subplot.frame.get_render_rect()
+    viewport = pygfx.Viewport.from_viewport_or_renderer(trace_widget.subplot.viewport)
+    # the viewport has no area (so ignores the wheel) until fastplotlib has
+    # handled the canvas resize
+    qtbot.waitUntil(lambda: min(viewport.rect[2:]) > 0)
+    x, y, width, height = viewport.rect
     controller.handle_event(
         pygfx.WheelEvent(
             type="wheel", x=x + width / 2, y=y + height / 2, dx=0.0, dy=120.0
         ),
-        pygfx.Viewport.from_viewport_or_renderer(trace_widget.subplot.viewport),
+        viewport,
     )
-    qtbot.wait(50)  # the step is applied when the next frame is drawn
+    # the step is applied before the next frame is drawn
+    before_render = pygfx.Event("before_render")
+    controller.handle_event(before_render, viewport)
     moved = controller.vertical_view()
     assert moved is not None
     assert moved[1] < 20.0
-    qtbot.wait(200)  # with easing it was still moving for 200 ms or more
+    # a second frame must not move the traces further (with easing it did)
+    controller.handle_event(before_render, viewport)
     assert controller.vertical_view() == pytest.approx(moved)
     trace_widget.close()
 
