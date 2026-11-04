@@ -36,9 +36,20 @@ jobs:
         with:
           environment-file: environment.yml
       - run: pip install . --no-deps
+      - run: python .github/crash_reports.py setup
       - run: pytest -sv
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
+      - if: failure()
+        run: python .github/crash_reports.py report
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crash-dumps-${{ matrix.os }}-conda-forge
+          path: |
+            ${{ runner.temp }}/crash-dumps
+            !${{ runner.temp }}/crash-dumps/core.*
+          if-no-files-found: ignore
   pypi:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
@@ -62,9 +73,20 @@ jobs:
           qt: true
       - if: runner.os == 'Linux'
         run: sudo apt-get install -y mesa-vulkan-drivers
+      - run: python .github/crash_reports.py setup
       - run: uv run pytest -sv --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
+      - if: failure()
+        run: python .github/crash_reports.py report
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crash-dumps-${{ matrix.os }}-pypi-${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/crash-dumps
+            !${{ runner.temp }}/crash-dumps/core.*
+          if-no-files-found: ignore
       - run: uv run diff-cover coverage.xml -c pyproject.toml
   pre-commit:
     runs-on: ubuntu-latest
