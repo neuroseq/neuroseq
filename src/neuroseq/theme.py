@@ -316,6 +316,9 @@ def app_stylesheet(theme: str) -> str:
     return _retro_stylesheet() if normalize_theme(theme) == RETRO else ""
 
 
+_APPLIED_THEME_PROPERTY = "neuroseq_applied_theme"
+
+
 def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     """Apply ``theme`` to the whole Qt application.
 
@@ -327,10 +330,19 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
         return
     theme = normalize_theme(theme)
     palette = qt_palette(theme)
+    stylesheet = app_stylesheet(theme)
+    if (
+        app.property(_APPLIED_THEME_PROPERTY) == theme
+        and app.palette() == palette
+        and app.styleSheet() == stylesheet
+    ):
+        # Already applied, and widgets created since then get it when they
+        # are polished: re-applying it would only re-style every widget.
+        return
     app.setPalette(palette)
     # The retro skin needs an application-wide stylesheet on top of the
     # palette; switching back to light/dark clears it again.
-    app.setStyleSheet(app_stylesheet(theme))
+    app.setStyleSheet(stylesheet)
     # QApplication.setPalette does not reach already-polished menu bars, menus,
     # or tool bars, so push the palette to every existing widget as well. In
     # addition, widgets that carry a stylesheet are painted through
@@ -347,3 +359,4 @@ def apply_app_theme(app: QtCore.QCoreApplication | None, theme: str) -> None:
     # Re-assert the Fusion style last so every widget is repolished and
     # repainted with the new palette already in place.
     app.setStyle("Fusion")
+    app.setProperty(_APPLIED_THEME_PROPERTY, theme)

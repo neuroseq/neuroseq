@@ -247,3 +247,55 @@ def test_apply_app_theme_propagates_to_menu_bar(qtbot: QtBot) -> None:
         theme.apply_app_theme(app, name)
         expected = theme.qt_palette(name).color(role).name()
         assert menu_bar.palette().color(role).name() == expected, name
+
+
+def test_reapplying_the_current_theme_skips_restyling(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    # Every new project workspace applies the theme; restyling every existing
+    # widget each time made opening a workspace slower the more were open.
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    try:
+        for name in (theme.DARK, theme.RETRO):
+            theme.apply_app_theme(app, name)
+            set_style_calls: list[str] = []
+            monkeypatch.setattr(app, "setStyle", set_style_calls.append)
+            theme.apply_app_theme(app, name)
+            assert set_style_calls == []
+            monkeypatch.undo()
+    finally:
+        theme.apply_app_theme(app, theme.LIGHT)
+
+
+def test_widgets_created_after_the_theme_was_applied_get_it(qtbot: QtBot) -> None:
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    role = QtGui.QPalette.ColorRole.Window
+    dark = theme.qt_palette(theme.DARK).color(role).name()
+    try:
+        theme.apply_app_theme(app, theme.DARK)
+        window = QtWidgets.QMainWindow()
+        qtbot.addWidget(window)
+        menu_bar = window.menuBar()
+        menu_bar.setStyleSheet("QMenuBar::item { padding: 3px 6px; margin: 0px; }")
+        theme.apply_app_theme(app, theme.DARK)
+        window.show()
+        assert menu_bar.palette().color(role).name() == dark
+    finally:
+        theme.apply_app_theme(app, theme.LIGHT)
+
+
+def test_theme_is_reapplied_after_the_palette_was_changed_elsewhere(
+    qtbot: QtBot,
+) -> None:
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    role = QtGui.QPalette.ColorRole.Window
+    try:
+        theme.apply_app_theme(app, theme.DARK)
+        app.setPalette(theme.qt_palette(theme.LIGHT))
+        theme.apply_app_theme(app, theme.DARK)
+        assert app.palette().color(role) == theme.qt_palette(theme.DARK).color(role)
+    finally:
+        theme.apply_app_theme(app, theme.LIGHT)
