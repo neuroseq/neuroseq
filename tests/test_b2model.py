@@ -1326,3 +1326,18 @@ def test_prune_orphaned_definitions_on_assemble() -> None:
     assert "Ci" not in model.initials  # its initial condition pruned too
     assert "Ce" in model.synapses  # excitatory synapse untouched
     assert "Ci" not in [obj.name for obj in model.network.objects]
+
+
+def test_brian2_object_freed_while_collecting_names_does_not_break_naming():
+    # Reading this object's name drops the last reference to it, as if the
+    # garbage collector freed it while Brian2 collects the names of all objects.
+    keep_alive = []
+
+    class VanishingBrianObject(b2.BrianObject):
+        @property
+        def name(self):
+            keep_alive.clear()
+            return self._name
+
+    keep_alive.append(VanishingBrianObject(name="vanishing"))
+    assert b2.BrianObject(name="brianobject*").name.startswith("brianobject")
