@@ -211,46 +211,54 @@ def isolate_brian2_codegen_state(
     SimulationGuard._owner = None
 
 
+# Captured here: some tests replace QtWidgets.QApplication with a fake.
+_QApplication = QtWidgets.QApplication
+
+
+def _close_top_level_windows() -> None:
+    """Close every top-level window, keeping each one referenced until then."""
+    app = _QApplication.instance()
+    if app is None:
+        return
+    # Holding these references stops the garbage collector from deleting a
+    # window that is only reachable through reference cycles, which could
+    # happen inside a paint of that very window (from any Python code called
+    # while painting it) and crash Qt.
+    windows = _QApplication.topLevelWidgets()
+    # Let anything already scheduled during the test - notably a matplotlib
+    # Qt backend's draw_idle(), queued via QTimer.singleShot(0, ...) from a
+    # .draw() call - run while every widget is still alive, before closing
+    # them below.
+    app.processEvents()
+    for window in windows:
+        try:
+            window.close()
+        except RuntimeError:
+            continue
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_call(item: pytest.Item) -> Generator[None, object, object]:
+    # Runs before pytest-qt processes events after the test: the windows a
+    # test leaves open must be closed before they can be painted again.
+    try:
+        return (yield)
+    finally:
+        _close_top_level_windows()
+
+
 @pytest.fixture(autouse=True)
 def flush_qt_deferred_deletes():
     yield
-    qapplication_class = QtWidgets.QApplication
-    app_instance = getattr(qapplication_class, "instance", None)
-    if not callable(app_instance):
-        return
-    app = app_instance()
-    if app is None:
-        return
-    top_level_widgets = getattr(qapplication_class, "topLevelWidgets", None)
-    if not callable(top_level_widgets):
-        return
-    process_events = getattr(app, "processEvents", None)
-    if not callable(process_events):
-        return
-    # Let anything already scheduled during the test - notably a matplotlib
-    # Qt backend's draw_idle(), queued via QTimer.singleShot(0, ...) from a
-    # .draw() call - actually run while every widget is still alive, before
-    # closing/deleting any of them below. On some platforms (seen on macOS
-    # CI; not reproduced under Linux's offscreen QPA platform) that callback
-    # firing later, against a canvas whose C++ side has since been deleted,
-    # raises RuntimeError inside a Qt-invoked slot in a way that crashes the
-    # interpreter outright instead of surfacing as a catchable exception -
-    # so this has to happen first. One round is enough for that already-
-    # queued callback; looping here just to be extra safe would multiply a
-    # real per-call cost (a native event-loop pump, not a cheap no-op) across
-    # every test in the suite for no real benefit.
-    process_events()
-    for widget in list(top_level_widgets()):
-        try:
-            widget.close()
-        except RuntimeError:
-            continue
-    process_events()
+    # Also covers windows opened during fixture teardown.
+    _close_top_level_windows()
     QtCore.QCoreApplication.sendPostedEvents(
         None,
         QtCore.QEvent.Type.DeferredDelete,
     )
-    process_events()
+    app = _QApplication.instance()
+    if app is not None:
+        app.processEvents()
 
 
 # use temporary path for storing user settings
