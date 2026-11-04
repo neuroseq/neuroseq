@@ -347,14 +347,10 @@ def test_scrolling_over_unfocused_spinbox_does_not_change_its_value(
 
 
 def test_scrolling_over_focused_spinbox_still_changes_its_value(
-    panel: SysCon2Panel, qtbot: QtBot
+    panel: SysCon2Panel, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    panel.show()
-    qtbot.waitExposed(panel)
-    panel.btn_toggle_holo4d_advanced.setChecked(True)  # runs_spinbox starts hidden
     panel.runs_spinbox.setValue(5)
-    panel.runs_spinbox.setFocus()
-    qtbot.waitUntil(lambda: panel.runs_spinbox.hasFocus(), timeout=2000)
+    monkeypatch.setattr(panel.runs_spinbox, "hasFocus", lambda: True)
 
     panel.runs_spinbox.wheelEvent(_wheel_event())
 

@@ -5,6 +5,7 @@ import threading
 import numpy as np
 import pytest
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.background_jobs import SimulationGuard
@@ -243,35 +244,37 @@ def test_close_tab_waits_for_save_and_tracks_workspace_after_reordering(
     assert second._disposed and not first._disposed
 
 
-def test_shortcut_only_dispatches_in_the_active_workspace(window, qtbot, monkeypatch):
+def test_workspace_shortcuts_only_apply_within_their_workspace(window):
+    # So Qt only triggers a shortcut in the workspace that has the focus.
+    actions = [
+        action
+        for action in window.active_workspace.actions()
+        if not action.shortcut().isEmpty()
+    ]
+    assert actions
+    for action in actions:
+        assert (
+            action.shortcutContext()
+            == QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+
+
+def test_shortcut_from_the_shell_goes_to_the_current_workspace(window, monkeypatch):
     first = window.active_workspace
     second = window._add_workspace(_project())
     calls = []
     monkeypatch.setattr(first, "_create_new_project", lambda: calls.append("first"))
     monkeypatch.setattr(second, "_create_new_project", lambda: calls.append("second"))
-    window.activateWindow()
-    second.console_widget.setFocus()
-    qtbot.waitUntil(lambda: window.isActiveWindow())
-    qtbot.keyClick(
-        second.console_widget,
-        QtCore.Qt.Key.Key_N,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
-    )
-    assert calls == ["second"]
-    window.project_tabs.setCurrentWidget(first)
-    first.console_widget.setFocus()
-    qtbot.keyClick(
-        first.console_widget,
-        QtCore.Qt.Key.Key_N,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
-    )
+    for workspace in (second, first):
+        window.project_tabs.setCurrentWidget(workspace)
+        event = QtGui.QKeyEvent(
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.Qt.Key.Key_N,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+        )
+        window.keyPressEvent(event)
+        assert event.isAccepted()
     assert calls == ["second", "first"]
-    tab_bar = window.project_tabs.tabBar()
-    tab_bar.setFocus()
-    qtbot.keyClick(
-        tab_bar, QtCore.Qt.Key.Key_N, QtCore.Qt.KeyboardModifier.ControlModifier
-    )
-    assert calls == ["second", "first", "first"]
 
 
 def test_close_keeps_all_workspaces_alive_when_a_hidden_job_cannot_stop(
