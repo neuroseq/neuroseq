@@ -448,9 +448,11 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
         # clicking any one of them just re-asserts the group's foreground
         # status without ever reordering members relative to each other, so
         # a popup can stay stuck behind its sibling no matter which is
-        # clicked. Each is still closed explicitly in closeEvent() below, so
-        # nothing leaks by skipping Qt's parent-child ownership here.
+        # clicked. Each is still closed (hidden) with this dialog in
+        # closeEvent() below.
         self.plot_window = SelfRaisingDialog()
+        # No Qt parent, so delete it with this dialog, not whenever Python frees it
+        self.destroyed.connect(self.plot_window.deleteLater)
         self.plot_window.setWindowTitle("STDP synaptic tuning — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True

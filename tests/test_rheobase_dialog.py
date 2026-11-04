@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -1458,3 +1459,17 @@ def test_syscon2_run_logs_the_laser_it_delivers_with(qtbot) -> None:
     _project, _editor, dialog, host = _syscon2_dialog(qtbot)
     dialog.start()
     assert "Delivering on the 940 nm laser at 1 mW" in dialog.log.toPlainText()
+
+
+def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
+    dialog = RheobaseDialog(_FakeEditor(_FakeProject()))  # type: ignore[arg-type]
+    destroyed: list[bool] = []
+    dialog.plot_window.destroyed.connect(lambda: destroyed.append(True))
+
+    dialog.deleteLater()
+    del dialog
+    for _ in range(2):  # the dialog, then its plot window
+        QtCore.QCoreApplication.sendPostedEvents(
+            None, QtCore.QEvent.Type.DeferredDelete
+        )
+    assert destroyed

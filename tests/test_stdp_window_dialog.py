@@ -957,3 +957,17 @@ def test_syscon2_pulse_amplitude_is_a_fraction_of_its_own(qtbot) -> None:
     assert dialog.lbl_units.text() == "× target power"
     dialog.cmb_target.setCurrentText(dialog.SIMULATION_TARGET)
     assert dialog.spn_amplitude.value() == 100.0
+
+
+def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
+    dialog = StdpWindowDialog(_FakeEditor(_FakeProject()))  # type: ignore[arg-type]
+    destroyed: list[bool] = []
+    dialog.plot_window.destroyed.connect(lambda: destroyed.append(True))
+
+    dialog.deleteLater()
+    del dialog
+    for _ in range(2):  # the dialog, then its plot window
+        QtCore.QCoreApplication.sendPostedEvents(
+            None, QtCore.QEvent.Type.DeferredDelete
+        )
+    assert destroyed

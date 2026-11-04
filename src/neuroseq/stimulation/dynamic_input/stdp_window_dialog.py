@@ -558,6 +558,8 @@ class StdpWindowDialog(SelfRaisingDialog):
         # group" - clicking one never brings it above a sibling in the same
         # chain.
         self.plot_window = SelfRaisingDialog()
+        # No Qt parent, so delete it with this dialog, not whenever Python frees it
+        self.destroyed.connect(self.plot_window.deleteLater)
         self.plot_window.setWindowTitle("STDP timing window (LTP/LTD vs Δt) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True

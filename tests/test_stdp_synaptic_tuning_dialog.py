@@ -938,3 +938,17 @@ def test_stdp_synaptic_tuning_pause_defers_next_simulation_and_resets_on_finish(
     assert dialog._pending_simulation_seconds is None
     assert not dialog.btn_pause.isEnabled()
     assert dialog.btn_pause.text() == "Pause"
+
+
+def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
+    dialog = StdpSynapticTuningDialog(_FakeEditor(_FakeProject()))  # type: ignore[arg-type]
+    destroyed: list[bool] = []
+    dialog.plot_window.destroyed.connect(lambda: destroyed.append(True))
+
+    dialog.deleteLater()
+    del dialog
+    for _ in range(2):  # the dialog, then its plot window
+        QtCore.QCoreApplication.sendPostedEvents(
+            None, QtCore.QEvent.Type.DeferredDelete
+        )
+    assert destroyed
