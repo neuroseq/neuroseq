@@ -1,8 +1,8 @@
 # NeuroSeq - Neuronal Sequencer
 
-[![CI](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml/badge.svg)](https://github.com/ssciwr/neuroseq/actions/workflows/ci.yml)
+[![CI](https://github.com/neuroseq/neuroseq/actions/workflows/ci.yml/badge.svg)](https://github.com/neuroseq/neuroseq/actions/workflows/ci.yml)
 
-Private repository containing the neuroseq prototype GUI.
+NeuroSeq is a Qt-based desktop GUI application for computational neuroscience. It combines Brian2 spiking neural network simulation with interactive stimulus design, multi-source experimental data import, and hardware export for holographic stimulation (HOLO4D `.seq` files).
 
 ![screenshot](docs/images/screenshot.png)
 
@@ -20,7 +20,7 @@ For a repository checkout, use
 project environment:
 
 ```bash
-git clone git@github.com:ssciwr/neuroseq.git
+git clone git@github.com:neuroseq/neuroseq.git
 cd neuroseq
 uv sync
 uv run neuroseq
@@ -53,13 +53,13 @@ NeuroSeq requires Python 3.12 or newer.
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
-pip install git+ssh://git@github.com/ssciwr/neuroseq
+pip install git+ssh://git@github.com/neuroseq/neuroseq
 ```
 
 Alternatively you can clone the repository and then install it:
 
 ```bash
-git clone git@github.com:ssciwr/neuroseq.git
+git clone git@github.com:neuroseq/neuroseq.git
 cd neuroseq
 pip install .
 ```
@@ -105,3 +105,8 @@ See the [documentation guide](docs/developer/documentation.md) to build or previ
 The NeuroSeq is an open-source project. Everyone can suggest and implement improvements as well as improve overall reliability and stability of its operation.
 
 To report a bug or suggest a new feature functionality please open a new issue. To implement a new feature, please fork the repository, modify the code accordingly and open a discussion with core developers via submitting a pull request.
+
+## License
+
+NeuroSeq is released under the [MIT License](LICENSE). Copyright © 2024-2026 Andrey Formozov.
+See [AUTHORS.md](AUTHORS.md) for the list of contributors.

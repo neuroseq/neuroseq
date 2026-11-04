@@ -267,6 +267,11 @@ DROP_VIDEO = "Add as imaging data (video)"
 #: How long closing waits for cancelled background jobs to wind down.
 CLOSE_JOB_TIMEOUT_MS = 10000
 
+DOCUMENTATION_URL = "https://neuroseq.github.io/"
+SOURCE_CODE_URL = "https://github.com/neuroseq/neuroseq"
+LICENSE_URL = f"{SOURCE_CODE_URL}/blob/main/LICENSE"
+AUTHORS_URL = f"{SOURCE_CODE_URL}/blob/main/AUTHORS.md"
+
 
 class WorkspaceCloseGate(QtCore.QObject):
     """Decide, without stopping anything, whether workspaces may close now.
@@ -2606,10 +2611,22 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def about(self) -> None:
         QtWidgets.QMessageBox.about(
             self,
-            "About neuroseq",
-            f"NeuroSeq\n\nVersion {__version__}\n\n"
-            + "https://github.com/ssciwr/neuroseq",
+            "About NeuroSeq",
+            f"<h3>NeuroSeq</h3><p>Version {__version__}</p>"
+            "<p>Copyright © 2024-2026 Andrey Formozov<br>"
+            f'Released under the <a href="{LICENSE_URL}">MIT License</a>.<br>'
+            f'See <a href="{AUTHORS_URL}">AUTHORS</a> for the list of contributors.</p>'
+            f'<p><a href="{DOCUMENTATION_URL}">Documentation</a><br>'
+            f'<a href="{SOURCE_CODE_URL}">Source code</a></p>',
         )
+
+    @staticmethod
+    def open_documentation() -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(DOCUMENTATION_URL))
+
+    @staticmethod
+    def open_source_code() -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(SOURCE_CODE_URL))
 
     def _add_stim_array_ops_button_to_data_toolbar(self) -> None:
         """Add a single dropdown button for the stim array lifecycle actions.
@@ -3427,6 +3444,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def _create_actions_help(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
     ) -> None:
+        add_action(
+            "&Documentation",
+            self.open_documentation,
+            menu,
+            shortcut="F1",
+            icon="mdi6.book-open-variant",
+        )
+        add_action("&Source Code", self.open_source_code, menu, icon="mdi6.code-braces")
+        menu.addSeparator()
         add_action("&About", self.about, menu)
 
     def _create_actions_data(

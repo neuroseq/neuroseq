@@ -36,7 +36,7 @@ Clone the repository, for example into `Documents\GitHub`:
 cd %USERPROFILE%\Documents
 mkdir GitHub
 cd GitHub
-git clone https://github.com/ssciwr/neuroseq.git
+git clone https://github.com/neuroseq/neuroseq.git
 cd neuroseq
 ```
 

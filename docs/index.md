@@ -38,3 +38,9 @@
 ### Troubleshooting
 
 - [Common issues](common_issues.md)
+
+### License
+
+NeuroSeq is released under the [MIT License](https://github.com/neuroseq/neuroseq/blob/main/LICENSE).
+Copyright © 2024-2026 Andrey Formozov.
+See [AUTHORS](https://github.com/neuroseq/neuroseq/blob/main/AUTHORS.md) for the list of contributors.
