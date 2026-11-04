@@ -30,8 +30,9 @@ Use the Conda environment named `neuroseq` for all commands in this repository s
 Use `uv` for the fastest local workflow:
 
 - `uv run neuroseq` launches the GUI from the current checkout.
-- `uv run pytest -sv` runs the full test suite.
-- `uv run pytest tests/test_gui.py -sv` runs one test module.
+- `uv run pytest` runs the full test suite, in parallel (pytest-xdist `-n auto` is the default).
+- `uv run pytest tests/test_gui.py` runs one test module.
+- Add `-n 0` to run serially, e.g. for a single test, `-s` output or `--pdb`.
 - `uv run pytest --cov --cov-report=xml` generates coverage data used in CI.
 - `uv run diff-cover coverage.xml -c pyproject.toml` checks the 75% diff-coverage gate.
 - `prek run -a` or `pre-commit run -a` runs lint, format, mypy, notebook cleanup, and workflow checks.

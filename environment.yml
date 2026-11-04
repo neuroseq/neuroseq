@@ -22,6 +22,7 @@ dependencies:
   - pytest-qt
   - pytest-mock
   - pytest-timeout
+  - pytest-xdist
   - pip
   - pip:
       # Pinned to the same versions uv.lock resolves for the pypi-based CI

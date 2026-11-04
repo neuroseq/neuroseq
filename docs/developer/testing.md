@@ -17,6 +17,10 @@ See [environment selection](../getting_started/installation.md#using-uv-from-a-c
 uv run pytest
 ```
 
+Tests run in parallel by default (`-n auto`, using pytest-xdist). Add `-n 0` to run
+them serially, which starts faster for a single test and is needed to see `-s`
+output or use `--pdb`.
+
 ## To run a specific subset of tests
 
 ```bash

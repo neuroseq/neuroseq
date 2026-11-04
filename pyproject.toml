@@ -94,6 +94,8 @@ packages = ["src/neuroseq"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# run tests in parallel by default; use -n 0 to run them serially
+addopts = "-n auto"
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"
