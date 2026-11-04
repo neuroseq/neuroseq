@@ -18,7 +18,7 @@ SDKs and `keyring` for credential storage.
 From the repository directly (requires SSH access to GitHub):
 
 ```bash
-pip install "neuroseq[chat] @ git+ssh://git@github.com/ssciwr/neuroseq.git"
+pip install "neuroseq[chat] @ git+ssh://git@github.com/neuroseq/neuroseq.git"
 ```
 
 From a local checkout:

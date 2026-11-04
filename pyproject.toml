@@ -4,10 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "neuroseq"
-description = "Protoype GUI to edit and run neuron models"
+description = "Qt-based desktop GUI application for computational neuroscience, combining Brian2 spiking neural network simulation with interactive stimulus design, multi-source experimental data import, and hardware export for holographic stimulation (HOLO4D .seq files)."
 readme = "README.md"
-license = { text = "NONE" }
-authors = [{ name = "SSC", email = "ssc@uni-heidelberg.de" }]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Andrey Formozov" }]
 requires-python = ">=3.12"
 dependencies = [
     "brian2",
@@ -38,6 +39,12 @@ dependencies = [
     "tifffile",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://neuroseq.github.io/"
+Documentation = "https://neuroseq.github.io/"
+Source = "https://github.com/neuroseq/neuroseq"
+Issues = "https://github.com/neuroseq/neuroseq/issues"
 
 [tool.uv.sources]
 torch = [

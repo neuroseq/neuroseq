@@ -17,7 +17,7 @@ this option.
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
-git clone git@github.com:ssciwr/neuroseq.git
+git clone git@github.com:neuroseq/neuroseq.git
 cd neuroseq
 uv sync
 uv run neuroseq
@@ -54,13 +54,13 @@ NeuroSeq requires Python 3.12 or newer.
 If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
 
 ```bash
-pip install git+ssh://git@github.com/ssciwr/neuroseq
+pip install git+ssh://git@github.com/neuroseq/neuroseq
 ```
 
 Alternatively you can clone the repository and then install it:
 
 ```bash
-git clone git@github.com:ssciwr/neuroseq.git
+git clone git@github.com:neuroseq/neuroseq.git
 cd neuroseq
 pip install .
 ```

@@ -17,7 +17,7 @@ uv tool install prek
 Then clone the repository and set up the pre-commit hooks for this repository:
 
 ```bash
-git clone git@github.com:ssciwr/neuroseq.git
+git clone git@github.com:neuroseq/neuroseq.git
 cd neuroseq
 uv sync --group dev
 prek install

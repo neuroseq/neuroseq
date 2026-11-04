@@ -46,8 +46,8 @@ confirm that a queued Stop command reached the device.
 
 ### Real-rig checklist
 
-This updates the [export/control test](https://github.com/ssciwr/neuroseq/pull/573#issuecomment-6046355724)
-and [rheobase test](https://github.com/ssciwr/neuroseq/pull/573#issuecomment-6046356049)
+This updates the [export/control test](https://github.com/neuroseq/neuroseq/pull/573#issuecomment-6046355724)
+and [rheobase test](https://github.com/neuroseq/neuroseq/pull/573#issuecomment-6046356049)
 in the PR. Those comments describe the overall workflow correctly, but the
 following details matter when testing the current implementation.
 
