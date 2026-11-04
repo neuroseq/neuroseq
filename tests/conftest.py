@@ -261,8 +261,9 @@ def flush_qt_deferred_deletes():
         app.processEvents()
 
 
-# use temporary path for storing user settings
-@pytest.fixture()
+# every test uses a temporary path for storing user settings, so tests don't
+# read or change the user's real settings (e.g. a slow Brian2 backend)
+@pytest.fixture(autouse=True)
 def tmp_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path):
     monkeypatch.setattr(
         "neuroseq.gui_settings.user_config_dir", lambda *args, **kwargs: str(tmp_path)
