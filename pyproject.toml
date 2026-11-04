@@ -71,7 +71,9 @@ chat = [
 neuroseq = "neuroseq.__main__:main"
 
 [dependency-groups]
+docs = ["zensical==0.0.74"]
 dev = [
+    { include-group = "docs" },
     "memray ; platform_system != 'Windows'",
     "mypy",
     "pre-commit",
@@ -84,7 +86,6 @@ dev = [
     "pytest-xdist",
     "pytest-memray ; platform_system != 'Windows'",
     "diff-cover",
-    "mkdocs-material",
     "ruff",
 ]
 

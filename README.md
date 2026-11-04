@@ -97,7 +97,8 @@ For the uv workflow, run `uv run neuroseq` from the repository instead.
 
 ## Documentation
 
-Documentation for the project is availible [here](docs/index.md).
+Documentation for the project is available [online](https://neuroseq.github.io/).
+See the [documentation guide](docs/developer/documentation.md) to build or preview it locally.
 
 ## Contributing and providing feed-back
 

@@ -25,7 +25,7 @@ Plugin support is split across three core modules:
 
 A plugin is a Python file in: `src/neuroseq/resources/analysis_plugins`. It must have `*.py` extention (files starting with `_` will be ignored) and define callable `render_analysis`. Each pluging has ID, NAME and ICON. The default value for ID and NAME is a filename without extention but user can also define them as `PLUGIN_ID`, `PLUGIN_NAME`, and `PLUGIN_ICON` (e.g. `mdi6.puzzle`). `PLUGIN_ID` should be stable over time. Use a machine-oriented id (for example, `mean_activity`) and keep display text in `PLUGIN_NAME`. At the present momement dropdown menu does not distinguish the type of the data that is being analysed and shows all improrted plugins regardless of datatype.
 
-See [`src/neuroseq/resources/analysis_plugins/mean_activity.py`](../../src/neuroseq/resources/analysis_plugins/mean_activity.py) for a working example plugin.
+See [`src/neuroseq/resources/analysis_plugins/mean_activity.py`](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/resources/analysis_plugins/mean_activity.py) for a working example plugin.
 
 ## Advanced Interactive Example
 
@@ -36,7 +36,7 @@ windows, and `protocol_dialog.py` provides protocol settings. Keep core code
 out of the plugin folder: it is scanned and executed on every right-click
 menu and is excluded from coverage.
 
-For an advanced plugin example with UI controls, see [`src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py`](../../src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py).
+For an advanced plugin example with UI controls, see [`src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py`](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py).
 
 This plugin extends the basic mean-activity analysis by adding an interactive control bar in the same analysis window.
 

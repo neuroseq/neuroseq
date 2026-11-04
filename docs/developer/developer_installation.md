@@ -23,14 +23,15 @@ uv sync --group dev
 prek install
 ```
 
-The documentation is in the docs folder as markdown and rendered using [mkdocs-material](https://squidfunk.github.io/mkdocs-material/getting-started/).
+The documentation is in the docs folder as Markdown and rendered using [Zensical](https://zensical.org/docs/).
 To serve the documentation locally run:
 
 ```bash
-uv run mkdocs serve
+uv run zensical serve
 ```
 
-Then go to http://127.0.0.1:8000/neuroseq to see the generated documentation.
+Open the URL shown in the terminal to see the generated documentation.
+See [Documentation](documentation.md) for build checks and deployment details.
 
 ## Developer Installation without uv
 

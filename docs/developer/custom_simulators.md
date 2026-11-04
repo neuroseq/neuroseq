@@ -8,14 +8,14 @@ NeuroSeq has built-in Brian2 simulator but also supports arbitraty simulation ba
 
 There are now two layers:
 
-1. A shared base class in [src/neuroseq/example_models/simulator.py](../../src/neuroseq/example_models/simulator.py).
-2. A backend implementation class such as [src/neuroseq/example_models/elise.py](../../src/neuroseq/example_models/elise.py).
+1. A shared base class in [src/neuroseq/example_models/NN.py](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/example_models/NN.py).
+2. A backend implementation class such as [src/neuroseq/example_models/elise.py](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/example_models/elise.py).
 
 The base class is intentionally lightweight. It does not use `abc`; instead, subclass methods are expected to override the base methods and the defaults raise `NotImplementedError`.
 
 ## Structure of the Base NN Class
 
-The shared `NN` class in [src/neuroseq/example_models/simulator.py](../../src/neuroseq/example_models/simulator.py) provides common state and parameter handling.
+The shared `NN` class in [src/neuroseq/example_models/NN.py](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/example_models/NN.py) provides common state and parameter handling.
 
 It currently contains:
 
@@ -40,7 +40,7 @@ The important design point is that the base class owns parameter bookkeeping and
 
 ## Structure of a Backend Implementation
 
-An implementation module should define a backend class derived from `NN`. The ELISE backend in [src/neuroseq/example_models/elise.py](../../src/neuroseq/example_models/elise.py) is the current reference implementation.
+An implementation module should define a backend class derived from `NN`. The ELISE backend in [src/neuroseq/example_models/elise.py](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/example_models/elise.py) is the current reference implementation.
 
 The backend class should typically provide:
 
@@ -102,8 +102,8 @@ The external simulator call path is:
 from collections.abc import Mapping
 
 from neuroseq.data import Experiment
-from neuroseq.example_models.simulator import ParamValue
-from neuroseq.example_models.simulator import NN
+from neuroseq.example_models.NN import ParamValue
+from neuroseq.example_models.NN import NN
 
 DEFAULT_PARAMS = {
     "example_param": {

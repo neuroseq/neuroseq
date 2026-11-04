@@ -42,7 +42,7 @@ If a project has an external simulator configured, the main `Run simulation` act
 
 ## Built-In Example: ELISE
 
-The bundled `ELISE Sequence Learning Network` example project already comes connected to the ELISE backend. In that project, the external simulator is loaded automatically and uses the class-based `NN` backend entry point in [src/neuroseq/example_models/elise.py](../../src/neuroseq/example_models/elise.py).
+The bundled `ELISE Sequence Learning Network` example project already comes connected to the ELISE backend. In that project, the external simulator is loaded automatically and uses the class-based `NN` backend entry point in [src/neuroseq/example_models/elise.py](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/example_models/elise.py).
 
 ## What Data Is Passed to the Simulator
 
