@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gc
+import weakref
 from types import SimpleNamespace
 
 import brian2.numpy_ as np
@@ -1989,3 +1991,21 @@ def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -
     trace_widget.set_stim_overlay_enabled(False)
     assert trace_widget._stim_onset_graphic is None
     trace_widget.close()
+
+
+def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) -> None:
+    parent = QtWidgets.QWidget()
+    trace_widget = TraceWidget(ConstrainedPanZoomController(), parent=parent)
+    parent.show()
+    qtbot.waitExposed(parent)
+    trace_widget.set_data(make_trace_data(n_neurons=10, n_timestamps=100))
+    qtbot.wait(50)
+    widget_ref = weakref.ref(trace_widget)
+    figure_ref = weakref.ref(trace_widget.figure)
+
+    parent.deleteLater()
+    del parent, trace_widget
+    QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
+    gc.collect()
+    assert widget_ref() is None
+    assert figure_ref() is None
