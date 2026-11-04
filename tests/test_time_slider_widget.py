@@ -94,12 +94,6 @@ def test_time_slider_widget(
     assert stim_widget.timeline.t == pytest.approx(1000.0, abs=0.1)
     assert heatmap_widget.idx == pytest.approx(10, abs=1)
 
-    trace_widget.close()
-    spike_widget.close()
-    stim_widget.close()
-    heatmap_widget.close()
-    slider.close()
-
 
 def test_time_slider_emits_time_changed_on_drag_and_explicit_set(qtbot: QtBot) -> None:
     slider = TimeSliderWidget()
@@ -117,7 +111,6 @@ def test_time_slider_emits_time_changed_on_drag_and_explicit_set(qtbot: QtBot) -
     # each connected widget's set_time_ms()
     slider.set_current_time_ms(1500)
     assert emitted == [500, 1500, 1500]
-    slider.close()
 
 
 def test_slider_tooltip_shows_seconds_and_movie_frame(qtbot: QtBot, tmp_path) -> None:

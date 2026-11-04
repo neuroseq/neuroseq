@@ -189,7 +189,6 @@ def test_experiment_appended_to_its_own_workspace(
 
     assert "dispatched" in original_project.experiments
     assert "dispatched" not in other_project.experiments
-    other.close()
 
 
 def test_progress_dialog_cancel_button_text_lifecycle(

@@ -364,7 +364,6 @@ def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
     assert stim_widget._greyed_neuron_ids == {2}
     stim_widget.set_neuron_greyed(2, False)
     assert not stim_widget.is_neuron_greyed(2)
-    stim_widget.close()
 
 
 def test_stim_widget_clear_data_clears_greyed_neurons(
@@ -380,7 +379,6 @@ def test_stim_widget_clear_data_clears_greyed_neurons(
     stim_widget.set_data(positive_stims)
 
     assert not stim_widget.is_neuron_greyed(1)
-    stim_widget.close()
 
 
 def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
@@ -421,7 +419,6 @@ def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
     assert stim_widget.n_neurons == 3
     assert stim_widget.grid_lines.n_neurons == 3
     assert controller._get_camera_state()["height"] == pytest.approx(3)
-    stim_widget.close()
 
 
 def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
@@ -451,7 +448,6 @@ def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
     stim_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
-    stim_widget.close()
 
 
 def test_stim_widget_y_tick_labels_stay_on_their_own_row(qtbot: QtBot) -> None:
@@ -477,7 +473,6 @@ def test_stim_widget_y_tick_labels_stay_on_their_own_row(qtbot: QtBot) -> None:
                 f"label {label!r} drawn off-row at y={y}"
             )
             assert label == str(round(y))
-    stim_widget.close()
 
 
 def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed(
@@ -503,7 +498,6 @@ def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed
 
     assert blocker.args[0] == 2
     assert blocker.args[1] == 2
-    stim_widget.close()
 
 
 def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
@@ -734,7 +728,6 @@ def test_stim_widget_select_neurons_translates_display_rows_when_greyed(
     stim_widget.select_neurons(slice(1, 3), slice(10, 20))
 
     assert stim_widget.selected_neuron_slice == slice(2, 4)
-    stim_widget.close()
 
 
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
@@ -1070,4 +1063,3 @@ def test_stim_widget_hover_shows_start_and_end_of_stimulus(
     world["pos"] = np.array([1.0, 1.0, 0.0])
     stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == "Neuron 1\n0 pA"
-    stim_widget.close()

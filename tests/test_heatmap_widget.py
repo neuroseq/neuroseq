@@ -23,7 +23,6 @@ def test_heatmap_widget_no_data(qtbot: QtBot) -> None:
     assert not heatmap_norm_dialog.chk_subtract.isChecked()
     assert not heatmap_norm_dialog.chk_subtract.isEnabled()
     assert not heatmap_norm_dialog.slider_idx.isEnabled()
-    heatmap_widget.close()
 
 
 def test_heatmap_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
@@ -33,7 +32,6 @@ def test_heatmap_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
     heatmap_widget._rebuild_context_menu()
     action_texts = [action.text() for action in heatmap_widget.context_menu.actions()]
     assert "Normalization…" in action_texts
-    heatmap_widget.close()
 
 
 @pytest.mark.parametrize(
@@ -118,8 +116,6 @@ def test_heatmap_widget_clear_data(qtbot: QtBot, make_synapse_data) -> None:
     heatmap_norm_dialog.show()
     assert not heatmap_norm_dialog.chk_subtract.isEnabled()
     assert not heatmap_norm_dialog.chk_subtract.isChecked()
-    heatmap_norm_dialog.close()
-    heatmap_widget.close()
 
 
 @pytest.mark.parametrize("data_shape", [(15, 12, 8), (20, 5, 10), (8, 8, 4)])
@@ -162,7 +158,6 @@ def test_heatmap_widget_set_data_with_subtraction(
     heatmap_norm_dialog.reset_defaults()
     assert heatmap_widget.subtract_idx is None
     assert np.sum(np.abs(heatmap_widget.ig.data[:])) > 1.0
-    heatmap_widget.close()
 
 
 def test_heatmap_widget_set_data_no_data(qtbot: QtBot) -> None:
@@ -172,7 +167,6 @@ def test_heatmap_widget_set_data_no_data(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: heatmap_widget.isVisible())
     heatmap_widget.set_data(None)
     assert heatmap_widget.data is None
-    heatmap_widget.close()
 
 
 def test_heatmap_widget_set_time_ms(qtbot: QtBot, make_synapse_data) -> None:
@@ -188,7 +182,6 @@ def test_heatmap_widget_set_time_ms(qtbot: QtBot, make_synapse_data) -> None:
         time_ms = 1000 * data.timestamps[idx]
         heatmap_widget.set_time_ms(time_ms)
         assert heatmap_widget.idx == idx
-    heatmap_widget.close()
 
 
 def test_heatmap_widget_shows_xy_index_ticks(qtbot: QtBot, make_synapse_data) -> None:
@@ -204,7 +197,6 @@ def test_heatmap_widget_shows_xy_index_ticks(qtbot: QtBot, make_synapse_data) ->
     assert np.array_equal(y_ticks, np.array([0, 3]))
     assert heatmap_widget.subplot.axes.x.line.visible
     assert heatmap_widget.subplot.axes.y.line.visible
-    heatmap_widget.close()
 
 
 @pytest.mark.parametrize(

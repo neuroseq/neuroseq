@@ -101,7 +101,6 @@ def test_gui_keeps_the_channel_choice_per_video(
     gui.project.save(archive, SaveLoadOptions(True, True, False, False))
     assert Project(archive).calcium_video_channels == (2, 1)
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) -> None:

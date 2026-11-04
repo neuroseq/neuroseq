@@ -86,4 +86,3 @@ def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
     qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=5000)
 
     assert worker_thread_at_finish[0] == QtCore.QCoreApplication.instance().thread()
-    gui.close()

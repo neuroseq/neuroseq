@@ -181,7 +181,6 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     qtbot.addWidget(stim_editor)
     stim_editor.show()
     qtbot.waitUntil(lambda: stim_editor.isVisible())
-    stim_editor.close()
 
 
 def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> None:
@@ -206,7 +205,6 @@ def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> No
     stim_editor.set_mode(InteractMode.DRAW)
     assert all(action.isVisible() for action in stim_editor.actions_draw)
     assert all(not action.isVisible() for action in stim_editor.actions_edit)
-    stim_editor.close()
 
 
 def test_left_toolbar_groups_history_modes_and_settings(qtbot: QtBot) -> None:
@@ -230,7 +228,6 @@ def test_left_toolbar_groups_history_modes_and_settings(qtbot: QtBot) -> None:
         ]
         assert actions[5].isSeparator()
         assert actions[6:] == settings
-    stim_editor.close()
 
 
 def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
@@ -262,7 +259,6 @@ def test_stim_array_lifecycle_actions_are_not_in_the_left_toolbar(
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
     assert [t for t in context_menu_texts if t in array_op_names] == array_op_names
     assert not stim_editor.action_trim_to_mapped_neurons.isEnabled()
-    stim_editor.close()
 
 
 def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None:
@@ -288,7 +284,6 @@ def test_pad_trim_loop_actions_are_not_in_the_left_toolbar(qtbot: QtBot) -> None
 
     context_menu_texts = [a.text() for a in stim_editor.context_menu.actions()]
     assert [t for t in context_menu_texts if t in time_op_names] == time_op_names
-    stim_editor.close()
 
 
 def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
@@ -321,7 +316,6 @@ def test_design_and_show_all_actions_are_not_in_the_left_toolbar(
         "Show all input arrays",
     ]
     assert stim_editor.action_show_all_stim_arrays.isChecked()
-    stim_editor.close()
 
 
 def test_trim_to_mapped_neurons_action_emits_its_own_signal(qtbot: QtBot) -> None:
@@ -531,7 +525,6 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
         stim_editor.y_btn_zoom_out.click()
         qtbot.wait(delay)
-    stim_editor.close()
 
 
 def test_stim_editor_pad_and_trim(
@@ -625,7 +618,6 @@ def test_stim_editor_pad_and_trim(
     )
     stim_editor.trim_stim_array()
     assert stim_editor.current_stim_modifier.stim_array.values.shape[0] == 300
-    stim_editor.close()
 
 
 def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
@@ -666,7 +658,6 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
 
     stim_editor.redo()
     assert modifier.stim_array.values.shape[0] == 600
-    stim_editor.close()
 
 
 def test_trim_warns_when_cutting_into_simulated_trace(
@@ -716,7 +707,6 @@ def test_trim_warns_when_cutting_into_simulated_trace(
     )
     stim_editor.trim_stim_array()
     assert modifier.stim_array.values.shape[0] < before
-    stim_editor.close()
 
 
 def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
@@ -808,7 +798,6 @@ def test_reset_stim_array_trims_to_simulation_head(qtbot: QtBot):
     # The reset is undoable (restores the trimmed tail).
     stim_editor.undo()
     assert modifier.stim_array.values.shape[0] == before
-    stim_editor.close()
 
 
 def test_reset_stim_array_no_op_when_already_at_simulation_head(qtbot: QtBot):
@@ -828,7 +817,6 @@ def test_reset_stim_array_no_op_when_already_at_simulation_head(qtbot: QtBot):
     stim_editor.reset_stim_array()
     assert modifier.stim_array.values.shape[0] == length_at_head
     assert len(modifier.action_stack) == stack_len
-    stim_editor.close()
 
 
 def test_current_stim_array_has_unsimulated_tail_detects_content_past_sim_head(
@@ -846,7 +834,6 @@ def test_current_stim_array_has_unsimulated_tail_detects_content_past_sim_head(
     assert modifier is not None
 
     assert stim_editor.current_stim_array_has_unsimulated_tail()
-    stim_editor.close()
 
 
 def test_current_stim_array_has_unsimulated_tail_ignores_already_simulated_history(
@@ -870,7 +857,6 @@ def test_current_stim_array_has_unsimulated_tail_ignores_already_simulated_histo
     stim_editor.reset_stim_array()
     assert np.any(modifier.stim_array.values)  # still real, simulated content
     assert not stim_editor.current_stim_array_has_unsimulated_tail()
-    stim_editor.close()
 
 
 def test_clear_stim_array_confirmation_parents_to_active_window(
@@ -902,7 +888,6 @@ def test_clear_stim_array_confirmation_parents_to_active_window(
     stim_editor.clear_stim_array()
 
     assert captured_parents == [fake_active_window]
-    stim_editor.close()
 
 
 def test_clear_stim_array_confirmation_falls_back_to_self(
@@ -924,7 +909,6 @@ def test_clear_stim_array_confirmation_falls_back_to_self(
     stim_editor.clear_stim_array()
 
     assert captured_parents == [stim_editor]
-    stim_editor.close()
 
 
 def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
@@ -961,7 +945,6 @@ def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor.redo()
     assert modifier.stim_array.values.shape[0] == 1500
     assert np.allclose(modifier.stim_array.values[1000:], 0.0)
-    stim_editor.close()
 
 
 def test_edit_stim_array_dt_change_requires_confirmation(
@@ -1040,7 +1023,6 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     assert other_stim.values is other_values
     assert trace.dt == 1 / 30
     assert trace.traces is original_traces
-    stim_editor.close()
 
 
 def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
@@ -1084,7 +1066,6 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     assert MockStimIntensityDialog.received_dt_seconds == approx(0.0005208125)
     # ...and the editor adopts whatever the dialog reports back on accept.
     assert stim_editor.draw_stim_length == 9
-    stim_editor.close()
 
 
 def test_stim_editor_left_toolbar_has_one_design_stimulus_action(
@@ -1100,7 +1081,6 @@ def test_stim_editor_left_toolbar_has_one_design_stimulus_action(
     assert texts.count("Set input value/length…") == 1
     assert "Draw designer stimuli" not in texts
     assert "Modify stimulus length" not in texts
-    stim_editor.close()
 
 
 def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
@@ -1138,7 +1118,6 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     assert stim_editor.current_stim_modifier.stim_array.name == "b"
     assert stim_editor.draw_stim_length == 2
     assert stim_editor._draw_stim_length_milliseconds() == approx(4.0)
-    stim_editor.close()
 
 
 def test_selecting_smaller_stim_refocuses_y_view() -> None:
@@ -1377,7 +1356,6 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
 
     assert captured["dt"] == approx(0.002)
     assert captured["title"] == "Create input array"
-    stim_editor.close()
 
 
 def test_stim_editor_mouse_click_draws_and_erases() -> None:
@@ -1529,7 +1507,6 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
     stim_editor.create_stim_array()
 
     assert captured["dt"] == approx(0.001)
-    stim_editor.close()
 
 
 def test_stim_editor_actions(
@@ -1760,7 +1737,6 @@ def test_stim_editor_actions(
     assert stim_editor.current_stim_modifier.stim_array.values[19, 8] == approx(0)
     assert stim_editor.current_stim_modifier.stim_array.values[16, 7] == approx(0)
     assert stim_editor.current_stim_modifier.stim_array.values[17, 7] == approx(0)
-    stim_editor.close()
 
 
 def _routine_combo_items(selector: Any) -> list[str]:
@@ -1802,7 +1778,6 @@ def test_open_dynamic_input_designer_shows_selector_with_preview(qtbot: QtBot) -
     selector._on_continue()
     assert dynamic_input._stdp_synaptic_tuning_dialog is not None
     assert dynamic_input._stdp_synaptic_tuning_dialog.isVisible()
-    stim_editor.close()
 
 
 def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> None:
@@ -1816,7 +1791,6 @@ def test_routine_selector_preview_updates_on_selection_change(qtbot: QtBot) -> N
     assert "rheobase" in selector.lbl_goal.text().lower()
     selector.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     assert "stdp" in selector.lbl_goal.text().lower()
-    stim_editor.close()
 
 
 def test_open_dynamic_input_designer_opens_rheobase_when_selected(qtbot: QtBot) -> None:
@@ -1832,7 +1806,6 @@ def test_open_dynamic_input_designer_opens_rheobase_when_selected(qtbot: QtBot) 
 
     assert dynamic_input._rheobase_dialog is not None
     assert dynamic_input._rheobase_dialog.isVisible()
-    stim_editor.close()
 
 
 def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
@@ -1851,7 +1824,6 @@ def test_routine_dialogs_have_no_qt_parent(qtbot: QtBot) -> None:
 
     assert dynamic_input._rheobase_dialog is not None
     assert dynamic_input._rheobase_dialog.parent() is None
-    stim_editor.close()
 
 
 def test_open_dynamic_input_designer_opens_stdp_window_when_selected(
@@ -1870,7 +1842,6 @@ def test_open_dynamic_input_designer_opens_stdp_window_when_selected(
     assert dynamic_input._stdp_window_dialog.isVisible()
     dynamic_input.discard_dynamic_input_dialogs()
     assert dynamic_input._stdp_window_dialog is None
-    stim_editor.close()
 
 
 def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> None:
@@ -1884,7 +1855,6 @@ def test_routine_selector_cancel_does_not_open_routine_dialog(qtbot: QtBot) -> N
     assert dynamic_input._stdp_synaptic_tuning_dialog is None
     assert dynamic_input._rheobase_dialog is None
     assert dynamic_input._stdp_window_dialog is None
-    stim_editor.close()
 
 
 def test_discard_after_routine_selector_was_deleted(qtbot: QtBot) -> None:
@@ -1903,7 +1873,6 @@ def test_discard_after_routine_selector_was_deleted(qtbot: QtBot) -> None:
 
     dynamic_input.discard_dynamic_input_dialogs()
     assert dynamic_input._rheobase_dialog is None
-    stim_editor.close()
 
 
 def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> None:
@@ -1936,8 +1905,6 @@ def test_discard_dynamic_input_dialogs_clears_cached_dialog(qtbot: QtBot) -> Non
     assert dynamic_input._stdp_synaptic_tuning_dialog is None
     assert dynamic_input._rheobase_dialog is None
     assert dynamic_input._stdp_window_dialog is None
-    stim_editor.close()
-    stim_editor.close()
 
 
 def test_syscon_dt_fix_requires_confirmation_and_refreshes_editor(qtbot, mocker):

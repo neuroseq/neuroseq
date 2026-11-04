@@ -53,7 +53,6 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
         "Patch-clamp files (*.pxp *.ibw *.csv *.txt);;Packed Experiment (*.pxp);;"
         "Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
     ]
-    dialog.close()
 
 
 def test_unsupported_input_format(

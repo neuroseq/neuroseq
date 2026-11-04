@@ -127,4 +127,3 @@ def test_gui_zoom_control_resizes_workspace(qtbot: QtBot) -> None:
     gui.zoom_control.set_zoom(100)
     assert content.minimumSize() == QtCore.QSize(1500, 950)
     gui._close_confirmed = True
-    gui.close()

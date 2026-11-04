@@ -127,7 +127,6 @@ def test_stim_loop_dialog_accept_returns_loop_count(qtbot: QtBot) -> None:
 
     assert dialog.loop_count == 4
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
-    dialog.close()
 
 
 def test_stim_editor_loop_stim_array_accepts_and_tiles(
@@ -160,7 +159,6 @@ def test_stim_editor_loop_stim_array_accepts_and_tiles(
 
     assert stim_editor.current_stim_modifier is not None
     assert stim_editor.current_stim_modifier.stim_array.values.shape == (12, 3)
-    stim_editor.close()
 
 
 def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
@@ -194,4 +192,3 @@ def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
 
     assert stim_editor.current_stim_modifier is not None
     assert stim_editor.current_stim_modifier.stim_array.values.shape == (2, 3)
-    stim_editor.close()

@@ -243,7 +243,6 @@ def test_dialog_selects_aoi_strategy_shows_subgroup(
     assert dialog.square_x_spin.value() == 50
     assert dialog.square_y_spin.value() == 50
     assert dialog.square_side_spin.value() == 50
-    dialog.close()
 
 
 def test_import_button_is_default_after_files_load(
@@ -254,7 +253,6 @@ def test_import_button_is_default_after_files_load(
     assert dialog.import_button.isDefault()
     assert not dialog.open_fiji_button.autoDefault()
     assert not dialog.run_cellpose_button.autoDefault()
-    dialog.close()
 
 
 def test_dialog_aoi_autofills_custom_mapping_line(tmp_path: Path, qtbot: QtBot) -> None:
@@ -265,7 +263,6 @@ def test_dialog_aoi_autofills_custom_mapping_line(tmp_path: Path, qtbot: QtBot) 
     assert text != ""
     parsed = dialog._parse_custom_mapping(text)
     assert parsed
-    dialog.close()
 
 
 def test_dialog_aoi_shows_region_summary(tmp_path: Path, qtbot: QtBot) -> None:
@@ -279,7 +276,6 @@ def test_dialog_aoi_shows_region_summary(tmp_path: Path, qtbot: QtBot) -> None:
     assert "Circle" in summary
     assert "preferential" in summary
     assert "exclusion" in summary
-    dialog.close()
 
 
 def test_dialog_aoi_changes_remap_on_spinbox_edit(tmp_path: Path, qtbot: QtBot) -> None:
@@ -293,7 +289,6 @@ def test_dialog_aoi_changes_remap_on_spinbox_edit(tmp_path: Path, qtbot: QtBot) 
 
     assert before != after
     assert dialog.custom_mapping_line.text() == ""
-    dialog.close()
 
 
 def test_dialog_aoi_percentage_mode_uses_centres_and_fov_size(
@@ -318,7 +313,6 @@ def test_dialog_aoi_percentage_mode_uses_centres_and_fov_size(
     assert config.circle.cx == 5.0
     assert config.circle.cy == 15.0
     assert config.circle.diameter == 4.0
-    dialog.close()
 
 
 def test_dialog_aoi_pixel_mode_uses_square_centre(tmp_path: Path, qtbot: QtBot) -> None:
@@ -338,7 +332,6 @@ def test_dialog_aoi_pixel_mode_uses_square_centre(tmp_path: Path, qtbot: QtBot) 
     dialog._set_aoi_controls(config)
     assert dialog.square_x_spin.value() == 10.0
     assert dialog.square_y_spin.value() == 12.0
-    dialog.close()
 
 
 def test_dialog_aoi_percent_mode_round_trips_through_set_aoi_controls(
@@ -374,7 +367,6 @@ def test_dialog_aoi_percent_mode_round_trips_through_set_aoi_controls(
     assert dialog.circle_diameter_spin.value() == pytest.approx(
         original["circle_diameter"]
     )
-    dialog.close()
 
 
 def test_dialog_aoi_import_updates_region_summary(
@@ -392,7 +384,6 @@ def test_dialog_aoi_import_updates_region_summary(
     assert "Input IDs:" in summary
     assert "Cellpose IDs:" in summary
     assert any(call["name"] == "information" for call in qmessagebox_calls)
-    dialog.close()
 
 
 def test_dialog_aoi_persists_through_reopen(tmp_path: Path, qtbot: QtBot) -> None:
@@ -417,8 +408,6 @@ def test_dialog_aoi_persists_through_reopen(tmp_path: Path, qtbot: QtBot) -> Non
     assert reopened.square_x_spin.value() == 1.5
     assert reopened.circle_diameter_spin.value() == 6.5
     assert not reopened.show_shapes_checkbox.isChecked()
-    dialog.close()
-    reopened.close()
 
 
 def test_aoi_drag_import_persists_through_project_save_reload(
@@ -468,5 +457,3 @@ def test_aoi_drag_import_persists_through_project_save_reload(
     assert reloaded.cellpose_data.stimulus_to_cellpose_mapping == dragged_mapping
     assert reloaded.cellpose_data.aoi_config == dragged_config
     assert reloaded.cellpose_data.segmentation_path == imported.segmentation_path
-
-    dialog.close()

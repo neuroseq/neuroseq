@@ -118,7 +118,6 @@ def test_footprint_panel_adjusts_fov_but_not_cell_colors(qtbot: QtBot) -> None:
 
     dialog.reset()
     assert np.array_equal(widget._composed_overlay_image(), original)
-    widget.close()
 
 
 def test_display_range_is_stored_on_shared_data_and_synced_across_views(
@@ -147,8 +146,6 @@ def test_display_range_is_stored_on_shared_data_and_synced_across_views(
 
     dialog.reset()
     assert result.display_range is None
-    first.close()
-    second.close()
 
 
 def test_loaded_display_range_is_applied_and_shown_in_dialog(qtbot: QtBot) -> None:
@@ -162,4 +159,3 @@ def test_loaded_display_range_is_applied_and_shown_in_dialog(qtbot: QtBot) -> No
     widget._show_brightness_contrast_dialog()
     assert widget._brightness_contrast_dialog is not None
     assert widget._brightness_contrast_dialog.display_range == DisplayRange(50, 150)
-    widget.close()

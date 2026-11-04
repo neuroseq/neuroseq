@@ -39,7 +39,6 @@ def test_data_widget(
     data_widget.clear_data()
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
-    data_widget.close()
 
 
 def test_data_widget_x_lock_allows_independent_and_linked_scrolling(
@@ -84,5 +83,3 @@ def test_data_widget_x_lock_allows_independent_and_linked_scrolling(
     data_widget.lock_x_checkbox.setChecked(True)
     data_widget.x_scrollbar.setValue(min(data_widget.x_scrollbar.maximum(), 300))
     assert default_x_scrollbar.value() == data_widget.x_scrollbar.value()
-
-    default_trace_widget.close()

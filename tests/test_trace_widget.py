@@ -106,7 +106,6 @@ def test_trace_preview_preserves_arrangement(qtbot, clip, center, tmp_path) -> N
     output = tmp_path / "preview.svg"
     canvas.figure.savefig(output)
     assert 'id="trace_3"' in output.read_text(encoding="utf-8")
-    dialog.close()
 
 
 @pytest.mark.parametrize(
@@ -154,7 +153,6 @@ def test_trace_preview_uses_selected_region(
     assert ax.get_ylim() == pytest.approx(
         (cy - state["height"] / 2, cy + state["height"] / 2)
     )
-    dialog.close()
 
 
 def _make_fake_click_event(ax, line, index: int, button: int = 1):
@@ -192,7 +190,6 @@ def test_trace_preview_amplitude_markers_require_two_points_on_same_trace(
 
     assert dialog._amplitude_points[0] == [expected_point]
     assert "one point placed" in dialog._amplitude_label.text()
-    dialog.close()
 
 
 def test_trace_preview_amplitude_markers_measure_delta_between_last_two_points(
@@ -228,7 +225,6 @@ def test_trace_preview_amplitude_markers_measure_delta_between_last_two_points(
     label_text = dialog._amplitude_label.text()
     assert f"{expected_dy:.4g}" in label_text
     assert f"{expected_dt:.1f} ms" in label_text
-    dialog.close()
 
 
 def test_trace_preview_amplitude_markers_only_hit_the_nearest_trace(
@@ -255,7 +251,6 @@ def test_trace_preview_amplitude_markers_only_hit_the_nearest_trace(
 
     assert set(dialog._amplitude_points.keys()) == {0}
     assert len(dialog._amplitude_points[0]) == 1
-    dialog.close()
 
 
 def test_trace_preview_amplitude_markers_ignored_when_placement_disabled(
@@ -277,7 +272,6 @@ def test_trace_preview_amplitude_markers_ignored_when_placement_disabled(
     dialog._on_click(_make_fake_click_event(ax, line, index=3))
 
     assert dialog._amplitude_points == {}
-    dialog.close()
 
 
 def test_trace_preview_clear_points_resets_markers_and_label(
@@ -305,7 +299,6 @@ def test_trace_preview_clear_points_resets_markers_and_label(
     assert dialog._amplitude_points == {}
     assert "Check" in dialog._amplitude_label.text()
     assert not dialog._clear_points_button.isEnabled()
-    dialog.close()
 
 
 def test_trace_widget_context_menu_offers_vector_export(
@@ -349,7 +342,6 @@ def test_trace_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
     norm_action.trigger()
     assert trace_widget._trace_norm_dialog is not None
     assert trace_widget._trace_norm_dialog.isVisible()
-    trace_widget._trace_norm_dialog.close()
 
 
 @pytest.mark.parametrize("widget_cls", [TraceWidget, SpikeWidget])
@@ -465,7 +457,6 @@ def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     # nor does disabling clipping
     trace_norm_dialog.chk_clip_clicked(False)
     assert np.mean(trace_widget.graphic.data[:, 1]) == pytest.approx(0.0, abs=0.01)
-    trace_widget.close()
 
 
 def test_trace_widget_median_offset(qtbot: QtBot) -> None:
@@ -515,7 +506,6 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     assert np.mean(trace_widget.graphic[0].data[:, 1]) == pytest.approx(0.0, abs=0.01)
     assert np.mean(trace_widget.graphic[1].data[:, 1]) == pytest.approx(0.0, abs=0.01)
     assert np.mean(trace_widget.graphic[2].data[:, 1]) == pytest.approx(0.0, abs=0.01)
-    trace_widget.close()
 
 
 def test_median_offset_normalization_bounds_negative_excursions_too(
@@ -550,7 +540,6 @@ def test_median_offset_normalization_bounds_negative_excursions_too(
 
     assert normalized[0].min() == pytest.approx(-0.5)
     assert normalized[0].max() == pytest.approx(0.005)
-    trace_widget.close()
 
 
 def _make_scaled_trace_data(n_neurons: int, n_timesteps: int = 50) -> TraceData:
@@ -602,7 +591,6 @@ def test_auto_extend_vertical_space_grows_rows_without_clipping(
     # camera actually gets refocused onto the larger extent
     total_height = sum(2 * h for h in half_heights)
     assert controller.max_height == pytest.approx(total_height)
-    trace_widget.close()
 
 
 def test_auto_extend_vertical_space_leaves_uniform_rows_alone_when_off(
@@ -624,7 +612,6 @@ def test_auto_extend_vertical_space_leaves_uniform_rows_alone_when_off(
     # clipping (the default) still applies when auto-extend is off
     normalized = trace_widget.get_normalized_trace_data()
     assert np.max(np.abs(normalized)) == pytest.approx(0.5)
-    trace_widget.close()
 
 
 def test_auto_extend_vertical_space_restores_controller_height_when_turned_off(
@@ -646,7 +633,6 @@ def test_auto_extend_vertical_space_restores_controller_height_when_turned_off(
     trace_widget.replot_traces()
     assert controller.max_height == pytest.approx(5.0)
     assert trace_widget._row_half_heights == []
-    trace_widget.close()
 
 
 def test_auto_extend_vertical_space_hover_and_tick_labels_track_warped_rows(
@@ -673,7 +659,6 @@ def test_auto_extend_vertical_space_hover_and_tick_labels_track_warped_rows(
         assert trace_widget._display_row_for_mouse_y(center) == neuron_id
     # hovering past the last row clamps to it rather than raising/wrapping
     assert trace_widget._display_row_for_mouse_y(centers[-1] + 100) == len(centers) - 1
-    trace_widget.close()
 
 
 def test_auto_extend_vertical_space_does_not_move_camera_on_replot(
@@ -719,7 +704,6 @@ def test_auto_extend_vertical_space_does_not_move_camera_on_replot(
         camera_state_before["position"]
     )
     assert controller.max_height >= sum(2 * h for h in trace_widget._row_half_heights)
-    trace_widget.close()
 
 
 def test_trace_norm_dialog_auto_extend_checkbox_updates_trace_widget(
@@ -738,7 +722,6 @@ def test_trace_norm_dialog_auto_extend_checkbox_updates_trace_widget(
     trace_norm_dialog.reset_defaults()
     assert trace_widget.auto_extend_vertical_space is False
     assert trace_norm_dialog.chk_auto_extend.isChecked() is False
-    trace_widget.close()
 
 
 def test_trace_widget_indices(qtbot: QtBot) -> None:
@@ -796,7 +779,6 @@ def test_trace_widget_y_tick_labels_show_real_neuron_id(qtbot: QtBot) -> None:
     # after hiding id 6, display row 2 now corresponds to real id 11
     format_tick = trace_widget._create_y_tick_formatter()
     assert format_tick(2, 0, 5) == "11"
-    trace_widget.close()
 
 
 def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
@@ -823,7 +805,6 @@ def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
     format_tick = trace_widget._create_y_tick_formatter()
 
     assert format_tick(5, 0, 10) == ""
-    trace_widget.close()
 
 
 @pytest.mark.parametrize(
@@ -868,7 +849,6 @@ def test_trace_widget_hover_value_units(
     assert captured["t"] == f"Neuron 0\n{expected}"
     assert isinstance(widget.data, TraceData)
     np.testing.assert_allclose(widget.data.traces, sample)
-    widget.close()
 
 
 def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
@@ -898,7 +878,6 @@ def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
     trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
-    trace_widget.close()
 
 
 def test_pointer_move_emits_neuron_hovered_only_on_change(
@@ -941,7 +920,6 @@ def test_pointer_move_emits_neuron_hovered_only_on_change(
     trace_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert emitted == [1, 2, None]
-    trace_widget.close()
 
 
 def test_pointer_leave_clears_hover_state(
@@ -976,7 +954,6 @@ def test_pointer_leave_clears_hover_state(
     assert emitted == [1, None]
     assert trace_widget.mouse_pos is None
     assert not trace_widget.text.visible
-    trace_widget.close()
 
 
 def test_trace_widget_clear_data_releases_plot_buffers(qtbot: QtBot) -> None:
@@ -1020,7 +997,6 @@ def test_trace_widget_set_neuron_greyed_adds_and_removes_overlay(
     assert trace_widget._greyed_neuron_ids == {2}
     trace_widget.set_neuron_greyed(2, False)
     assert not trace_widget.is_neuron_greyed(2)
-    trace_widget.close()
 
 
 def test_trace_widget_greying_hides_and_compacts_lines(
@@ -1064,7 +1040,6 @@ def test_trace_widget_greying_hides_and_compacts_lines(
     assert trace_widget.grid_lines.n_neurons == 3
     camera_state = controller._get_camera_state()
     assert camera_state["height"] == pytest.approx(3)
-    trace_widget.close()
 
 
 def test_two_trace_views_sharing_state_stay_in_sync(
@@ -1099,8 +1074,6 @@ def test_two_trace_views_sharing_state_stay_in_sync(
     assert view_a.n_neurons == 3
     assert view_a.graphic is not None
     assert view_a.graphic.graphics[1].visible
-    view_a.close()
-    view_b.close()
 
 
 def test_two_trace_views_sharing_state_stay_in_sync_for_batched_greying(
@@ -1132,8 +1105,6 @@ def test_two_trace_views_sharing_state_stay_in_sync_for_batched_greying(
     assert not view_a.is_neuron_greyed(0)
     assert not view_a.is_neuron_greyed(1)
     assert view_a.is_neuron_greyed(2)
-    view_a.close()
-    view_b.close()
 
 
 def test_trace_widget_with_no_state_arg_gets_a_private_state(
@@ -1149,8 +1120,6 @@ def test_trace_widget_with_no_state_arg_gets_a_private_state(
 
     assert view_a.data is not None
     assert view_b.data is None
-    view_a.close()
-    view_b.close()
 
 
 def test_trace_widget_clear_data_clears_greyed_neurons(
@@ -1166,7 +1135,6 @@ def test_trace_widget_clear_data_clears_greyed_neurons(
     trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
 
     assert not trace_widget.is_neuron_greyed(1)
-    trace_widget.close()
 
 
 def test_trace_widget(qtbot: QtBot) -> None:
@@ -1243,7 +1211,6 @@ def test_trace_widget(qtbot: QtBot) -> None:
     qtbot.wait(20)
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
-    trace_widget.close()
 
 
 def test_trace_widget_gridlines_use_controller_limits(qtbot: QtBot) -> None:
@@ -1268,7 +1235,6 @@ def test_trace_widget_gridlines_use_controller_limits(qtbot: QtBot) -> None:
     assert trace_widget.grid_lines.time_ms == pytest.approx(controller.max_width)
     positions = trace_widget.grid_lines.gridline_10samples.geometry.positions.data
     assert np.max(positions[:, 0]) == pytest.approx(controller.max_width)
-    trace_widget.close()
 
 
 def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> None:
@@ -1293,7 +1259,6 @@ def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> Non
     assert trace_widget.grid_lines.n_neurons == 10
     positions = trace_widget.grid_lines.gridline_10samples.geometry.positions.data
     assert np.max(positions[:, 1]) == pytest.approx(controller.max_height - 0.5)
-    trace_widget.close()
 
 
 def test_trace_widget_gridlines_follow_trace_dt(qtbot: QtBot) -> None:
@@ -1319,7 +1284,6 @@ def test_trace_widget_gridlines_follow_trace_dt(qtbot: QtBot) -> None:
         0::2, 0
     ]
     assert positions[1] - positions[0] == pytest.approx(99.1)
-    trace_widget.close()
 
 
 def test_trace_widget_set_grid_visible(qtbot: QtBot) -> None:
@@ -1348,7 +1312,6 @@ def test_trace_widget_set_grid_visible(qtbot: QtBot) -> None:
     trace_widget.set_grid_visible(True)
     assert trace_widget.grid_lines is not None
     assert trace_widget.grid_lines.visible
-    trace_widget.close()
 
 
 def test_trace_widget_shrinks_line_thickness_when_zoomed_out(
@@ -1387,7 +1350,6 @@ def test_trace_widget_shrinks_line_thickness_when_zoomed_out(
 
     controller.focus_neuron_range(0, n_neurons)
     assert trace_widget.graphic.graphics[0].thickness == pytest.approx(1.4)
-    trace_widget.close()
 
 
 def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
@@ -1466,9 +1428,6 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
         abs=5.0,
     )
 
-    trace_widget.close()
-    default_trace_widget.close()
-
 
 def test_zooming_the_default_controller_propagates_to_a_locked_widget(
     qtbot: QtBot,
@@ -1516,9 +1475,6 @@ def test_zooming_the_default_controller_propagates_to_a_locked_widget(
 
     local_width = float(local_controller._get_camera_state()["width"])
     assert local_width == pytest.approx(after_width, rel=0.01)
-
-    trace_widget.close()
-    default_trace_widget.close()
 
 
 def test_region_of_interest_select_slice_label_uses_override_range(
@@ -1592,7 +1548,6 @@ def test_stim_overlay_hidden_until_enabled(
 
     trace_widget.set_stim_overlay_enabled(False)
     assert trace_widget._stim_overlay_graphic is None
-    trace_widget.close()
 
 
 def test_stim_overlay_compacts_with_greyed_neurons(
@@ -1615,7 +1570,6 @@ def test_stim_overlay_compacts_with_greyed_neurons(
     trace_widget.set_neuron_greyed(1, False)
     rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
     assert rendered.shape[0] == 3
-    trace_widget.close()
 
 
 def test_stim_overlay_aligns_rows_by_same_neuron_id(
@@ -1637,7 +1591,6 @@ def test_stim_overlay_aligns_rows_by_same_neuron_id(
     rendered = np.asarray(trace_widget._stim_overlay_graphic.data.value)
     assert np.allclose(rendered[1, :], 5.0)
     assert np.allclose(rendered[0, :], stim.values[:, 0])
-    trace_widget.close()
 
 
 def test_stim_overlay_survives_data_refresh(
@@ -1657,7 +1610,6 @@ def test_stim_overlay_survives_data_refresh(
     trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
 
     assert trace_widget._stim_overlay_graphic is not None
-    trace_widget.close()
 
 
 def test_stim_overlay_cleared_when_trace_data_cleared(
@@ -1675,7 +1627,6 @@ def test_stim_overlay_cleared_when_trace_data_cleared(
     trace_widget.set_data(None)
 
     assert trace_widget._stim_overlay_graphic is None
-    trace_widget.close()
 
 
 def test_calling_clear_data_directly_with_greyed_neuron_and_overlay_does_not_warn(
@@ -1708,7 +1659,6 @@ def test_calling_clear_data_directly_with_greyed_neuron_and_overlay_does_not_war
         trace_widget.clear_data()
 
     assert "not a child" not in caplog.text
-    trace_widget.close()
 
 
 def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
@@ -1733,7 +1683,6 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
 
     assert state.receivers(state.data_changed) == baseline_data
     assert state.receivers(state.greyed_changed) == baseline_greyed
-    view_a.close()
 
 
 def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
@@ -1897,7 +1846,6 @@ def test_hover_text_moves_left_of_cursor_near_right_border(
     assert trace_widget.text.text.anchor == "middle-right"
     trace_widget.pointer_move(SimpleNamespace(x=100.0))
     assert trace_widget.text.text.anchor == "middle-left"
-    trace_widget.close()
 
 
 def test_center_on_neuron_keeps_zoom_and_other_traces(
@@ -1922,7 +1870,6 @@ def test_center_on_neuron_keeps_zoom_and_other_traces(
     assert trace_widget.center_on_neuron(12)
     # Neuron 5 is hidden, so neuron 12 is now on display row 11.
     assert controller.vertical_view() == pytest.approx((4.0, 11.0))
-    trace_widget.close()
 
 
 def test_wheel_scrolling_moves_the_traces_at_once(
@@ -1960,7 +1907,6 @@ def test_wheel_scrolling_moves_the_traces_at_once(
     # a second frame must not move the traces further (with easing it did)
     controller.handle_event(before_render, viewport)
     assert controller.vertical_view() == pytest.approx(moved)
-    trace_widget.close()
 
 
 def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -> None:
@@ -1990,7 +1936,6 @@ def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -
 
     trace_widget.set_stim_overlay_enabled(False)
     assert trace_widget._stim_onset_graphic is None
-    trace_widget.close()
 
 
 def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) -> None:

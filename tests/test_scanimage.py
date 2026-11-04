@@ -264,7 +264,6 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording, tmp_
     assert not other.project.imaging_acquisitions
     assert original.calcium_video_paths
     original.dirty = False
-    window.close()
 
 
 def test_controls_trigger_timeout_and_foreign_acquisition(
@@ -501,7 +500,6 @@ def test_recording_completion_attaches_and_reopens_movie(
     gui.project.history.undo()
     assert gui.project.experiments["Test"] is old_group
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_helper_process_connects_and_disconnects_named_session(qtbot, tmp_path):
@@ -676,7 +674,6 @@ def test_new_recording_preserves_imported_movie(
     assert gui.scanimage_controls.channel_spin.value() == 3
     assert "was not saved" in gui.scanimage_controls.message_label.text()
     project.dirty = False
-    window.close()
 
 
 def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocker):
@@ -723,7 +720,6 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
     assert dialog.cmb_offset.count() == 0
     assert dialog.offset == 0
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording):
@@ -805,7 +801,6 @@ def test_image_acquisition_is_a_tab_of_the_stimulation_setup_pane(qtbot):
     index = gui.stimulation_setup.currentIndex()
     assert gui.stimulation_setup.tabText(index) == SCANIMAGE_TAB_TITLE
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
@@ -834,7 +829,6 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
     qtbot.waitUntil(lambda: gui.calcium_video_widget.widget.isVisible())
     assert canvas_rect(gui.calcium_video_widget.widget) == cell_rect
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
@@ -865,7 +859,6 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
     assert gui.project.calcium_video_paths == [second]
     assert gui.cmb_video.count() == 1
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_selecting_a_video_with_missing_files_keeps_the_current_one(
@@ -884,7 +877,6 @@ def test_selecting_a_video_with_missing_files_keeps_the_current_one(
     assert gui.cmb_video.currentIndex() == 1
     assert qmessagebox_calls
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
@@ -1012,4 +1004,3 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     gui.acquisition_controller.fov_ready.emit(str(image))
     segment.assert_called_once_with(segment=image)
     gui._close_confirmed = True
-    gui.close()

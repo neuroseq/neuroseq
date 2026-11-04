@@ -100,7 +100,6 @@ def test_spike_widget(qtbot: QtBot, make_spike_data) -> None:
     spike_data = make_spike_data(n_neurons=10, n_spikes=50, max_time_secs=1.0)
     spike_widget.set_data(spike_data)
     assert spike_widget.n_neurons == max(spike_data.spike_indices) + 1
-    spike_widget.close()
 
 
 def test_spike_widget_populates_visible_neuron_ids_for_y_axis_labels(
@@ -118,7 +117,6 @@ def test_spike_widget_populates_visible_neuron_ids_for_y_axis_labels(
     spike_widget.set_data(spike_data)
     assert spike_widget._all_neuron_ids == list(range(spike_widget.n_neurons))
     assert spike_widget._visible_neuron_ids == list(range(spike_widget.n_neurons))
-    spike_widget.close()
 
 
 def test_spike_widget_neuron_count_falls_back_to_controller_limit(
@@ -149,7 +147,6 @@ def test_spike_widget_neuron_count_falls_back_to_controller_limit(
     spike_widget.set_data(spike_data)
     assert spike_widget.n_neurons == 10
     assert spike_widget._all_neuron_ids == list(range(10))
-    spike_widget.close()
 
 
 def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
@@ -227,6 +224,3 @@ def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
         default_after_lock["position"][0],
         abs=5.0,
     )
-
-    spike_widget.close()
-    default_trace_widget.close()
