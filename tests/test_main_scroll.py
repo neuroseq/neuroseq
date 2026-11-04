@@ -5,6 +5,7 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.main_scroll import MainScrollFilter
 from neuroseq.main_scroll import make_main_scroll_area
 
 
@@ -56,6 +57,20 @@ def test_scrolling_up_returns_priority_at_nested_top(qtbot: QtBot) -> None:
     area.verticalScrollBar().setValue(200)
     _wheel(inner.viewport(), 120)  # inner already at top -> main window scrolls up
     assert area.verticalScrollBar().value() < 200
+
+
+def test_one_filter_serves_every_main_scroll_area(qtbot: QtBot) -> None:
+    first_area, first_inner = _build(qtbot)
+    second_area, second_inner = _build(qtbot)
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert len(app.findChildren(MainScrollFilter)) == 1
+
+    second_bar = second_inner.verticalScrollBar()
+    second_bar.setValue(second_bar.maximum())
+    _wheel(second_inner.viewport(), -120)
+    assert second_area.verticalScrollBar().value() > 0
+    assert first_area.verticalScrollBar().value() == 0
 
 
 def test_zoom_control_buttons_field_and_limits(qtbot: QtBot) -> None:
