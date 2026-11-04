@@ -4,8 +4,10 @@ import pathlib
 
 import brian2.numpy_ as np
 
+from neuroseq.llm.system_prompt import DOCS_DIR
 from neuroseq.llm.system_prompt import build_context_snapshot
 from neuroseq.llm.system_prompt import build_static_prompt
+from neuroseq.llm.system_prompt import find_docs_dir
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
@@ -45,6 +47,23 @@ def test_build_static_prompt_skips_images(tmp_path: pathlib.Path) -> None:
 
     assert "hello" in prompt
     assert "image.png" not in prompt
+
+
+def test_find_docs_dir_prefers_docs_packaged_in_wheel(tmp_path: pathlib.Path) -> None:
+    (tmp_path / "docs").mkdir()
+
+    assert find_docs_dir(tmp_path) == tmp_path / "docs"
+
+
+def test_find_docs_dir_falls_back_to_repository_docs(tmp_path: pathlib.Path) -> None:
+    repo_docs = pathlib.Path(__file__).resolve().parents[1] / "docs"
+
+    assert find_docs_dir(tmp_path) == repo_docs
+
+
+def test_default_docs_dir_contains_the_docs() -> None:
+    assert (DOCS_DIR / "index.md").is_file()
+    assert "### docs/getting_started/installation.md" in build_static_prompt()
 
 
 def test_build_context_snapshot_lists_project_state() -> None:

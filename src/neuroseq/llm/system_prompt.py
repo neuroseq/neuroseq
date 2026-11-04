@@ -1,10 +1,27 @@
 from __future__ import annotations
 
 import pathlib
+from collections.abc import Iterator
+from importlib import resources
+from importlib.resources.abc import Traversable
 
 from neuroseq.project import Project
 
-DOCS_DIR = pathlib.Path(__file__).resolve().parents[3] / "docs"
+# the repository's docs/, used when running from a checkout
+_CHECKOUT_DOCS_DIR = pathlib.Path(__file__).resolve().parents[3] / "docs"
+
+
+def find_docs_dir(package: Traversable | None = None) -> Traversable:
+    """The docs packaged into an installed wheel, else the repository's docs/."""
+    if package is None:
+        package = resources.files("neuroseq")
+    packaged = package / "docs"
+    if packaged.is_dir():
+        return packaged
+    return _CHECKOUT_DOCS_DIR
+
+
+DOCS_DIR = find_docs_dir()
 
 _PREAMBLE = """\
 You are NeuroSeq's in-app help assistant. NeuroSeq is a desktop GUI for
@@ -23,17 +40,31 @@ unless the user asks for more detail.
 """
 
 
-def build_static_prompt(docs_dir: pathlib.Path = DOCS_DIR) -> str:
+def _markdown_files(
+    directory: Traversable, prefix: str = ""
+) -> Iterator[tuple[str, Traversable]]:
+    for entry in sorted(directory.iterdir(), key=lambda e: e.name):
+        if entry.is_dir():
+            yield from _markdown_files(entry, f"{prefix}{entry.name}/")
+        elif entry.name.endswith(".md"):
+            yield f"{prefix}{entry.name}", entry
+
+
+def build_static_prompt(docs_dir: Traversable = DOCS_DIR) -> str:
     parts = [_PREAMBLE, "\n## Documentation\n"]
-    for md_path in sorted(docs_dir.rglob("*.md")):
+    try:
+        md_files = list(_markdown_files(docs_dir))
+    except OSError:
+        md_files = []
+    for rel, md_file in md_files:
         try:
-            if md_path.stat().st_size > 200_000:
-                continue
-            rel = md_path.relative_to(docs_dir).as_posix()
-            parts.append(f"\n### docs/{rel}\n")
-            parts.append(md_path.read_text(encoding="utf-8"))
+            text = md_file.read_text(encoding="utf-8")
         except OSError:
             continue
+        if len(text) > 200_000:
+            continue
+        parts.append(f"\n### docs/{rel}\n")
+        parts.append(text)
     return "".join(parts)
 
 

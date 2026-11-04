@@ -1,114 +1,51 @@
 # Installation
 
-NeuroSeq requires Python 3.12 or newer. Choose one of the following workflows
-and use the same environment for launching, testing, and troubleshooting.
+NeuroSeq requires Python 3.12 or newer. Install the latest release from
+[PyPI](https://pypi.org/project/neuroseq/) with pip into its own environment,
+so that its dependencies do not interfere with other Python software.
 
-| Option         | Environment                    | Requires Conda? | Launch command              |
-| -------------- | ------------------------------ | --------------- | --------------------------- |
-| uv             | Project `.venv`, managed by uv | No              | `uv run neuroseq`           |
-| Conda with pip | Named Conda environment        | Yes             | `neuroseq` after activation |
+## Create an environment
 
-## Option 1: Repository installation with uv
-
-uv works independently of Conda and can download a suitable Python interpreter
-when needed. You do not need to create or activate a Conda environment for
-this option.
-
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
+With Python's built-in `venv`:
 
 ```bash
-git clone git@github.com:neuroseq/neuroseq.git
-cd neuroseq
-uv sync
-uv run neuroseq
+python -m venv neuroseq-env
+source neuroseq-env/bin/activate     # Linux / macOS
+neuroseq-env\Scripts\activate        # Windows
 ```
 
-GitHub SSH access is required for this clone URL. `uv sync` creates a project
-environment in `.venv` and installs dependencies using `pyproject.toml` and
-`uv.lock`. `uv run` checks that environment before launching a command.
-No manual activation of `.venv` is needed. See
-[uv's project workflow](https://docs.astral.sh/uv/guides/projects/).
+Or with [Conda](https://www.anaconda.com/):
 
-After pulling repository updates, run `uv sync` again. To deliberately resolve
-newer dependency versions, use `uv lock --upgrade` followed by `uv sync` and
-test the result; this changes `uv.lock`.
-
-## Option 2: Conda
-
-Conda is an alternative to the project `.venv`. Install
-[Anaconda](https://www.anaconda.com/) if needed.
-
-Once Anaconda installed, create and activate a new environment in a command line:
-
-```
+```bash
 conda create -n neuroseq python=3.12
 conda activate neuroseq
 ```
 
-Alternatively, the new enviroment can be created within Anaconda Navigator. For this, open Anaconda Navigator and go to "Enviroments". Click "Create" button, write "neuroseq" as a name and select Python 3.12.
+The Conda environment can also be created in Anaconda Navigator: go to
+"Environments", click "Create", enter "neuroseq" as the name and select
+Python 3.12.
 
-### Install NeuroSeq into Conda
+## Install NeuroSeq
 
-NeuroSeq requires Python 3.12 or newer.
-
-If you have ssh authentication to GitHub set up you can install directly from this repository with pip:
-
-```bash
-pip install git+ssh://git@github.com/neuroseq/neuroseq
-```
-
-Alternatively you can clone the repository and then install it:
+In the activated environment, run:
 
 ```bash
-git clone git@github.com:neuroseq/neuroseq.git
-cd neuroseq
-pip install .
+python -m pip install neuroseq
 ```
 
-Run `neuroseq` from the activated Conda environment. Prefer
-`python -m pip install .` to explicitly install into its Python. To update
-the installation after pulling changes, run `python -m pip install --upgrade .`.
-Use `python -m pip check` to check dependency metadata.
-
-Pip does not use `uv.lock` or `[tool.uv.sources]`, so this installation can have
-different package versions and PyTorch builds from the uv workflow. For GPU
-setup, see [GPU troubleshooting](../common_issues.md#imaging-segmentation).
-
-## Using uv from a Conda shell
-
-Combining uv and Conda is optional, not a third required setup step. You may
-install uv in an activated Conda environment:
+Then launch the GUI with:
 
 ```bash
-conda activate neuroseq
-python -m pip install uv
-uv sync
-uv run neuroseq
+neuroseq
 ```
 
-With the default project configuration, `uv run` uses the repository's `.venv`,
-even when Conda is active. Conda supplies the shell/tool installation; the
-application dependencies remain in the separate uv environment. In particular,
-`conda run -n neuroseq python` and `uv run python` can load different packages.
-Updating one does not repair or update the other.
+To upgrade to the latest release, run `python -m pip install --upgrade neuroseq`.
 
-For a fully independent uv setup, install standalone uv using the link above
-and run it from a shell without Conda activated. If your current uv executable
-is installed inside Conda, install standalone uv before removing that Conda
-environment. An existing project `.venv` may also use a Conda-provided Python;
-when retiring that Python installation, recreate `.venv` with a uv-managed
-Python interpreter.
+For GPU-accelerated cell segmentation, see
+[GPU troubleshooting](../common_issues.md#imaging-segmentation).
 
-To identify the environment and Brian2/NumPy versions actually used, run:
-
-```bash
-uv run python -c "import sys, brian2, numpy; print(sys.executable); print(brian2.__version__, numpy.__version__)"
-```
-
-For a direct Conda installation, run the same check with
-`conda run -n neuroseq python -c "import sys, brian2, numpy; print(sys.executable); print(brian2.__version__, numpy.__version__)"`.
-In the application's embedded console, `import sys; print(sys.executable)`
-identifies the running interpreter. Point your IDE at that same interpreter.
+To work on NeuroSeq itself from a repository checkout (with uv or Conda), see the
+[developer installation guide](../developer/developer_installation.md).
 
 ## Windows desktop shortcut
 

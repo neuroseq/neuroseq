@@ -31,6 +31,7 @@
 - [Documentation](developer/documentation.md)
 - [Implementation of custom simulators](developer/custom_simulators.md)
 - [Analysis plugins](developer/analysis_plugins.md)
+- [Making a release](developer/releases.md)
 - [Miscellaneous](developer/miscellaneous.md)
 - [Testing](developer/testing.md)
 - [Contributing](developer/contributing.md)

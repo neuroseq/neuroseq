@@ -9,7 +9,7 @@ uv uses the project's `.venv` by default.
 
 For an installation directly into Conda, replace `uv run pytest` with
 `conda run -n neuroseq python -m pytest` (or `python -m pytest` after activation).
-See [environment selection](../getting_started/installation.md#using-uv-from-a-conda-shell).
+See [environment selection](developer_installation.md#using-uv-from-a-conda-shell).
 
 ## To run all tests
 
