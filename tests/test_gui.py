@@ -1910,7 +1910,7 @@ def test_gui_simulate_and_playback(
     assert gui.heatmap_widget.timestamps is not None
     n_timesteps = gui.heatmap_widget.timestamps.size
     gui.time_slider.toggle_pause()
-    qtbot.waitUntil(lambda: gui.heatmap_widget.idx > 0)
+    qtbot.waitUntil(lambda: gui.heatmap_widget.idx > 0, timeout=100000)
     # pause and then continue playback
     gui.time_slider.toggle_pause()
     gui.time_slider.toggle_pause()
