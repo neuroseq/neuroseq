@@ -93,6 +93,19 @@ def pytest_configure(config):
     wait_timeout.WAIT_TIMEOUT_MS = round(1000 * config.getoption("--wait-timeout"))
 
 
+def pytest_terminal_summary(terminalreporter):
+    # Show rerun tests as warnings on the GitHub Actions run page
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        return
+    for report in terminalreporter.stats.get("rerun", []):
+        crash = getattr(report.longrepr, "reprcrash", None)
+        reason = (crash.message if crash else str(report.longrepr)).splitlines()
+        message = f"{report.nodeid} failed and was rerun: {reason[0] if reason else ''}"
+        terminalreporter.write_line(
+            f"::warning title=Rerun test::{message.replace('%', '%25')}"
+        )
+
+
 def pytest_collection_modifyitems(config, items):
     if config.getoption("--update-screenshot"):
         for item in items:

@@ -21,6 +21,7 @@ dependencies:
   - pytest
   - pytest-qt
   - pytest-mock
+  - pytest-rerunfailures
   - pytest-timeout
   - pytest-xdist
   - pip
