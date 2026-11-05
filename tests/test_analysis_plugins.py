@@ -72,7 +72,6 @@ def test_custom_analysis_widget_runs_example_plugin(
         slice(0, 5),
         slice(10, 100),
     )
-    qtbot.wait(20)
 
     assert custom_analysis_widget.traces is not None
     custom_analysis_widget.clear_data()

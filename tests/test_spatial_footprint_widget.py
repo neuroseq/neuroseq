@@ -1179,7 +1179,6 @@ def test_overlay_view_plain_click_does_not_start_a_lasso(
     ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
-        qtbot.wait(10)
 
     assert blocker.args == [1]
     assert lasso_emitted == []
@@ -1308,13 +1307,11 @@ def test_overlay_view_left_click_selects_right_click_does_not(
 
     overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
     assert emitted == []  # a plain right click does not select
     assert right_clicked == [1]  # but reports the cell (issue #603)
 
     overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
     assert emitted == [1]
 
 
@@ -1344,7 +1341,6 @@ def test_overlay_view_shift_left_click_without_a_drag_still_just_selects(
         SimpleNamespace(button=1, modifiers=("Shift",))
     )
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
 
     assert emitted == [1]
 

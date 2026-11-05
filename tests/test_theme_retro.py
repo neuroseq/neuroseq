@@ -194,7 +194,6 @@ def test_retro_combo_popup_selection_is_readable(qtbot: QtBot) -> None:
         for row in range(combo_box.count()):
             view.setCurrentIndex(model.index(row, 0))
             app.processEvents()
-            qtbot.wait(20)
             image = view.viewport().grab().toImage()
             sample_x = image.width() - 8
             highlighted = image.pixelColor(

@@ -1205,13 +1205,10 @@ def test_trace_widget(qtbot: QtBot) -> None:
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
     trace_widget.select_neurons(slice(1, 3), slice(10, 20))
-    # wait for the widget to update
-    qtbot.wait(20)
     assert trace_widget.selected_neuron_slice == slice(1, 3)
     assert trace_widget.selected_time_slice == slice(10, 20)
     # de-selecting neurons reverts to displaying all of them as selected
     trace_widget.unselect_neurons()
-    qtbot.wait(20)
     assert trace_widget.selected_neuron_slice is None
     assert trace_widget.selected_time_slice is None
 
@@ -1950,8 +1947,12 @@ def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) 
     trace_widget = TraceWidget(ConstrainedPanZoomController(), parent=parent)
     with qtbot.waitExposed(parent, timeout=WAIT_TIMEOUT_MS):
         parent.show()
+    drawn = []
+    trace_widget.figure.canvas.add_event_handler(
+        lambda event: drawn.append(True), "before_draw"
+    )
     trace_widget.set_data(make_trace_data(n_neurons=10, n_timestamps=100))
-    qtbot.wait(50)
+    qtbot.waitUntil(lambda: bool(drawn), timeout=WAIT_TIMEOUT_MS)
     widget_ref = weakref.ref(trace_widget)
     figure_ref = weakref.ref(trace_widget.figure)
 

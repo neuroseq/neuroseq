@@ -137,8 +137,8 @@ def connection(qtbot, mocker):
     mocker.patch.object(conn.process, "write")
     yield conn
     conn.shutdown()
-    conn.deleteLater()
-    qtbot.wait(1)
+    with qtbot.waitSignal(conn.destroyed, timeout=WAIT_TIMEOUT_MS):
+        conn.deleteLater()
 
 
 def test_poll_is_bounded_and_abort_has_priority(connection):
@@ -536,8 +536,8 @@ class Engine:
         assert conn.process.state() == QtCore.QProcess.ProcessState.NotRunning
     finally:
         conn.shutdown()
-        conn.deleteLater()
-        qtbot.wait(1)
+        with qtbot.waitSignal(conn.destroyed, timeout=WAIT_TIMEOUT_MS):
+            conn.deleteLater()
 
 
 def test_standard_two_channel_run_has_compact_transport_and_metadata(

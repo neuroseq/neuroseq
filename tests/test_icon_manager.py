@@ -46,9 +46,9 @@ def test_icon_manager_prunes_deleted_targets(qtbot: QtBot) -> None:
     manager.set_action_icon(action, "mdi6.file")
     assert len(manager._entries) == 1
 
-    action.deleteLater()
+    with qtbot.waitSignal(action.destroyed, timeout=WAIT_TIMEOUT_MS):
+        action.deleteLater()
     action = None  # drop the last Python reference
-    qtbot.wait(10)
 
     # Should not raise even though the underlying target may be gone, and it
     # must not grow the registry with dead entries.

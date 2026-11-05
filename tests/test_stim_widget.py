@@ -120,14 +120,21 @@ def get_event_target(widget):
     return handle if handle is not None else widget
 
 
+def wait_for_canvas_events(qtbot: QtBot, widget: QtGui.QWidget) -> None:
+    # rendercanvas queues events (merging consecutive moves) and only
+    # dispatches them once per frame, which can take a while (e.g. on
+    # Windows): wait until it has done so
+    events = getattr(widget, "_subwidget", widget)._events
+    qtbot.waitUntil(lambda: not events._pending_events, timeout=WAIT_TIMEOUT_MS)
+
+
 def mouse_click(
     qtbot: QtBot,
     widget: QtGui.QWidget,
     pos: QtCore.QPoint,
     button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
-    delay_ms=10,
 ) -> None:
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseClick(
         get_event_target(widget),
         button,
@@ -152,12 +159,11 @@ def mouse_click_and_drag(
     start: QtCore.QPoint,
     end: QtCore.QPoint,
     button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
-    delay_ms=10,
     intermediate_points=4,
 ) -> None:
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseMove(get_event_target(widget), pos=start)
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mousePress(
         get_event_target(widget),
         button,
@@ -169,24 +175,18 @@ def mouse_click_and_drag(
         np.linspace(start.y(), end.y(), n_points),
         strict=True,
     ):
-        qtbot.wait(delay_ms)
+        wait_for_canvas_events(qtbot, widget)
         qtbot.mouseMove(
             get_event_target(widget),
             pos=QtCore.QPoint(int(x), int(y)),
         )
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseRelease(
         get_event_target(widget),
         button,
         pos=end,
     )
-    # rendercanvas queues events and only dispatches them once per frame,
-    # which can take a while (e.g. on Windows): wait until it has done so
-    events = getattr(getattr(widget, "_subwidget", widget), "_events", None)
-    if events is not None:
-        qtbot.waitUntil(lambda: not events._pending_events, timeout=WAIT_TIMEOUT_MS)
-    else:
-        qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
 
 
 @pytest.fixture

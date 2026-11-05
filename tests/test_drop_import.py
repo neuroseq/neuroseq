@@ -154,13 +154,20 @@ def test_dropping_on_a_panel(
     with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
         gui.show()
     gui._auto_show_widget(gui.stim_editor)
-    qtbot.wait(50)
+
+    def stim_editor_centre() -> QtCore.QPoint:
+        return gui.stim_editor.mapTo(gui, gui.stim_editor.rect().center())
+
+    # the shown panel is laid out (and so found under the cursor) later
+    qtbot.waitUntil(
+        lambda: gui._drop_target(stim_editor_centre()) == "input",
+        timeout=WAIT_TIMEOUT_MS,
+    )
     path = tmp_path / "wave.ibw"
     path.write_bytes(b"")
     mime = QtCore.QMimeData()
     mime.setUrls([QtCore.QUrl.fromLocalFile(str(path))])
-    centre = gui.stim_editor.mapTo(gui, gui.stim_editor.rect().center())
-    assert gui._drop_target(centre) == "input"
+    centre = stim_editor_centre()
 
     enter = QtGui.QDragEnterEvent(
         centre,

@@ -54,10 +54,6 @@ from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
-# no obvious signal to wait for after the model is updated to know when the GUI is ready,
-# so for now we just wait for a fixed time
-delay_after_update_model_call_in_ms = 50
-
 
 def _wait_for_brian2_simulation(qtbot: QtBot, gui: ProjectWorkspace) -> None:
     qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
@@ -1883,10 +1879,9 @@ def test_gui_simulate_and_playback(
 ) -> None:
     gui = ProjectWorkspace()
     gui.load_project(test_project)
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     assert gui.heatmap_widget.idx == 0
     assert "run" in gui.continue_simulation_action.text().lower()
     assert "continue" not in gui.continue_simulation_action.text().lower()
@@ -1895,7 +1890,6 @@ def test_gui_simulate_and_playback(
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getText", lambda *args: (f"{simulation_time_s}", True)
     )
-    qtbot.wait(delay_after_update_model_call_in_ms)
     simulation_time_ms = simulation_time_s * 1000
     gui.btn_continue_simulation_clicked()
     _wait_for_brian2_simulation(qtbot, gui)
@@ -1975,10 +1969,9 @@ def test_gui_simulate_and_cancel(
 ) -> None:
     gui = ProjectWorkspace()
     gui.load_project(test_project)
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1.0", True))
 
     gui.btn_continue_simulation_clicked()
@@ -2460,12 +2453,10 @@ def test_gui_save(
     tmp_path: Path, monkeypatch: MonkeyPatch, qtbot: QtBot, project_ornstein: Project
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     gui.update_project(project_ornstein)
-    qtbot.wait(delay_after_update_model_call_in_ms)
     filename_without_extension = tmp_path / "test"
     # the gui will add the .nseq extension automatically
     filename = filename_without_extension.with_suffix(".nseq")
@@ -2510,12 +2501,10 @@ def test_gui_save_quick_save_skips_dialogs_when_filepath_set(
     """Once a project has a file path, plain Save (Ctrl+S) writes straight
     back to it without showing the options or file-picker dialogs."""
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     gui.update_project(project_ornstein)
-    qtbot.wait(delay_after_update_model_call_in_ms)
 
     filename = tmp_path / "existing.nseq"
     gui.project.save(filename, SaveLoadOptions(True, True, True, True))
@@ -2540,12 +2529,10 @@ def test_gui_save_as_uses_all_options_without_options_dialog(
 ) -> None:
     """Save As prompts for a destination and includes every project component."""
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     gui.update_project(project_ornstein)
-    qtbot.wait(delay_after_update_model_call_in_ms)
 
     original_filename = tmp_path / "existing.nseq"
     gui.project.save(original_filename, SaveLoadOptions(True, True, True, True))
@@ -2583,10 +2570,9 @@ def test_gui_import(
     test_project: Project,
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     # create a nseq file to import from
     project = test_project
     model_path = tmp_path / "model.nseq"
@@ -2600,7 +2586,6 @@ def test_gui_import(
         ),
     )
     gui.update_project(project_ornstein)
-    qtbot.wait(delay_after_update_model_call_in_ms)
     # mock getOpenFileName to return the desired filename
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -3946,7 +3931,6 @@ def test_gui_checkpoints(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("test", True)
     )
     gui.update_project(project_ornstein)
-    qtbot.wait(delay_after_update_model_call_in_ms)
     gui.btn_store_checkpoint_clicked()
     assert "test" in gui.project.b2_model.checkpoints
     # simulate
@@ -4007,10 +3991,9 @@ def test_gui_synapse_ram_limit(
 ) -> None:
     gui = ProjectWorkspace()
     gui.load_project(test_project)
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     assert gui.heatmap_widget.idx == 0
     simulation_time = 0.1
     # mock getText to return the desired simulation time
@@ -4026,19 +4009,16 @@ def test_gui_synapse_ram_limit(
     # 1 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
     gui.choose_max_ram_synapse_plot_matrix()
-    qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 334
     # 2 MB RAM limit
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("2", True))
     gui.choose_max_ram_synapse_plot_matrix()
-    qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 500
     # 0 MB RAM limit == unlimited
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0", True))
     gui.choose_max_ram_synapse_plot_matrix()
-    qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     # invalid string displays error message
@@ -4047,7 +4027,6 @@ def test_gui_synapse_ram_limit(
         QtWidgets.QInputDialog, "getText", lambda *args: ("imnotanumber!", True)
     )
     gui.choose_max_ram_synapse_plot_matrix()
-    qtbot.wait(delay_after_update_model_call_in_ms)
     n_timesteps = gui.heatmap_widget.timestamps.size
     assert n_timesteps == 1000
     assert len(qmessagebox_calls) == 1
@@ -4059,10 +4038,9 @@ def test_gui_brian2_backend(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     assert b2.prefs.codegen.target == "numpy"
     # mock getItem to return the desired backend choice
     monkeypatch.setattr(
@@ -4088,15 +4066,13 @@ def test_gui_stim_padding(
     tmp_config_dir,
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     assert gui.heatmap_widget.idx == 0
     # set 10secs of stim padding
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("10", True))
     gui.choose_stim_padding_secs()
-    qtbot.wait(delay_after_update_model_call_in_ms)
     # simulate 0.1s
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.1", True))
     gui.btn_continue_simulation_clicked()
@@ -4112,10 +4088,9 @@ def test_gui_restore_settings_on_restart(
     monkeypatch: MonkeyPatch, qtbot: QtBot, tmp_config_dir
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     # change all settings
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getItem", lambda *args, **kwargs: ("cython", True)
@@ -4131,13 +4106,11 @@ def test_gui_restore_settings_on_restart(
 
     # close gui and reopen to check if settings were saved and reloaded correctly
     gui.close()
-    qtbot.wait(delay_after_update_model_call_in_ms)
 
     gui2 = ProjectWorkspace()
-    gui2.show()
     qtbot.addWidget(gui2)
-    qtbot.waitUntil(lambda: gui2.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui2, timeout=WAIT_TIMEOUT_MS):
+        gui2.show()
     assert b2.prefs.codegen.target == "cython"
     assert gui2.settings.max_ram_synapse_plot_matrix == 512
     assert gui2.settings.stim_padding_secs == 6
@@ -4151,10 +4124,9 @@ def test_gui_playback_speed(
 ) -> None:
     gui = ProjectWorkspace()
     gui.load_project(test_project)
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     assert gui.time_slider.relative_playback_speed == pytest.approx(0.25)
     # mock getItem to return the desired playback speed
     monkeypatch.setattr(
@@ -4195,10 +4167,9 @@ def test_gui_simulate_external_model(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ) -> None:
     gui = ProjectWorkspace()
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(lambda: gui.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     # load external simulation function
     monkeypatch.setattr(
         QtWidgets.QFileDialog,
@@ -4248,10 +4219,9 @@ def test_integration_modeleditor_delete_restore(
 ) -> None:
     gui = ProjectWorkspace()
     gui.load_project(test_project)
-    gui.show()
     qtbot.addWidget(gui)
-    qtbot.waitUntil(gui.isVisible, timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
 
     gui.btn_edit_clicked()
 
@@ -4291,7 +4261,6 @@ def test_integration_modeleditor_delete_restore(
         QtCore.Qt.MouseButton.LeftButton,
     )
     qtbot.waitUntil(lambda: not modeleditor.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.wait(delay_after_update_model_call_in_ms)
 
     # no error dialog was shown
     assert len(qmessagebox_calls) == 0

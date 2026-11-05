@@ -5,7 +5,6 @@ import time
 
 import pytest
 from pytestqt.qtbot import QtBot
-from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.data import Experiment
@@ -51,13 +50,11 @@ def gui(qtbot: QtBot):
 def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
     qtbot: QtBot, gui: ProjectWorkspace
 ) -> None:
-    def _simulate(stims_dict, simulation_time, params, progress):
-        for k in range(200):
-            progress(k / 200)
-            time.sleep(0.01)
-        return Experiment("should_not_finish", simulation_time, [], [])
-
-    _wire_fake_external_simulator(gui, _simulate)
+    # runs until cancelled, so it can't finish before the cancel arrives
+    block = threading.Event()
+    _wire_fake_external_simulator(
+        gui, _make_blocking_simulation(block, "should_not_finish")
+    )
     original_experiments = dict(gui.project.experiments)
 
     gui._do_external_simulation(1.0)
@@ -65,16 +62,19 @@ def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
     assert worker is not None
     cancelled: list[bool] = []
     worker.cancelled.connect(lambda: cancelled.append(True))
-    QtCore.QTimer.singleShot(150, gui.progress_dialog.canceled.emit)
+    gui.progress_dialog.canceled.emit()
 
-    qtbot.waitUntil(
-        lambda: (
-            bool(cancelled)
-            and gui._background_job.worker is None
-            and QtWidgets.QApplication.overrideCursor() is None
-        ),
-        timeout=WAIT_TIMEOUT_MS,
-    )
+    try:
+        qtbot.waitUntil(
+            lambda: (
+                bool(cancelled)
+                and gui._background_job.worker is None
+                and QtWidgets.QApplication.overrideCursor() is None
+            ),
+            timeout=WAIT_TIMEOUT_MS,
+        )
+    finally:
+        block.set()
     assert gui.project.experiments == original_experiments
     assert gui.continue_simulation_action.isEnabled()
     assert gui._do_external_simulation_action.isEnabled()
