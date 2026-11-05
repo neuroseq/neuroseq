@@ -18,6 +18,7 @@ dependencies = [
     "scipy",
     "qtpy",
     "pyqt6",
+    "pyqt6-qt6!=6.11.1",
     "pyqtgraph!=0.14.0",
     "h5py",
     "igor2",
