@@ -1,9 +1,11 @@
 import dataclasses
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 from matplotlib.colors import to_hex
+from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme
@@ -17,6 +19,7 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from tests.fake_stimulation_host import FakeBss2Host
 from tests.fake_stimulation_host import FakeStimulationHost
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _FakeProject:
@@ -381,6 +384,28 @@ def test_rheobase_plot_marks_converged_rheobase(qtbot, monkeypatch) -> None:
     assert dialog.rheobase_axes.get_title() == ""
     assert dialog.search_axes.get_title() == ""
     assert "Rheobase ~=" in dialog.lbl_status.text()
+
+
+def test_rheobase_plot_is_drawn_once_per_event_loop_pass(qtbot, monkeypatch) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_spikes", lambda trace: int(dialog._pending_amplitude >= 2.6)
+    )
+    draws: list[object] = []
+    dialog.rheobase_plot.canvas.mpl_connect("draw_event", draws.append)
+    # matplotlib also redraws when the plot is first shown and sized
+    with qtbot.waitExposed(dialog.plot_window, timeout=WAIT_TIMEOUT_MS):
+        dialog.plot_window.show()
+    qtbot.waitUntil(lambda: bool(draws), timeout=WAIT_TIMEOUT_MS)
+    draws.clear()
+
+    dialog.start()
+    _finish_search(dialog)
+
+    assert draws == []
+    qtbot.waitUntil(lambda: bool(draws), timeout=WAIT_TIMEOUT_MS)
+    assert len(draws) == 1
 
 
 def test_rheobase_sweeps_duration_range_and_marks_chronaxie(qtbot, monkeypatch) -> None:
@@ -969,7 +994,7 @@ def test_syscon2_automatic_probe_is_recorded_and_measured_as_dff(qtbot) -> None:
     assert host.owner is dialog
     run_name = host.run_names[0]
     assert run_name.startswith("rheobase_")
-    assert f"runs/{run_name}" in dialog.log.toPlainText()
+    assert str(Path("runs", run_name)) in dialog.log.toPlainText()
     for i in range(20):
         if not dialog._running:
             break
@@ -1457,3 +1482,17 @@ def test_syscon2_run_logs_the_laser_it_delivers_with(qtbot) -> None:
     _project, _editor, dialog, host = _syscon2_dialog(qtbot)
     dialog.start()
     assert "Delivering on the 940 nm laser at 1 mW" in dialog.log.toPlainText()
+
+
+def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
+    dialog = RheobaseDialog(_FakeEditor(_FakeProject()))  # type: ignore[arg-type]
+    destroyed: list[bool] = []
+    dialog.plot_window.destroyed.connect(lambda: destroyed.append(True))
+
+    dialog.deleteLater()
+    del dialog
+    for _ in range(2):  # the dialog, then its plot window
+        QtCore.QCoreApplication.sendPostedEvents(
+            None, QtCore.QEvent.Type.DeferredDelete
+        )
+    assert destroyed

@@ -134,6 +134,8 @@ def _transients(spike_frames: dict[int, list[int]], n_frames: int = 150) -> np.n
 
 
 def test_deconvolution_finds_the_spikes_of_each_cell() -> None:
+    pytest.importorskip("suite2p.extraction")
+
     from neuroseq.data import TraceData
     from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 
@@ -154,6 +156,8 @@ def test_deconvolution_finds_the_spikes_of_each_cell() -> None:
 
 
 def test_recorded_probe_is_counted_from_deconvolved_spikes(tmp_path) -> None:
+    pytest.importorskip("suite2p.extraction")
+
     from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
     from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
         measure_calcium_spike_count,

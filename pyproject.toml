@@ -30,12 +30,8 @@ dependencies = [
     "nvidia-ml-py",
     "cellpose[gui]",
     "suite2p>=1.0",
-    "torch==2.6.0; sys_platform == 'linux'",
-    "torch; sys_platform == 'win32'",
-    "torch; sys_platform == 'darwin'",
-    "torchvision==0.21.0; sys_platform == 'linux'",
-    "torchvision; sys_platform == 'win32'",
-    "torchvision; sys_platform == 'darwin'",
+    "torch",
+    "torchvision",
     "tifffile",
 ]
 dynamic = ["version"]
@@ -48,22 +44,15 @@ Issues = "https://github.com/neuroseq/neuroseq/issues"
 
 [tool.uv.sources]
 torch = [
-    { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
-    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 torchvision = [
-    { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
-    { index = "pytorch-cu124", marker = "sys_platform == 'linux'" },
+    { index = "pytorch-cu128", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
-[[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
 explicit = true
 
 [project.optional-dependencies]
@@ -105,6 +94,8 @@ packages = ["src/neuroseq"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+# run tests in parallel by default; use -n 0 to run them serially
+addopts = "-n auto"
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"

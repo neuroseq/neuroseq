@@ -14,6 +14,7 @@ from neuroseq.example_projects import default_project
 from neuroseq.project import Project
 from neuroseq.project_workspace import ProjectWorkspace
 from neuroseq.save_load_options import SaveLoadOptions
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _MockSaveLoadOptionsDialog:
@@ -40,7 +41,9 @@ def gui(qtbot: QtBot):
         widget.close()
     except RuntimeError:
         return
-    qtbot.waitUntil(lambda: widget._background_job.worker_thread is None, timeout=10000)
+    qtbot.waitUntil(
+        lambda: widget._background_job.worker_thread is None, timeout=WAIT_TIMEOUT_MS
+    )
 
 
 def _patch_save_dialog(monkeypatch: MonkeyPatch, filename: str) -> None:
@@ -68,7 +71,9 @@ def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
-        lambda report: release.wait(5), "Original operation", lambda _: None
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000),
+        "Original operation",
+        lambda _: None,
     )
     original_worker = gui._background_job.worker
     original_label = gui.progress_dialog.labelText()
@@ -96,7 +101,7 @@ def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
         assert not gui.menu_file.isEnabled()
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not gui._background_job.busy)
+        qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=WAIT_TIMEOUT_MS)
 
 
 def test_close_keeps_window_open_when_worker_cannot_stop(
@@ -104,7 +109,9 @@ def test_close_keeps_window_open_when_worker_cannot_stop(
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
-        lambda report: release.wait(5), "Original operation", lambda _: None
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000),
+        "Original operation",
+        lambda _: None,
     )
     gui._close_confirmed = True
     try:
@@ -116,7 +123,7 @@ def test_close_keeps_window_open_when_worker_cannot_stop(
         assert not gui._close_confirmed
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not gui._background_job.busy)
+        qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=WAIT_TIMEOUT_MS)
 
 
 def test_save_runs_on_worker_thread(
@@ -137,7 +144,7 @@ def test_save_runs_on_worker_thread(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
 
     assert out.exists()
     assert save_thread_ids
@@ -153,7 +160,7 @@ def test_file_menu_disabled_during_save(
     original_save = Project.save
 
     def _blocking_save(self, filepath, options):
-        block.wait(timeout=5.0)
+        block.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         return original_save(self, filepath, options)
 
     monkeypatch.setattr(Project, "save", _blocking_save)
@@ -161,14 +168,16 @@ def test_file_menu_disabled_during_save(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._background_job.worker is not None, timeout=2000)
+    qtbot.waitUntil(
+        lambda: gui._background_job.worker is not None, timeout=WAIT_TIMEOUT_MS
+    )
 
     assert not gui.menu_file.isEnabled()
     assert not gui.toolbar_file.isEnabled()
     assert not gui.continue_simulation_action.isEnabled()
 
     block.set()
-    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
 
     assert gui.menu_file.isEnabled()
     assert gui.toolbar_file.isEnabled()
@@ -192,7 +201,7 @@ def test_save_failure_surfaces_error_and_keeps_ui_unfrozen(
     _patch_save_dialog(monkeypatch, str(out))
 
     gui.btn_save_clicked()
-    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
 
     assert not out.exists()
     # UI restored to enabled state after the failure.
@@ -233,7 +242,7 @@ def test_load_runs_on_worker_thread(
 
     _patch_open_dialog(monkeypatch, str(src_path))
     gui.btn_open_clicked()
-    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=15000)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
 
     # First Project() call is from the file-path-driven load_project →
     # _load_task on the worker thread. (Any subsequent Project() calls

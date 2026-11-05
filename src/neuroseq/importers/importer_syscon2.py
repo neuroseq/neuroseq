@@ -299,11 +299,19 @@ def original_stim_sidecar_path(seq_path: str | Path) -> Path:
     return seq_path.with_name(seq_path.stem + ORIGINAL_STIM_SUFFIX)
 
 
+def _seq_digest(seq_bytes: bytes) -> str:
+    """Hash of a .seq file's content, independent of its line endings.
+
+    The file is written as text, so on Windows it has \\r\\n line endings.
+    """
+    return hashlib.sha256(seq_bytes.replace(b"\r\n", b"\n")).hexdigest()
+
+
 def write_original_stim_sidecar(
     path: str | Path, values: np.ndarray, dt: float, seq_text: str
 ) -> None:
     """Save the exported stim array so a re-import can restore its exact timings."""
-    digest = hashlib.sha256(seq_text.encode("utf-8")).hexdigest()
+    digest = _seq_digest(seq_text.encode("utf-8"))
     with open(path, "wb") as handle:
         np.savez_compressed(
             handle,
@@ -321,7 +329,7 @@ def _load_original_stim_sidecar(
         return None
     try:
         with np.load(sidecar, allow_pickle=False) as data:
-            if str(data["seq_sha256"]) != hashlib.sha256(seq_bytes).hexdigest():
+            if str(data["seq_sha256"]) != _seq_digest(seq_bytes):
                 logger.info("Ignoring %s: it does not match %s", sidecar, seq_path)
                 return None
             values = np.asarray(data["values"], dtype=np.float32)

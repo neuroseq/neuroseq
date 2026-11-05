@@ -18,6 +18,7 @@ from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.workspace_acquisition_controller import WorkspaceAcquisitionController
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -182,7 +183,7 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     assert manifest["block"]["label"] == "rheobase"
     assert manifest["block"]["seq_path"] == "D:/runs/rheobase_001.seq"
     assert manifest["block"]["syscon_sequence"] == "neuroseq\\rheobase_001.seq"
-    with qtbot.waitSignal(controller.block_armed) as armed:
+    with qtbot.waitSignal(controller.block_armed, timeout=WAIT_TIMEOUT_MS) as armed:
         controller.scanimage_status(
             {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
         )
@@ -191,7 +192,9 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
         controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
 
     tif = str(s.folder / f"{arguments['stem']}_00001.tif")
-    with qtbot.waitSignal(controller.block_recorded, timeout=5000) as recorded:
+    with qtbot.waitSignal(
+        controller.block_recorded, timeout=WAIT_TIMEOUT_MS
+    ) as recorded:
         controller.scanimage_recording_ready(
             {
                 "run_id": run_id,
@@ -228,7 +231,9 @@ def test_failed_block_recording_is_reported(setup, qtbot, state):
     s = setup
     _ready_for_blocks(s)
     run_id = s.controller.arm_block(_block())
-    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
+    with qtbot.waitSignal(
+        s.controller.block_recording_failed, timeout=WAIT_TIMEOUT_MS
+    ) as failed:
         s.controller.scanimage_status(
             {"run": {"id": run_id, "state": state, "error": "no trigger"}}
         )
@@ -273,7 +278,9 @@ def test_armed_block_that_never_finishes_fails_at_its_deadline(
     monkeypatch.setattr(controller_module, "BLOCK_DEADLINE_MARGIN_S", -2.0)
     run_id = s.controller.arm_block(_block(0.1))
     s.connection.run_id = run_id
-    with qtbot.waitSignal(s.controller.block_recording_failed, timeout=3000) as failed:
+    with qtbot.waitSignal(
+        s.controller.block_recording_failed, timeout=WAIT_TIMEOUT_MS
+    ) as failed:
         s.controller.scanimage_status(
             {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
         )
@@ -306,7 +313,9 @@ def test_extraction_failure_is_reported(setup, qtbot, mocker):
         side_effect=ValueError("masks do not match"),
     )
     run_id = s.controller.arm_block(_block())
-    with qtbot.waitSignal(s.controller.block_recording_failed, timeout=5000) as failed:
+    with qtbot.waitSignal(
+        s.controller.block_recording_failed, timeout=WAIT_TIMEOUT_MS
+    ) as failed:
         s.controller.scanimage_recording_ready(
             {
                 "run_id": run_id,
@@ -359,7 +368,7 @@ def test_block_completes_when_the_run_ends_right_after_recording_ready(
     s.controller.block_recording_failed.connect(lambda *args: failed.append(args))
     run_id = s.controller.arm_block(_block())
     arguments = s.command.call_args.args[1]
-    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=WAIT_TIMEOUT_MS):
         s.connection.recording_ready.emit(_ready_result(run_id, arguments, s.folder))
         s.connection.run_finished.emit(run_id)
     assert not failed
@@ -383,7 +392,7 @@ def test_aborted_block_with_a_complete_recording_is_extracted(setup, qtbot, mock
     arguments = s.command.call_args.args[1]
     s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
     s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
-    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=WAIT_TIMEOUT_MS):
         s.connection.recording_ready.emit(_ready_result(run_id, arguments, s.folder))
         s.connection.run_finished.emit(run_id)
     assert not failed
@@ -397,7 +406,9 @@ def test_aborted_block_with_a_partial_recording_fails(setup, qtbot):
     s.controller.scanimage_status({"run": {"id": run_id, "state": "recording"}})
     s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
     result = _ready_result(run_id, arguments, s.folder) | {"status": "aborted"}
-    with qtbot.waitSignal(s.controller.block_recording_failed) as failed:
+    with qtbot.waitSignal(
+        s.controller.block_recording_failed, timeout=WAIT_TIMEOUT_MS
+    ) as failed:
         s.connection.recording_ready.emit(result)
     assert "ScanImage aborted the recording" in failed.args[1]
 
@@ -427,7 +438,9 @@ def test_blocks_of_a_run_make_one_continuous_trace_and_spike_dataset(
         block = dataclasses.replace(_block(), group="rheobase_run", offset_s=offset)
         run_id = s.controller.arm_block(block)
         arguments = s.command.call_args.args[1]
-        with qtbot.waitSignal(s.controller.block_recorded, timeout=5000) as recorded:
+        with qtbot.waitSignal(
+            s.controller.block_recorded, timeout=WAIT_TIMEOUT_MS
+        ) as recorded:
             s.controller.scanimage_recording_ready(
                 _ready_result(run_id, arguments, s.folder)
             )
@@ -462,7 +475,7 @@ def test_block_measures_the_functional_channel_of_the_scanimage_tab(
     arguments = s.command.call_args.args[1]
     assert arguments["manifest"]["block"]["functional_channel"] == 2
     s.controller.controls.channel_spin.setValue(1)  # changed after arming
-    with qtbot.waitSignal(s.controller.block_recorded, timeout=5000):
+    with qtbot.waitSignal(s.controller.block_recorded, timeout=WAIT_TIMEOUT_MS):
         s.controller.scanimage_recording_ready(
             _ready_result(run_id, arguments, s.folder)
         )
@@ -550,7 +563,7 @@ def test_next_block_does_not_wait_for_an_earlier_extraction(setup, qtbot, mocker
     trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
 
     def slow_extract(*_args, **_kwargs):
-        release.wait(10)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return trace
 
     mocker.patch.object(controller_module, "extract_recording_dff", slow_extract)
@@ -575,7 +588,9 @@ def test_next_block_does_not_wait_for_an_earlier_extraction(setup, qtbot, mocker
     )
     assert s.controller.acquisition_in_progress
     release.set()
-    qtbot.waitUntil(lambda: not s.controller.acquisition_in_progress, timeout=10000)
+    qtbot.waitUntil(
+        lambda: not s.controller.acquisition_in_progress, timeout=WAIT_TIMEOUT_MS
+    )
     assert recorded == [second]  # the abandoned first block reports nothing
 
 
@@ -597,7 +612,9 @@ def test_traces_go_to_the_project_that_was_recorded_into(setup, qtbot, mocker):
     other = Project()
     other.add_experiment(controller_module.Experiment(arguments["name"], 3.0, [], []))
     s.controller._project = lambda: other
-    qtbot.waitUntil(lambda: not s.controller.acquisition_in_progress, timeout=10000)
+    qtbot.waitUntil(
+        lambda: not s.controller.acquisition_in_progress, timeout=WAIT_TIMEOUT_MS
+    )
     assert trace in recorded_into.experiments[arguments["name"]].data
     assert other.experiments[arguments["name"]].data == []
 
@@ -659,7 +676,9 @@ def test_failing_to_add_the_traces_fails_the_block(setup, qtbot, mocker):
     )
     run_id = s.controller.arm_block(_block())
     arguments = s.command.call_args.args[1]
-    with qtbot.waitSignal(s.controller.block_recording_failed, timeout=5000) as failed:
+    with qtbot.waitSignal(
+        s.controller.block_recording_failed, timeout=WAIT_TIMEOUT_MS
+    ) as failed:
         s.controller.scanimage_recording_ready(
             _ready_result(run_id, arguments, s.folder)
         )
@@ -673,7 +692,7 @@ def test_grab_fov_records_averages_and_hands_the_image_to_segmentation(setup, qt
     controls = s.controller.controls
     controls.fov_frames_spin.setValue(30)
     controls.channel_spin.setValue(2)
-    with qtbot.waitSignal(controls.fov_requested) as requested:
+    with qtbot.waitSignal(controls.fov_requested, timeout=WAIT_TIMEOUT_MS) as requested:
         controls.fov_button.setEnabled(True)
         controls.fov_button.click()
     arguments = s.command.call_args.args[1]
@@ -691,7 +710,7 @@ def test_grab_fov_records_averages_and_hands_the_image_to_segmentation(setup, qt
     for _ in range(30):
         pages += [np.full((4, 5), 9, np.int16), np.full((4, 5), 50, np.int16)]
     tifffile.imwrite(tiff, np.stack(pages))
-    with qtbot.waitSignal(s.controller.fov_ready) as ready:
+    with qtbot.waitSignal(s.controller.fov_ready, timeout=WAIT_TIMEOUT_MS) as ready:
         s.controller.scanimage_recording_ready(
             {
                 "run_id": arguments["run_id"],
@@ -751,7 +770,7 @@ def test_fov_uses_the_channel_chosen_when_it_was_grabbed(setup, qtbot):
     tifffile.imwrite(
         tiff, np.stack([np.full((3, 4), v, np.int16) for v in (4, 9, 4, 9)])
     )
-    with qtbot.waitSignal(s.controller.fov_ready, timeout=5000) as ready:
+    with qtbot.waitSignal(s.controller.fov_ready, timeout=WAIT_TIMEOUT_MS) as ready:
         s.controller.scanimage_recording_ready(
             {
                 "run_id": request["run_id"],

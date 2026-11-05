@@ -22,6 +22,7 @@ from neuroseq.stimulation.stim_editor import StimEditor
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _make_editor(
@@ -58,7 +59,7 @@ def _make_editor(
     static_input = StaticInputController(editor, editor)
     qtbot.addWidget(editor)
     editor.show()
-    qtbot.waitUntil(lambda: editor.isVisible())
+    qtbot.waitUntil(lambda: editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     editor.set_project(project, stim_to_select="a")
     return editor, project, static_input
 

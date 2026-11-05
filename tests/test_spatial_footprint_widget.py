@@ -37,6 +37,7 @@ from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RE
 from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _right_click_event() -> SimpleNamespace:
@@ -120,7 +121,6 @@ def test_set_data_populates_overlay_and_clears_on_none(qtbot: QtBot) -> None:
     assert not widget.empty_state_widget.isHidden()
     assert widget.overlay_widget.isHidden()
     assert widget.checkbox_container.isHidden()
-    widget.close()
 
 
 def _aoi_config(show_shapes: bool = True) -> AreasOfInterestConfig:
@@ -169,7 +169,6 @@ def test_set_data_hides_aoi_shapes_when_show_shapes_is_false(qtbot: QtBot) -> No
     widget.set_data(_cellpose_result(aoi_config=_aoi_config(show_shapes=False)))
 
     assert not widget.overlay_widget.overlay_view._aoi_visible
-    widget.close()
 
 
 def test_set_data_with_no_aoi_config_shows_no_aoi_shapes(qtbot: QtBot) -> None:
@@ -179,7 +178,6 @@ def test_set_data_with_no_aoi_config_shows_no_aoi_shapes(qtbot: QtBot) -> None:
     widget.set_data(_cellpose_result())
 
     assert widget.overlay_widget.overlay_view._aoi_config is None
-    widget.close()
 
 
 def test_show_labels_checkbox_toggles_stimulus_id_labels(qtbot: QtBot) -> None:
@@ -193,7 +191,6 @@ def test_show_labels_checkbox_toggles_stimulus_id_labels(qtbot: QtBot) -> None:
 
     assert not widget.overlay_widget.show_stimulus_ids
     assert not widget.overlay_widget.show_cellpose_ids  # never toggled on here
-    widget.close()
 
 
 def test_show_segmentation_checkbox_toggles_the_segmentation_layer(
@@ -210,7 +207,6 @@ def test_show_segmentation_checkbox_toggles_the_segmentation_layer(
 
     assert widget.overlay_widget.show_segmentation is False
     assert not segmentation_graphic.visible
-    widget.close()
 
 
 def test_show_segmentation_checkbox_reveals_the_stored_background_image(
@@ -249,7 +245,6 @@ def test_show_segmentation_checkbox_reveals_the_stored_background_image(
     after_image = np.asarray(image_graphic.data.value)
     np.testing.assert_array_equal(after_image, background_image)
     assert not np.array_equal(after_image, before_image)
-    widget.close()
 
 
 def test_show_segmentation_checkbox_reloads_background_from_disk_when_missing(
@@ -296,7 +291,6 @@ def test_show_segmentation_checkbox_reloads_background_from_disk_when_missing(
     after_image = np.asarray(image_graphic.data.value)
     np.testing.assert_array_equal(after_image, result.background_image)
     assert not np.array_equal(after_image, overlay_image)
-    widget.close()
 
 
 def test_set_data_leaves_background_image_none_when_file_unreachable(
@@ -311,7 +305,6 @@ def test_set_data_leaves_background_image_none_when_file_unreachable(
     widget.set_data(result)
 
     assert result.background_image is None
-    widget.close()
 
 
 def test_show_shapes_checkbox_toggles_aoi_overlay_live(qtbot: QtBot) -> None:
@@ -325,7 +318,6 @@ def test_show_shapes_checkbox_toggles_aoi_overlay_live(qtbot: QtBot) -> None:
     widget.show_shapes_checkbox.setChecked(False)
 
     assert not widget.overlay_widget.overlay_view._aoi_visible
-    widget.close()
 
 
 def test_show_shapes_checkbox_disabled_without_an_aoi_config(qtbot: QtBot) -> None:
@@ -335,17 +327,14 @@ def test_show_shapes_checkbox_disabled_without_an_aoi_config(qtbot: QtBot) -> No
     widget.set_data(_cellpose_result())
 
     assert not widget.show_shapes_checkbox.isEnabled()
-    widget.close()
 
 
 def test_import_button_emits_import_requested(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    with qtbot.waitSignal(widget.import_requested):
+    with qtbot.waitSignal(widget.import_requested, timeout=WAIT_TIMEOUT_MS):
         widget.import_button.click()
-
-    widget.close()
 
 
 def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> None:
@@ -364,7 +353,6 @@ def test_cell_overlay_resize_keeps_embedded_view_layout_driven(qtbot: QtBot) -> 
 
     assert widget.overlay_view.maximumWidth() > widget.overlay_view.minimumWidth()
     assert widget.overlay_view.maximumHeight() > widget.overlay_view.minimumHeight()
-    widget.close()
 
 
 def test_untitled_overlay_widget_has_no_group_box_border(qtbot: QtBot) -> None:
@@ -383,8 +371,6 @@ def test_untitled_overlay_widget_has_no_group_box_border(qtbot: QtBot) -> None:
     qtbot.addWidget(titled)
     assert not titled.isFlat()
     assert titled.styleSheet() == ""
-    titled.close()
-    untitled.close()
 
 
 def test_untitled_overlay_widget_has_no_bottom_margin(qtbot: QtBot) -> None:
@@ -405,8 +391,6 @@ def test_untitled_overlay_widget_has_no_bottom_margin(qtbot: QtBot) -> None:
     titled_layout = titled.layout()
     assert titled_layout is not None
     assert titled_layout.contentsMargins() == QtCore.QMargins(0, 0, 0, 10)
-    titled.close()
-    untitled.close()
 
 
 def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
@@ -431,7 +415,6 @@ def test_set_overlay_image_swaps_pixels_without_touching_segmentation_or_labels(
     np.testing.assert_array_equal(np.asarray(image_graphic.data.value), new_image)
     # the segmentation color layer is untouched - same graphic, not rebuilt
     assert widget.overlay_view._segmentation_graphic is segmentation_graphic
-    widget.close()
 
 
 def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
@@ -458,7 +441,6 @@ def test_set_overlay_image_is_a_noop_with_a_mismatched_shape_or_no_graphic_yet(
     widget.set_overlay_image(np.zeros((5, 5, 3), dtype=np.uint8))  # wrong shape
 
     np.testing.assert_array_equal(np.asarray(image_graphic.data.value), before)
-    widget.close()
 
 
 def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
@@ -484,7 +466,6 @@ def test_checkbox_row_sits_at_the_bottom_of_the_cell_tab(qtbot: QtBot) -> None:
         == widget.calcium_video_widget.video_actions_widget.height()
         == 44
     )
-    widget.close()
 
 
 def test_checkbox_row_margins_match_the_video_tabs_action_bar(qtbot: QtBot) -> None:
@@ -510,7 +491,6 @@ def test_checkbox_row_margins_match_the_video_tabs_action_bar(qtbot: QtBot) -> N
         widget.checkbox_container.height() - margins.top() - margins.bottom()
     )
     assert available_height >= tallest_checkbox_height
-    widget.close()
 
 
 def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> None:
@@ -524,8 +504,8 @@ def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> No
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result())
     widget.resize(400, 400)
-    widget.show()
-    qtbot.waitExposed(widget)
+    with qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS):
+        widget.show()
 
     assert widget.tabs.currentIndex() == 0
     size_hint_on_cell_tab = widget.sizeHint()
@@ -533,12 +513,11 @@ def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> No
     geometry_on_cell_tab = widget.tabs.geometry()
 
     widget.tabs.setCurrentIndex(1)
-    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1)
+    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1, timeout=WAIT_TIMEOUT_MS)
 
     assert widget.sizeHint() == size_hint_on_cell_tab
     assert widget.minimumSizeHint() == min_size_hint_on_cell_tab
     assert widget.tabs.geometry() == geometry_on_cell_tab
-    widget.close()
 
 
 def test_clicking_a_cell_selects_it_and_greys_the_rest(qtbot: QtBot) -> None:
@@ -554,7 +533,6 @@ def test_clicking_a_cell_selects_it_and_greys_the_rest(qtbot: QtBot) -> None:
     assert widget._greyed_cellpose_ids == {0, 1}
     # cellpose 0 -> stim 2, cellpose 1 -> stim 1 (mapping inverted)
     assert sorted(emitted) == [[1, True], [2, True]]
-    widget.close()
 
 
 def test_clicking_same_cell_twice_deselects_and_shows_everyone_again(
@@ -573,7 +551,6 @@ def test_clicking_same_cell_twice_deselects_and_shows_everyone_again(
     assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
     assert sorted(emitted) == [[0, False], [2, False]]
-    widget.close()
 
 
 def test_selecting_a_second_cell_only_shows_both_selected_cells(
@@ -592,7 +569,6 @@ def test_selecting_a_second_cell_only_shows_both_selected_cells(
     assert widget._selected_cellpose_ids == {0, 1}
     assert widget._greyed_cellpose_ids == {2}
     assert emitted == [[1, False]]
-    widget.close()
 
 
 def test_clear_selection_shows_all_cells_again(qtbot: QtBot) -> None:
@@ -611,7 +587,6 @@ def test_clear_selection_shows_all_cells_again(qtbot: QtBot) -> None:
     assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
     assert emitted == [[2, False]]
-    widget.close()
 
 
 def test_clear_selection_button_is_a_noop_with_nothing_selected(qtbot: QtBot) -> None:
@@ -624,7 +599,6 @@ def test_clear_selection_button_is_a_noop_with_nothing_selected(qtbot: QtBot) ->
     widget.clear_selection()
 
     assert emitted == []
-    widget.close()
 
 
 def test_identity_mapping_when_none_present(qtbot: QtBot) -> None:
@@ -637,7 +611,6 @@ def test_identity_mapping_when_none_present(qtbot: QtBot) -> None:
     widget.overlay_widget.neuron_clicked.emit(2)
 
     assert sorted(emitted) == [[0, True], [1, True]]
-    widget.close()
 
 
 def test_selecting_a_cell_dims_the_other_unselected_cells(qtbot: QtBot) -> None:
@@ -674,7 +647,6 @@ def test_selecting_a_cell_dims_the_other_unselected_cells(qtbot: QtBot) -> None:
         * UNSELECTED_CELL_BRIGHTNESS,
         atol=1.0,
     )
-    widget.close()
 
 
 def test_clearing_the_selection_restores_full_brightness(qtbot: QtBot) -> None:
@@ -691,7 +663,6 @@ def test_clearing_the_selection_restores_full_brightness(qtbot: QtBot) -> None:
     widget.clear_selection()
 
     np.testing.assert_array_equal(np.asarray(image_graphic.data.value), original_image)
-    widget.close()
 
 
 def test_selecting_a_previously_hidden_cell_shows_it_again(qtbot: QtBot) -> None:
@@ -708,7 +679,6 @@ def test_selecting_a_previously_hidden_cell_shows_it_again(qtbot: QtBot) -> None
     assert widget._selected_cellpose_ids == {0, 1}
     assert widget._greyed_cellpose_ids == {2}
     assert emitted == [[1, False]]
-    widget.close()
 
 
 def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
@@ -838,7 +808,6 @@ def test_selecting_a_cell_does_not_hide_it_when_unmapped_cells_collide_with_its_
     assert widget._greyed_cellpose_ids == {0, 1, 2, 3, 4, 5, 6}
     # neuron 2 (the selected cell) must never be told it's greyed
     assert [2, True] not in emitted
-    widget.close()
 
 
 def test_selected_cell_renders_red_black_ring(qtbot: QtBot) -> None:
@@ -875,7 +844,6 @@ def test_selected_cell_renders_red_black_ring(qtbot: QtBot) -> None:
     assert np.any(
         np.all(np.isclose(cell_colors, np.array([0.0, 0.0, 1.0]), atol=1 / 255), axis=1)
     )
-    widget.close()
 
 
 def test_hovering_a_cell_boosts_its_brightness(qtbot: QtBot) -> None:
@@ -917,7 +885,6 @@ def test_hovering_a_cell_boosts_its_brightness(qtbot: QtBot) -> None:
     np.testing.assert_array_equal(
         after_image[segmentation == 0], before_image[segmentation == 0]
     )
-    widget.close()
 
 
 def test_hovering_a_dimmed_unselected_cell_restores_full_brightness(
@@ -953,7 +920,6 @@ def test_hovering_a_dimmed_unselected_cell_restores_full_brightness(
     assert not np.array_equal(
         hovered_image[segmentation == 1], dimmed_image[segmentation == 1]
     )
-    widget.close()
 
 
 def test_active_stim_id_boosts_the_cell_brightness(qtbot: QtBot) -> None:
@@ -995,8 +961,6 @@ def test_active_stim_id_boosts_the_cell_brightness(qtbot: QtBot) -> None:
     np.testing.assert_array_equal(
         after_image[segmentation == 0], before_image[segmentation == 0]
     )
-    widget.close()
-    widget.close()
 
 
 def test_show_targets_checkbox_draws_and_hides_crosses(qtbot: QtBot) -> None:
@@ -1034,7 +998,6 @@ def test_show_targets_checkbox_draws_and_hides_crosses(qtbot: QtBot) -> None:
     widget.show_targets_checkbox.setChecked(True)
 
     assert overlay_view._target_cross_graphic is not None
-    widget.close()
 
 
 def test_active_stim_ids_cleared_when_data_changes(qtbot: QtBot) -> None:
@@ -1047,7 +1010,6 @@ def test_active_stim_ids_cleared_when_data_changes(qtbot: QtBot) -> None:
     widget.set_data(_cellpose_result(mapping={0: 0, 1: 1, 2: 2}))
 
     assert widget._state.active_stim_ids == frozenset()
-    widget.close()
 
 
 def test_hover_update_does_not_trigger_a_full_overlay_rebuild(
@@ -1073,7 +1035,6 @@ def test_hover_update_does_not_trigger_a_full_overlay_rebuild(
     widget._state.set_hovered_stim_id(1)
 
     assert full_rebuild_calls == 0
-    widget.close()
 
 
 def test_lasso_selection_adds_cells_and_hides_the_rest(qtbot: QtBot) -> None:
@@ -1088,7 +1049,6 @@ def test_lasso_selection_adds_cells_and_hides_the_rest(qtbot: QtBot) -> None:
     assert widget._selected_cellpose_ids == {1, 2}
     assert widget._greyed_cellpose_ids == {0}
     assert emitted == [[0, True]]
-    widget.close()
 
 
 def test_lasso_selection_grows_when_enclosing_only_new_cells(qtbot: QtBot) -> None:
@@ -1105,7 +1065,6 @@ def test_lasso_selection_grows_when_enclosing_only_new_cells(qtbot: QtBot) -> No
     assert widget._selected_cellpose_ids == {1, 2}
     assert widget._greyed_cellpose_ids == {0}
     assert emitted == [[2, False]]
-    widget.close()
 
 
 def test_lasso_selection_toggles_cells_already_selected(qtbot: QtBot) -> None:
@@ -1122,8 +1081,6 @@ def test_lasso_selection_toggles_cells_already_selected(qtbot: QtBot) -> None:
 
     assert widget._selected_cellpose_ids == {2}
     assert widget._greyed_cellpose_ids == {0, 1}
-    widget.close()
-    widget.close()
 
 
 def test_overlay_view_lasso_selects_only_enclosed_cells(
@@ -1149,7 +1106,9 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
         lambda ev: next(positions),
     )
 
-    with qtbot.waitSignal(overlay_view.neuron_lasso_selected) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_lasso_selected, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view.pointer_move(None)  # crosses tolerance -> becomes a lasso
         overlay_view.pointer_move(None)
@@ -1159,7 +1118,6 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
     assert blocker.args == [[1]]
     assert overlay_view._lasso_points == []
     assert overlay_view._lasso_line is None
-    overlay_view.close()
 
 
 def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
@@ -1195,7 +1153,6 @@ def test_overlay_view_lasso_ignores_loop_enclosing_nothing(
     qtbot.wait(10)
 
     assert emitted == []
-    overlay_view.close()
 
 
 def test_overlay_view_plain_click_does_not_start_a_lasso(
@@ -1217,14 +1174,14 @@ def test_overlay_view_plain_click_does_not_start_a_lasso(
     lasso_emitted: list[list[int]] = []
     overlay_view.neuron_lasso_selected.connect(lasso_emitted.append)
 
-    with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_clicked, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
-        qtbot.wait(10)
 
     assert blocker.args == [1]
     assert lasso_emitted == []
-    overlay_view.close()
 
 
 def test_overlay_view_renders_striped_cell_colors(qtbot: QtBot) -> None:
@@ -1242,7 +1199,6 @@ def test_overlay_view_renders_striped_cell_colors(qtbot: QtBot) -> None:
     assert np.any(np.all(np.isclose(cell_colors[:, :3], STRIPED_CELL_GREY), axis=1))
     assert np.any(np.all(np.isclose(cell_colors[:, :3], STRIPED_CELL_WHITE), axis=1))
     assert np.allclose(cell_colors[:, 3], STRIPED_CELL_ALPHA)
-    overlay_view.close()
 
 
 def test_overlay_view_emits_neuron_clicked_on_plain_click(
@@ -1262,12 +1218,13 @@ def test_overlay_view_emits_neuron_clicked_on_plain_click(
         lambda ev: np.array([2.0, 0.0, 0.0]),
     )
 
-    with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_clicked, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
 
     assert blocker.args == [1]
-    overlay_view.close()
 
 
 def test_overlay_view_ignores_drag_past_tolerance_with_no_move_event(
@@ -1301,7 +1258,6 @@ def test_overlay_view_ignores_drag_past_tolerance_with_no_move_event(
     qtbot.wait(10)
 
     assert emitted == []
-    overlay_view.close()
 
 
 def test_overlay_view_ignores_click_when_selection_disabled(
@@ -1324,7 +1280,6 @@ def test_overlay_view_ignores_click_when_selection_disabled(
     qtbot.wait(10)
 
     assert emitted == []
-    overlay_view.close()
 
 
 def test_overlay_view_left_click_selects_right_click_does_not(
@@ -1352,15 +1307,12 @@ def test_overlay_view_left_click_selects_right_click_does_not(
 
     overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
     assert emitted == []  # a plain right click does not select
     assert right_clicked == [1]  # but reports the cell (issue #603)
 
     overlay_view._cell_selection_pointer_down(SimpleNamespace(button=1))  # left
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
     assert emitted == [1]
-    overlay_view.close()
 
 
 def test_overlay_view_shift_left_click_without_a_drag_still_just_selects(
@@ -1389,10 +1341,8 @@ def test_overlay_view_shift_left_click_without_a_drag_still_just_selects(
         SimpleNamespace(button=1, modifiers=("Shift",))
     )
     overlay_view._cell_selection_pointer_up(None)
-    qtbot.wait(10)
 
     assert emitted == [1]
-    overlay_view.close()
 
 
 def test_overlay_view_left_drag_past_tolerance_abandons_the_gesture(
@@ -1428,7 +1378,6 @@ def test_overlay_view_left_drag_past_tolerance_abandons_the_gesture(
     assert overlay_view._lasso_points == []
     assert overlay_view.subplot.controller.enabled  # never touched
     assert lasso_emitted == []
-    overlay_view.close()
 
 
 def test_overlay_view_shift_left_drag_lassos(
@@ -1462,7 +1411,6 @@ def test_overlay_view_shift_left_drag_lassos(
 
     assert overlay_view._lasso_points != []
     assert not overlay_view.subplot.controller.enabled  # disabled for the lasso drag
-    overlay_view.close()
 
 
 def test_spatial_footprint_widget_click_and_lasso_use_different_buttons(
@@ -1473,7 +1421,6 @@ def test_spatial_footprint_widget_click_and_lasso_use_different_buttons(
 
     assert widget.overlay_widget.overlay_view.cell_click_button == 1
     assert widget.overlay_widget.overlay_view.cell_lasso_button == 2
-    widget.close()
 
 
 def test_overlay_view_context_menu_event_does_not_bubble_to_parent(
@@ -1540,7 +1487,6 @@ def test_overlay_view_background_double_click_emits_background_clicked(
     assert background_clicks == [None]
 
     assert clicked == []
-    overlay_view.close()
 
 
 def test_overlay_view_background_single_click_does_not_clear_selection(
@@ -1563,7 +1509,6 @@ def test_overlay_view_background_single_click_does_not_clear_selection(
     overlay_view._cell_selection_pointer_up(_up_event(0.0))
 
     assert background_clicks == []
-    overlay_view.close()
 
 
 def test_overlay_view_background_click_outside_double_click_interval_resets(
@@ -1593,7 +1538,6 @@ def test_overlay_view_background_click_outside_double_click_interval_resets(
     overlay_view._cell_selection_pointer_down(_right_click_event())
     overlay_view._cell_selection_pointer_up(_up_event(interval_s * 2 + interval_s / 2))
     assert background_clicks == [None]
-    overlay_view.close()
 
 
 def test_background_click_clears_the_whole_selection(qtbot: QtBot) -> None:
@@ -1610,7 +1554,6 @@ def test_background_click_clears_the_whole_selection(qtbot: QtBot) -> None:
     assert widget._selected_cellpose_ids == set()
     assert widget._greyed_cellpose_ids == set()
     assert sorted(emitted) == [[0, False], [2, False]]
-    widget.close()
 
 
 def test_overlay_view_ignores_aoi_drag_when_not_editable(
@@ -1639,7 +1582,6 @@ def test_overlay_view_ignores_aoi_drag_when_not_editable(
     overlay_view._aoi_pointer_down(SimpleNamespace(stop_propagation=lambda: None))
 
     assert overlay_view._drag_state is not None
-    overlay_view.close()
 
 
 def test_overlay_view_body_drag_requires_shift(
@@ -1674,7 +1616,6 @@ def test_overlay_view_body_drag_requires_shift(
     )
     assert overlay_view._drag_state is not None
     assert overlay_view._drag_state.part == "body"
-    overlay_view.close()
 
 
 def test_aoi_undo_redo_noop_with_empty_history(qtbot: QtBot) -> None:
@@ -1685,7 +1626,6 @@ def test_aoi_undo_redo_noop_with_empty_history(qtbot: QtBot) -> None:
     assert not overlay_view.can_redo_aoi_edit()
     assert not overlay_view.undo_aoi_edit()
     assert not overlay_view.redo_aoi_edit()
-    overlay_view.close()
 
 
 def test_aoi_click_without_movement_does_not_add_undo_entry(
@@ -1758,7 +1698,6 @@ def test_aoi_body_drag_can_be_undone_and_redone(
     assert overlay_view.redo_aoi_edit()
     assert overlay_view._aoi_config is not None
     assert overlay_view._aoi_config.square.x == moved_x
-    overlay_view.close()
 
 
 def test_aoi_undo_redo_history_resets_on_new_image(
@@ -1792,7 +1731,6 @@ def test_aoi_undo_redo_history_resets_on_new_image(
 
     assert not overlay_view.can_undo_aoi_edit()
     assert not overlay_view.can_redo_aoi_edit()
-    overlay_view.close()
 
 
 def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
@@ -1815,8 +1753,6 @@ def test_two_views_sharing_state_stay_in_sync_on_click(qtbot: QtBot) -> None:
     view_b.clear_selection()
 
     assert view_a._greyed_cellpose_ids == set()
-    view_a.close()
-    view_b.close()
 
 
 def test_two_views_sharing_state_stay_in_sync_on_lasso(qtbot: QtBot) -> None:
@@ -1833,8 +1769,6 @@ def test_two_views_sharing_state_stay_in_sync_on_lasso(qtbot: QtBot) -> None:
     assert view_b._selected_cellpose_ids == {1}
     assert view_a._greyed_cellpose_ids == {0, 2}
     assert view_b._greyed_cellpose_ids == {0, 2}
-    view_a.close()
-    view_b.close()
 
 
 def test_widget_with_no_state_arg_gets_a_private_state(qtbot: QtBot) -> None:
@@ -1849,8 +1783,6 @@ def test_widget_with_no_state_arg_gets_a_private_state(qtbot: QtBot) -> None:
     assert view_a._greyed_cellpose_ids == {0, 2}
     assert view_b._greyed_cellpose_ids == set()
     assert view_b._cellpose_data is None
-    view_a.close()
-    view_b.close()
 
 
 def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
@@ -1879,7 +1811,6 @@ def test_close_fully_disconnects_from_shared_state(qtbot: QtBot) -> None:
     assert state.receivers(state.data_changed) == baseline_data
     assert state.receivers(state.selection_changed) == baseline_selection
     assert state.receivers(state.neuron_greyed_out_changed) == baseline_greyed
-    view_a.close()
 
 
 def test_imaging_panel_has_cell_and_video_tabs(qtbot: QtBot) -> None:
@@ -2004,7 +1935,9 @@ def test_right_click_on_a_cell_requests_its_neuron(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
-    with qtbot.waitSignal(widget.neuron_focus_requested) as blocker:
+    with qtbot.waitSignal(
+        widget.neuron_focus_requested, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         widget.overlay_widget.neuron_right_clicked.emit(2)
     assert blocker.args == [0]
     assert widget._selected_cellpose_ids == set()  # nothing selected or hidden

@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 
 from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
@@ -69,7 +70,6 @@ def test_ctrl_z_and_ctrl_shift_z_shortcuts_drive_aoi_undo_redo(
     dialog._redo_aoi_shortcut.activated.emit()
 
     assert calls == {"undo": 1, "redo": 1}
-    dialog.close()
 
 
 def test_custom_areas_of_interest_is_default_mapping_strategy(qtbot: QtBot) -> None:
@@ -83,10 +83,10 @@ def test_cellpose_dialog_opens_at_compact_file_selection_size(qtbot: QtBot):
     dialog = CellposeImportDialog()
     qtbot.addWidget(dialog)
 
-    dialog.showMaximized()
+    with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+        dialog.showMaximized()
     dialog._set_ui_loaded_state(False)
-    dialog.show()
-    qtbot.waitExposed(dialog)
+    qtbot.waitUntil(lambda: dialog.size() == dialog.sizeHint(), timeout=WAIT_TIMEOUT_MS)
 
     assert not dialog.isMaximized()
     assert dialog.main_content_container is not None
@@ -127,7 +127,6 @@ def test_cellpose_dialog_linear_offset_persisted(
     assert dialog.linear_offset_spin.value() == 3
     assert dialog._get_linear_offset() == 3
     assert len(qmessagebox_calls) == 0
-    dialog.close()
 
 
 def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
@@ -145,7 +144,6 @@ def test_cellpose_dialog_linear_offset_preview_mapping(tmp_path, qtbot: QtBot):
     assert first_mapping_key == 0
     assert mapping[first_mapping_key] == min_original_id + 3
     assert mapping.get(1) == min_original_id
-    dialog.close()
 
 
 def test_cellpose_dialog_custom_mapping_restores_on_reopen(tmp_path, qtbot: QtBot):
@@ -201,7 +199,6 @@ def test_manual_click_checkbox_only_visible_for_custom_strategy(
 
     _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
     assert dialog.manual_click_row_widget.isHidden()
-    dialog.close()
 
 
 def test_manual_click_assigns_by_order_and_fills_in_the_rest(
@@ -232,7 +229,6 @@ def test_manual_click_assigns_by_order_and_fills_in_the_rest(
         {stim_id + 1: cellpose_id for stim_id, cellpose_id in enumerate(remaining)}
     )
     assert dialog.overlay_widget.stimulus_to_cellpose_mapping == expected
-    dialog.close()
 
 
 def test_manual_click_again_undoes_it(tmp_path, qtbot: QtBot) -> None:
@@ -251,7 +247,6 @@ def test_manual_click_again_undoes_it(tmp_path, qtbot: QtBot) -> None:
         stim_id: cellpose_id for stim_id, cellpose_id in enumerate(original_ids)
     }
     assert dialog.overlay_widget.stimulus_to_cellpose_mapping == identity_mapping
-    dialog.close()
 
 
 def test_manual_click_clear_button_resets_order(tmp_path, qtbot: QtBot) -> None:
@@ -269,7 +264,6 @@ def test_manual_click_clear_button_resets_order(tmp_path, qtbot: QtBot) -> None:
         stim_id: cellpose_id for stim_id, cellpose_id in enumerate(original_ids)
     }
     assert dialog.overlay_widget.stimulus_to_cellpose_mapping == identity_mapping
-    dialog.close()
 
 
 def test_manual_click_ignored_while_checkbox_unchecked(tmp_path, qtbot: QtBot) -> None:
@@ -281,7 +275,6 @@ def test_manual_click_ignored_while_checkbox_unchecked(tmp_path, qtbot: QtBot) -
     dialog.overlay_widget.neuron_clicked.emit(original_ids[-1])
 
     assert dialog._manual_click_order == []
-    dialog.close()
 
 
 def test_manual_click_mode_turns_off_when_switching_strategy(
@@ -296,7 +289,6 @@ def test_manual_click_mode_turns_off_when_switching_strategy(
 
     assert not dialog.manual_click_checkbox.isChecked()
     assert not dialog.overlay_widget.overlay_view.enable_cell_selection
-    dialog.close()
 
 
 def test_show_aoi_checkbox_draws_read_only_shapes_under_custom(
@@ -316,7 +308,6 @@ def test_show_aoi_checkbox_draws_read_only_shapes_under_custom(
 
     dialog.show_aoi_in_custom_checkbox.setChecked(False)
     assert not view._aoi_visible
-    dialog.close()
 
 
 def test_show_aoi_checkbox_does_not_leak_into_other_strategies_or_result(
@@ -336,7 +327,6 @@ def test_show_aoi_checkbox_does_not_leak_into_other_strategies_or_result(
     _select_mapping_strategy(dialog, CUSTOM_AOI_STRATEGY)
     assert view._aoi_visible
     assert view.aoi_editable
-    dialog.close()
 
 
 def test_annotate_mean_tiff_populates_file_selection(tmp_path, qtbot: QtBot, mocker):
@@ -517,7 +507,6 @@ def test_linear_mapping_has_adjustable_shapes_that_leave_it_unchanged(
     assert imported.stimulus_to_cellpose_mapping is None
     assert imported.aoi_config is not None
     assert imported.aoi_config.square.x == pytest.approx(1.0, abs=0.01)
-    dialog.close()
 
 
 @pytest.mark.parametrize("accept", [True, False])

@@ -14,6 +14,7 @@ from neuroseq.llm.read_access import ReadAccess
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_project_reads_values_and_units_without_modifying_project():
@@ -99,7 +100,7 @@ def test_worker_reads_then_answers_without_streaming_protocol(qtbot):
     worker.read_requested.connect(
         lambda request: worker.deliver_read('{"files": ["gui.py"]}')
     )
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
     worker.wait()
     assert "".join(tokens) == "Here is the answer."
@@ -111,9 +112,9 @@ def test_worker_stop_while_waiting_for_read(qtbot):
         ScriptedBackend([['{"neuroseq_read": {"kind": "project"}}']]), [], "fake"
     )
     worker.read_requested.connect(lambda request: worker.request_stop())
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
-    assert worker.wait(1000)
+    assert worker.wait(WAIT_TIMEOUT_MS)
 
 
 def test_worker_limits_reads(qtbot):
@@ -123,7 +124,7 @@ def test_worker_limits_reads(qtbot):
     tokens = []
     worker.token.connect(tokens.append)
     worker.read_requested.connect(lambda request: worker.deliver_read("{}"))
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
     worker.wait()
     assert len(backend.calls) == 13
@@ -368,7 +369,7 @@ def test_worker_accepts_code_fenced_requests(qtbot, reply):
         worker.deliver_read("{}")
 
     worker.read_requested.connect(receive)
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
     worker.wait()
     assert requests == [
@@ -382,7 +383,7 @@ def test_worker_streams_backtick_answer_that_is_not_a_request(qtbot):
     worker = _ChatWorker(backend, [], "fake")
     tokens = []
     worker.token.connect(tokens.append)
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
     worker.wait()
     assert "".join(tokens) == "`x` is a variable."
@@ -413,7 +414,7 @@ def test_worker_dispatches_plugin_writes(qtbot):
         worker.deliver_read('{"saved": "resources/analysis_plugins/custom.py"}')
 
     worker.read_requested.connect(receive)
-    with qtbot.waitSignal(worker.completed):
+    with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
     worker.wait()
     assert requests[0]["operation"] == "neuroseq_write"
@@ -460,7 +461,7 @@ def test_chat_widget_saves_confirmed_plugin(
     widget, confirm = _plugin_chat_widget(qtbot, monkeypatch, accept=True)
     widget.input_edit.setPlainText("Create an analysis plugin")
     widget._on_send_clicked()
-    qtbot.waitUntil(lambda: widget._worker is None)
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
     assert (isolate_user_plugin_dir / "from_chat.py").read_text(
         encoding="utf-8"
     ) == PLUGIN_SOURCE
@@ -474,7 +475,7 @@ def test_chat_widget_reports_declined_plugin(
     widget, confirm = _plugin_chat_widget(qtbot, monkeypatch, accept=False)
     widget.input_edit.setPlainText("Create an analysis plugin")
     widget._on_send_clicked()
-    qtbot.waitUntil(lambda: widget._worker is None)
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
     assert not (isolate_user_plugin_dir / "from_chat.py").exists()
     assert len(confirm.calls) == 1
     # The model is told the user declined.
@@ -494,5 +495,5 @@ def test_chat_widget_passes_busy_check_to_read_access(qtbot, monkeypatch):
     )
     widget.input_edit.setPlainText("State?")
     widget._on_send_clicked()
-    qtbot.waitUntil(lambda: widget._worker is None)
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
     assert "background job" in widget._backend.calls[1][-1].content

@@ -877,6 +877,8 @@ class RheobaseDialog(SelfRaisingDialog):
         # group" - clicking one never brings it above a sibling in the same
         # chain.
         self.plot_window = SelfRaisingDialog()
+        # No Qt parent, so delete it with this dialog, not whenever Python frees it
+        self.destroyed.connect(self.plot_window.deleteLater)
         self.plot_window.setWindowTitle("Minimal input for spiking (rheobase) — plots")
         self.plot_window.setWindowFlag(
             QtCore.Qt.WindowType.WindowMinimizeButtonHint, True
@@ -892,6 +894,12 @@ class RheobaseDialog(SelfRaisingDialog):
         self.search_axes = figure.add_subplot(grid[1, 0])
         plot_layout.addWidget(wrap_in_scroll_area(self.rheobase_plot, self.plot_window))
         self.plot_window.resize(720, 560)
+        # The plot is updated on every probe and parameter change, often many
+        # times before the window can repaint: render it once all are done.
+        self._plot_draw_timer = QtCore.QTimer(self)
+        self._plot_draw_timer.setSingleShot(True)
+        self._plot_draw_timer.setInterval(0)
+        self._plot_draw_timer.timeout.connect(self.rheobase_plot.draw)
 
         self.lbl_status = QtWidgets.QLabel("Rheobase: waiting for first probe", self)
         layout.addWidget(self.lbl_status)
@@ -1994,7 +2002,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.rheobase_plot.getFigure().subplots_adjust(
             left=0.12, right=0.98, bottom=0.11, top=0.95, hspace=0.28
         )
-        self.rheobase_plot.draw()
+        self._plot_draw_timer.start()
 
     def _update_status_label(self) -> None:
         units = self._unit_label()
@@ -2053,7 +2061,7 @@ class RheobaseDialog(SelfRaisingDialog):
     def apply_theme(self, theme: str) -> None:
         self._theme = theme_module.normalize_theme(theme)
         self._style_plot_axes()
-        self.rheobase_plot.draw()
+        self._plot_draw_timer.start()
 
     def simulation_failed(self, message: str) -> None:
         if (

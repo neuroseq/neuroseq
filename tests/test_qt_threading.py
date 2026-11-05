@@ -7,6 +7,7 @@ from qtpy import QtCore
 
 from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _Worker(QtCore.QObject):
@@ -33,7 +34,7 @@ def test_worker_is_back_on_the_main_thread_after_run(qtbot: QtBot) -> None:
     worker.done.connect(thread.quit)
 
     thread.start()
-    qtbot.waitUntil(thread.isFinished, timeout=5000)
+    qtbot.waitUntil(thread.isFinished, timeout=WAIT_TIMEOUT_MS)
 
     assert worker.thread_during_run is thread
     assert worker.thread() == QtCore.QCoreApplication.instance().thread()
@@ -56,10 +57,10 @@ def test_worker_returns_to_main_thread_even_when_run_raises(qtbot: QtBot) -> Non
     # the time the worker is back on the main thread.
     qtbot.waitUntil(
         lambda: worker.thread() == QtCore.QCoreApplication.instance().thread(),
-        timeout=5000,
+        timeout=WAIT_TIMEOUT_MS,
     )
     thread.quit()
-    assert thread.wait(5000)
+    assert thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
@@ -71,7 +72,7 @@ def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
 
     def task(report):
         # Hold the task open until the test has hooked thread.finished.
-        release.wait(5)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return 1
 
     assert gui._dispatch_io_task(task, "t", lambda _r: None)
@@ -82,8 +83,7 @@ def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
     thread.finished.connect(lambda: worker_thread_at_finish.append(worker.thread()))
     release.set()
 
-    qtbot.waitUntil(lambda: bool(worker_thread_at_finish), timeout=5000)
-    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=5000)
+    qtbot.waitUntil(lambda: bool(worker_thread_at_finish), timeout=WAIT_TIMEOUT_MS)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
 
     assert worker_thread_at_finish[0] == QtCore.QCoreApplication.instance().thread()
-    gui.close()

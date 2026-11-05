@@ -9,6 +9,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class TestSuite2pImportDialog:
@@ -157,7 +158,7 @@ class TestSuite2pImportDialog:
         dialog = Suite2pImportDialog()
         qtbot.addWidget(dialog)
         dialog.show()
-        qtbot.waitUntil(lambda: dialog.isVisible())
+        qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
         # Initially individual file imports should be hidden
         assert not dialog.individual_files_group.isVisible()

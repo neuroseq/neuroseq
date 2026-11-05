@@ -14,6 +14,7 @@ from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_timed_array_modifier(qtbot: QtBot) -> None:
@@ -24,7 +25,7 @@ def test_timed_array_modifier(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     tma = StimArrayModifier(stim_array, stim_widget)
     assert tma.can_undo() is False
     assert tma.can_redo() is False
@@ -93,7 +94,6 @@ def test_timed_array_modifier(qtbot: QtBot) -> None:
     assert tma.can_undo() is False
     assert tma.can_redo() is True
     assert len(tma) == 2
-    stim_widget.close()
 
 
 def test_trim_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
@@ -125,7 +125,6 @@ def test_trim_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
     assert np.allclose(project.stim_arrays["stim"].values[900:950, 0], 1.0)
     assert np.allclose(project.stim_arrays["stim2"].values, 1.0)
     assert project.simulation_timeline_seconds() == approx(1.0)
-    stim_widget.close()
 
 
 def test_trim_reversible_action_only_one_array(qtbot: QtBot) -> None:
@@ -150,7 +149,6 @@ def test_trim_reversible_action_only_one_array(qtbot: QtBot) -> None:
     action.undo(project.stim_arrays["a"], stim_widget)
     assert project.stim_arrays["a"].values.shape[0] == 1000
     assert project.stim_arrays["b"].values.shape[0] == 1000
-    stim_widget.close()
 
 
 def test_pad_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
@@ -182,4 +180,3 @@ def test_pad_reversible_action_restores_all_arrays(qtbot: QtBot) -> None:
     assert np.allclose(project.stim_arrays["stim"].values[400:450, 0], 1.0)
     assert np.allclose(project.stim_arrays["stim2"].values, 1.0)
     assert project.simulation_timeline_seconds() == approx(0.5)
-    stim_widget.close()

@@ -7,6 +7,7 @@ from neuroseq.stimulation.stim import DrawStim
 from neuroseq.stimulation.stim import DrawStimType
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_intensity_dialog import StimIntensityDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_stim_intensity_dialog(qtbot: QtBot):
@@ -17,7 +18,7 @@ def test_stim_intensity_dialog(qtbot: QtBot):
     dialog = StimIntensityDialog(draw_stim, stim_units, stim_type, 4, 0.001)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     assert dialog.windowTitle() == "Design input"
     assert dialog.rad_intensity_linear.text() == "Ramp"

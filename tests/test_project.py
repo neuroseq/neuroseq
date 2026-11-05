@@ -509,9 +509,11 @@ def test_trace_read_budget_downsamples_time_to_fit_ram() -> None:
     a larger budget yields the full-resolution trace again.
     """
     project = default_project()
-    # 3 s at 0.1 ms recording => ~1.1 MB for the 10-neuron trace, enough to
-    # exceed a 1 MB budget and trigger downsampling.
-    project.run_simulation(3.0)
+    # 100 neurons for 0.3 s at 0.1 ms recording => ~1.1 MB trace, enough to
+    # exceed a 1 MB budget and trigger downsampling (the simulation cost is per
+    # time step, so many neurons for a short time keeps it quick).
+    project.b2_model.define_neuronnumber("P", 100)
+    project.run_simulation(0.3)
     trace_name = project.get_data_names(TraceData)[0]
 
     project.max_ram_trace_plot_matrix = 0  # no limit

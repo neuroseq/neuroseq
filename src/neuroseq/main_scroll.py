@@ -20,12 +20,30 @@ def _can_scroll(bar: QtWidgets.QScrollBar, delta: int) -> bool:
     return bar.value() > bar.minimum() if delta > 0 else bar.value() < bar.maximum()
 
 
-class MainScrollFilter(QtCore.QObject):
-    """Application event filter forwarding exhausted wheel events to ``outer``."""
+_MAIN_SCROLL_AREA_PROPERTY = "neuroseq_main_scroll_area"
 
-    def __init__(self, outer: QtWidgets.QScrollArea) -> None:
-        super().__init__(outer)
-        self._outer = outer
+
+def _main_scroll_area(widget: QtWidgets.QWidget) -> QtWidgets.QScrollArea | None:
+    """The main scroll area around ``widget`` in its window, if any."""
+    ancestor = widget.parentWidget()
+    while ancestor is not None:
+        if isinstance(ancestor, QtWidgets.QScrollArea) and ancestor.property(
+            _MAIN_SCROLL_AREA_PROPERTY
+        ):
+            return ancestor
+        if ancestor.isWindow():
+            return None
+        ancestor = ancestor.parentWidget()
+    return None
+
+
+class MainScrollFilter(QtCore.QObject):
+    """Application event filter forwarding exhausted wheel events to the main
+    scroll area around the widget under the wheel.
+
+    One instance serves all main scroll areas, so each event costs a single
+    Python call however many workspaces are open.
+    """
 
     def eventFilter(self, watched: QtCore.QObject | None, event: QtCore.QEvent | None):
         if event is None or event.type() != QtCore.QEvent.Type.Wheel:
@@ -34,9 +52,8 @@ class MainScrollFilter(QtCore.QObject):
             event, QtGui.QWheelEvent
         ):
             return False
-        if watched.window() is not self._outer.window() or not self._outer.isAncestorOf(
-            watched
-        ):
+        outer = _main_scroll_area(watched)
+        if outer is None:
             return False
         dy, dx = event.angleDelta().y(), event.angleDelta().x()
         if dy == 0 and dx == 0:
@@ -47,7 +64,7 @@ class MainScrollFilter(QtCore.QObject):
         delta = dx if abs(dx) > abs(dy) else dy
 
         widget: QtWidgets.QWidget | None = watched
-        while widget is not None and widget is not self._outer:
+        while widget is not None and widget is not outer:
             if isinstance(widget, QtWidgets.QAbstractScrollArea):
                 bar = (
                     widget.horizontalScrollBar()
@@ -64,9 +81,7 @@ class MainScrollFilter(QtCore.QObject):
             widget = widget.parentWidget()
 
         outer_bar = (
-            self._outer.horizontalScrollBar()
-            if horizontal
-            else self._outer.verticalScrollBar()
+            outer.horizontalScrollBar() if horizontal else outer.verticalScrollBar()
         )
         if outer_bar is None or not _can_scroll(outer_bar, delta):
             return False
@@ -165,7 +180,8 @@ def make_main_scroll_area(
     area.setWidgetResizable(True)
     area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
     area.setWidget(content)
+    area.setProperty(_MAIN_SCROLL_AREA_PROPERTY, True)
     app = QtWidgets.QApplication.instance()
-    if app is not None:
-        app.installEventFilter(MainScrollFilter(area))
+    if app is not None and app.findChild(MainScrollFilter) is None:
+        app.installEventFilter(MainScrollFilter(app))
     return area

@@ -11,6 +11,7 @@ from neuroseq.stimulation.dynamic_input.routine_overview_dialog import (
     RoutineSelectorDialog,
 )
 from neuroseq.stimulation.dynamic_input.routine_overview_dialog import routine_overview
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_every_dynamic_routine_has_an_overview() -> None:
@@ -49,7 +50,6 @@ def test_selector_shows_preview_for_initial_selection(qtbot: QtBot) -> None:
     assert dialog.lbl_goal.text() == overview.goal
     assert dialog._axes.get_title() == overview.plot_title
     assert dialog._axes.lines
-    dialog.close()
 
 
 def test_selector_preview_updates_when_selection_changes(qtbot: QtBot) -> None:
@@ -71,7 +71,6 @@ def test_selector_preview_updates_when_selection_changes(qtbot: QtBot) -> None:
             assert dialog.image_widget.isHidden()
             assert dialog._axes.get_title() == overview.plot_title
             assert dialog._axes.lines
-    dialog.close()
 
 
 def test_rheobase_preview_uses_bundled_svg(qtbot: QtBot) -> None:
@@ -88,7 +87,6 @@ def test_rheobase_preview_uses_bundled_svg(qtbot: QtBot) -> None:
     assert not dialog.image_widget.isHidden()
     assert dialog.image_widget.is_valid()
     assert dialog.plot_widget.isHidden()
-    dialog.close()
 
 
 def test_selector_continue_emits_selected_routine(qtbot: QtBot) -> None:
@@ -100,7 +98,6 @@ def test_selector_continue_emits_selected_routine(qtbot: QtBot) -> None:
     dialog.cmb_routine.setCurrentText(DynamicInputController.STDP_WINDOW_ROUTINE)
     dialog._on_continue()
     assert chosen == [DynamicInputController.STDP_WINDOW_ROUTINE]
-    dialog.close()
 
 
 def test_selector_apply_theme_runs(qtbot: QtBot) -> None:
@@ -109,7 +106,6 @@ def test_selector_apply_theme_runs(qtbot: QtBot) -> None:
     # Recoloring for either theme must not raise.
     dialog.apply_theme("dark")
     dialog.apply_theme("light")
-    dialog.close()
 
 
 def test_selector_plot_background_stays_white_across_themes(qtbot: QtBot) -> None:
@@ -119,7 +115,6 @@ def test_selector_plot_background_stays_white_across_themes(qtbot: QtBot) -> Non
         dialog.apply_theme(theme)
         assert dialog.plot_widget.getFigure().get_facecolor() == (1.0, 1.0, 1.0, 1.0)
         assert dialog._axes.get_facecolor() == (1.0, 1.0, 1.0, 1.0)
-    dialog.close()
 
 
 def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
@@ -130,7 +125,7 @@ def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
     qtbot.addWidget(dialog)
     dialog.show()
     dialog.resize(dialog.width(), 200)
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     scroll_areas = dialog.findChildren(QtWidgets.QScrollArea)
     assert len(scroll_areas) == 1
@@ -141,7 +136,6 @@ def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
     # The preview content is taller than the shrunk dialog, so there is
     # something to scroll.
     assert preview.sizeHint().height() > scroll.height()
-    dialog.close()
 
 
 def test_default_routine_is_preselected(qtbot) -> None:

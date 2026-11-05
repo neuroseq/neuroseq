@@ -5,7 +5,9 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.main_scroll import MainScrollFilter
 from neuroseq.main_scroll import make_main_scroll_area
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _wheel(widget: QtWidgets.QWidget, delta: int) -> None:
@@ -32,8 +34,8 @@ def _build(qtbot: QtBot):
     area = make_main_scroll_area(content, 300, 2000)
     qtbot.addWidget(area)
     area.resize(400, 300)
-    area.show()
-    qtbot.waitExposed(area)
+    with qtbot.waitExposed(area, timeout=WAIT_TIMEOUT_MS):
+        area.show()
     return area, inner
 
 
@@ -56,6 +58,20 @@ def test_scrolling_up_returns_priority_at_nested_top(qtbot: QtBot) -> None:
     area.verticalScrollBar().setValue(200)
     _wheel(inner.viewport(), 120)  # inner already at top -> main window scrolls up
     assert area.verticalScrollBar().value() < 200
+
+
+def test_one_filter_serves_every_main_scroll_area(qtbot: QtBot) -> None:
+    first_area, first_inner = _build(qtbot)
+    second_area, second_inner = _build(qtbot)
+    app = QtWidgets.QApplication.instance()
+    assert app is not None
+    assert len(app.findChildren(MainScrollFilter)) == 1
+
+    second_bar = second_inner.verticalScrollBar()
+    second_bar.setValue(second_bar.maximum())
+    _wheel(second_inner.viewport(), -120)
+    assert second_area.verticalScrollBar().value() > 0
+    assert first_area.verticalScrollBar().value() == 0
 
 
 def test_zoom_control_buttons_field_and_limits(qtbot: QtBot) -> None:
@@ -112,4 +128,3 @@ def test_gui_zoom_control_resizes_workspace(qtbot: QtBot) -> None:
     gui.zoom_control.set_zoom(100)
     assert content.minimumSize() == QtCore.QSize(1500, 950)
     gui._close_confirmed = True
-    gui.close()

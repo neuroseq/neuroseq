@@ -15,6 +15,7 @@ from neuroseq.project_workspace import DROP_SEGMENT
 from neuroseq.project_workspace import DROP_TRACES
 from neuroseq.project_workspace import DROP_VIDEO
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 LEGACY_SEQ = Path(__file__).parent / "data" / "legacy_cellpose_v1" / "legacy_export.seq"
 
@@ -150,16 +151,23 @@ def test_dropping_on_a_panel(
     gui: ProjectWorkspace, calls: list, qtbot: QtBot, tmp_path: Path
 ) -> None:
     """A real drop event, routed by the panel under the cursor."""
-    gui.show()
-    qtbot.waitExposed(gui)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     gui._auto_show_widget(gui.stim_editor)
-    qtbot.wait(50)
+
+    def stim_editor_centre() -> QtCore.QPoint:
+        return gui.stim_editor.mapTo(gui, gui.stim_editor.rect().center())
+
+    # the shown panel is laid out (and so found under the cursor) later
+    qtbot.waitUntil(
+        lambda: gui._drop_target(stim_editor_centre()) == "input",
+        timeout=WAIT_TIMEOUT_MS,
+    )
     path = tmp_path / "wave.ibw"
     path.write_bytes(b"")
     mime = QtCore.QMimeData()
     mime.setUrls([QtCore.QUrl.fromLocalFile(str(path))])
-    centre = gui.stim_editor.mapTo(gui, gui.stim_editor.rect().center())
-    assert gui._drop_target(centre) == "input"
+    centre = stim_editor_centre()
 
     enter = QtGui.QDragEnterEvent(
         centre,
@@ -178,7 +186,7 @@ def test_dropping_on_a_panel(
         QtCore.Qt.KeyboardModifier.NoModifier,
     )
     QtWidgets.QApplication.sendEvent(gui, drop)
-    qtbot.waitUntil(lambda: bool(calls))
+    qtbot.waitUntil(lambda: bool(calls), timeout=WAIT_TIMEOUT_MS)
     assert calls == [
         ("btn_import_patch_clamp_input_clicked", {"args": (), "path": path})
     ]

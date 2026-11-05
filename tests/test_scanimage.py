@@ -13,6 +13,7 @@ from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_engine_worker import EngineAdapter
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.importers.importer_scanimage import index_recording
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -136,8 +137,8 @@ def connection(qtbot, mocker):
     mocker.patch.object(conn.process, "write")
     yield conn
     conn.shutdown()
-    conn.deleteLater()
-    qtbot.wait(1)
+    with qtbot.waitSignal(conn.destroyed, timeout=WAIT_TIMEOUT_MS):
+        conn.deleteLater()
 
 
 def test_poll_is_bounded_and_abort_has_priority(connection):
@@ -264,7 +265,6 @@ def test_recording_stays_with_originating_project(qtbot, mocker, recording, tmp_
     assert not other.project.imaging_acquisitions
     assert original.calcium_video_paths
     original.dirty = False
-    window.close()
 
 
 def test_controls_trigger_timeout_and_foreign_acquisition(
@@ -501,7 +501,6 @@ def test_recording_completion_attaches_and_reopens_movie(
     gui.project.history.undo()
     assert gui.project.experiments["Test"] is old_group
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_helper_process_connects_and_disconnects_named_session(qtbot, tmp_path):
@@ -530,15 +529,15 @@ class Engine:
     conn.process.setProcessEnvironment(environment)
     try:
         conn.connect_session(sys.executable, "Named")
-        qtbot.waitUntil(lambda: conn.connected, timeout=10000)
+        qtbot.waitUntil(lambda: conn.connected, timeout=WAIT_TIMEOUT_MS)
         assert "engine diagnostic" in conn._stderr
         assert conn.command("disconnect")
-        qtbot.waitUntil(lambda: not conn.connected, timeout=10000)
+        qtbot.waitUntil(lambda: not conn.connected, timeout=WAIT_TIMEOUT_MS)
         assert conn.process.state() == QtCore.QProcess.ProcessState.NotRunning
     finally:
         conn.shutdown()
-        conn.deleteLater()
-        qtbot.wait(1)
+        with qtbot.waitSignal(conn.destroyed, timeout=WAIT_TIMEOUT_MS):
+            conn.deleteLater()
 
 
 def test_standard_two_channel_run_has_compact_transport_and_metadata(
@@ -676,7 +675,6 @@ def test_new_recording_preserves_imported_movie(
     assert gui.scanimage_controls.channel_spin.value() == 3
     assert "was not saved" in gui.scanimage_controls.message_label.text()
     project.dirty = False
-    window.close()
 
 
 def test_transport_failure_is_run_scoped_but_ui_errors_are_not(connection, mocker):
@@ -723,7 +721,6 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
     assert dialog.cmb_offset.count() == 0
     assert dialog.offset == 0
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_early_project_indexes_upgrade_without_descriptions(tmp_path, recording):
@@ -805,7 +802,6 @@ def test_image_acquisition_is_a_tab_of_the_stimulation_setup_pane(qtbot):
     index = gui.stimulation_setup.currentIndex()
     assert gui.stimulation_setup.tabText(index) == SCANIMAGE_TAB_TITLE
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
@@ -816,8 +812,8 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    gui.show()
-    qtbot.waitExposed(gui)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     footprint = gui.spatial_footprint_widget
     footprint.set_data(_cellpose_result())
     gui.project.add_calcium_video([Path(p) for p in recording[0]], 10)
@@ -828,13 +824,16 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
         return QtCore.QRect(top_left, canvas.size())
 
     footprint.tabs.setCurrentIndex(0)
-    qtbot.waitUntil(lambda: footprint.overlay_widget.isVisible())
+    qtbot.waitUntil(
+        lambda: footprint.overlay_widget.isVisible(), timeout=WAIT_TIMEOUT_MS
+    )
     cell_rect = canvas_rect(footprint.overlay_widget)
     footprint.tabs.setCurrentIndex(1)
-    qtbot.waitUntil(lambda: gui.calcium_video_widget.widget.isVisible())
+    qtbot.waitUntil(
+        lambda: gui.calcium_video_widget.widget.isVisible(), timeout=WAIT_TIMEOUT_MS
+    )
     assert canvas_rect(gui.calcium_video_widget.widget) == cell_rect
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
@@ -865,7 +864,6 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
     assert gui.project.calcium_video_paths == [second]
     assert gui.cmb_video.count() == 1
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_selecting_a_video_with_missing_files_keeps_the_current_one(
@@ -884,7 +882,6 @@ def test_selecting_a_video_with_missing_files_keeps_the_current_one(
     assert gui.cmb_video.currentIndex() == 1
     assert qmessagebox_calls
     gui._close_confirmed = True
-    gui.close()
 
 
 def test_single_video_projects_from_main_load_as_a_one_item_list(tmp_path):
@@ -1012,4 +1009,3 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     gui.acquisition_controller.fov_ready.emit(str(image))
     segment.assert_called_once_with(segment=image)
     gui._close_confirmed = True
-    gui.close()

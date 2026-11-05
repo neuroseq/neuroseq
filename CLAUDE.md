@@ -61,8 +61,8 @@ The thesis processes raw TIFFs externally before this PR existed; that workflow 
 # Install and run (uv recommended)
 uv run neuroseq
 
-# Run tests (serial full suite ~6 min; -n auto parallelises it to ~40 s)
-uv run pytest -n auto
+# Run tests (in parallel by default, ~1 min; add -n 0 to run serially, e.g. for -s or --pdb)
+uv run pytest
 
 # Run specific test file
 uv run pytest tests/test_gui.py
@@ -221,6 +221,8 @@ Two `autouse` fixtures apply to every test automatically:
 - **`patch_b2w_exec_show`** — replaces `.exec()` with `.show()` on `QDialog` and `QMessageBox` to prevent event-loop blocking.
 
 Use the opt-in **`qmessagebox_calls`** fixture to capture dialog calls and assert on them (supports both static `QMessageBox` methods and `StimulationGeneratorDialog._show_scrollable_message`).
+
+Wait for the condition a test needs instead of `qtbot.wait(ms)`, and pass `timeout=WAIT_TIMEOUT_MS` (`from tests.wait_timeout import WAIT_TIMEOUT_MS`): 5 s by default, `--wait-timeout=30` in CI. Use `waitExposed`/`waitActive` as context managers (`with qtbot.waitExposed(w): w.show()`); called bare they don't wait.
 
 ### Brian2 in tests
 

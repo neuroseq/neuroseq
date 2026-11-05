@@ -14,6 +14,7 @@ from neuroseq.llm.chat_widget import ChatWidget
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class FakeBackend(LLMBackend):
@@ -68,7 +69,7 @@ def _make_widget(
     widget = ChatWidget()
     qtbot.addWidget(widget)
     widget.show()
-    qtbot.waitUntil(lambda: widget.isVisible())
+    qtbot.waitUntil(lambda: widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     return widget
 
 
@@ -93,7 +94,9 @@ def test_send_appends_user_and_assistant_to_history(qtbot: QtBot, monkeypatch) -
 
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
 
     assert widget._history == [
         Message(Role.USER, "hello"),
@@ -110,10 +113,12 @@ def test_send_disabled_while_streaming(qtbot: QtBot, monkeypatch) -> None:
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
 
-    qtbot.waitUntil(lambda: widget.stop_button.isEnabled())
+    qtbot.waitUntil(lambda: widget.stop_button.isEnabled(), timeout=WAIT_TIMEOUT_MS)
     assert not widget.send_button.isEnabled()
     assert widget.stop_button.isEnabled()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
     assert widget.send_button.isEnabled()
     assert not widget.stop_button.isEnabled()
 
@@ -127,7 +132,9 @@ def test_error_surfaces_in_status_line_and_does_not_append_to_history(
 
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text().startswith("Error:"))
+    qtbot.waitUntil(
+        lambda: widget.status_label.text().startswith("Error:"), timeout=WAIT_TIMEOUT_MS
+    )
 
     assert widget._history == [Message(Role.USER, "hello")]
     assert "Error: boom" in widget.status_label.text()
@@ -139,7 +146,9 @@ def test_clear_chat_resets_history_and_view(qtbot: QtBot, monkeypatch) -> None:
 
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
     widget.clear_button.click()
 
     assert widget._history == []
@@ -155,12 +164,16 @@ def test_set_project_updates_snapshot_used_in_next_request(
 
     widget.input_edit.setPlainText("first")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
 
     widget.set_project(_make_project())
     widget.input_edit.setPlainText("second")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
 
     assert "no project loaded" in backend.seen_messages[0][0].content
     assert "Neurons: 3" in backend.seen_messages[1][0].content
@@ -185,7 +198,9 @@ def test_reload_backend_after_settings_change(qtbot: QtBot, monkeypatch) -> None
     widget.reload_backend()
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
 
     assert "Openai · gpt-test" in widget.badge_label.text()
     assert second_backend.seen_messages
@@ -197,9 +212,13 @@ def test_stop_button_interrupts_stream(qtbot: QtBot, monkeypatch) -> None:
 
     widget.input_edit.setPlainText("hello")
     widget.send_button.click()
-    qtbot.waitUntil(lambda: "a" in widget.history_view.toPlainText())
+    qtbot.waitUntil(
+        lambda: "a" in widget.history_view.toPlainText(), timeout=WAIT_TIMEOUT_MS
+    )
     widget.stop_button.click()
-    qtbot.waitUntil(lambda: widget.status_label.text() == "Idle")
+    qtbot.waitUntil(
+        lambda: widget.status_label.text() == "Idle", timeout=WAIT_TIMEOUT_MS
+    )
 
     assert len(widget._history) == 2
     assert widget._history[1].role == Role.ASSISTANT

@@ -10,6 +10,7 @@ from pytestqt.qtbot import QtBot
 import neuroseq.project_workspace
 from neuroseq.project import Project
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -29,7 +30,7 @@ def gui_with_b2_project(qtbot: QtBot, test_project: Project):
             widget._background_job.worker_thread is None
             or not widget._background_job.worker_thread.isRunning()
         ),
-        timeout=10000,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -58,7 +59,8 @@ def test_brian2_sim_runs_on_worker_thread(
 
     gui_with_b2_project.btn_continue_simulation_clicked()
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is None, timeout=5000
+        lambda: gui_with_b2_project._background_job.worker is None,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
     assert seen_thread_ids
@@ -71,7 +73,7 @@ def test_brian2_progress_dialog_shows_label_transition(
     allow_report = threading.Event()
 
     def _spy_run_simulation(time_seconds, report=None, stim_array_padding_seconds=0.0):
-        allow_report.wait(timeout=5.0)
+        allow_report.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         if report is not None:
             report(0.1, 0.25, 0.0, 1.0)
 
@@ -87,17 +89,18 @@ def test_brian2_progress_dialog_shows_label_transition(
             gui_with_b2_project.progress_dialog.labelText()
             == "Preparing Brian2 simulation…"
         ),
-        timeout=2000,
+        timeout=WAIT_TIMEOUT_MS,
     )
     allow_report.set()
     qtbot.waitUntil(
         lambda: (
             gui_with_b2_project.progress_dialog.labelText() == "Simulating Brian2..."
         ),
-        timeout=5000,
+        timeout=WAIT_TIMEOUT_MS,
     )
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is None, timeout=5000
+        lambda: gui_with_b2_project._background_job.worker is None,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -121,9 +124,10 @@ def test_brian2_finished_calls_update_data(
 
     gui_with_b2_project.btn_continue_simulation_clicked()
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is None, timeout=5000
+        lambda: gui_with_b2_project._background_job.worker is None,
+        timeout=WAIT_TIMEOUT_MS,
     )
-    qtbot.waitUntil(lambda: calls == [True], timeout=2000)
+    qtbot.waitUntil(lambda: calls == [True], timeout=WAIT_TIMEOUT_MS)
 
     assert calls == [True]
 
@@ -148,7 +152,8 @@ def test_brian2_failure_surfaces_critical_dialog(
 
     gui_with_b2_project.btn_continue_simulation_clicked()
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is None, timeout=5000
+        lambda: gui_with_b2_project._background_job.worker is None,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
     assert any(
@@ -188,9 +193,10 @@ def test_brian2_run_button_blocks_reentrancy(
 
     gui_with_b2_project.btn_continue_simulation_clicked()
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is not None, timeout=2000
+        lambda: gui_with_b2_project._background_job.worker is not None,
+        timeout=WAIT_TIMEOUT_MS,
     )
-    qtbot.waitUntil(lambda: run_count == 1, timeout=2000)
+    qtbot.waitUntil(lambda: run_count == 1, timeout=WAIT_TIMEOUT_MS)
     original_worker = gui_with_b2_project._background_job.worker
     assert original_worker is not None
     assert not gui_with_b2_project.menu_file.isEnabled()
@@ -207,7 +213,8 @@ def test_brian2_run_button_blocks_reentrancy(
     finally:
         block.set()
         qtbot.waitUntil(
-            lambda: gui_with_b2_project._background_job.worker is None, timeout=5000
+            lambda: gui_with_b2_project._background_job.worker is None,
+            timeout=WAIT_TIMEOUT_MS,
         )
 
     assert gui_with_b2_project.menu_file.isEnabled()
@@ -222,7 +229,7 @@ def test_brian2_close_event_drains_inflight_sim(
     def _blocking_run_simulation(
         time_seconds, report=None, stim_array_padding_seconds=0.0
     ):
-        block.wait(timeout=5.0)
+        block.wait(timeout=WAIT_TIMEOUT_MS / 1000)
 
     monkeypatch.setattr(
         gui_with_b2_project.project,
@@ -233,7 +240,8 @@ def test_brian2_close_event_drains_inflight_sim(
 
     gui_with_b2_project.btn_continue_simulation_clicked()
     qtbot.waitUntil(
-        lambda: gui_with_b2_project._background_job.worker is not None, timeout=2000
+        lambda: gui_with_b2_project._background_job.worker is not None,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
     def _delayed_release() -> None:
@@ -245,12 +253,12 @@ def test_brian2_close_event_drains_inflight_sim(
     try:
         gui_with_b2_project.close()
     finally:
-        releaser.join(timeout=2.0)
+        releaser.join(timeout=WAIT_TIMEOUT_MS / 1000)
 
     qtbot.waitUntil(
         lambda: (
             gui_with_b2_project._background_job.worker_thread is None
             or not gui_with_b2_project._background_job.worker_thread.isRunning()
         ),
-        timeout=10000,
+        timeout=WAIT_TIMEOUT_MS,
     )

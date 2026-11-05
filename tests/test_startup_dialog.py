@@ -172,4 +172,3 @@ def test_gui_opens_the_blank_startup_project_with_its_stim_array_selected(
     assert modifier is not None
     assert modifier.stim_array.name == "stimulus"
     assert modifier.stim_array.values.shape == (5000, 10)
-    gui.close()

@@ -9,6 +9,8 @@ from typing import Any
 from typing import NoReturn
 
 import brian2 as b2
+import brian2.core.names
+import brian2.devices.device
 import h5py
 import numpy as np
 
@@ -22,6 +24,28 @@ from neuroseq.stimulation.stim import StimArray
 from neuroseq.utils import construct_synapse_matrix
 from neuroseq.utils import get_downsample_factor
 from neuroseq.utils import save_store_name
+
+_brian2_find_name = brian2.core.names.find_name
+
+
+def _find_name(name: str, names: Any = None) -> str:
+    """Brian2's find_name, but safe if an object is freed while collecting names.
+
+    Brian2's own version dereferences each weak reference twice, so it raises an
+    AttributeError if the object is freed in between, e.g. by the garbage
+    collector. TODO: remove once this is fixed in Brian2, see
+    https://github.com/brian-team/brian2/issues/1929
+    """
+    if names is None and name.endswith("*"):
+        objects = [ref() for ref in set(brian2.core.names.Nameable.__instances__())]
+        names = {
+            obj.name for obj in objects if obj is not None and hasattr(obj, "name")
+        }
+    return _brian2_find_name(name, names)
+
+
+brian2.core.names.find_name = _find_name
+brian2.devices.device.find_name = _find_name
 
 
 class B2Model:

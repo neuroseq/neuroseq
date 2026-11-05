@@ -19,6 +19,7 @@ import neuroseq
 import neuroseq.stimulation.stim
 from neuroseq.data import Experiment
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _MockImportDialog:
@@ -49,7 +50,9 @@ def _wait_for_external_simulation(qtbot: QtBot, gui: ProjectWorkspace):
     # `finished` before the test enters the wait — `waitSignal` only
     # catches future emissions, while `waitUntil` is true whether the
     # worker is still running or already gone.
-    qtbot.waitUntil(lambda: gui._background_job.worker_thread is None, timeout=10000)
+    qtbot.waitUntil(
+        lambda: gui._background_job.worker_thread is None, timeout=WAIT_TIMEOUT_MS
+    )
 
 
 def test_run_dispatches_to_external_when_path_set(
@@ -86,7 +89,6 @@ def test_run_dispatches_to_external_when_path_set(
 
     assert calls["external"] == [1.5]
     assert calls["b2"] == []
-    gui.close()
 
 
 def test_run_dispatches_to_b2_when_path_unset(
@@ -114,7 +116,6 @@ def test_run_dispatches_to_b2_when_path_unset(
 
     assert calls["external"] == []
     assert calls["b2"] == [0.5]
-    gui.close()
 
 
 def test_external_simulation_passes_params_kwarg(
@@ -166,7 +167,6 @@ def test_external_simulation_passes_params_kwarg(
     captured = fn.__globals__["captured"]
     assert captured["simulation_time"] == 2.0
     assert captured["params"] == {"k1": 42, "k2": 1.5}
-    gui.close()
 
 
 def test_run_dialog_default_is_suggested_simulation_time(
@@ -197,7 +197,6 @@ def test_run_dialog_default_is_suggested_simulation_time(
     gui.btn_continue_simulation_clicked()
 
     assert seen_default["text"] == "1.92"
-    gui.close()
 
 
 def test_run_with_overshoot_tiles_stim_before_dispatch(
@@ -245,7 +244,6 @@ def test_run_with_overshoot_tiles_stim_before_dispatch(
     assert isinstance(fn, FunctionType)
     captured = fn.__globals__["captured"]
     assert captured["shape"] == (250, 2)
-    gui.close()
 
 
 def test_btn_edit_clicked_writes_external_params_back(
@@ -276,7 +274,6 @@ def test_btn_edit_clicked_writes_external_params_back(
     gui.btn_edit_clicked()
 
     assert gui.project.external_simulate_params["alpha"]["value"] == 12
-    gui.close()
 
 
 def test_btn_edit_clicked_writes_b2model_back(
@@ -307,7 +304,6 @@ def test_btn_edit_clicked_writes_b2model_back(
     gui.btn_edit_clicked()
 
     assert gui.project.b2_model is replacement
-    gui.close()
 
 
 def test_load_external_simulation_function_failure_clears_state(
@@ -337,7 +333,6 @@ def test_load_external_simulation_function_failure_clears_state(
     assert gui.project.external_simulate_path is None
     assert gui.project.external_simulator is None
     assert gui.project.external_simulate_function is None
-    gui.close()
 
 
 def test_external_simulator_accepts_progress_detection() -> None:
@@ -408,7 +403,6 @@ def test_external_simulation_passes_progress_when_accepted(
     # The simulator emitted 0.0, 0.5, 1.0, and the GUI also sets 0 then 100.
     assert 50 in set_value_calls
     assert 100 in set_value_calls
-    gui.close()
 
 
 def test_external_simulation_skips_progress_for_old_simulators(
@@ -441,4 +435,3 @@ def test_external_simulation_skips_progress_for_old_simulators(
     assert isinstance(fn, FunctionType)
     captured = fn.__globals__["captured"]
     assert captured["ran"] is True
-    gui.close()

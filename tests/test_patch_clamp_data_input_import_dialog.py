@@ -24,6 +24,7 @@ from neuroseq.importers.patch_clamp_data_input_import_dialog import (
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,7 +54,6 @@ def test_input_browse_formats(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch) -> 
         "Patch-clamp files (*.pxp *.ibw *.csv *.txt);;Packed Experiment (*.pxp);;"
         "Binary Wave (*.ibw);;CSV files (*.csv);;Text files (*.txt);;All files (*)"
     ]
-    dialog.close()
 
 
 def test_unsupported_input_format(
@@ -163,7 +163,7 @@ def test_patch_clamp_data_input_import_dialog_wave_plot_hidden_initially(
     dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     assert not dialog.wave_plot.isVisible()
 
@@ -182,11 +182,11 @@ def test_patch_clamp_data_input_import_dialog_wave_plot_shown_after_wave_load(
     dialog = PatchClampDataInputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog._load_file(str(path))
 
-    qtbot.waitUntil(lambda: dialog.wave_plot.isVisible())
+    qtbot.waitUntil(lambda: dialog.wave_plot.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_patch_clamp_data_input_import_dialog_shows_multi_sweep_info(
@@ -371,7 +371,7 @@ def test_patch_clamp_data_input_import_dialog_loads_pxp_and_shows_wave_picker(
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.wave_picker_group.isVisible()
@@ -420,7 +420,7 @@ def test_patch_clamp_data_input_import_dialog_pxp_wave_selection_sets_loaded_wav
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.loaded_wave is wave_a
@@ -471,7 +471,7 @@ def test_patch_clamp_data_input_import_dialog_pxp_multi_wave_requires_selection(
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.loaded_wave is None
@@ -527,7 +527,7 @@ def test_patch_clamp_data_input_import_dialog_loading_csv_after_pxp_clears_wave_
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog._load_file(str(pxp_path))
     assert dialog.wave_picker_group.isVisible()
@@ -586,7 +586,7 @@ def test_patch_clamp_data_input_import_dialog_warns_when_pxp_records_are_skipped
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.wave_picker_group.isVisible()
@@ -633,7 +633,7 @@ def test_patch_clamp_data_input_import_dialog_single_wave_pxp_import_stays_open_
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.loaded_wave is wave_a
@@ -650,10 +650,10 @@ def test_patch_clamp_data_input_import_dialog_single_wave_pxp_import_stays_open_
     )
     assert not any(call["name"] == "information" for call in qmessagebox_calls)
 
-    with qtbot.waitSignal(dialog.finished, timeout=1000):
+    with qtbot.waitSignal(dialog.finished, timeout=WAIT_TIMEOUT_MS):
         dialog.cancel_button.click()
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
-    qtbot.waitUntil(lambda: not dialog.isVisible())
+    qtbot.waitUntil(lambda: not dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_imports(
@@ -698,7 +698,7 @@ def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_import
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     items = [dialog.pxp_wave_list.item(i) for i in range(dialog.pxp_wave_list.count())]
@@ -739,7 +739,7 @@ def test_patch_clamp_data_input_import_dialog_stays_open_for_multiple_pxp_import
     assert "WaveB" in project.stim_arrays
     assert dialog.selected_stim_name == "WaveB"
 
-    with qtbot.waitSignal(dialog.finished, timeout=1000):
+    with qtbot.waitSignal(dialog.finished, timeout=WAIT_TIMEOUT_MS):
         dialog.cancel_button.click()
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -786,7 +786,7 @@ def test_patch_clamp_data_input_import_dialog_reimport_same_pxp_wave_is_blocked(
     dialog = PatchClampDataInputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     wave_a_item = None

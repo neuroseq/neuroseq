@@ -13,6 +13,7 @@ from neuroseq.device_control.bss2_connection import STATE_CONNECTED
 from neuroseq.device_control.bss2_connection import STATE_DISCONNECTED
 from neuroseq.device_control.bss2_connection import Bss2Connection
 from neuroseq.workspace_devices import WorkspaceDevices
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 FAKE_HELPER = Path(__file__).with_name("bss2_fake_helper.py")
 TOKEN = "eyJfake.secret-token-value.sig"
@@ -73,7 +74,7 @@ def make_connection(qtbot: QtBot):
 
 
 def _connect(qtbot: QtBot, connection: Bss2Connection) -> str:
-    with qtbot.waitSignal(connection.connected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.connected, timeout=WAIT_TIMEOUT_MS) as blocker:
         assert connection.connect_helper(config(), TOKEN, "expected-chip")
     return blocker.args[0]
 
@@ -92,7 +93,9 @@ def test_connect_passes_environment_and_scrubs_token(qtbot, make_connection) -> 
     assert connection.state == STATE_CONNECTED and connection.is_connected
     assert "differs" in connection.status  # expected identifier did not match
     assert not connection.connect_helper(config(), TOKEN)  # already running
-    qtbot.waitUntil(lambda: any("***" in t for t in recorder.texts), timeout=5000)
+    qtbot.waitUntil(
+        lambda: any("***" in t for t in recorder.texts), timeout=WAIT_TIMEOUT_MS
+    )
     joined = "\n".join(recorder.texts)
     assert "Starting the BrainScaleS-2 container" in joined
     assert "activating environment esd" in joined  # stray stdout kept as log
@@ -103,7 +106,7 @@ def test_run_round_trip(qtbot, make_connection) -> None:
     connection = make_connection()
     recorder = Recorder(connection)
     _connect(qtbot, connection)
-    with qtbot.waitSignal(connection.run_finished, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.run_finished, timeout=WAIT_TIMEOUT_MS) as blocker:
         assert connection.run("r1", _run_arguments())
         assert connection.busy
         assert not connection.run("r2", _run_arguments())
@@ -128,7 +131,7 @@ def test_run_requires_connection(make_connection) -> None:
 def test_run_error_keeps_connection(qtbot, make_connection) -> None:
     connection = make_connection("run_error")
     _connect(qtbot, connection)
-    with qtbot.waitSignal(connection.run_failed, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.run_failed, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.run("r1", _run_arguments())
     assert blocker.args[0] == "r1" and "fake chip failure" in blocker.args[1]
     assert connection.is_connected
@@ -138,7 +141,7 @@ def test_helper_crash_fails_run_and_disconnects(qtbot, make_connection) -> None:
     connection = make_connection("crash_on_run")
     recorder = Recorder(connection)
     _connect(qtbot, connection)
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.run("r1", _run_arguments())
     assert "exit code 5" in blocker.args[0]
     assert "segmentation fault" in blocker.args[0]
@@ -148,7 +151,7 @@ def test_helper_crash_fails_run_and_disconnects(qtbot, make_connection) -> None:
 
 def test_connect_error_disconnects(qtbot, make_connection) -> None:
     connection = make_connection("connect_error")
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.connect_helper(config(), TOKEN)
     assert "quiggeldy refused the token" in blocker.args[0]
     assert connection.state == STATE_DISCONNECTED
@@ -156,14 +159,14 @@ def test_connect_error_disconnects(qtbot, make_connection) -> None:
 
 def test_helper_exit_before_ready(qtbot, make_connection) -> None:
     connection = make_connection("exit")
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.connect_helper(config(), "")
     assert "exit code 3" in blocker.args[0]
 
 
 def test_helper_fatal_error_is_in_the_status_line(qtbot, make_connection) -> None:
     connection = make_connection("fatal")
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.connect_helper(config(), "")
     first_line = blocker.args[0].splitlines()[0]
     assert "exit code 255" in first_line
@@ -173,7 +176,7 @@ def test_helper_fatal_error_is_in_the_status_line(qtbot, make_connection) -> Non
 
 def test_start_timeout(qtbot, make_connection) -> None:
     connection = make_connection("silent", start_timeout_ms=300)
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.connect_helper(config(), TOKEN)
     assert "container start-up" in blocker.args[0]
 
@@ -182,7 +185,7 @@ def test_run_timeout(qtbot, make_connection) -> None:
     connection = make_connection("slow_run", run_timeout_ms=300)
     recorder = Recorder(connection)
     _connect(qtbot, connection)
-    with qtbot.waitSignal(connection.disconnected, timeout=20000):
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS):
         connection.run("r1", _run_arguments())
     assert recorder.failed and "hardware run" in recorder.failed[0][1]
 
@@ -192,7 +195,7 @@ def test_stop_aborts_running_run(qtbot, make_connection) -> None:
     recorder = Recorder(connection)
     _connect(qtbot, connection)
     connection.run("r1", _run_arguments())
-    with qtbot.waitSignal(connection.disconnected, timeout=20000):
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS):
         connection.stop()
     assert recorder.failed == [
         ("r1", "Stopped by the user; the helper was terminated.")
@@ -202,20 +205,20 @@ def test_stop_aborts_running_run(qtbot, make_connection) -> None:
 def test_disconnect_and_terminate_while_starting(qtbot, make_connection) -> None:
     connection = make_connection()
     _connect(qtbot, connection)
-    with qtbot.waitSignal(connection.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         connection.disconnect_helper()
     assert blocker.args[0] == "Disconnected."
 
     slow = make_connection("silent")
     slow.connect_helper(config(), TOKEN)
-    with qtbot.waitSignal(slow.disconnected, timeout=20000) as blocker:
+    with qtbot.waitSignal(slow.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         slow.disconnect_helper()
     assert blocker.args[0] == "Disconnected."
 
 
 def test_launch_failures(qtbot, make_connection) -> None:
     connection = Bss2Connection()  # real launcher: empty image is rejected
-    with qtbot.waitSignal(connection.disconnected, timeout=2000) as blocker:
+    with qtbot.waitSignal(connection.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         assert not connection.connect_helper(
             bp.LaunchConfig("", "", "h", 1, "u"), TOKEN
         )
@@ -224,7 +227,7 @@ def test_launch_failures(qtbot, make_connection) -> None:
     missing = Bss2Connection(
         launcher=lambda _c, _t: bp.LaunchCommand("/nonexistent/singularity", [], {})
     )
-    with qtbot.waitSignal(missing.disconnected, timeout=5000) as blocker:
+    with qtbot.waitSignal(missing.disconnected, timeout=WAIT_TIMEOUT_MS) as blocker:
         missing.connect_helper(config(), TOKEN)
     assert "Could not start" in blocker.args[0]
 
@@ -251,11 +254,11 @@ def test_sessions_route_results_to_their_workspace(qtbot: QtBot) -> None:
     second.run_finished.connect(lambda *a: finished["second"].append(a))
     first.run_progress.connect(progress.append)
     try:
-        with qtbot.waitSignal(second.connected, timeout=20000):
+        with qtbot.waitSignal(second.connected, timeout=WAIT_TIMEOUT_MS):
             assert first.connect_helper(config(), TOKEN)
         assert first.state == STATE_CONNECTED
         assert first.identifier == second.identifier
-        with qtbot.waitSignal(first.run_finished, timeout=20000):
+        with qtbot.waitSignal(first.run_finished, timeout=WAIT_TIMEOUT_MS):
             assert first.run("job", _run_arguments())
             assert first.owns_run and not second.owns_run
             assert second.busy
@@ -265,7 +268,7 @@ def test_sessions_route_results_to_their_workspace(qtbot: QtBot) -> None:
 
         # A session created later learns the current state.
         late = devices.bss2_session(owner)
-        with qtbot.waitSignal(late.connected, timeout=2000) as blocker:
+        with qtbot.waitSignal(late.connected, timeout=WAIT_TIMEOUT_MS) as blocker:
             pass
         assert blocker.args[0] == first.identifier
 
@@ -278,7 +281,7 @@ def test_sessions_route_results_to_their_workspace(qtbot: QtBot) -> None:
         second.stop()
         second.disconnect_helper()
         assert devices.bss2.is_connected
-        with qtbot.waitSignal(first.run_failed, timeout=20000):
+        with qtbot.waitSignal(first.run_failed, timeout=WAIT_TIMEOUT_MS):
             first.run("other", _run_arguments())
             first.stop()
         assert failures == []

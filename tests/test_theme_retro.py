@@ -12,6 +12,7 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq import theme
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _relative_luminance(color: QtGui.QColor) -> float:
@@ -128,8 +129,8 @@ def test_theme_control_gallery_screenshot(
 
     try:
         theme.apply_app_theme(app, theme_name)
-        dialog.show()
-        qtbot.waitExposed(dialog)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
         app.processEvents()
         pixmap = dialog.grab()
         assert pixmap.save(str(actual_path))
@@ -179,8 +180,8 @@ def test_retro_combo_popup_selection_is_readable(qtbot: QtBot) -> None:
 
     try:
         theme.apply_app_theme(app, theme.RETRO)
-        dialog.show()
-        qtbot.waitExposed(dialog)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
         combo_box.showPopup()
         app.processEvents()
 
@@ -193,7 +194,6 @@ def test_retro_combo_popup_selection_is_readable(qtbot: QtBot) -> None:
         for row in range(combo_box.count()):
             view.setCurrentIndex(model.index(row, 0))
             app.processEvents()
-            qtbot.wait(20)
             image = view.viewport().grab().toImage()
             sample_x = image.width() - 8
             highlighted = image.pixelColor(
@@ -234,8 +234,8 @@ def test_retro_button_focus_does_not_look_pressed(qtbot: QtBot) -> None:
 
     try:
         theme.apply_app_theme(app, theme.RETRO)
-        dialog.show()
-        qtbot.waitExposed(dialog)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
 
         other_control.setFocus(QtCore.Qt.FocusReason.TabFocusReason)
         app.processEvents()

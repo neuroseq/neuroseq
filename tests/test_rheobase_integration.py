@@ -66,8 +66,10 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     dialog.spn_response_ms.setValue(15.0)
     dialog.spn_threshold_mv.setValue(-20.0)
     dialog.spn_min_amplitude.setValue(0.0)
-    dialog.spn_max_amplitude.setValue(100.0)  # nS
-    dialog.spn_tolerance.setValue(0.5)  # nS bracket
+    # The threshold is ~20 nS: this range and bracket need only a few (slow)
+    # probe simulations.
+    dialog.spn_max_amplitude.setValue(50.0)  # nS
+    dialog.spn_tolerance.setValue(2.0)  # nS bracket
     dialog.spn_max_iterations.setValue(30)
 
     # start() drives the whole search synchronously through the connected slot.
@@ -76,7 +78,7 @@ def test_rheobase_closed_loop_finds_threshold_on_real_model(
     assert not dialog._running
     assert dialog._rheobase is not None
     # A genuine interior threshold, not pinned to either amplitude bound.
-    assert 0.0 < dialog._rheobase < 100.0
+    assert 0.0 < dialog._rheobase < 50.0
     # The trace really came from the model, not a fixture double.
     assert dialog.cmb_trace.currentText().startswith("Simulation :: ")
     # Spike detection was monotone in amplitude: everything at/above the

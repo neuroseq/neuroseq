@@ -15,6 +15,7 @@ from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_stim_preview_keeps_editor_menu(qtbot, monkeypatch):
@@ -119,14 +120,21 @@ def get_event_target(widget):
     return handle if handle is not None else widget
 
 
+def wait_for_canvas_events(qtbot: QtBot, widget: QtGui.QWidget) -> None:
+    # rendercanvas queues events (merging consecutive moves) and only
+    # dispatches them once per frame, which can take a while (e.g. on
+    # Windows): wait until it has done so
+    events = getattr(widget, "_subwidget", widget)._events
+    qtbot.waitUntil(lambda: not events._pending_events, timeout=WAIT_TIMEOUT_MS)
+
+
 def mouse_click(
     qtbot: QtBot,
     widget: QtGui.QWidget,
     pos: QtCore.QPoint,
     button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
-    delay_ms=10,
 ) -> None:
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseClick(
         get_event_target(widget),
         button,
@@ -140,7 +148,8 @@ def wait_for_canvas(qtbot: QtBot, stim_widget, *points: QtCore.QPoint) -> None:
         lambda: all(
             stim_widget.subplot.map_screen_to_world((p.x(), p.y())) is not None
             for p in points
-        )
+        ),
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -150,12 +159,11 @@ def mouse_click_and_drag(
     start: QtCore.QPoint,
     end: QtCore.QPoint,
     button: QtCore.Qt.MouseButton = QtCore.Qt.MouseButton.LeftButton,
-    delay_ms=10,
     intermediate_points=4,
 ) -> None:
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseMove(get_event_target(widget), pos=start)
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mousePress(
         get_event_target(widget),
         button,
@@ -167,18 +175,18 @@ def mouse_click_and_drag(
         np.linspace(start.y(), end.y(), n_points),
         strict=True,
     ):
-        qtbot.wait(delay_ms)
+        wait_for_canvas_events(qtbot, widget)
         qtbot.mouseMove(
             get_event_target(widget),
             pos=QtCore.QPoint(int(x), int(y)),
         )
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
     qtbot.mouseRelease(
-        widget,
+        get_event_target(widget),
         button,
         pos=end,
     )
-    qtbot.wait(delay_ms)
+    wait_for_canvas_events(qtbot, widget)
 
 
 @pytest.fixture
@@ -218,7 +226,7 @@ def test_stim_widget_background_stims(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     s1 = StimArray(
         "s1", StimType.Excitation, np.random.random((10, 100)), "mV", dt=0.001
     )
@@ -236,7 +244,7 @@ def test_stim_widget_background_stims(qtbot: QtBot) -> None:
     for graphic in stim_widget.background_graphics:
         assert graphic.visible is True
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_background_stims_use_their_own_dt(qtbot: QtBot) -> None:
@@ -244,7 +252,7 @@ def test_stim_widget_background_stims_use_their_own_dt(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     selected_stim = StimArray(
         "selected", StimType.Excitation, np.random.random((10, 8)), "mV", dt=0.001
     )
@@ -262,7 +270,7 @@ def test_stim_widget_background_stims_use_their_own_dt(qtbot: QtBot) -> None:
     assert background_graphic.world_object.world.scale[0] == pytest.approx(0.5)
     assert background_graphic.offset[0] == pytest.approx(0.25)
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_hover_uses_background_values_in_show_all_mode(
@@ -272,7 +280,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     foreground = StimArray(
         "foreground",
         StimType.Excitation,
@@ -309,7 +317,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
     assert len(stim_widget._background_stim_arrays) == 1
     assert captured["additional_text"] == "Neuron 1\n-4.5 pA\nStart: 2 ms\nEnd: 3 ms"
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_clear_data_resets_background_stim_arrays(qtbot: QtBot) -> None:
@@ -317,7 +325,7 @@ def test_stim_widget_clear_data_resets_background_stim_arrays(qtbot: QtBot) -> N
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     foreground = StimArray(
         "foreground",
         StimType.Excitation,
@@ -339,7 +347,7 @@ def test_stim_widget_clear_data_resets_background_stim_arrays(qtbot: QtBot) -> N
 
     assert stim_widget._background_stim_arrays == []
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
@@ -358,7 +366,6 @@ def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
     assert stim_widget._greyed_neuron_ids == {2}
     stim_widget.set_neuron_greyed(2, False)
     assert not stim_widget.is_neuron_greyed(2)
-    stim_widget.close()
 
 
 def test_stim_widget_clear_data_clears_greyed_neurons(
@@ -374,7 +381,6 @@ def test_stim_widget_clear_data_clears_greyed_neurons(
     stim_widget.set_data(positive_stims)
 
     assert not stim_widget.is_neuron_greyed(1)
-    stim_widget.close()
 
 
 def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
@@ -415,7 +421,6 @@ def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
     assert stim_widget.n_neurons == 3
     assert stim_widget.grid_lines.n_neurons == 3
     assert controller._get_camera_state()["height"] == pytest.approx(3)
-    stim_widget.close()
 
 
 def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
@@ -445,7 +450,6 @@ def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
     stim_widget.pointer_move(SimpleNamespace(x=0.0))
 
     assert captured["t"].startswith("Neuron 14\n")
-    stim_widget.close()
 
 
 def test_stim_widget_y_tick_labels_stay_on_their_own_row(qtbot: QtBot) -> None:
@@ -471,7 +475,6 @@ def test_stim_widget_y_tick_labels_stay_on_their_own_row(qtbot: QtBot) -> None:
                 f"label {label!r} drawn off-row at y={y}"
             )
             assert label == str(round(y))
-    stim_widget.close()
 
 
 def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed(
@@ -492,12 +495,13 @@ def test_stim_widget_draw_mode_translates_display_row_to_real_neuron_when_greyed
         "map_screen_to_world",
         lambda ev: np.array([0.0, 1.0, 0.0]),
     )
-    with qtbot.waitSignal(stim_widget.mouse_dragged) as blocker:
+    with qtbot.waitSignal(
+        stim_widget.mouse_dragged, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         stim_widget.pointer_down(SimpleNamespace(button=1))
 
     assert blocker.args[0] == 2
     assert blocker.args[1] == 2
-    stim_widget.close()
 
 
 def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
@@ -505,7 +509,7 @@ def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_array = StimArray(
         "stim",
         StimType.Excitation,
@@ -521,7 +525,7 @@ def test_stim_widget_gridlines_follow_stim_dt(qtbot: QtBot) -> None:
     positions = stim_widget.grid_lines.gridline_1sample.geometry.positions.data[0::2, 0]
     assert positions[1] - positions[0] == pytest.approx(0.5208125)
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_short_stimuli_minimum_size_toggle(qtbot: QtBot) -> None:
@@ -686,7 +690,7 @@ def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_array = StimArray(
         "stim",
         StimType.Excitation,
@@ -710,7 +714,7 @@ def test_stim_widget_hover_preview_snaps_to_sample_on_pointer_move(
     assert stim_widget.hover_slice_graphic.offset[0] == pytest.approx(1.25)
     assert stim_widget.hover_slice_graphic.offset[1] == pytest.approx(2.0)
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_select_neurons_translates_display_rows_when_greyed(
@@ -728,15 +732,14 @@ def test_stim_widget_select_neurons_translates_display_rows_when_greyed(
     stim_widget.select_neurons(slice(1, 3), slice(10, 20))
 
     assert stim_widget.selected_neuron_slice == slice(2, 4)
-    stim_widget.close()
 
 
 def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
-    stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    with qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS):
+        stim_widget.show()
     stim_widget.set_mode(InteractMode.SELECT)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
@@ -753,10 +756,15 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     assert stim_widget.selected_time_slice is None
     stim_widget.select_neurons(slice(1, 3), slice(10, 20))
     # wait for the widget to update
-    qtbot.waitUntil(lambda: stim_widget.selected_neuron_slice == slice(1, 3))
+    qtbot.waitUntil(
+        lambda: stim_widget.selected_neuron_slice == slice(1, 3),
+        timeout=WAIT_TIMEOUT_MS,
+    )
     assert stim_widget.selected_time_slice == slice(10, 20)
     stim_widget.unselect_neurons()
-    qtbot.waitUntil(lambda: stim_widget.selected_neuron_slice is None)
+    qtbot.waitUntil(
+        lambda: stim_widget.selected_neuron_slice is None, timeout=WAIT_TIMEOUT_MS
+    )
     assert stim_widget.selected_time_slice is None
     # a missing slice argument should default to the full range
     stim_widget.select_neurons(time_index_slice=slice(1, 3))
@@ -775,7 +783,7 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     start = QtCore.QPoint(x0, y0)
     end = QtCore.QPoint(x0 * 3, y0 * 3)
     wait_for_canvas(qtbot, stim_widget, start, end)
-    mouse_click_and_drag(qtbot, stim_widget, start, end)
+    mouse_click_and_drag(qtbot, stim_widget.figure.canvas, start, end)
     assert stim_widget.selected_neuron_slice is not None
     assert stim_widget.selected_time_slice is not None
     # A quarter-to-three-quarters drag should land roughly in the middle
@@ -798,15 +806,15 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
         <= 0.90 * n_timestamps
     )
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
-    stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    with qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS):
+        stim_widget.show()
     stim_widget.set_mode(InteractMode.DRAW)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
@@ -832,13 +840,13 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
 
     # mouse clicks
     stim_widget.setFocus()
-    with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
+    with qtbot.waitSignal(stim_widget.mouse_clicked, timeout=WAIT_TIMEOUT_MS) as signal:
         mouse_click(qtbot, stim_widget.figure.canvas, QtCore.QPoint(x0, y0))
     neuron_index_offset, time_index, mouse_button = signal.args
     assert 0 < time_index / n_timestamps < 0.4
     assert 0 < neuron_index_offset / n_neurons < 1.0
     assert mouse_button == 1
-    with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
+    with qtbot.waitSignal(stim_widget.mouse_clicked, timeout=WAIT_TIMEOUT_MS) as signal:
         mouse_click(
             qtbot,
             stim_widget.figure.canvas,
@@ -849,7 +857,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     assert 0.3 < time_index / n_timestamps < 0.7
     assert 0 < neuron_index_offset / n_neurons < 1.0
     assert mouse_button == 2
-    with qtbot.waitSignal(stim_widget.mouse_clicked) as signal:
+    with qtbot.waitSignal(stim_widget.mouse_clicked, timeout=WAIT_TIMEOUT_MS) as signal:
         mouse_click(qtbot, stim_widget.figure.canvas, QtCore.QPoint(x2, y1))
     neuron_index_offset, time_index, mouse_button = signal.args
     assert 0.6 < time_index / n_timestamps < 1.0
@@ -864,9 +872,10 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
         lambda n0, n1, t0, t1, btn: drag_signals.append((n0, n1, t0, t1, btn))
     )
     mouse_click_and_drag(
-        qtbot, stim_widget, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
+        qtbot, stim_widget.figure.canvas, QtCore.QPoint(x0, y0), QtCore.QPoint(x2, y0)
     )
-    assert len(drag_signals) > 2
+    # moves between start and end may be merged into one event
+    assert len(drag_signals) >= 2
     # first signal on start of drag
     n0, n1, t0, t1, btn = drag_signals[0]
     assert btn == 1
@@ -882,7 +891,7 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     assert 0.6 < t1 / n_timestamps < 1.0
     assert 0 < n0 / n_neurons < 1.0
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_ext_stims(
@@ -892,7 +901,7 @@ def test_stim_widget_ext_stims(
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     # default stim type and colormap settings
     assert stim_widget.stim_type == StimType.Excitation
     assert stim_widget.vmin == pytest.approx(0.0)
@@ -930,7 +939,7 @@ def test_stim_widget_ext_stims(
     assert stim_widget.vmin == pytest.approx(-3.0)
     assert stim_widget.vmax == pytest.approx(3.0)
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stim_widget_minimum_size_overlay_not_rebuilt_while_hidden(
@@ -992,7 +1001,7 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_array = StimArray(
         "stim", StimType.Excitation, np.random.random((10, 8)), "mV", dt=0.0005
     )
@@ -1021,7 +1030,7 @@ def test_stim_widget_hover_preview_stays_snapped_within_cell(
         stim_widget.HOVER_Z
     )
     stim_widget.close()
-    qtbot.waitUntil(lambda: not stim_widget.isVisible())
+    qtbot.waitUntil(lambda: not stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_active_span_finds_bounds_of_contiguous_nonzero_run() -> None:
@@ -1061,4 +1070,3 @@ def test_stim_widget_hover_shows_start_and_end_of_stimulus(
     world["pos"] = np.array([1.0, 1.0, 0.0])
     stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == "Neuron 1\n0 pA"
-    stim_widget.close()

@@ -12,6 +12,7 @@ from pytestqt.qtbot import QtBot
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.data import TraceData
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _load_plugin_module():
@@ -101,7 +102,8 @@ def test_compute_cycle_performance_periodic_signal_is_optimal() -> None:
     assert shifts.shape == (3,)
     np.testing.assert_array_almost_equal(mses, np.zeros(3), decimal=8)
     np.testing.assert_array_almost_equal(corrs, np.ones(3), decimal=8)
-    np.testing.assert_array_equal(shifts, np.zeros(3, dtype=np.int64))
+    # Shifts should be zero - modulo the period of 64
+    np.testing.assert_array_equal(shifts % 64, np.zeros(3, dtype=np.int64))
 
 
 def test_compute_cycle_performance_recovers_time_shifted_cycle() -> None:
@@ -192,12 +194,11 @@ def test_widget_renders_replay_mse_bar_chart(qtbot: QtBot) -> None:
     widget = CustomAnalysisWidget()
     qtbot.addWidget(widget)
     widget.show()
-    qtbot.waitUntil(lambda: widget.isVisible())
+    qtbot.waitUntil(lambda: widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     # 3 cycles of 1920 samples at dt=1 ms → 5.76 s, identical cycles.
     data = _make_periodic_trace(n_neurons=4, cycle_samples=1920, n_cycles=3, dt=0.001)
     widget.set_data(data, plugin, slice(0, 4), slice(0, 1920 * 3))
-    qtbot.wait(20)
 
     # Shift-corrected MSE drops the last cycle (no shift slack), so we
     # expect n_cycles - 1 = 2 bars; both should be ≈ 0 since the signal
@@ -215,12 +216,11 @@ def test_widget_shows_helpful_message_on_too_short_selection(
     widget = CustomAnalysisWidget()
     qtbot.addWidget(widget)
     widget.show()
-    qtbot.waitUntil(lambda: widget.isVisible())
+    qtbot.waitUntil(lambda: widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     # 0.5 s of data at dt=1 ms; default cycle is 1920 ms → too short.
     data = _make_periodic_trace(n_neurons=3, cycle_samples=500, n_cycles=1, dt=0.001)
     widget.set_data(data, plugin, slice(0, 3), slice(0, 500))
-    qtbot.wait(20)
 
     texts = [t.get_text() for t in widget.subplot.texts]
     assert any("at least 2 full cycles" in t for t in texts)

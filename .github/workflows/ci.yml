@@ -16,31 +16,48 @@ jobs:
   conda-forge:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: conda-forge"
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: ["macos-arm64-ssc"]
+        os: ["macos-latest", "ubuntu-latest", "windows-latest"]
     defaults:
       run:
         shell: bash -leo pipefail {0}
     steps:
       - uses: actions/checkout@v7
+      - if: runner.os == 'Linux'
+        uses: pyvista/setup-headless-display-action@v5
+        with:
+          qt: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y mesa-vulkan-drivers
       - uses: mamba-org/setup-micromamba@v3
         with:
           environment-file: environment.yml
       - run: pip install . --no-deps
-      - run: pytest -sv
+      - run: python .github/crash_reports.py setup
+      - run: pytest -v --wait-timeout=30
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
+      - if: failure()
+        run: python .github/crash_reports.py report
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crash-dumps-${{ matrix.os }}-conda-forge
+          path: |
+            ${{ runner.temp }}/crash-dumps
+            !${{ runner.temp }}/crash-dumps/core.*
+          if-no-files-found: ignore
   pypi:
     runs-on: ${{ matrix.os }}
     name: "${{ matrix.os }} :: pypi :: ${{ matrix.python-version }}"
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        os: ["macos-arm64-ssc"]
+        os: ["macos-latest", "ubuntu-latest", "windows-latest"]
         python-version: ["3.12", "3.14"]
     steps:
       - uses: actions/checkout@v7
@@ -50,12 +67,29 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - uses: astral-sh/setup-uv@v7
-      - run: uv run pytest -sv --cov --cov-report=xml
+      - if: runner.os == 'Linux'
+        uses: pyvista/setup-headless-display-action@v5
+        with:
+          qt: true
+      - if: runner.os == 'Linux'
+        run: sudo apt-get install -y mesa-vulkan-drivers
+      - run: python .github/crash_reports.py setup
+      - run: uv run pytest -v --wait-timeout=30 --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
+      - if: failure()
+        run: python .github/crash_reports.py report
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: crash-dumps-${{ matrix.os }}-pypi-${{ matrix.python-version }}
+          path: |
+            ${{ runner.temp }}/crash-dumps
+            !${{ runner.temp }}/crash-dumps/core.*
+          if-no-files-found: ignore
       - run: uv run diff-cover coverage.xml -c pyproject.toml
   pre-commit:
-    runs-on: "macos-arm64-ssc"
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7

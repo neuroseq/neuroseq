@@ -60,6 +60,12 @@ class FPLWidget(QtWidgets.QWidget):
                     logger.debug("Could not poll GPU device on close (%s).", exc)
                 if hasattr(figure, "close"):
                     figure.close()
+                # fastplotlib keeps subplots in a numpy object array, which
+                # the gc can't see into, so the figure <-> subplot cycle would
+                # keep the figure and everything it references alive.
+                subplots = getattr(figure, "_subplots", None)
+                if subplots is not None:
+                    subplots[...] = None
             except Exception as exc:
                 logger.debug("Could not close fastplotlib figure (%s).", exc)
             finally:

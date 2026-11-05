@@ -12,6 +12,7 @@ from neuroseq.model_editor import EditableNeurongroupTree
 from neuroseq.model_editor import EditableParameterTree
 from neuroseq.model_editor import EditableSynapseTree
 from neuroseq.model_editor import ModelEditorDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_EagerComboBox(qtbot: QtBot) -> None:
@@ -74,7 +75,9 @@ def test_etree_edit_item(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
     textfield = synapsenode.child("model")
 
     # edit normal parameter
-    with qtbot.waitSignal(normal.sigValueChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(
+        normal.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
+    ):
         normal.setValue("other")
 
     assert stree.b2model.synapses["S"]["target"] == "other"
@@ -82,7 +85,9 @@ def test_etree_edit_item(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
     assert normal.value() == "other"
 
     # edit textfield parameter
-    with qtbot.waitSignal(textfield.sigValueChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(
+        textfield.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
+    ):
         textfield.setValue("dv/dt = -v: 1")
 
     assert stree.b2model.synapses["S"]["model"] == "dv/dt = -v: 1"
@@ -109,7 +114,7 @@ def test_add_new_init_element(b2_model_nmda, qtbot: QtBot) -> None:
 
     assert "variable" not in b2_model_nmda.initials["S"]
 
-    with qtbot.waitSignal(sn.param.sigAddNew, timeout=1000, raising=True):
+    with qtbot.waitSignal(sn.param.sigAddNew, raising=True, timeout=WAIT_TIMEOUT_MS):
         sn.param.addNew(new_param)
 
     assert "variable" in b2_model_nmda.initials["S"]
@@ -335,7 +340,9 @@ def test_default_monitor_addition(
     assert sourceitem is not None
     assert varitem is not None
 
-    with qtbot.waitSignal(typeitem.widget.activated, timeout=1000, raising=True):
+    with qtbot.waitSignal(
+        typeitem.widget.activated, raising=True, timeout=WAIT_TIMEOUT_MS
+    ):
         qtbot.mouseClick(typeitem.widget, QtCore.Qt.LeftButton)
         qtbot.keyClick(typeitem.widget, QtCore.Qt.Key_Up)
 
@@ -392,7 +399,7 @@ def test_default_monitor_customization(
     assert varitem is not None
 
     with qtbot.waitSignal(
-        typeitem.widget.currentIndexChanged, timeout=1000, raising=True
+        typeitem.widget.currentIndexChanged, raising=True, timeout=WAIT_TIMEOUT_MS
     ):
         typeitem.widget.setCurrentIndex(0)
 
@@ -401,7 +408,7 @@ def test_default_monitor_customization(
     assert stree.b2model.monitors["new_monitor"]["type"] == "StateMonitor"
 
     with qtbot.waitSignal(
-        sourceitem.widget.currentIndexChanged, timeout=1000, raising=True
+        sourceitem.widget.currentIndexChanged, raising=True, timeout=WAIT_TIMEOUT_MS
     ):
         sourceitem.widget.setCurrentIndex(1)
 
@@ -410,7 +417,7 @@ def test_default_monitor_customization(
     assert stree.b2model.monitors["new_monitor"]["source"] == "neurons"
 
     with qtbot.waitSignal(
-        varitem.widget.currentIndexChanged, timeout=1000, raising=True
+        varitem.widget.currentIndexChanged, raising=True, timeout=WAIT_TIMEOUT_MS
     ):
         varitem.widget.setCurrentIndex(2)
 
@@ -488,7 +495,7 @@ def test_delete_neurongroup(b2_model_nmda, qtbot: QtBot) -> None:
         QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
         0,
     )[0]
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "neurons" not in b2_model_nmda.neurongroups
@@ -509,7 +516,7 @@ def test_delete_neurongroup_element(b2_model_nmda, qtbot: QtBot) -> None:
 
     ng = [p.param for p in ngs if p.parent().param.name() == "neurons"][0]
 
-    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.remove()
 
     assert "neuronnumber" not in b2_model_nmda.neurongroups["neurons"]
@@ -526,7 +533,7 @@ def test_delete_synapse(b2_model_nmda, qtbot: QtBot) -> None:
         QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
         0,
     )[0]
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "S" not in b2_model_nmda.synapses
@@ -546,7 +553,7 @@ def test_delete_synapse_element(b2_model_nmda, qtbot: QtBot) -> None:
 
     ng = [p.param for p in ngs if p.parent().param.name() == "S"][0]
 
-    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.remove()
 
     assert "origin" not in b2_model_nmda.synapses["S"]
@@ -563,7 +570,7 @@ def test_delete_monitor(b2_model_nmda, qtbot: QtBot) -> None:
         QtCore.Qt.MatchFlag.MatchExactly | QtCore.Qt.MatchFlag.MatchRecursive,
         0,
     )[0]
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "Mn" not in b2_model_nmda.monitors
@@ -583,7 +590,7 @@ def test_delete_monitor_element(b2_model_nmda, qtbot: QtBot) -> None:
 
     ng = [p.param for p in ngs if p.parent().param.name() == "M"][0]
 
-    with qtbot.waitSignal(ng.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.remove()
 
     assert "source" not in b2_model_nmda.monitors["M"]
@@ -603,7 +610,7 @@ def test_delete_parameter(b2_model_nmda, qtbot: QtBot) -> None:
         0,
     )[0]
 
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "a" not in b2_model_nmda.parameters
@@ -623,7 +630,7 @@ def test_delete_init(b2_model_nmda, qtbot: QtBot) -> None:
         0,
     )[0]
 
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "S" not in b2_model_nmda.initials
@@ -643,7 +650,7 @@ def test_delete_init_element(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
         0,
     )[0]
 
-    with qtbot.waitSignal(ng.param.sigRemoved, timeout=1000, raising=True):
+    with qtbot.waitSignal(ng.param.sigRemoved, raising=True, timeout=WAIT_TIMEOUT_MS):
         ng.param.remove()
 
     assert "w" not in b2_model_nmda.initials["S"]
@@ -659,7 +666,9 @@ def test_ptree_edit_b2quantity(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
 
     a_node = pnode.child("a")
 
-    with qtbot.waitSignal(a_node.sigValueChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(
+        a_node.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
+    ):
         a_node.setValue("1/60 * ms")
 
     assert ptree.b2model.parameters["a"] == ((1 / 60) * b2.msecond)  # type: ignore
@@ -678,7 +687,7 @@ def test_rename_tree_element(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
 
     node = pnode.child("a")
 
-    with qtbot.waitSignal(node.sigNameChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(node.sigNameChanged, raising=True, timeout=WAIT_TIMEOUT_MS):
         node.setName("x")
 
     item = node.makeTreeItem(0)
@@ -691,7 +700,7 @@ def test_rename_tree_element(b2_model_nmda: B2Model, qtbot: QtBot) -> None:
 
     node = pnode.child("x")
 
-    with qtbot.waitSignal(node.sigNameChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(node.sigNameChanged, raising=True, timeout=WAIT_TIMEOUT_MS):
         node.setName("y")
 
     item = node.makeTreeItem(0)
@@ -960,7 +969,7 @@ def test_method_selection(
     )[0]
 
     with qtbot.waitSignal(
-        method_dropdown.param.sigValueChanged, timeout=1000, raising=True
+        method_dropdown.param.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
     ):
         method_dropdown.param.setValue("exponential_euler")
 
@@ -974,7 +983,7 @@ def test_method_selection(
     exp_euler_data_shape = diag.b2model.network["Mn"].g.shape
 
     with qtbot.waitSignal(
-        method_dropdown.param.sigValueChanged, timeout=1000, raising=True
+        method_dropdown.param.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
     ):
         method_dropdown.param.setValue("euler")
     assert diag.b2model.neurongroups["neuron_input"]["method"] == "euler"
@@ -1012,7 +1021,9 @@ def test_monitordialog_modify_with_run(
 
     b2_model_nmda.assemble_network()
 
-    with qtbot.waitSignal(dtparam.param.sigValueChanged, timeout=1000, raising=True):
+    with qtbot.waitSignal(
+        dtparam.param.sigValueChanged, raising=True, timeout=WAIT_TIMEOUT_MS
+    ):
         dtparam.param.setValue("100 * ms")
 
     assert b2_model_nmda.monitors["M"]["dt"] == 100 * b2.ms

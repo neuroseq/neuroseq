@@ -16,6 +16,7 @@ from neuroseq.utils import detect_period
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _make_project(*stim_arrays: StimArray) -> Project:
@@ -120,14 +121,13 @@ def test_stim_loop_dialog_accept_returns_loop_count(qtbot: QtBot) -> None:
     dialog = StimLoopDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(dialog.isVisible)
+    qtbot.waitUntil(dialog.isVisible, timeout=WAIT_TIMEOUT_MS)
 
     dialog.spinbox.setValue(4)
     dialog.accept()
 
     assert dialog.loop_count == 4
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
-    dialog.close()
 
 
 def test_stim_editor_loop_stim_array_accepts_and_tiles(
@@ -150,7 +150,7 @@ def test_stim_editor_loop_stim_array_accepts_and_tiles(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(stim_editor.isVisible)
+    qtbot.waitUntil(stim_editor.isVisible, timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     monkeypatch.setattr(
         neuroseq.stimulation.stim_editor, "StimLoopDialog", _AcceptedDialog
@@ -160,7 +160,6 @@ def test_stim_editor_loop_stim_array_accepts_and_tiles(
 
     assert stim_editor.current_stim_modifier is not None
     assert stim_editor.current_stim_modifier.stim_array.values.shape == (12, 3)
-    stim_editor.close()
 
 
 def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
@@ -184,7 +183,7 @@ def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(stim_editor.isVisible)
+    qtbot.waitUntil(stim_editor.isVisible, timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     monkeypatch.setattr(
         neuroseq.stimulation.stim_editor, "StimLoopDialog", _RejectedDialog
@@ -194,4 +193,3 @@ def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
 
     assert stim_editor.current_stim_modifier is not None
     assert stim_editor.current_stim_modifier.stim_array.values.shape == (2, 3)
-    stim_editor.close()

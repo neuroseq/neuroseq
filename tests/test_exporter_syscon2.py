@@ -2228,7 +2228,11 @@ def test_exact_slm_timing_delays_only_as_much_as_the_load_window_needs() -> None
     assert _starts(imported[:, 2]) == [900]
 
 
-def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -> None:
+# check this works with both LF (linux) and CRLF (windows) line endings
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_original_stim_sidecar_restores_exact_timings_and_rows(
+    tmp_path: Path, newline: str
+) -> None:
     from neuroseq.importers.importer_syscon2 import original_stim_sidecar_path
     from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_file
     from neuroseq.importers.importer_syscon2 import write_original_stim_sidecar
@@ -2257,7 +2261,7 @@ def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -
         exact_slm_timing=True,
     )
     seq_path = tmp_path / "script.seq"
-    seq_path.write_text(seq_text, encoding="utf-8")
+    seq_path.write_text(seq_text, encoding="utf-8", newline=newline)
 
     plain = parse_syscon2_seq_file(seq_path)
     assert plain.original_values is None
@@ -2277,5 +2281,5 @@ def test_original_stim_sidecar_restores_exact_timings_and_rows(tmp_path: Path) -
     assert result.grouped_objects == n_neurons
 
     # A sidecar that does not belong to the file is ignored.
-    seq_path.write_text(seq_text + "\n", encoding="utf-8")
+    seq_path.write_text(seq_text + "\n", encoding="utf-8", newline=newline)
     assert parse_syscon2_seq_file(seq_path).original_values is None

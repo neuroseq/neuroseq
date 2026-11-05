@@ -5,6 +5,7 @@ import threading
 import numpy as np
 import pytest
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.background_jobs import SimulationGuard
@@ -16,6 +17,7 @@ from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.workspace_devices import WorkspaceDevices
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _project() -> Project:
@@ -149,7 +151,7 @@ def test_hidden_workspace_receives_its_own_background_result(
 
     def simulate(*args, **kwargs):
         started.set()
-        release.wait(5)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return Experiment("result", 0.1, [], [])
 
     first.project.external_simulate_function = simulate
@@ -157,14 +159,14 @@ def test_hidden_workspace_receives_its_own_background_result(
         first, "_append_experimental_data", first.project.add_experiment
     )
     first._do_external_simulation(0.1)
-    qtbot.waitUntil(started.is_set)
+    qtbot.waitUntil(started.is_set, timeout=WAIT_TIMEOUT_MS)
     second = window._add_workspace(_project())
     try:
         assert window.project_tabs.isEnabled()
         assert first._background_job.busy
     finally:
         release.set()
-    qtbot.waitUntil(lambda: not first._background_job.busy)
+    qtbot.waitUntil(lambda: not first._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     assert "result" in first.project.experiments
     assert "result" not in second.project.experiments
     assert window.active_workspace is second
@@ -243,35 +245,37 @@ def test_close_tab_waits_for_save_and_tracks_workspace_after_reordering(
     assert second._disposed and not first._disposed
 
 
-def test_shortcut_only_dispatches_in_the_active_workspace(window, qtbot, monkeypatch):
+def test_workspace_shortcuts_only_apply_within_their_workspace(window):
+    # So Qt only triggers a shortcut in the workspace that has the focus.
+    actions = [
+        action
+        for action in window.active_workspace.actions()
+        if not action.shortcut().isEmpty()
+    ]
+    assert actions
+    for action in actions:
+        assert (
+            action.shortcutContext()
+            == QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut
+        )
+
+
+def test_shortcut_from_the_shell_goes_to_the_current_workspace(window, monkeypatch):
     first = window.active_workspace
     second = window._add_workspace(_project())
     calls = []
     monkeypatch.setattr(first, "_create_new_project", lambda: calls.append("first"))
     monkeypatch.setattr(second, "_create_new_project", lambda: calls.append("second"))
-    window.activateWindow()
-    second.console_widget.setFocus()
-    qtbot.waitUntil(lambda: window.isActiveWindow())
-    qtbot.keyClick(
-        second.console_widget,
-        QtCore.Qt.Key.Key_N,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
-    )
-    assert calls == ["second"]
-    window.project_tabs.setCurrentWidget(first)
-    first.console_widget.setFocus()
-    qtbot.keyClick(
-        first.console_widget,
-        QtCore.Qt.Key.Key_N,
-        QtCore.Qt.KeyboardModifier.ControlModifier,
-    )
+    for workspace in (second, first):
+        window.project_tabs.setCurrentWidget(workspace)
+        event = QtGui.QKeyEvent(
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.Qt.Key.Key_N,
+            QtCore.Qt.KeyboardModifier.ControlModifier,
+        )
+        window.keyPressEvent(event)
+        assert event.isAccepted()
     assert calls == ["second", "first"]
-    tab_bar = window.project_tabs.tabBar()
-    tab_bar.setFocus()
-    qtbot.keyClick(
-        tab_bar, QtCore.Qt.Key.Key_N, QtCore.Qt.KeyboardModifier.ControlModifier
-    )
-    assert calls == ["second", "first", "first"]
 
 
 def test_close_keeps_all_workspaces_alive_when_a_hidden_job_cannot_stop(
@@ -362,7 +366,7 @@ def _start_job(workspace, *, cancellable=True, honour_cancel=True):
     release = threading.Event()
     results = []
     assert workspace._dispatch_io_task(
-        lambda report: release.wait(5) and "done",
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000) and "done",
         "Long operation...",
         results.append,
         cancel_callback=(
@@ -390,7 +394,7 @@ def test_application_close_lists_all_blockers_and_stops_nothing(
     finally:
         second.syscon2_panel._execution_phase = "idle"
         release.set()
-        qtbot.waitUntil(lambda: not first._background_job.busy)
+        qtbot.waitUntil(lambda: not first._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     assert results == ["done"]
 
 
@@ -406,7 +410,9 @@ def test_uncancellable_job_blocks_tab_close(window, qtbot, qmessagebox_calls):
         )
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not workspace._background_job.busy)
+        qtbot.waitUntil(
+            lambda: not workspace._background_job.busy, timeout=WAIT_TIMEOUT_MS
+        )
 
 
 def test_application_close_cancels_jobs_then_closes_without_blocking(window, qtbot):
@@ -415,7 +421,9 @@ def test_application_close_cancels_jobs_then_closes_without_blocking(window, qtb
     release, results = _start_job(first)
     assert not window.close()  # returns at once; the job is still winding down
     assert first.progress_dialog.labelText() == "Cancelling..."
-    qtbot.waitUntil(lambda: first._disposed and second._disposed)
+    qtbot.waitUntil(
+        lambda: first._disposed and second._disposed, timeout=WAIT_TIMEOUT_MS
+    )
     # The job's outcome was delivered rather than dropped.
     assert results == ["done"]
 
@@ -428,12 +436,14 @@ def test_close_timeout_keeps_workspaces_open_and_says_so(
     release, _results = _start_job(workspace, honour_cancel=False)
     try:
         assert not window.close()
-        qtbot.waitUntil(lambda: bool(qmessagebox_calls))
+        qtbot.waitUntil(lambda: bool(qmessagebox_calls), timeout=WAIT_TIMEOUT_MS)
         assert "still stopping" in qmessagebox_calls[-1]["text"]
         assert not workspace._disposed and workspace._background_job.busy
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not workspace._background_job.busy)
+        qtbot.waitUntil(
+            lambda: not workspace._background_job.busy, timeout=WAIT_TIMEOUT_MS
+        )
     assert not window._close_gate.waiting
 
 
@@ -500,7 +510,9 @@ def test_brian2_simulations_are_serialized_across_workspaces(
     release = threading.Event()
     runs = []
     monkeypatch.setattr(
-        first.project, "run_simulation", lambda *args, **kwargs: release.wait(5)
+        first.project,
+        "run_simulation",
+        lambda *args, **kwargs: release.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(
         second.project, "run_simulation", lambda *args, **kwargs: runs.append(1)
@@ -518,12 +530,14 @@ def test_brian2_simulations_are_serialized_across_workspaces(
         assert not second._background_job.busy
         # I/O stays per workspace.
         assert second._dispatch_io_task(lambda report: None, "Saving", lambda _: None)
-        qtbot.waitUntil(lambda: not second._background_job.busy)
+        qtbot.waitUntil(
+            lambda: not second._background_job.busy, timeout=WAIT_TIMEOUT_MS
+        )
     finally:
         release.set()
-    qtbot.waitUntil(lambda: not first._background_job.busy)
+    qtbot.waitUntil(lambda: not first._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     second._do_brian2_simulation_threaded(0.1)
-    qtbot.waitUntil(lambda: not second._background_job.busy)
+    qtbot.waitUntil(lambda: not second._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     assert runs == [1]
     second.project.external_simulate_function = None
 
@@ -539,27 +553,31 @@ def test_simulation_guard_is_released_on_failure_cancel_and_close(
     monkeypatch.setattr(workspace.project, "run_simulation", fail)
     workspace._do_brian2_simulation_threaded(0.1)
     assert SimulationGuard.held_by() is workspace
-    qtbot.waitUntil(lambda: not workspace._background_job.busy)
+    qtbot.waitUntil(lambda: not workspace._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     assert SimulationGuard.held_by() is None
 
     cancelled = threading.Event()
     monkeypatch.setattr(
-        workspace.project, "run_simulation", lambda *a, **k: cancelled.wait(5)
+        workspace.project,
+        "run_simulation",
+        lambda *a, **k: cancelled.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(workspace.project, "request_cancel_simulation", cancelled.set)
     workspace._do_brian2_simulation_threaded(0.1)
     workspace._cancel_background_job()
-    qtbot.waitUntil(lambda: not workspace._background_job.busy)
+    qtbot.waitUntil(lambda: not workspace._background_job.busy, timeout=WAIT_TIMEOUT_MS)
     assert SimulationGuard.held_by() is None
 
     closing = threading.Event()
     monkeypatch.setattr(
-        workspace.project, "run_simulation", lambda *a, **k: closing.wait(5)
+        workspace.project,
+        "run_simulation",
+        lambda *a, **k: closing.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(workspace.project, "request_cancel_simulation", closing.set)
     workspace._do_brian2_simulation_threaded(0.1)
     window._close_tab(0)
-    qtbot.waitUntil(lambda: workspace._disposed)
+    qtbot.waitUntil(lambda: workspace._disposed, timeout=WAIT_TIMEOUT_MS)
     assert SimulationGuard.held_by() is None
 
 
