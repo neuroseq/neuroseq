@@ -19,6 +19,7 @@ from neuroseq.stimulation.stim import StimType
 from tests.test_bss2_panel import _connect
 from tests.test_bss2_panel import devices  # noqa: F401 - fixture
 from tests.test_bss2_panel import panel  # noqa: F401 - fixture
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _probe_array() -> StimArray:
@@ -47,8 +48,8 @@ def test_block_runs_on_the_chip_and_its_spikes_reach_the_project(qtbot, panel): 
     owner = object()
     panel.set_project(project)
     with (
-        qtbot.waitSignal(panel.experiment_added, timeout=20000) as added,
-        qtbot.waitSignal(host.block_completed, timeout=20000) as completed,
+        qtbot.waitSignal(panel.experiment_added, timeout=WAIT_TIMEOUT_MS) as added,
+        qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed,
     ):
         assert host.send_block(
             project, _probe_array(), 10, 20, "rheobase", owner=owner, record_neuron=1
@@ -56,7 +57,7 @@ def test_block_runs_on_the_chip_and_its_spikes_reach_the_project(qtbot, panel): 
         assert host.busy and panel.run_in_progress
         assert "still running" in host.unavailable()
         # The tab's Stop also applies to a routine's run.
-        qtbot.waitUntil(panel.btn_stop.isEnabled, timeout=5000)
+        qtbot.waitUntil(panel.btn_stop.isEnabled, timeout=WAIT_TIMEOUT_MS)
     # The workspace and the tab hear of the readback like of a Deliver.
     assert added.args == [completed.args[1]["experiment"]]
     assert panel.experiment_combo.findText(added.args[0]) >= 0
@@ -100,7 +101,7 @@ def test_cancelled_block_result_is_ignored(qtbot, panel):  # noqa: F811
     assert not host.busy
     # The chip still runs it: the workspace must not close, and Stop applies.
     assert panel.run_in_progress
-    qtbot.waitUntil(lambda: not panel._session.busy, timeout=20000)
+    qtbot.waitUntil(lambda: not panel._session.busy, timeout=WAIT_TIMEOUT_MS)
     assert not panel.run_in_progress
     assert not completed
     assert not project.experiments
@@ -109,21 +110,21 @@ def test_cancelled_block_result_is_ignored(qtbot, panel):  # noqa: F811
 def test_failed_run_and_invalid_blocks_fail_the_block(qtbot, panel):  # noqa: F811
     host = panel.stimulation_host
     owner = object()
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         assert not host.send_block(Project(), _probe_array(), 0, 5, owner=owner)
     assert failed.args[0] is owner and "Connect" in failed.args[1]
     _connect(qtbot, panel)
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         assert not host.send_block(Project(), _probe_array(), 5, 5, owner=owner)
     assert "Invalid sample range" in failed.args[1]
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         assert not host.send_block(
             Project(), _probe_array(), 0, 5, owner=owner, record_neuron=7
         )
     assert "recorded neuron 7" in failed.args[1]
     host.send_block(Project(), _probe_array(), 10, 20, owner=owner)
     request_id = host._run.request_id
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         panel._session.run_failed.emit("someone-else", "ignored")
         panel._session.run_failed.emit(request_id, "chip went away")
     assert failed.args == [owner, "chip went away"]
@@ -137,7 +138,7 @@ def test_any_readback_error_fails_the_block(qtbot, panel, mocker):  # noqa: F811
         "neuroseq.device_control.bss2_protocol.add_readback_experiment",
         side_effect=RuntimeError("unexpected"),
     )
-    with qtbot.waitSignal(host.block_failed, timeout=20000) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         host.send_block(Project(), _probe_array(), 10, 20, owner="routine")
     assert failed.args[0] == "routine" and "unexpected" in failed.args[1]
     assert not host.busy
@@ -153,7 +154,7 @@ def test_routines_can_connect_with_the_tabs_settings(qtbot, panel):  # noqa: F81
     panel.token_edit.setText(TOKEN)
     statuses: list[str] = []
     host.connection_changed.connect(statuses.append)
-    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+    with qtbot.waitSignal(panel._session.connected, timeout=WAIT_TIMEOUT_MS):
         host.connect_hardware()
     assert not host.can_connect
     assert host.connection_status().startswith("Connected to fakechip")
@@ -168,7 +169,9 @@ def test_a_runs_blocks_share_one_data_group(qtbot, panel):  # noqa: F811
     stim = _probe_array()
     payloads = []
     for start, stop in ((0, 10), (10, 20)):
-        with qtbot.waitSignal(host.block_completed, timeout=20000) as completed:
+        with qtbot.waitSignal(
+            host.block_completed, timeout=WAIT_TIMEOUT_MS
+        ) as completed:
             host.send_block(
                 project, stim, start, stop, "rheobase", record_neuron=1, group="Run 1"
             )

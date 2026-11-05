@@ -9,6 +9,7 @@ from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_data_widget(
@@ -24,7 +25,7 @@ def test_data_widget(
     data_widget.set_default_scroll_bars(default_x_scrollbar, default_y_scrollbar)
     qtbot.addWidget(data_widget)
     data_widget.show()
-    qtbot.waitUntil(lambda: data_widget.isVisible())
+    qtbot.waitUntil(lambda: data_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert data_widget.trace_widget.n_neurons == 0
     assert data_widget.spike_widget.n_neurons == 0
     data_widget.set_data(make_trace_data(n_neurons=3))
@@ -54,7 +55,7 @@ def test_data_widget_x_lock_allows_independent_and_linked_scrolling(
     default_trace_widget = TraceWidget(controller=default_controller)
     qtbot.addWidget(default_trace_widget)
     default_trace_widget.show()
-    qtbot.waitUntil(lambda: default_trace_widget.isVisible())
+    qtbot.waitUntil(lambda: default_trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     default_controller.set_limits(5.0, 20)
 

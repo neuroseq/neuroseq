@@ -7,6 +7,7 @@ from qtpy import QtWidgets
 
 from neuroseq.main_scroll import MainScrollFilter
 from neuroseq.main_scroll import make_main_scroll_area
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _wheel(widget: QtWidgets.QWidget, delta: int) -> None:
@@ -34,7 +35,7 @@ def _build(qtbot: QtBot):
     qtbot.addWidget(area)
     area.resize(400, 300)
     area.show()
-    qtbot.waitExposed(area)
+    qtbot.waitExposed(area, timeout=WAIT_TIMEOUT_MS)
     return area, inner
 
 

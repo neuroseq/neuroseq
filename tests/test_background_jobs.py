@@ -9,6 +9,7 @@ from neuroseq.background_jobs import BackgroundIOWorker
 from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import EliseProtocolWorker
 from neuroseq.background_jobs import wait_for_jobs
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -42,7 +43,7 @@ def test_completion_runs_on_main_thread_after_worker_stops(qtbot, job):
     thread = job.worker_thread
     assert thread is not None
     release.set()
-    qtbot.waitUntil(lambda: bool(results))
+    qtbot.waitUntil(lambda: bool(results), timeout=WAIT_TIMEOUT_MS)
     assert results == [True]
 
 
@@ -64,7 +65,7 @@ def test_completion_can_start_the_next_job(qtbot, job):
         on_finished=first_finished,
         on_failed=pytest.fail,
     )
-    qtbot.waitUntil(lambda: len(results) == 2)
+    qtbot.waitUntil(lambda: len(results) == 2, timeout=WAIT_TIMEOUT_MS)
     assert results == ["first", "second"]
     assert not job.busy
 
@@ -89,7 +90,7 @@ def test_failure_releases_owner_and_delivers_error_on_main_thread(qtbot, job):
         on_finished=lambda _: pytest.fail("unexpected success"),
         on_failed=failed,
     )
-    qtbot.waitUntil(lambda: bool(errors))
+    qtbot.waitUntil(lambda: bool(errors), timeout=WAIT_TIMEOUT_MS)
     assert errors == ["OSError: failed save"]
 
 
@@ -116,7 +117,7 @@ def test_cancellation_retains_ownership_until_task_returns(qtbot, job):
     assert job.busy
     assert job.worker is worker
     release.set()
-    qtbot.waitUntil(lambda: bool(cancelled))
+    qtbot.waitUntil(lambda: bool(cancelled), timeout=WAIT_TIMEOUT_MS)
     assert not job.busy
 
 
@@ -140,7 +141,7 @@ def test_rejects_overlapping_jobs(qtbot, job):
         assert job.worker is worker
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not job.busy)
+        qtbot.waitUntil(lambda: not job.busy, timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stop_cancels_protocol_without_delivering_ui_callbacks(qtbot, job):
@@ -186,7 +187,7 @@ def test_shutdown_timeout_keeps_ownership(qtbot, job):
         assert job.worker_thread is thread
     finally:
         release.set()
-        qtbot.waitUntil(lambda: not job.busy)
+        qtbot.waitUntil(lambda: not job.busy, timeout=WAIT_TIMEOUT_MS)
     assert results == [True]
 
 
@@ -211,7 +212,7 @@ def test_idle_follows_callbacks_and_wait_for_jobs_defers_to_event_loop(qtbot, jo
         parent=owner,
     )
     job.cancel()
-    qtbot.waitUntil(lambda: "all idle" in events)
+    qtbot.waitUntil(lambda: "all idle" in events, timeout=WAIT_TIMEOUT_MS)
     assert events == ["finished", "idle", "all idle"]
     assert not job.cancellable
 
@@ -233,9 +234,9 @@ def test_wait_for_jobs_times_out_while_a_job_keeps_running(qtbot, job):
         timeout_ms=20,
         parent=owner,
     )
-    qtbot.waitUntil(lambda: bool(outcome))
+    qtbot.waitUntil(lambda: bool(outcome), timeout=WAIT_TIMEOUT_MS)
     release.set()
-    qtbot.waitUntil(lambda: not job.busy)
+    qtbot.waitUntil(lambda: not job.busy, timeout=WAIT_TIMEOUT_MS)
     qtbot.wait(20)
     assert outcome == ["timeout"]
 
@@ -255,7 +256,7 @@ def test_raising_completion_callback_is_reported_not_fatal(
         on_finished=on_finished,
         on_failed=pytest.fail,
     )
-    qtbot.waitUntil(lambda: bool(idle))
+    qtbot.waitUntil(lambda: bool(idle), timeout=WAIT_TIMEOUT_MS)
     assert not job.busy
     assert qmessagebox_calls[-1]["name"] == "critical"
     assert "ValueError: bad result" in qmessagebox_calls[-1]["text"]
@@ -267,4 +268,4 @@ def test_raising_completion_callback_is_reported_not_fatal(
         on_finished=results.append,
         on_failed=pytest.fail,
     )
-    qtbot.waitUntil(lambda: results == ["second"])
+    qtbot.waitUntil(lambda: results == ["second"], timeout=WAIT_TIMEOUT_MS)

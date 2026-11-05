@@ -5,6 +5,7 @@ from pytestqt.qtbot import QtBot
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_dialog import EditStimDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_edit_stim_dialog(qtbot: QtBot):
@@ -20,7 +21,7 @@ def test_edit_stim_dialog(qtbot: QtBot):
     dialog = EditStimDialog(stim_array, existing_names)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     # Check initial values
     assert dialog.windowTitle() == "Edit input array"

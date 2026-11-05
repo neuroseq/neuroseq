@@ -8,6 +8,7 @@ from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_discover_analysis_plugins_contains_example_plugin() -> None:
@@ -46,7 +47,9 @@ def test_trace_widget_analysis_action_allows_no_selection(qtbot: QtBot) -> None:
         if action.text() == "Mean activity"
     )
 
-    with qtbot.waitSignal(trace_widget.custom_analysis_requested) as blocker:
+    with qtbot.waitSignal(
+        trace_widget.custom_analysis_requested, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         mean_activity_action.trigger()
 
     assert blocker.args[3:] == [None, None]
@@ -60,7 +63,7 @@ def test_custom_analysis_widget_runs_example_plugin(
     custom_analysis_widget = CustomAnalysisWidget()
     qtbot.addWidget(custom_analysis_widget)
     custom_analysis_widget.show()
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     data = make_trace_data(n_neurons=10, n_timestamps=200, dt=0.001)
     custom_analysis_widget.set_data(

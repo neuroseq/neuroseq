@@ -20,6 +20,7 @@ from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture()
@@ -51,7 +52,7 @@ def test_slice_stim_array_rejects_bad_range(stim: StimArray) -> None:
 
 def test_send_block_without_settings_fails(stim: StimArray, tmp_path, qtbot) -> None:
     host = _host([], None, tmp_path)
-    with qtbot.waitSignal(host.block_failed):
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS):
         assert not host.send_block(Project(), stim, 0, 5)
     assert host.phase == "idle"
 
@@ -78,12 +79,12 @@ def test_send_block_full_cycle(stim: StimArray, tmp_path, qtbot, mocker) -> None
         str(result.seq_path), "target"
     )
 
-    with qtbot.waitSignal(host.block_sent) as sent:
+    with qtbot.waitSignal(host.block_sent, timeout=WAIT_TIMEOUT_MS) as sent:
         host.on_command_finished(name, None)
     assert sent.args == [None, result]
     assert host.phase == "awaiting_acquisition"
 
-    with qtbot.waitSignal(host.block_completed) as completed:
+    with qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed:
         host.acquisition_imported()
     assert completed.args == [None, None]
     assert host.phase == "idle"
@@ -94,7 +95,7 @@ def test_import_failure_resets_phase(stim: StimArray, tmp_path, qtbot, mocker) -
     host = _host(submitted, SysconExportSettings(config_text=""), tmp_path)
     mocker.patch.object(host_module, "export_stim_array", return_value=mocker.Mock())
     host.send_block(Project(), stim, 0, 5)
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         host.on_command_failed(submitted[0][0], "boom")
     assert failed.args == [None, "boom"]
     assert host.phase == "idle"
@@ -106,7 +107,7 @@ def test_second_block_while_in_flight_is_rejected(
     host = _host([], SysconExportSettings(config_text=""), tmp_path)
     mocker.patch.object(host_module, "export_stim_array", return_value=mocker.Mock())
     host.send_block(Project(), stim, 0, 5)
-    with qtbot.waitSignal(host.block_failed):
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS):
         assert not host.send_block(Project(), stim, 0, 5)
 
 
@@ -237,7 +238,7 @@ def test_automatic_block_is_uploaded_recorded_and_run(
         Project(), stim, 0, 5, owner=owner, automatic=True, recording=_recording(stim)
     )
     assert host.phase == "preparing"
-    with qtbot.waitSignal(host.block_sent) as sent:
+    with qtbot.waitSignal(host.block_sent, timeout=WAIT_TIMEOUT_MS) as sent:
         _run(submitted, host, client)
     assert sent.args[0] is owner
     assert client.calls == [
@@ -256,7 +257,7 @@ def test_automatic_block_is_uploaded_recorded_and_run(
     assert client.calls[-1] == ("run", "auto", "rising")
     assert host.phase == "running"  # until the recording is in
 
-    with qtbot.waitSignal(host.block_completed) as completed:
+    with qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed:
         acquisition.block_recorded.emit("run1", {"trace": "Rec :: dF/F"})
     assert completed.args == [owner, {"trace": "Rec :: dF/F"}]
     assert host.phase == "idle"
@@ -304,7 +305,7 @@ def test_run_failing_twice_names_the_states_and_stops_nothing(
         stim, tmp_path, qtbot, mocker, client
     )
 
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         _run(submitted, host, client)
 
     assert failed.args[0] is owner
@@ -323,7 +324,7 @@ def test_other_run_errors_are_not_retried(
     host, submitted, _acquisition, _owner = _armed_block(
         stim, tmp_path, qtbot, mocker, client
     )
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         _run(submitted, host, client)
     assert failed.args[1] == "Laser interlock open"
     assert [call[0] for call in client.calls].count("upload") == 1
@@ -338,7 +339,7 @@ def test_automatic_block_without_recording_waits_for_the_sequence(
     _run(submitted, host, client)
     assert host.phase == "running"
     assert not acquisition.armed
-    with qtbot.waitSignal(host.block_completed) as completed:
+    with qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed:
         _run(submitted, host, client)
     assert completed.args == [None, {}]
     assert host.phase == "idle"
@@ -352,7 +353,7 @@ def test_recording_failure_fails_the_block_and_stops_the_sequence(
     host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
     _run(submitted, host, client)
     acquisition.block_armed.emit("run1")
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         acquisition.block_recording_failed.emit("run1", "first-frame timeout")
     assert "first-frame timeout" in failed.args[1]
     assert host.phase == "idle"
@@ -366,7 +367,7 @@ def test_recording_unavailable_refuses_the_block(
 ) -> None:
     host, submitted, acquisition = _automatic_host(tmp_path, mocker)
     acquisition.unavailable = "Connect to ScanImage first."
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         assert not host.send_block(
             Project(), stim, 0, 5, automatic=True, recording=_recording(stim)
         )
@@ -379,7 +380,7 @@ def test_missing_remote_sequence_fails_the_block(
 ) -> None:
     host, submitted, _acquisition = _automatic_host(tmp_path, mocker)
     host.send_block(Project(), stim, 0, 5, automatic=True)
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         _run(submitted, host, _FakeClient([], ["Idle"]))
     assert "does not list" in failed.args[1]
     assert host.phase == "idle"
@@ -419,7 +420,7 @@ def test_not_connected_refuses_the_block(stim: StimArray, tmp_path, qtbot) -> No
     host = _host(
         [], SysconExportSettings(config_text=""), tmp_path, is_connected=lambda: False
     )
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         assert not host.send_block(Project(), stim, 0, 5)
     assert "Connect to SysCon2" in failed.args[1]
 
@@ -467,7 +468,7 @@ def test_reawait_restores_the_last_manual_block(
     assert host.phase == "idle"
     host.reawait(owner)
     assert host.phase == "awaiting_acquisition"
-    with qtbot.waitSignal(host.block_completed) as completed:
+    with qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed:
         host.acquisition_imported()
     assert completed.args[0] is owner
 
@@ -563,7 +564,7 @@ def test_disconnected_hardware_fails_the_block_at_once(
     host.send_block(Project(), stim, 0, 5, automatic=True)
     if step == "run":
         _run(submitted, host, client)
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         _run(submitted, host, client)
     assert "disconnected" in failed.args[1]
 
@@ -590,7 +591,7 @@ def test_abort_tells_the_routine_and_frees_the_worker(
     host, submitted, _acquisition = _automatic_host(tmp_path, mocker)
     owner = object()
     host.send_block(Project(), stim, 0, 5, owner=owner, automatic=True)
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         host.abort("Stopped in the stimulation setup.")
     assert failed.args == [owner, "Stopped in the stimulation setup."]
     assert host.phase == "idle"
@@ -607,7 +608,7 @@ def test_cancel_announces_itself_so_the_tab_can_refresh(
     host, _submitted, _acquisition = _automatic_host(tmp_path, mocker)
     owner = object()
     host.send_block(Project(), stim, 0, 5, owner=owner, automatic=True)
-    with qtbot.waitSignal(host.progress):
+    with qtbot.waitSignal(host.progress, timeout=WAIT_TIMEOUT_MS):
         host.cancel(owner)
     assert host.phase == "idle"
 
@@ -635,7 +636,7 @@ def test_unknown_hardware_state_fails_an_automatic_block(
     host, submitted, acquisition = _automatic_host(tmp_path, mocker)
     mocker.patch.object(host_module, "UPLOAD_TIMEOUT_S", 0.0)
     host.send_block(Project(), stim, 0, 5, automatic=True, recording=_recording(stim))
-    with qtbot.waitSignal(host.block_failed) as failed:
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS) as failed:
         _run(submitted, host, _FakeClient(["target\\probe_001.seq"], ["Error"]))
     assert "state: Error" in failed.args[1]
     assert not acquisition.armed

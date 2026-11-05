@@ -14,6 +14,7 @@ from neuroseq.visualization.stim_widget import StimWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_timed_array_modifier(qtbot: QtBot) -> None:
@@ -24,7 +25,7 @@ def test_timed_array_modifier(qtbot: QtBot) -> None:
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     tma = StimArrayModifier(stim_array, stim_widget)
     assert tma.can_undo() is False
     assert tma.can_redo() is False

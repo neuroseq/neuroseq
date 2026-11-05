@@ -3,6 +3,7 @@ from __future__ import annotations
 from pytestqt.qtbot import QtBot
 
 from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _FakeSettings:
@@ -21,7 +22,7 @@ def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
     dialog = LLMSettingsDialog()
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     return dialog
 
 
@@ -96,7 +97,7 @@ def test_settings_changed_signal_fires_on_provider_switch(
     monkeypatch,
 ) -> None:
     dialog = _make_dialog(qtbot, monkeypatch)
-    with qtbot.waitSignal(dialog.settings_changed):
+    with qtbot.waitSignal(dialog.settings_changed, timeout=WAIT_TIMEOUT_MS):
         dialog.provider_combo.setCurrentText("OpenAI")
 
 

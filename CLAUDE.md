@@ -222,6 +222,8 @@ Two `autouse` fixtures apply to every test automatically:
 
 Use the opt-in **`qmessagebox_calls`** fixture to capture dialog calls and assert on them (supports both static `QMessageBox` methods and `StimulationGeneratorDialog._show_scrollable_message`).
 
+Wait for the condition a test needs instead of `qtbot.wait(ms)`, and pass `timeout=WAIT_TIMEOUT_MS` (`from tests.wait_timeout import WAIT_TIMEOUT_MS`): 5 s by default, `--wait-timeout=30` in CI.
+
 ### Brian2 in tests
 
 `conftest.py` sets `b2.prefs.codegen.target = "numpy"` globally for all tests, disabling C++ code generation for speed and reproducibility.

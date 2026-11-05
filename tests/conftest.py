@@ -49,6 +49,7 @@ from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import init_brian2_logging
+from tests import wait_timeout
 
 b2.prefs.codegen.target = "numpy"
 b2.prefs.codegen.runtime.cython.cache_dir = "/tmp/neuroseq-brian2-cython-cache"
@@ -80,6 +81,16 @@ def pytest_addoption(parser):
         default=False,
         help="Update screenshot reference images",
     )
+    parser.addoption(
+        "--wait-timeout",
+        type=float,
+        default=wait_timeout.WAIT_TIMEOUT_MS / 1000,
+        help="Timeout in seconds of qtbot waits (default: %(default)s)",
+    )
+
+
+def pytest_configure(config):
+    wait_timeout.WAIT_TIMEOUT_MS = round(1000 * config.getoption("--wait-timeout"))
 
 
 def pytest_collection_modifyitems(config, items):

@@ -15,6 +15,7 @@ from neuroseq.project_workspace import ProjectWorkspace
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 # Mirrors elise_learning_curves.CURVES_ATTR (the plugin loads via a file spec,
 # not as an importable module, so we reference the attribute name directly).
@@ -437,7 +438,9 @@ def test_run_protocol_full_dispatch(qtbot: QtBot, monkeypatch) -> None:
 
         gui._run_elise_protocol()
         # Worker dispatched on a thread; wait for the finished slot to tear down.
-        qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=60000)
+        qtbot.waitUntil(
+            lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS
+        )
         assert gui.findChildren(CustomAnalysisWindow)
         # The stim arrays were rebuilt to the recorded full timeline.
         sa = gui.project.stim_arrays.get("opsin_exc")

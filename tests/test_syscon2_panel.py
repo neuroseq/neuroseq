@@ -22,6 +22,7 @@ from neuroseq.export.syscon2_export_service import default_export_directory
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class FakeTransport:
@@ -76,7 +77,7 @@ def _connect(
     monkeypatch.setattr(
         connection_manager_module, "NamedPipeTransport", lambda: transport
     )
-    with qtbot.waitSignal(panel._manager.connected, timeout=2000):
+    with qtbot.waitSignal(panel._manager.connected, timeout=WAIT_TIMEOUT_MS):
         panel._manager.connect_to_syscon2()
 
 
@@ -96,7 +97,7 @@ def test_disconnect_button_resets_status(
     fake = FakeTransport()
     _connect(panel, qtbot, monkeypatch, fake)
 
-    with qtbot.waitSignal(panel._manager.disconnected, timeout=2000):
+    with qtbot.waitSignal(panel._manager.disconnected, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_disconnect, QtCore.Qt.MouseButton.LeftButton)
 
     assert panel.status_label.text() == "Disconnected"
@@ -121,7 +122,7 @@ def test_refresh_sequences_populates_list(
         FakeTransport([encode_string("a.seq\r\nb.seq\r\n")]),
     )
 
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_refresh_sequences, QtCore.Qt.MouseButton.LeftButton)
 
     items = [
@@ -136,11 +137,11 @@ def test_select_sequence_sends_command(
     fake = FakeTransport([encode_string("a.seq\r\n"), encode_string("OK")])
     _connect(panel, qtbot, monkeypatch, fake)
 
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_refresh_sequences, QtCore.Qt.MouseButton.LeftButton)
     panel.sequence_list.setCurrentRow(0)
 
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_select_sequence, QtCore.Qt.MouseButton.LeftButton)
 
     assert b"SelectSequence" in fake.sent[-1]
@@ -152,7 +153,7 @@ def test_delete_sequence_requires_confirmation(
 ) -> None:
     fake = FakeTransport([encode_string("a.seq\r\n"), encode_string("OK")])
     _connect(panel, qtbot, monkeypatch, fake)
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_refresh_sequences, QtCore.Qt.MouseButton.LeftButton)
     panel.sequence_list.setCurrentRow(0)
 
@@ -165,7 +166,7 @@ def test_delete_sequence_requires_confirmation(
     assert not any(b"DeleteSequence" in frame for frame in fake.sent)
 
     question.return_value = QtWidgets.QMessageBox.StandardButton.Yes
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_delete_sequence, QtCore.Qt.MouseButton.LeftButton)
     assert any(b"DeleteSequence" in frame for frame in fake.sent)
 
@@ -189,10 +190,11 @@ def test_holo4d_run_requires_confirmation(
         "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_holo4d_run, QtCore.Qt.MouseButton.LeftButton)
     qtbot.waitUntil(
-        lambda: any(b"RunSequence" in frame for frame in fake.sent), timeout=2000
+        lambda: any(b"RunSequence" in frame for frame in fake.sent),
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -203,7 +205,7 @@ def test_laser_emission_uses_selected_device_after_confirmation(
     fake = FakeTransport([encode_string(lightsources_text), encode_string("OK")])
     _connect(panel, qtbot, monkeypatch, fake)
 
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(
             panel.btn_refresh_lightsources, QtCore.Qt.MouseButton.LeftButton
         )
@@ -214,7 +216,7 @@ def test_laser_emission_uses_selected_device_after_confirmation(
         "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.question",
         return_value=QtWidgets.QMessageBox.StandardButton.Yes,
     )
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_emission_on, QtCore.Qt.MouseButton.LeftButton)
 
     sent = fake.sent[-1]
@@ -232,7 +234,7 @@ def test_command_failure_shows_warning(
     warning = mocker.patch(
         "neuroseq.device_control.syscon2_panel.QtWidgets.QMessageBox.warning"
     )
-    with qtbot.waitSignal(panel._manager.command_failed, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_failed, timeout=WAIT_TIMEOUT_MS):
         qtbot.mouseClick(panel.btn_refresh_sequences, QtCore.Qt.MouseButton.LeftButton)
 
     warning.assert_called_once()
@@ -283,7 +285,7 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
     (tmp_path / "pushed.seq").write_text("sequence contents")
     seq_path = str(tmp_path / "pushed.seq")
 
-    with qtbot.waitSignal(panel._manager.command_finished, timeout=2000):
+    with qtbot.waitSignal(panel._manager.command_finished, timeout=WAIT_TIMEOUT_MS):
         panel._on_dialog_sequence_generated(seq_path, str(png_path), frozenset({1, 2}))
 
     pixmap = panel.preview_label.pixmap()
@@ -293,7 +295,7 @@ def test_dialog_sequence_generated_shows_preview_and_imports_and_refreshes(
     assert b"pushed.seq" in fake.sent[0]
     assert "Import confirmed" in panel.preview_status_label.text()
 
-    qtbot.waitUntil(lambda: panel.sequence_list.count() == 1, timeout=2000)
+    qtbot.waitUntil(lambda: panel.sequence_list.count() == 1, timeout=WAIT_TIMEOUT_MS)
     assert panel.sequence_list.item(0).text() == "pushed.seq"
 
 
@@ -302,7 +304,7 @@ def test_dialog_sequence_generated_emits_targets_changed(
 ) -> None:
     """Feature (#582): the Spatial Footprints panel learns which neurons a
     newly generated/sent sequence targets via this signal."""
-    with qtbot.waitSignal(panel.targets_changed, timeout=1000) as blocker:
+    with qtbot.waitSignal(panel.targets_changed, timeout=WAIT_TIMEOUT_MS) as blocker:
         panel._on_dialog_sequence_generated(
             "unused.seq", "unused.png", frozenset({3, 5})
         )
@@ -372,7 +374,7 @@ def test_holo4d_advanced_options_hidden_by_default_and_toggle_reveals_them(
     panel: SysCon2Panel, qtbot: QtBot
 ) -> None:
     panel.show()
-    qtbot.waitExposed(panel)
+    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
     assert not panel.holo4d_advanced_panel.isVisible()
     assert not panel.btn_toggle_holo4d_advanced.isChecked()
 
@@ -393,7 +395,7 @@ def test_laser_advanced_controls_hidden_by_default_and_toggle_reveals_them(
     panel: SysCon2Panel, qtbot: QtBot
 ) -> None:
     panel.show()
-    qtbot.waitExposed(panel)
+    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
     assert not panel.laser_advanced_panel.isVisible()
     assert not panel.btn_toggle_laser_advanced.isChecked()
 
@@ -893,7 +895,7 @@ def test_trigger_wait_is_not_reported_as_completed(panel, mocker):
 def test_laser_controls_hidden_and_single_selector_defaults_940(panel, qtbot):
     panel._on_lightsources({"dummy_SN": ["dummy 1100 nm", "dummy 940 nm"]})
     panel.show()
-    qtbot.waitExposed(panel)
+    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
     assert panel.description_combo.currentText() == "940 nm"
     assert panel._selected_device_and_description() == ("dummy_SN", "dummy 940 nm")
     for widget in (
@@ -922,10 +924,12 @@ def test_generated_and_routine_exports_display_resizable_preview(
     submit = mocker.patch.object(panel, "_submit")
     panel._on_dialog_sequence_generated("example.seq", str(path), frozenset({1}))
     panel.show()
-    qtbot.waitExposed(panel)
+    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
     panel.btn_toggle_preview.click()
     panel.resize(460, 850)
-    qtbot.waitUntil(lambda: panel.preview_label.pixmap() is not None)
+    qtbot.waitUntil(
+        lambda: panel.preview_label.pixmap() is not None, timeout=WAIT_TIMEOUT_MS
+    )
     assert not panel.preview_label.pixmap().isNull()
     assert panel.preview_label.pixmap().width() <= panel.preview_label.width()
     assert isinstance(panel.preview_label, QtWidgets.QScrollArea)
@@ -985,7 +989,7 @@ def test_disconnect_cancels_pending_run_and_ignores_old_ack(panel, mocker):
 
 def test_preview_hidden_by_default_and_toggle_expands_it(panel, qtbot):
     panel.show()
-    qtbot.waitExposed(panel)
+    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
     assert not panel.preview_container.isVisible()
     assert panel.btn_toggle_preview.text() == "Show preview"
     panel.btn_toggle_preview.click()

@@ -21,6 +21,11 @@ Tests run in parallel by default (`-n auto`, using pytest-xdist). Add `-n 0` to 
 them serially, which starts faster for a single test and is needed to see `-s`
 output or use `--pdb`.
 
+Tests wait for a condition (`qtbot.waitUntil`, `waitSignal`, `waitExposed`, ...)
+instead of sleeping for a fixed time, and pass `timeout=WAIT_TIMEOUT_MS` (from
+`tests/wait_timeout.py`). It is 5 s by default, so a hanging test fails quickly;
+CI uses `--wait-timeout=30` (seconds) for its slower runners.
+
 ## To run a specific subset of tests
 
 ```bash

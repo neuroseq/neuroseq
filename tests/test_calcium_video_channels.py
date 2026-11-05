@@ -10,6 +10,7 @@ import tifffile
 from pytestqt.qtbot import QtBot
 
 from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -63,13 +64,13 @@ def test_channel_controls_emit_the_choice(
     assert widget.frame_count() == 6
     assert not widget.channel_combo.isEnabled()
 
-    with qtbot.waitSignal(widget.channels_changed) as blocker:
+    with qtbot.waitSignal(widget.channels_changed, timeout=WAIT_TIMEOUT_MS) as blocker:
         widget.channels_spin.setValue(2)
     assert blocker.args == [2, 1]
     assert widget.frame_count() == 3
 
     widget.channel_combo.setCurrentIndex(widget.channel_combo.findData(2))
-    with qtbot.waitSignal(widget.channels_changed) as blocker:
+    with qtbot.waitSignal(widget.channels_changed, timeout=WAIT_TIMEOUT_MS) as blocker:
         widget.channel_combo.activated.emit(widget.channel_combo.currentIndex())
     assert blocker.args == [2, 2]
     widget.set_time_ms(0)

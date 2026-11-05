@@ -6,6 +6,7 @@ from pytestqt.qtbot import QtBot
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.data import Experiment
 from neuroseq.project import Project
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_add_experiment_data_dialog(
@@ -20,7 +21,7 @@ def test_add_experiment_data_dialog(
     dialog = AddExperimentDataDialog(test_experiment, project_nmda)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     assert dialog.cmb_experiments.count() == len(test_experiments)
     assert dialog.cmb_experiments.itemText(0) == test_experiments[0].name

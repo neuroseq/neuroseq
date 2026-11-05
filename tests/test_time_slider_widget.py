@@ -14,6 +14,7 @@ from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_time_slider_widget(
@@ -22,7 +23,7 @@ def test_time_slider_widget(
     slider = TimeSliderWidget()
     qtbot.addWidget(slider)
     slider.show()
-    qtbot.waitUntil(lambda: slider.isVisible())
+    qtbot.waitUntil(lambda: slider.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     # create some widgets that should respond to slider time changes
     controller = ConstrainedPanZoomController()
@@ -30,26 +31,26 @@ def test_time_slider_widget(
     qtbot.addWidget(trace_widget)
     trace_widget.show()
     trace_widget.set_data(make_trace_data(n_neurons=2, n_timestamps=1800))
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     spike_widget = SpikeWidget(controller)
     qtbot.addWidget(spike_widget)
     spike_widget.show()
     spike_widget.set_data(make_spike_data(n_neurons=2, max_time_secs=2.0))
-    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    qtbot.waitUntil(lambda: spike_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
     stim_widget.show()
     stim_widget.set_data(
         StimArray("stim", StimType.Excitation, np.zeros((2200, 1)), "mV", 0.001)
     )
-    qtbot.waitUntil(lambda: stim_widget.isVisible())
+    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     heatmap_widget = HeatmapWidget()
     qtbot.addWidget(heatmap_widget)
     heatmap_widget.show()
     heatmap_widget.set_data(
         make_synapse_data(n_i=3, n_j=2, n_timestamps=20, max_time_secs=2.0)
     )
-    qtbot.waitUntil(lambda: heatmap_widget.isVisible())
+    qtbot.waitUntil(lambda: heatmap_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     # connect them to the slider
     slider.connect_widget(trace_widget)

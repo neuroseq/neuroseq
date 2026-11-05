@@ -11,6 +11,7 @@ from qtpy import QtWidgets
 from neuroseq.data import Experiment
 from neuroseq.project import Project
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _wire_fake_external_simulator(gui: ProjectWorkspace, fake_simulate_fn) -> None:
@@ -43,7 +44,7 @@ def gui(qtbot: QtBot):
             widget._background_job.worker_thread is None
             or not widget._background_job.worker_thread.isRunning()
         ),
-        timeout=3000,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -72,7 +73,7 @@ def test_cancel_via_progress_dialog_raises_and_emits_cancelled(
             and gui._background_job.worker is None
             and QtWidgets.QApplication.overrideCursor() is None
         ),
-        timeout=5000,
+        timeout=WAIT_TIMEOUT_MS,
     )
     assert gui.project.experiments == original_experiments
     assert gui.continue_simulation_action.isEnabled()
@@ -92,7 +93,7 @@ def test_simulation_actions_disabled_during_run(
     gui._do_external_simulation(1.0)
     worker = gui._background_job.worker
     assert worker is not None
-    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
+    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert not gui.continue_simulation_action.isEnabled()
     assert not gui._do_external_simulation_action.isEnabled()
 
@@ -101,7 +102,7 @@ def test_simulation_actions_disabled_during_run(
     block.set()
     qtbot.waitUntil(
         lambda: bool(finished) and gui._background_job.worker_thread is None,
-        timeout=5000,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
     assert gui.continue_simulation_action.isEnabled()
@@ -128,7 +129,7 @@ def test_dispatch_is_idempotent_while_running(
     gui._do_external_simulation(1.0)
     original_worker = gui._background_job.worker
     assert original_worker is not None
-    qtbot.waitUntil(lambda: call_count == 1, timeout=2000)
+    qtbot.waitUntil(lambda: call_count == 1, timeout=WAIT_TIMEOUT_MS)
 
     gui._do_external_simulation(1.0)
 
@@ -138,7 +139,7 @@ def test_dispatch_is_idempotent_while_running(
     finished: list[bool] = []
     original_worker.finished.connect(lambda *_: finished.append(True))
     block.set()
-    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
+    qtbot.waitUntil(lambda: bool(finished), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_close_event_cancels_inflight_sim(qtbot: QtBot, gui: ProjectWorkspace) -> None:
@@ -159,7 +160,7 @@ def test_close_event_cancels_inflight_sim(qtbot: QtBot, gui: ProjectWorkspace) -
             gui._background_job.worker_thread is None
             or not gui._background_job.worker_thread.isRunning()
         ),
-        timeout=3000,
+        timeout=WAIT_TIMEOUT_MS,
     )
 
 
@@ -184,8 +185,8 @@ def test_experiment_appended_to_its_own_workspace(
     finished: list[bool] = []
     worker.finished.connect(lambda *_: finished.append(True))
     block.set()
-    qtbot.waitUntil(lambda: bool(finished), timeout=5000)
-    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=5000)
+    qtbot.waitUntil(lambda: bool(finished), timeout=WAIT_TIMEOUT_MS)
+    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=WAIT_TIMEOUT_MS)
 
     assert "dispatched" in original_project.experiments
     assert "dispatched" not in other_project.experiments
@@ -205,14 +206,14 @@ def test_progress_dialog_cancel_button_text_lifecycle(
     gui._do_external_simulation(1.0)
     worker = gui._background_job.worker
     assert worker is not None
-    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=2000)
+    qtbot.waitUntil(lambda: gui.progress_dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
     assert cancel_button is not None
     assert cancel_button.isEnabled()
 
     block.set()
-    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=5000)
+    qtbot.waitUntil(lambda: not gui._background_job.busy, timeout=WAIT_TIMEOUT_MS)
 
     cancel_button = gui.progress_dialog.findChild(QtWidgets.QPushButton)
     assert cancel_button is None or not cancel_button.isVisible()

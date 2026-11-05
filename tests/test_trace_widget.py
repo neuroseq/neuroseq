@@ -27,6 +27,7 @@ from neuroseq.visualization_support.constrained_pan_zoom_controller import (
 )
 from neuroseq.visualization_support.region_of_interest import RegionOfInterest
 from neuroseq.visualization_support.trace_widget_state import TraceWidgetState
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_timeseries_overlays_follow_theme(qtbot: QtBot, make_trace_data) -> None:
@@ -324,7 +325,9 @@ def test_trace_widget_context_menu_offers_vector_export(
         if action.text() == "Preview vector graphic…"
     )
     assert export_action.isEnabled()
-    with qtbot.waitSignal(trace_widget.vector_export_requested):
+    with qtbot.waitSignal(
+        trace_widget.vector_export_requested, timeout=WAIT_TIMEOUT_MS
+    ):
         export_action.trigger()
 
 
@@ -425,7 +428,7 @@ def test_trace_widget_zero_traces(qtbot: QtBot) -> None:
     qtbot.addWidget(trace_norm_dialog)
     trace_widget.show()
     trace_norm_dialog.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     n_neurons = 20
     n_timestamps = 100
     dt = 0.0991
@@ -467,7 +470,7 @@ def test_trace_widget_median_offset(qtbot: QtBot) -> None:
     qtbot.addWidget(trace_norm_dialog)
     trace_widget.show()
     trace_norm_dialog.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="traces",
         traces=np.array(
@@ -729,7 +732,7 @@ def test_trace_widget_indices(qtbot: QtBot) -> None:
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="traces",
         traces=np.random.random_sample((5, 100)).astype(np.float32),
@@ -1145,7 +1148,7 @@ def test_trace_widget(qtbot: QtBot) -> None:
     qtbot.addWidget(trace_norm_dialog)
     trace_widget.show()
     trace_norm_dialog.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     n_neurons = 20
     n_timestamps = 100
     dt = 0.0991
@@ -1218,7 +1221,7 @@ def test_trace_widget_gridlines_use_controller_limits(qtbot: QtBot) -> None:
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     n_neurons = 5
     n_timestamps = 50
     dt = 0.001
@@ -1242,7 +1245,7 @@ def test_trace_widget_gridlines_use_controller_neuron_limit(qtbot: QtBot) -> Non
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     n_neurons = 3
     n_timestamps = 20
     dt = 0.001
@@ -1266,7 +1269,7 @@ def test_trace_widget_gridlines_follow_trace_dt(qtbot: QtBot) -> None:
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dt = 0.0991
     data = TraceData(
         name="traces",
@@ -1291,7 +1294,7 @@ def test_trace_widget_set_grid_visible(qtbot: QtBot) -> None:
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="traces",
         traces=np.random.rand(4, 20).astype(np.float32),
@@ -1364,7 +1367,7 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
     default_trace_widget = TraceWidget(controller=default_controller)
     qtbot.addWidget(default_trace_widget)
     default_trace_widget.show()
-    qtbot.waitUntil(lambda: default_trace_widget.isVisible())
+    qtbot.waitUntil(lambda: default_trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     local_controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(
@@ -1375,7 +1378,7 @@ def test_trace_widget_x_lock_allows_independent_and_linked_scrolling(
     trace_widget.set_default_scroll_bars(default_x_scrollbar, default_y_scrollbar)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     default_controller.set_limits(5.0, 20)
     local_controller.set_limits(5.0, 20)
@@ -1449,7 +1452,7 @@ def test_zooming_the_default_controller_propagates_to_a_locked_widget(
     default_trace_widget = TraceWidget(controller=default_controller)
     qtbot.addWidget(default_trace_widget)
     default_trace_widget.show()
-    qtbot.waitUntil(lambda: default_trace_widget.isVisible())
+    qtbot.waitUntil(lambda: default_trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     local_controller = ConstrainedPanZoomController()
     trace_widget = TraceWidget(
@@ -1460,7 +1463,7 @@ def test_zooming_the_default_controller_propagates_to_a_locked_widget(
     trace_widget.set_default_scroll_bars(default_x_scrollbar, default_y_scrollbar)
     qtbot.addWidget(trace_widget)
     trace_widget.show()
-    qtbot.waitUntil(lambda: trace_widget.isVisible())
+    qtbot.waitUntil(lambda: trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     default_controller.set_limits(5.0, 20)
     local_controller.set_limits(5.0, 20)
@@ -1720,7 +1723,9 @@ def test_trace_widget_pearson_correlation_opens_neuron_subset_dialog(
         captured["args"] = args
 
     trace_widget.custom_analysis_requested.connect(_capture)
-    with qtbot.waitSignal(trace_widget.custom_analysis_requested):
+    with qtbot.waitSignal(
+        trace_widget.custom_analysis_requested, timeout=WAIT_TIMEOUT_MS
+    ):
         pearson_action.trigger()
 
     assert captured["args"][3] == [1, 3]
@@ -1820,7 +1825,9 @@ def test_spike_widget_pearson_correlation_skips_neuron_subset_dialog(
         if action.text() == "Pearson correlation"
     )
 
-    with qtbot.waitSignal(spike_widget.custom_analysis_requested):
+    with qtbot.waitSignal(
+        spike_widget.custom_analysis_requested, timeout=WAIT_TIMEOUT_MS
+    ):
         pearson_action.trigger()
 
 
@@ -1883,14 +1890,14 @@ def test_wheel_scrolling_moves_the_traces_at_once(
     qtbot.addWidget(trace_widget)
     trace_widget.resize(800, 400)
     trace_widget.show()
-    qtbot.waitExposed(trace_widget)
+    qtbot.waitExposed(trace_widget, timeout=WAIT_TIMEOUT_MS)
     trace_widget.set_data(make_trace_data(n_neurons=40, n_timestamps=10))
     controller.set_limits(0.01, 40)
     controller.set_vertical_view((8.0, 20.0))
     viewport = pygfx.Viewport.from_viewport_or_renderer(trace_widget.subplot.viewport)
     # the viewport has no area (so ignores the wheel) until fastplotlib has
     # handled the canvas resize
-    qtbot.waitUntil(lambda: min(viewport.rect[2:]) > 0)
+    qtbot.waitUntil(lambda: min(viewport.rect[2:]) > 0, timeout=WAIT_TIMEOUT_MS)
     x, y, width, height = viewport.rect
     controller.handle_event(
         pygfx.WheelEvent(
@@ -1942,7 +1949,7 @@ def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) 
     parent = QtWidgets.QWidget()
     trace_widget = TraceWidget(ConstrainedPanZoomController(), parent=parent)
     parent.show()
-    qtbot.waitExposed(parent)
+    qtbot.waitExposed(parent, timeout=WAIT_TIMEOUT_MS)
     trace_widget.set_data(make_trace_data(n_neurons=10, n_timestamps=100))
     qtbot.wait(50)
     widget_ref = weakref.ref(trace_widget)

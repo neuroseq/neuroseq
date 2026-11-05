@@ -34,6 +34,7 @@ from neuroseq.utils import InteractMode
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_project_history_interleaves_arrays_and_imports_across_refreshes(
@@ -180,7 +181,7 @@ def test_stim_editor_no_data(qtbot: QtBot) -> None:
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_switching_mode_shows_only_the_relevant_action_group(qtbot: QtBot) -> None:
@@ -326,10 +327,12 @@ def test_trim_to_mapped_neurons_action_emits_its_own_signal(qtbot: QtBot) -> Non
     qtbot.addWidget(stim_editor)
     stim_editor.action_trim_to_mapped_neurons.setEnabled(True)
 
-    with qtbot.waitSignal(stim_editor.trim_to_mapped_neurons_requested):
+    with qtbot.waitSignal(
+        stim_editor.trim_to_mapped_neurons_requested, timeout=WAIT_TIMEOUT_MS
+    ):
         stim_editor.action_trim_to_mapped_neurons.trigger()
     stim_editor.close()
-    qtbot.waitUntil(lambda: not stim_editor.isVisible())
+    qtbot.waitUntil(lambda: not stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
@@ -349,7 +352,7 @@ def _make_ramp_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     stim_editor.draw_stim = DrawStim(DrawStimType.Linear, 0.0, 1.0)
     stim_editor.draw_stim_length = 4
@@ -503,7 +506,7 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     # zoom/pan using the sliders and zoom buttons
     delay = 50
@@ -546,7 +549,7 @@ def test_stim_editor_pad_and_trim(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     # pad with invalid number of seconds
     monkeypatch.setattr(
@@ -635,7 +638,7 @@ def test_stim_editor_trim_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
 
     # Trim 0.4 s off; confirm the "would delete data" prompt with Yes.
@@ -725,14 +728,14 @@ def test_routine_dialogs_have_reset_stim_array_button(qtbot: QtBot) -> None:
         assert selector is not None
         selector.cmb_routine.setCurrentText(routine)
         selector._on_continue()
-        qtbot.waitUntil(lambda s=selector: not s.isVisible())
+        qtbot.waitUntil(lambda s=selector: not s.isVisible(), timeout=WAIT_TIMEOUT_MS)
         dialog = getattr(dynamic_input, attr)
         assert dialog is not None
         assert dialog.btn_reset.text() == "Reset input array"
         dialog.close()
-        qtbot.waitUntil(lambda d=dialog: not d.isVisible())
+        qtbot.waitUntil(lambda d=dialog: not d.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.close()
-    qtbot.waitUntil(lambda: not stim_editor.isVisible())
+    qtbot.waitUntil(lambda: not stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> None:
@@ -745,7 +748,7 @@ def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> Non
         DynamicInputController.STDP_SYNAPTIC_TUNING_ROUTINE
     )
     selector._on_continue()
-    qtbot.waitUntil(lambda: not selector.isVisible())
+    qtbot.waitUntil(lambda: not selector.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog = dynamic_input._stdp_synaptic_tuning_dialog
     assert dialog is not None
 
@@ -758,9 +761,9 @@ def test_routine_reset_button_trims_stim_to_simulation_head(qtbot: QtBot) -> Non
     dialog.btn_reset.click()
     assert modifier.stim_array.values.shape[0] == 1
     dialog.close()
-    qtbot.waitUntil(lambda: not dialog.isVisible())
+    qtbot.waitUntil(lambda: not dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.close()
-    qtbot.waitUntil(lambda: not stim_editor.isVisible())
+    qtbot.waitUntil(lambda: not stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def _make_editor_for_project(qtbot: QtBot, project: Project) -> StimEditor:
@@ -926,7 +929,7 @@ def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
 
     # Pad 0.5 s (500 samples) onto the 1 s array.
@@ -986,7 +989,7 @@ def test_edit_stim_array_dt_change_requires_confirmation(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     stim_editor.draw_stim_length = 4
     monkeypatch.setattr(
@@ -1054,7 +1057,7 @@ def test_choose_stim_intensity_passes_and_reads_back_draw_stim_length(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     stim_editor.draw_stim_length = 5
 
@@ -1109,7 +1112,7 @@ def test_selecting_stim_preserves_physical_draw_duration(qtbot: QtBot) -> None:
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project, stim_to_select="a")
     stim_editor.draw_stim_length = 4
     stim_editor.select_stim("b")
@@ -1349,7 +1352,7 @@ def test_create_stim_array_defaults_to_selected_stim_dt(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project, stim_to_select="a")
 
     stim_editor.create_stim_array()
@@ -1501,7 +1504,7 @@ def test_create_stim_array_defaults_to_one_millisecond_without_selection(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
 
     stim_editor.create_stim_array()
@@ -1535,7 +1538,7 @@ def test_stim_editor_actions(
     stim_editor = StimEditor(controller, cmb_stim, toolbar)
     qtbot.addWidget(stim_editor)
     stim_editor.show()
-    qtbot.waitUntil(lambda: stim_editor.isVisible())
+    qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert stim_editor.action_draw_mode.isChecked()
     assert not stim_editor.action_undo.isEnabled()
     assert not stim_editor.action_redo.isEnabled()

@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 
 from neuroseq import theme
 from neuroseq.icon_manager import IconManager
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _icon_luminance(icon) -> float:
@@ -76,7 +77,7 @@ def test_icon_manager_forgets_deleted_targets_without_theme_change(
 
     parent.deleteLater()
     del parent, action, owner
-    qtbot.waitUntil(lambda: not manager._entries)
+    qtbot.waitUntil(lambda: not manager._entries, timeout=WAIT_TIMEOUT_MS)
     gc.collect()
     # The registry no longer keeps the action, or what its slots capture, alive.
     assert owner_ref() is None

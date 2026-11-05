@@ -13,6 +13,7 @@ from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
 )
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.mark.parametrize("selected", [False, True])
@@ -95,7 +96,7 @@ def test_spike_widget(qtbot: QtBot, make_spike_data) -> None:
     spike_widget = SpikeWidget(controller=controller)
     qtbot.addWidget(spike_widget)
     spike_widget.show()
-    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    qtbot.waitUntil(lambda: spike_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert spike_widget.n_neurons == 0
     spike_data = make_spike_data(n_neurons=10, n_spikes=50, max_time_secs=1.0)
     spike_widget.set_data(spike_data)
@@ -112,7 +113,7 @@ def test_spike_widget_populates_visible_neuron_ids_for_y_axis_labels(
     spike_widget = SpikeWidget(controller=controller)
     qtbot.addWidget(spike_widget)
     spike_widget.show()
-    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    qtbot.waitUntil(lambda: spike_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     spike_data = make_spike_data(n_neurons=10, n_spikes=50, max_time_secs=1.0)
     spike_widget.set_data(spike_data)
     assert spike_widget._all_neuron_ids == list(range(spike_widget.n_neurons))
@@ -133,7 +134,7 @@ def test_spike_widget_neuron_count_falls_back_to_controller_limit(
     spike_widget = SpikeWidget(controller=controller)
     qtbot.addWidget(spike_widget)
     spike_widget.show()
-    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    qtbot.waitUntil(lambda: spike_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     import brian2.numpy_ as np
 
@@ -161,7 +162,7 @@ def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
     default_trace_widget = TraceWidget(controller=default_controller)
     qtbot.addWidget(default_trace_widget)
     default_trace_widget.show()
-    qtbot.waitUntil(lambda: default_trace_widget.isVisible())
+    qtbot.waitUntil(lambda: default_trace_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     local_controller = ConstrainedPanZoomController()
     spike_widget = SpikeWidget(
@@ -172,7 +173,7 @@ def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
     spike_widget.set_default_scroll_bars(default_x_scrollbar, default_y_scrollbar)
     qtbot.addWidget(spike_widget)
     spike_widget.show()
-    qtbot.waitUntil(lambda: spike_widget.isVisible())
+    qtbot.waitUntil(lambda: spike_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     default_controller.set_limits(5.0, 20)
     local_controller.set_limits(5.0, 20)

@@ -37,6 +37,7 @@ from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RE
 from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _right_click_event() -> SimpleNamespace:
@@ -332,7 +333,7 @@ def test_import_button_emits_import_requested(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
 
-    with qtbot.waitSignal(widget.import_requested):
+    with qtbot.waitSignal(widget.import_requested, timeout=WAIT_TIMEOUT_MS):
         widget.import_button.click()
 
 
@@ -504,7 +505,7 @@ def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> No
     widget.set_data(_cellpose_result())
     widget.resize(400, 400)
     widget.show()
-    qtbot.waitExposed(widget)
+    qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS)
 
     assert widget.tabs.currentIndex() == 0
     size_hint_on_cell_tab = widget.sizeHint()
@@ -512,7 +513,7 @@ def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> No
     geometry_on_cell_tab = widget.tabs.geometry()
 
     widget.tabs.setCurrentIndex(1)
-    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1)
+    qtbot.waitUntil(lambda: widget.tabs.currentIndex() == 1, timeout=WAIT_TIMEOUT_MS)
 
     assert widget.sizeHint() == size_hint_on_cell_tab
     assert widget.minimumSizeHint() == min_size_hint_on_cell_tab
@@ -1105,7 +1106,9 @@ def test_overlay_view_lasso_selects_only_enclosed_cells(
         lambda ev: next(positions),
     )
 
-    with qtbot.waitSignal(overlay_view.neuron_lasso_selected) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_lasso_selected, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view.pointer_move(None)  # crosses tolerance -> becomes a lasso
         overlay_view.pointer_move(None)
@@ -1171,7 +1174,9 @@ def test_overlay_view_plain_click_does_not_start_a_lasso(
     lasso_emitted: list[list[int]] = []
     overlay_view.neuron_lasso_selected.connect(lasso_emitted.append)
 
-    with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_clicked, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
         qtbot.wait(10)
@@ -1214,7 +1219,9 @@ def test_overlay_view_emits_neuron_clicked_on_plain_click(
         lambda ev: np.array([2.0, 0.0, 0.0]),
     )
 
-    with qtbot.waitSignal(overlay_view.neuron_clicked) as blocker:
+    with qtbot.waitSignal(
+        overlay_view.neuron_clicked, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         overlay_view._cell_selection_pointer_down(_right_click_event())
         overlay_view._cell_selection_pointer_up(None)
 
@@ -1932,7 +1939,9 @@ def test_right_click_on_a_cell_requests_its_neuron(qtbot: QtBot) -> None:
     widget = SpatialFootprintWidget()
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result(mapping={0: 2, 1: 1, 2: 0}))
-    with qtbot.waitSignal(widget.neuron_focus_requested) as blocker:
+    with qtbot.waitSignal(
+        widget.neuron_focus_requested, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         widget.overlay_widget.neuron_right_clicked.emit(2)
     assert blocker.args == [0]
     assert widget._selected_cellpose_ids == set()  # nothing selected or hidden

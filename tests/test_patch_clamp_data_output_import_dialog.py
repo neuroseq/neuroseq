@@ -20,6 +20,7 @@ from neuroseq.importers.patch_clamp_data_output_import_dialog import (
     PatchClampDataOutputImportDialog,
 )
 from neuroseq.project import Project
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _find_trace_data(
@@ -179,7 +180,7 @@ def test_trace_dialog_wave_plot_hidden_initially(qtbot: QtBot) -> None:
     dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     assert not dialog.wave_plot.isVisible()
 
@@ -198,11 +199,11 @@ def test_trace_dialog_wave_plot_shown_after_wave_load(
     dialog = PatchClampDataOutputImportDialog(Project())
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog._load_file(str(path))
 
-    qtbot.waitUntil(lambda: dialog.wave_plot.isVisible())
+    qtbot.waitUntil(lambda: dialog.wave_plot.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_trace_dialog_shows_multi_sweep_info(qtbot: QtBot) -> None:
@@ -404,7 +405,7 @@ def test_trace_dialog_loads_pxp_and_shows_wave_picker(
     dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.wave_picker_group.isVisible()
@@ -459,7 +460,7 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
     dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
     dialog.new_experiment_name_edit.setText("Experiment A")
 
@@ -501,7 +502,7 @@ def test_trace_dialog_stays_open_for_multiple_pxp_imports(
     assert dialog.selected_experiment_name == "Experiment A"
     assert dialog.selected_trace_name == "WaveB"
 
-    with qtbot.waitSignal(dialog.finished, timeout=1000):
+    with qtbot.waitSignal(dialog.finished, timeout=WAIT_TIMEOUT_MS):
         dialog.cancel_button.click()
     assert dialog.result() == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -545,7 +546,7 @@ def test_trace_dialog_reimport_same_pxp_wave_is_blocked(
     dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
     dialog.new_experiment_name_edit.setText("Experiment A")
 
@@ -614,7 +615,7 @@ def test_trace_dialog_warns_when_pxp_records_are_skipped(
     dialog = PatchClampDataOutputImportDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog._load_file(str(pxp_path))
 
     assert dialog.wave_picker_group.isVisible()

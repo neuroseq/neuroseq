@@ -8,6 +8,7 @@ from neuroseq.data import TraceData
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 gui_delay_in_ms = 50
 
@@ -40,7 +41,7 @@ def test_custom_analysis_widget_trace_histogram(
     qtbot: QtBot, new_window: bool, make_trace_data
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_trace_data(n_neurons=10, dt=0.1)
     assert custom_analysis_widget.subplot.get_title() == ""
     # no data, no plot
@@ -100,7 +101,7 @@ def test_custom_analysis_widget_spike_histogram(
     qtbot: QtBot, new_window: bool, make_spike_data
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert custom_analysis_widget.subplot.get_title() == ""
     data = make_spike_data(n_neurons=24)
     # no data, no plot
@@ -160,7 +161,7 @@ def test_custom_analysis_widget_trace_histogram2d(
     qtbot: QtBot, new_window: bool, make_trace_data
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert custom_analysis_widget.subplot.get_title() == ""
     data = make_trace_data(n_neurons=10, n_timestamps=1000, dt=0.1)
     # no data, no plot
@@ -215,7 +216,7 @@ def test_custom_analysis_widget_spike_histogram2d(
     qtbot: QtBot, new_window: bool, make_spike_data
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert custom_analysis_widget.subplot.get_title() == ""
     data = make_spike_data(n_neurons=24)
     # no data, no plot
@@ -276,7 +277,7 @@ def test_custom_analysis_widget_spike_count_per_neuron(
 ) -> None:
     """Test the SpikeCountPerNeuron analysis with all data and no slices."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # with no slices provided, all data is used
     custom_analysis_widget.set_data(
@@ -302,7 +303,7 @@ def test_custom_analysis_widget_spike_count_per_neuron_single_neuron(
 ) -> None:
     """Test SpikeCountPerNeuron with single neuron slice."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # set single neuron
     custom_analysis_widget.set_data(
@@ -324,7 +325,7 @@ def test_custom_analysis_widget_spike_count_per_neuron_neuron_range(
 ) -> None:
     """Test SpikeCountPerNeuron with neuron range slice."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # set slice of neurons
     custom_analysis_widget.set_data(
@@ -346,7 +347,7 @@ def test_custom_analysis_widget_spike_count_per_neuron_time_slice(
 ) -> None:
     """Test SpikeCountPerNeuron with time slice filtering."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # set time slice (0.15-1.05s)
     custom_analysis_widget.set_data(
@@ -369,7 +370,7 @@ def test_custom_analysis_widget_spike_count_per_neuron_both_slices(
 ) -> None:
     """Test SpikeCountPerNeuron with both neuron and time slices."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # set neuronslice and timeslice
     custom_analysis_widget.set_data(
@@ -392,7 +393,7 @@ def test_custom_analysis_widget_spike_count_no_spikes_in_selection(
 ) -> None:
     """Test SpikeCountPerNeuron when no spikes exist in the selected region."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = make_spike_data(n_neurons=24)
     # set a time slice far beyond existing data (should result in no spikes)
     custom_analysis_widget.set_data(
@@ -416,7 +417,7 @@ def test_custom_analysis_widget_trace_pearson_correlation(
     qtbot: QtBot, new_window: bool
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     traces = np.asarray(
         [
             [0.0, 1.0, 2.0, 3.0],
@@ -459,7 +460,7 @@ def test_custom_analysis_widget_trace_pearson_correlation_title_wraps_after_labe
     title past the window edge on one line - it should now wrap onto a
     second line right after "Pearson correlation:"."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="corr_traces",
         traces=np.random.random_sample((20, 50)).astype(np.float32),
@@ -497,7 +498,7 @@ def test_custom_analysis_widget_trace_pearson_correlation_ticks_use_real_neuron_
     """Regression (#546): the correlation matrix's ticks used to always read
     0, 1, 2, ... regardless of which neurons were actually selected."""
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="corr_traces",
         traces=np.random.random_sample((5, 10)).astype(np.float32),
@@ -528,7 +529,7 @@ def test_custom_analysis_widget_trace_pearson_correlation_ticks_are_integers(
     to any real neuron id - the axes should only ever tick at whole numbers.
     """
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, False)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     n_neurons = 18  # with this axes size, matplotlib's default locator
     # picks a fractional step (multiples of 2.5) without MaxNLocator(integer=True).
     data = TraceData(
@@ -560,7 +561,7 @@ def test_custom_analysis_widget_trace_pearson_correlation_short_selection(
     qtbot: QtBot, new_window: bool
 ) -> None:
     custom_analysis_widget, _ = make_custom_analysis_widget(qtbot, new_window)
-    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible())
+    qtbot.waitUntil(lambda: custom_analysis_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
     data = TraceData(
         name="short_corr_traces",
         traces=np.asarray([[1.0], [2.0]], dtype=np.float32),

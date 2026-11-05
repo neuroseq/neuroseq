@@ -12,6 +12,8 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from tests.wait_timeout import WAIT_TIMEOUT_MS
+
 
 def _make_pipeline_result():
     from neuroseq.importers.importer_tif import TifPipelineResult
@@ -242,7 +244,7 @@ def test_wheel_over_parameter_field_scrolls_without_changing_value(qtbot):
     dialog.resize(360, 220)
     dialog.show()
     scroll_bar = dialog._scroll_area.verticalScrollBar()
-    qtbot.waitUntil(lambda: scroll_bar.maximum() > 0)
+    qtbot.waitUntil(lambda: scroll_bar.maximum() > 0, timeout=WAIT_TIMEOUT_MS)
     scroll_bar.setValue(0)
     old_value = dialog._fs_spin.value()
     wheel_event = QtGui.QWheelEvent(
@@ -357,7 +359,9 @@ def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
     accept = mocker.patch.object(dialog, "accept")
 
     dialog._start_pipeline()
-    qtbot.waitUntil(lambda: dialog._pipeline_result is not None, timeout=5000)
+    qtbot.waitUntil(
+        lambda: dialog._pipeline_result is not None, timeout=WAIT_TIMEOUT_MS
+    )
 
     assert captured["tif_paths"] == [tif]
     assert captured["masks"] is None
@@ -397,7 +401,9 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
     accept = mocker.patch.object(dialog, "accept")
 
     dialog._start_pipeline()
-    qtbot.waitUntil(lambda: dialog._pipeline_result is not None, timeout=5000)
+    qtbot.waitUntil(
+        lambda: dialog._pipeline_result is not None, timeout=WAIT_TIMEOUT_MS
+    )
 
     question.assert_called_once()
     run.assert_called_once()
@@ -433,7 +439,9 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     mocker.patch.object(type(dialog).__bases__[0], "accept", lambda self_: None)
 
     dialog._start_pipeline()
-    qtbot.waitUntil(lambda: dialog._pipeline_result is not None, timeout=5000)
+    qtbot.waitUntil(
+        lambda: dialog._pipeline_result is not None, timeout=WAIT_TIMEOUT_MS
+    )
 
     mock_run.assert_called_once()
     assert len(dialog.imported_data) == 2
@@ -918,7 +926,7 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
         side_effect=RuntimeError("synthetic failure"),
     )
     dialog._start_pipeline()
-    qtbot.waitUntil(lambda: dialog._run_button.isEnabled(), timeout=5000)
+    qtbot.waitUntil(lambda: dialog._run_button.isEnabled(), timeout=WAIT_TIMEOUT_MS)
     assert dialog._pipeline_result is None
 
 
@@ -990,7 +998,7 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     )
 
     dialog._start_pipeline()
-    qtbot.waitUntil(started.is_set, timeout=5000)
+    qtbot.waitUntil(started.is_set, timeout=WAIT_TIMEOUT_MS)
     progress_dialog = dialog._progress_dialog
 
     dialog._cancel_pipeline()
@@ -1007,7 +1015,7 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     rejected.assert_not_called()
 
     release.set()
-    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=5000)
+    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=WAIT_TIMEOUT_MS)
     rejected.assert_called_once_with(dialog)
     assert dialog._run_button.isEnabled()
     assert dialog._pipeline_result is None
@@ -1042,10 +1050,12 @@ def test_running_pipeline_reports_progress_to_progress_dialog(qtbot, mocker, tmp
     dialog._start_pipeline()
     progress_dialog = dialog._progress_dialog
     try:
-        qtbot.waitUntil(lambda: progress_dialog._bar.value() == 50, timeout=5000)
+        qtbot.waitUntil(
+            lambda: progress_dialog._bar.value() == 50, timeout=WAIT_TIMEOUT_MS
+        )
         assert progress_dialog._label.text() == "halfway"
         assert not dialog._run_button.isEnabled()
     finally:
         release.set()
-    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=5000)
+    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=WAIT_TIMEOUT_MS)
     assert dialog._run_button.isEnabled()

@@ -23,6 +23,7 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 _REFERENCE_LUT_TEXT = """F2-EC-FD-4A-EB-0E-8C-29-3A-0D-22-7A-94-1D-D1-94
 [_]
@@ -193,7 +194,7 @@ def test_stimulation_generator_dialog_sanity_check_passes(
     )
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -401,7 +402,7 @@ def test_stimulation_generator_dialog_sanity_check_warns_when_report_contains_wa
     )
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -428,7 +429,7 @@ def test_stimulation_generator_dialog_sanity_check_fails_for_inactive_input(
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -466,7 +467,7 @@ def test_stimulation_generator_dialog_applies_sanitized_values_after_confirmatio
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -509,7 +510,7 @@ def test_stimulation_generator_dialog_declines_sanitized_values_when_confirmatio
     dialog = StimulationGeneratorDialog(project)
     qtbot.addWidget(dialog)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -562,7 +563,7 @@ def test_stimulation_generator_dialog_uses_stim_editor_undo_path_for_applied_san
     dialog = StimulationGeneratorDialog(project, parent=parent)
     qtbot.addWidget(parent)
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     dialog.check_sanity_button.click()
 
@@ -631,7 +632,9 @@ def test_stimulation_generator_dialog_emits_sequence_generated_on_success(
     dialog.folder_edit.setText(str(tmp_path))
     dialog.name_edit.setText("live_export")
 
-    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+    with qtbot.waitSignal(
+        dialog.sequence_generated, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         dialog._generate_scripts()
 
     assert blocker.args == [
@@ -665,7 +668,9 @@ def test_stimulation_generator_dialog_sequence_generated_excludes_unmapped_neuro
     dialog.folder_edit.setText(str(tmp_path))
     dialog.name_edit.setText("multi_target_export")
 
-    with qtbot.waitSignal(dialog.sequence_generated, timeout=1000) as blocker:
+    with qtbot.waitSignal(
+        dialog.sequence_generated, timeout=WAIT_TIMEOUT_MS
+    ) as blocker:
         dialog._generate_scripts()
 
     assert blocker.args[2] == frozenset({0})

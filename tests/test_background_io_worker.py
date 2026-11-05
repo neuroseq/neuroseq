@@ -9,6 +9,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtCore
 
 from neuroseq.background_jobs import BackgroundIOWorker
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _ProgressReceiver(QtCore.QObject):
@@ -43,7 +44,7 @@ def test_io_worker_runs_off_main_thread(qtbot: QtBot) -> None:
 
     thread, worker = _spawn_worker(_task)
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000) as blocker:
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS) as blocker:
             thread.start()
         assert seen
         assert seen[0] != threading.main_thread().ident
@@ -64,7 +65,7 @@ def test_io_worker_progress_signal_arrives_in_main_thread(qtbot: QtBot) -> None:
     thread, worker = _spawn_worker(_task)
     worker.progress.connect(receiver.record)
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000):
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS):
             thread.start()
         assert receiver.percents == sorted(receiver.percents)
         assert receiver.thread_ids
@@ -83,7 +84,7 @@ def test_io_worker_emits_failed_on_exception(qtbot: QtBot) -> None:
     finished_seen: list[bool] = []
     worker.finished.connect(lambda *_: finished_seen.append(True))
     try:
-        with qtbot.waitSignal(worker.failed, timeout=2000) as blocker:
+        with qtbot.waitSignal(worker.failed, timeout=WAIT_TIMEOUT_MS) as blocker:
             thread.start()
         message = blocker.args[0]
         assert "RuntimeError" in message
@@ -103,7 +104,7 @@ def test_io_worker_finished_payload_is_task_return_value(qtbot: QtBot) -> None:
 
     thread, worker = _spawn_worker(_task)
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000) as blocker:
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS) as blocker:
             thread.start()
         assert blocker.args[0] is sentinel
     finally:

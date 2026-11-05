@@ -18,6 +18,7 @@ from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _FakeProject:
@@ -845,9 +846,9 @@ def test_stdp_synaptic_tuning_plots_open_in_separate_window(qtbot) -> None:
 
     # Showing the dialog brings up the plot window; closing it hides the plots.
     dialog.show()
-    qtbot.waitUntil(lambda: dialog.plot_window.isVisible())
+    qtbot.waitUntil(lambda: dialog.plot_window.isVisible(), timeout=WAIT_TIMEOUT_MS)
     dialog.close()
-    qtbot.waitUntil(lambda: not dialog.plot_window.isVisible())
+    qtbot.waitUntil(lambda: not dialog.plot_window.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_stdp_synaptic_tuning_shows_stim_array_info_and_clear_button(qtbot) -> None:

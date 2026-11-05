@@ -37,7 +37,7 @@ jobs:
           environment-file: environment.yml
       - run: pip install . --no-deps
       - run: python .github/crash_reports.py setup
-      - run: pytest -v
+      - run: pytest -v --wait-timeout=30
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
       - if: failure()
@@ -74,7 +74,7 @@ jobs:
       - if: runner.os == 'Linux'
         run: sudo apt-get install -y mesa-vulkan-drivers
       - run: python .github/crash_reports.py setup
-      - run: uv run pytest -v --cov --cov-report=xml
+      - run: uv run pytest -v --wait-timeout=30 --cov --cov-report=xml
         env:
           NEUROSEQ_HEADLESS_TEST: TRUE
       - if: failure()

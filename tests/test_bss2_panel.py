@@ -24,6 +24,7 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.workspace_devices import WorkspaceDevices
 from tests.test_bss2_connection import TOKEN
 from tests.test_bss2_connection import fake_launcher
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 CSV = 'Host,Port,Identifier\n"a.host",11717,"chip_a"\n"b.host",11718,"chip_b"\n'
 QUESTION = "neuroseq.device_control.bss2_panel.QtWidgets.QMessageBox.question"
@@ -61,9 +62,9 @@ def panel(qtbot: QtBot, devices, tmp_config_dir, tmp_path) -> Iterator[Bss2Panel
 def _connect(qtbot: QtBot, panel: Bss2Panel) -> None:
     panel.host_edit.setText("quiggeldy.test")
     panel.token_edit.setText(TOKEN)
-    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+    with qtbot.waitSignal(panel._session.connected, timeout=WAIT_TIMEOUT_MS):
         panel.btn_connect.click()
-    qtbot.waitUntil(lambda: panel.btn_deliver.isEnabled(), timeout=5000)
+    qtbot.waitUntil(lambda: panel.btn_deliver.isEnabled(), timeout=WAIT_TIMEOUT_MS)
 
 
 def test_settings_persist_without_token(qtbot, panel, tmp_config_dir) -> None:
@@ -107,7 +108,7 @@ def test_refresh_setups_picks_default_and_fills_fields(
     panel.host_edit.setText("unlisted.host")  # not in the list: default pick
     panel.refresh_setups()
     # Two downloaded setups followed by the three built-in KIP instances.
-    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
+    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=WAIT_TIMEOUT_MS)
     assert panel.setup_combo.itemText(4) == ("quiggeldy.bioai.eu:11780 (special)")
     index = bp.default_setup_index("tester", 2)
     assert panel.setup_combo.currentIndex() == index
@@ -123,7 +124,9 @@ def test_refresh_setups_picks_default_and_fills_fields(
 
     panel.setup_fetcher = fail
     panel.refresh_setups()
-    qtbot.waitUntil(lambda: "offline" in panel.log_view.toPlainText(), timeout=5000)
+    qtbot.waitUntil(
+        lambda: "offline" in panel.log_view.toPlainText(), timeout=WAIT_TIMEOUT_MS
+    )
     assert panel.btn_refresh_setups.isEnabled()
     panel._on_setups_downloaded("Host,Port\n")
     panel._on_setups_downloaded("Host,Port,Identifier\n")
@@ -157,7 +160,7 @@ def test_connect_deliver_adds_undoable_experiment(qtbot, panel, mocker) -> None:
         QUESTION, return_value=QtWidgets.QMessageBox.StandardButton.Yes
     )
     panel.madc_spin.setValue(1)
-    with qtbot.waitSignal(panel.experiment_added, timeout=20000) as blocker:
+    with qtbot.waitSignal(panel.experiment_added, timeout=WAIT_TIMEOUT_MS) as blocker:
         panel.btn_deliver.click()
         assert panel.run_in_progress
         assert not panel.btn_deliver.isEnabled() and panel.btn_stop.isEnabled()
@@ -304,7 +307,7 @@ def test_stop_aborts_run_and_disconnect(qtbot, panel, devices, mocker) -> None:
     panel.deliver()
     assert panel.run_in_progress
     assert not panel.btn_disconnect.isEnabled()
-    with qtbot.waitSignal(panel._session.disconnected, timeout=20000):
+    with qtbot.waitSignal(panel._session.disconnected, timeout=WAIT_TIMEOUT_MS):
         panel.btn_stop.click()
     assert not panel.run_in_progress
     assert panel.btn_connect.isEnabled()
@@ -312,7 +315,7 @@ def test_stop_aborts_run_and_disconnect(qtbot, panel, devices, mocker) -> None:
 
     devices.bss2.launcher = fake_launcher()
     _connect(qtbot, panel)
-    with qtbot.waitSignal(panel._session.disconnected, timeout=20000):
+    with qtbot.waitSignal(panel._session.disconnected, timeout=WAIT_TIMEOUT_MS):
         panel.btn_disconnect.click()
     assert panel.identifier_label.text() == "–"
 
@@ -484,7 +487,7 @@ def test_connect_without_host_loads_setups_then_connects(qtbot, panel) -> None:
     panel.setup_fetcher = lambda url: CSV
     panel.host_edit.setText("")
     panel.token_edit.setText(TOKEN)
-    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+    with qtbot.waitSignal(panel._session.connected, timeout=WAIT_TIMEOUT_MS):
         panel.btn_connect.click()
     assert panel.host_edit.text() in {"a.host", "b.host"}
     assert "loading the setup list first" in panel.log_view.toPlainText()
@@ -499,7 +502,7 @@ def test_connect_without_host_reports_a_failed_setup_download(
     panel.setup_fetcher = fail
     panel.host_edit.setText("")
     panel.connect_hardware()
-    qtbot.waitUntil(lambda: bool(qmessagebox_calls), timeout=5000)
+    qtbot.waitUntil(lambda: bool(qmessagebox_calls), timeout=WAIT_TIMEOUT_MS)
     assert "Enter the quiggeldy host" in qmessagebox_calls[-1]["text"]
     assert panel._session.state == STATE_DISCONNECTED
 
@@ -509,7 +512,7 @@ def test_connect_without_token_does_not_ask(qtbot, panel, mocker, monkeypatch) -
     panel.host_edit.setText("quiggeldy.test")
     panel.token_edit.setText("")
     question = mocker.patch(QUESTION)
-    with qtbot.waitSignal(panel._session.connected, timeout=20000):
+    with qtbot.waitSignal(panel._session.connected, timeout=WAIT_TIMEOUT_MS):
         panel.connect_hardware()
     question.assert_not_called()
     assert "Connecting without an EBRAINS token." in panel.log_view.toPlainText()
@@ -584,7 +587,7 @@ def test_refresh_keeps_the_selected_instance(qtbot, panel) -> None:
         bp.DEFAULT_QUIGGELDY_PORT,
     )
     panel.refresh_setups()
-    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=5000)
+    qtbot.waitUntil(lambda: panel.setup_combo.count() == 5, timeout=WAIT_TIMEOUT_MS)
     assert panel.setup_combo.currentText().endswith(":11750 (experimental)")
     assert panel.port_spin.value() == 11750
 

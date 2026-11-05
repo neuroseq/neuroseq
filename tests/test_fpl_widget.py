@@ -10,6 +10,7 @@ from rendercanvas.qt import QRenderWidget
 
 from neuroseq import theme
 from neuroseq.visualization.fpl_widget import FPLWidget
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.mark.parametrize("close_plot", [True, False])
@@ -88,8 +89,8 @@ def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:
     assert rendered == []
 
     widget.show()
-    qtbot.waitExposed(widget)
-    qtbot.waitUntil(widget._fpl_canvas_ready)
+    qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS)
+    qtbot.waitUntil(widget._fpl_canvas_ready, timeout=WAIT_TIMEOUT_MS)
     rendered.clear()
     widget._fpl_guarded_render()
     # valid viewport so guarded renderer calls the real renderer:
@@ -140,7 +141,9 @@ def test_closing_canvas_does_not_reenter_the_qt_event_loop(monkeypatch, qtbot):
     QtCore.QTimer.singleShot(0, lambda: events.append("queued callback"))
     widget.close()
     assert events == ["closed"]
-    qtbot.waitUntil(lambda: events == ["closed", "queued callback"])
+    qtbot.waitUntil(
+        lambda: events == ["closed", "queued callback"], timeout=WAIT_TIMEOUT_MS
+    )
 
 
 def test_destroyed_cleanup_swallows_figure_errors(monkeypatch, qtbot, caplog):

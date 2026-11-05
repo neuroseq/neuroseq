@@ -19,6 +19,7 @@ import neuroseq
 import neuroseq.stimulation.stim
 from neuroseq.data import Experiment
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _MockImportDialog:
@@ -49,7 +50,9 @@ def _wait_for_external_simulation(qtbot: QtBot, gui: ProjectWorkspace):
     # `finished` before the test enters the wait — `waitSignal` only
     # catches future emissions, while `waitUntil` is true whether the
     # worker is still running or already gone.
-    qtbot.waitUntil(lambda: gui._background_job.worker_thread is None, timeout=10000)
+    qtbot.waitUntil(
+        lambda: gui._background_job.worker_thread is None, timeout=WAIT_TIMEOUT_MS
+    )
 
 
 def test_run_dispatches_to_external_when_path_set(

@@ -11,6 +11,7 @@ from neuroseq.stimulation.dynamic_input.routine_overview_dialog import (
     RoutineSelectorDialog,
 )
 from neuroseq.stimulation.dynamic_input.routine_overview_dialog import routine_overview
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_every_dynamic_routine_has_an_overview() -> None:
@@ -124,7 +125,7 @@ def test_selector_preview_is_scrollable_on_a_small_screen(qtbot: QtBot) -> None:
     qtbot.addWidget(dialog)
     dialog.show()
     dialog.resize(dialog.width(), 200)
-    qtbot.waitUntil(lambda: dialog.isVisible())
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
 
     scroll_areas = dialog.findChildren(QtWidgets.QScrollArea)
     assert len(scroll_areas) == 1

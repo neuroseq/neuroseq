@@ -13,6 +13,7 @@ from neuroseq.device_control.scanimage_connection import ScanImageConnection
 from neuroseq.device_control.scanimage_engine_worker import EngineAdapter
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.importers.importer_scanimage import index_recording
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 @pytest.fixture
@@ -528,10 +529,10 @@ class Engine:
     conn.process.setProcessEnvironment(environment)
     try:
         conn.connect_session(sys.executable, "Named")
-        qtbot.waitUntil(lambda: conn.connected, timeout=10000)
+        qtbot.waitUntil(lambda: conn.connected, timeout=WAIT_TIMEOUT_MS)
         assert "engine diagnostic" in conn._stderr
         assert conn.command("disconnect")
-        qtbot.waitUntil(lambda: not conn.connected, timeout=10000)
+        qtbot.waitUntil(lambda: not conn.connected, timeout=WAIT_TIMEOUT_MS)
         assert conn.process.state() == QtCore.QProcess.ProcessState.NotRunning
     finally:
         conn.shutdown()
@@ -812,7 +813,7 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     gui.show()
-    qtbot.waitExposed(gui)
+    qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS)
     footprint = gui.spatial_footprint_widget
     footprint.set_data(_cellpose_result())
     gui.project.add_calcium_video([Path(p) for p in recording[0]], 10)
@@ -823,10 +824,14 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
         return QtCore.QRect(top_left, canvas.size())
 
     footprint.tabs.setCurrentIndex(0)
-    qtbot.waitUntil(lambda: footprint.overlay_widget.isVisible())
+    qtbot.waitUntil(
+        lambda: footprint.overlay_widget.isVisible(), timeout=WAIT_TIMEOUT_MS
+    )
     cell_rect = canvas_rect(footprint.overlay_widget)
     footprint.tabs.setCurrentIndex(1)
-    qtbot.waitUntil(lambda: gui.calcium_video_widget.widget.isVisible())
+    qtbot.waitUntil(
+        lambda: gui.calcium_video_widget.widget.isVisible(), timeout=WAIT_TIMEOUT_MS
+    )
     assert canvas_rect(gui.calcium_video_widget.widget) == cell_rect
     gui._close_confirmed = True
 

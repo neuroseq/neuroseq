@@ -15,6 +15,7 @@ from neuroseq.project_workspace import DROP_SEGMENT
 from neuroseq.project_workspace import DROP_TRACES
 from neuroseq.project_workspace import DROP_VIDEO
 from neuroseq.project_workspace import ProjectWorkspace
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 LEGACY_SEQ = Path(__file__).parent / "data" / "legacy_cellpose_v1" / "legacy_export.seq"
 
@@ -151,7 +152,7 @@ def test_dropping_on_a_panel(
 ) -> None:
     """A real drop event, routed by the panel under the cursor."""
     gui.show()
-    qtbot.waitExposed(gui)
+    qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS)
     gui._auto_show_widget(gui.stim_editor)
     qtbot.wait(50)
     path = tmp_path / "wave.ibw"
@@ -178,7 +179,7 @@ def test_dropping_on_a_panel(
         QtCore.Qt.KeyboardModifier.NoModifier,
     )
     QtWidgets.QApplication.sendEvent(gui, drop)
-    qtbot.waitUntil(lambda: bool(calls))
+    qtbot.waitUntil(lambda: bool(calls), timeout=WAIT_TIMEOUT_MS)
     assert calls == [
         ("btn_import_patch_clamp_input_clicked", {"args": (), "path": path})
     ]

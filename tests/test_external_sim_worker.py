@@ -7,6 +7,7 @@ from qtpy import QtCore
 
 from neuroseq.background_jobs import ExternalSimWorker
 from neuroseq.data import Experiment
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _ProgressReceiver(QtCore.QObject):
@@ -66,7 +67,7 @@ def test_worker_runs_on_a_non_main_thread(qtbot: QtBot) -> None:
 
     thread, worker, _ = _spawn_worker(_simulate)
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000):
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS):
             thread.start()
         assert seen_thread_ids
         assert seen_thread_ids[0] != threading.main_thread().ident
@@ -81,7 +82,7 @@ def test_worker_progress_signals_arrive_in_main_thread(qtbot: QtBot) -> None:
     worker.progress.connect(receiver.record)
 
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000):
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS):
             thread.start()
         assert receiver.fractions == sorted(receiver.fractions)
         assert receiver.thread_ids
@@ -96,7 +97,7 @@ def test_worker_progress_signals_arrive_in_main_thread(qtbot: QtBot) -> None:
 def test_worker_emits_finished_with_experiment(qtbot: QtBot) -> None:
     thread, worker, _ = _spawn_worker(_fake_simulate_success)
     try:
-        with qtbot.waitSignal(worker.finished, timeout=2000) as blocker:
+        with qtbot.waitSignal(worker.finished, timeout=WAIT_TIMEOUT_MS) as blocker:
             thread.start()
         experiment = blocker.args[0]
         assert isinstance(experiment, Experiment)
@@ -112,7 +113,7 @@ def test_worker_emits_failed_on_simulator_exception(qtbot: QtBot) -> None:
     worker.finished.connect(lambda *_: finished_emitted.append(True))
 
     try:
-        with qtbot.waitSignal(worker.failed, timeout=2000) as blocker:
+        with qtbot.waitSignal(worker.failed, timeout=WAIT_TIMEOUT_MS) as blocker:
             thread.start()
         message = blocker.args[0]
         assert "ValueError" in message

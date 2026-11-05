@@ -14,6 +14,7 @@ from neuroseq import theme
 from neuroseq.console_widget import SAMPLE_CODE
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.project import Project
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def test_console(qtbot: QtBot, test_project: Project) -> None:
@@ -21,7 +22,7 @@ def test_console(qtbot: QtBot, test_project: Project) -> None:
     console = ConsoleWidget()
     qtbot.addWidget(console)
     console.show()
-    qtbot.waitUntil(lambda: console.isVisible())
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
     console.console_command_entered.connect(lambda: signals.append(True))
     assert "np" in console.namespace()
     assert "b2" in console.namespace()
@@ -50,7 +51,7 @@ def test_retro_theme_preserves_console_banner_character_spacing(qtbot: QtBot) ->
     original_family = console.output.font().family()
     console.setStyleSheet(theme.app_stylesheet(theme.RETRO))
     console.show()
-    qtbot.waitUntil(lambda: console.isVisible())
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert console.output.font().family() == original_family
     assert (
         console.output.document().defaultTextOption().flags()
@@ -68,11 +69,13 @@ def test_console_scrolls_back_to_welcome_splash_on_startup(qtbot: QtBot) -> None
     console = ConsoleWidget()
     qtbot.addWidget(console)
     console.show()
-    qtbot.waitUntil(lambda: console.isVisible())
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
     # the intro text is long enough to auto-scroll the view to the bottom as
     # it's inserted - it must land back at the top so the "Welcome to
     # NeuroSeq" splash (the very first line) is what's actually visible.
-    qtbot.waitUntil(lambda: console.output.verticalScrollBar().value() == 0)
+    qtbot.waitUntil(
+        lambda: console.output.verticalScrollBar().value() == 0, timeout=WAIT_TIMEOUT_MS
+    )
 
 
 def test_console_retints_the_brain_image_on_construction_and_every_show(
@@ -96,13 +99,13 @@ def test_console_retints_the_brain_image_on_construction_and_every_show(
     assert len(calls) == 1
 
     console.show()
-    qtbot.waitUntil(lambda: console.isVisible())
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
     after_first_show = len(calls)
     assert after_first_show > 1
 
     console.hide()
     console.show()
-    qtbot.waitUntil(lambda: console.isVisible())
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
     assert len(calls) > after_first_show
 
 
@@ -119,7 +122,7 @@ def test_console_help_dialogs_allow_console_interaction(qtbot: QtBot, method) ->
     assert QtWidgets.QApplication.activeModalWidget() is None
     qtbot.keyClicks(console.input, "1 + 1")
     assert console.input.text() == "1 + 1"
-    with qtbot.waitSignal(dialog.destroyed):
+    with qtbot.waitSignal(dialog.destroyed, timeout=WAIT_TIMEOUT_MS):
         dialog.close()
 
 

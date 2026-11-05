@@ -8,6 +8,7 @@ from qtpy import QtWidgets
 
 from neuroseq.importers.cellpose_import_dialog import CUSTOM_AOI_STRATEGY
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _make_cellpose_dialog(tmp_path, qtbot: QtBot) -> CellposeImportDialog:
@@ -85,7 +86,7 @@ def test_cellpose_dialog_opens_at_compact_file_selection_size(qtbot: QtBot):
     dialog.showMaximized()
     dialog._set_ui_loaded_state(False)
     dialog.show()
-    qtbot.waitExposed(dialog)
+    qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS)
 
     assert not dialog.isMaximized()
     assert dialog.main_content_container is not None
