@@ -10,6 +10,7 @@ from neuroseq.llm.backend import get_backend_class
 from neuroseq.llm.backend import missing_dependency_message
 
 from . import anthropic_backend  # noqa: F401
+from . import claude_code_backend  # noqa: F401
 from . import codex_backend  # noqa: F401
 from . import ollama  # noqa: F401
 from . import openai_backend  # noqa: F401

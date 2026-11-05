@@ -17,6 +17,7 @@ from neuroseq.llm import Role
 from neuroseq.llm.anthropic_backend import AnthropicBackend
 from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
+from neuroseq.llm.claude_code_backend import ClaudeCodeBackend
 from neuroseq.llm.codex_backend import CodexBackend
 from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
@@ -263,6 +264,8 @@ class ChatWidget(QtWidgets.QWidget):
             return AnthropicBackend()
         if settings.llm_provider == "codex":
             return CodexBackend(executable=settings.llm_codex_executable)
+        if settings.llm_provider == "claude_code":
+            return ClaudeCodeBackend(executable=settings.llm_claude_executable)
         raise LLMBackendError(f"Unknown provider '{settings.llm_provider}'")
 
     def _update_badge(self) -> None:

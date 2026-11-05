@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import pathlib
 import queue
 import shutil
@@ -39,7 +38,7 @@ class _AppServer:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
                 encoding="utf-8",
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except OSError as error:
             raise LLMBackendError(f"Could not start Codex: {error}") from error

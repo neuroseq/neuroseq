@@ -28,20 +28,21 @@ pip install ".[chat]"
 ```
 
 The panel itself is available in the default install. API providers require
-their optional dependencies. Codex uses a separately installed Codex CLI
-and does not require the `chat` extra.
+their optional dependencies. Codex and Claude Code use their separately
+installed CLIs and do not require the `chat` extra.
 
 ## Configuring a provider
 
-Open **Settings → LLM assistant** to choose a provider and model. Four
+Open **Settings → LLM assistant** to choose a provider and model. Five
 backends are bundled:
 
-| Provider  | Notes                                                                       |
-| --------- | --------------------------------------------------------------------------- |
-| Ollama    | Local models served by a running [Ollama](https://ollama.com) daemon.       |
-| OpenAI    | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
-| Anthropic | Anthropic Claude API.                                                       |
-| Codex     | Local Codex app-server using your existing Codex sign-in and configuration. |
+| Provider    | Notes                                                                       |
+| ----------- | --------------------------------------------------------------------------- |
+| Ollama      | Local models served by a running [Ollama](https://ollama.com) daemon.       |
+| OpenAI      | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
+| Anthropic   | Anthropic Claude API.                                                       |
+| Codex       | Local Codex app-server using your existing Codex sign-in and configuration. |
+| Claude Code | Local Claude Code CLI using your existing Claude sign-in.                   |
 
 For OpenAI and Anthropic you can paste an API key into the settings dialog.
 Keys are stored in the OS keyring via the `keyring` package; if no keyring
@@ -78,6 +79,27 @@ sandbox and no native tool approvals. Your local Codex provider configuration
 and configured tools still apply; the native filesystem sandbox does not confine
 reads to the NeuroSeq source package. Native tool approval requests and interactive
 tool prompts are rejected. This panel does not provide a code-editing review workflow.
+
+### Claude Code
+
+1. Install [Claude Code](https://code.claude.com/docs/en/setup), then run
+   `claude auth login` from a terminal under the same operating-system account as
+   NeuroSeq. A Claude subscription sign-in, a Console account, or an
+   `ANTHROPIC_API_KEY` in the environment all work.
+2. In **Settings → LLM Assistant**, choose **Claude Code (local sign-in)**.
+3. Leave **Claude Code executable** empty to find `claude` on PATH, or enter the
+   full executable path. Restart NeuroSeq after changing your system PATH.
+4. Leave **Model** set to `default` to use your Claude Code configuration, or pick
+   `opus`, `sonnet` or `haiku` (any model name Claude Code accepts also works).
+   Model access depends on your plan.
+5. Use **Test connection** to check the CLI and sign-in (`claude auth status`)
+   without sending an inference request.
+
+Each request runs `claude --print` once with streamed output. All native
+Claude Code tools, MCP servers, settings files, slash commands and session
+persistence are disabled, and the process runs in an empty temporary directory,
+so the model reaches the project and source only through NeuroSeq's inspection
+protocol below. Stop terminates the process.
 
 ## Using the assistant
 
@@ -123,7 +145,7 @@ imports the Python code.
 - Project and source access is read-only except for Python files in the analysis
   plugin folder. NeuroSeq's inspection protocol cannot directly execute Python
   or run simulations. Codex's configured native tools have their own sandbox policy.
-- Inspection uses a JSON request protocol supported by all four backends;
+- Inspection uses a JSON request protocol supported by all five backends;
   reliability depends on the model following that protocol. Each turn allows
   up to 12 read/write requests; ask a follow-up to continue. Data is read on demand rather
   than sending the entire project and source tree in every prompt.
