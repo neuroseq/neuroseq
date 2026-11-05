@@ -563,7 +563,7 @@ def test_next_block_does_not_wait_for_an_earlier_extraction(setup, qtbot, mocker
     trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
 
     def slow_extract(*_args, **_kwargs):
-        release.wait(10)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return trace
 
     mocker.patch.object(controller_module, "extract_recording_dff", slow_extract)

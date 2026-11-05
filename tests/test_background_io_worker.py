@@ -51,7 +51,7 @@ def test_io_worker_runs_off_main_thread(qtbot: QtBot) -> None:
         assert blocker.args[0] == "ok"
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_io_worker_progress_signal_arrives_in_main_thread(qtbot: QtBot) -> None:
@@ -72,7 +72,7 @@ def test_io_worker_progress_signal_arrives_in_main_thread(qtbot: QtBot) -> None:
         assert all(tid == threading.main_thread().ident for tid in receiver.thread_ids)
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_io_worker_emits_failed_on_exception(qtbot: QtBot) -> None:
@@ -92,7 +92,7 @@ def test_io_worker_emits_failed_on_exception(qtbot: QtBot) -> None:
         assert not finished_seen
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_io_worker_finished_payload_is_task_return_value(qtbot: QtBot) -> None:
@@ -109,4 +109,4 @@ def test_io_worker_finished_payload_is_task_return_value(qtbot: QtBot) -> None:
         assert blocker.args[0] is sentinel
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)

@@ -16,13 +16,13 @@ from tests.wait_timeout import WAIT_TIMEOUT_MS
 def job(qapp):
     owner = BackgroundJob()
     yield owner
-    assert owner.stop(5000)
+    assert owner.stop(WAIT_TIMEOUT_MS)
 
 
 def test_completion_runs_on_main_thread_after_worker_stops(qtbot, job):
     release = threading.Event()
     results = []
-    worker = BackgroundIOWorker(lambda report: release.wait(5))
+    worker = BackgroundIOWorker(lambda report: release.wait(WAIT_TIMEOUT_MS / 1000))
 
     def on_finished(result):
         assert thread.isFinished()
@@ -100,7 +100,7 @@ def test_cancellation_retains_ownership_until_task_returns(qtbot, job):
     cancelled = []
 
     def run(progress):
-        assert release.wait(5)
+        assert release.wait(WAIT_TIMEOUT_MS / 1000)
         progress(0.5)
 
     worker = EliseProtocolWorker(run, {}, cancel_event)
@@ -124,7 +124,7 @@ def test_cancellation_retains_ownership_until_task_returns(qtbot, job):
 def test_rejects_overlapping_jobs(qtbot, job):
     release = threading.Event()
     job.start(
-        BackgroundIOWorker(lambda report: release.wait(5)),
+        BackgroundIOWorker(lambda report: release.wait(WAIT_TIMEOUT_MS / 1000)),
         on_progress=lambda _: None,
         on_finished=lambda _: None,
         on_failed=pytest.fail,
@@ -151,7 +151,7 @@ def test_stop_cancels_protocol_without_delivering_ui_callbacks(qtbot, job):
 
     def run(progress):
         entered.set()
-        assert cancel_event.wait(5)
+        assert cancel_event.wait(WAIT_TIMEOUT_MS / 1000)
         progress(0.5)
 
     job.start(
@@ -162,8 +162,8 @@ def test_stop_cancels_protocol_without_delivering_ui_callbacks(qtbot, job):
         on_cancelled=lambda: callbacks.append("cancelled"),
         cancel=cancel_event.set,
     )
-    assert entered.wait(5)
-    assert job.stop(5000)
+    assert entered.wait(WAIT_TIMEOUT_MS / 1000)
+    assert job.stop(WAIT_TIMEOUT_MS)
     assert cancel_event.is_set()
     assert not job.busy
     QtCore.QCoreApplication.processEvents()
@@ -174,7 +174,7 @@ def test_shutdown_timeout_keeps_ownership(qtbot, job):
     release = threading.Event()
     results = []
     job.start(
-        BackgroundIOWorker(lambda report: release.wait(5)),
+        BackgroundIOWorker(lambda report: release.wait(WAIT_TIMEOUT_MS / 1000)),
         on_progress=lambda _: None,
         on_finished=results.append,
         on_failed=pytest.fail,
@@ -196,7 +196,7 @@ def test_idle_follows_callbacks_and_wait_for_jobs_defers_to_event_loop(qtbot, jo
     release = threading.Event()
     job.idle.connect(lambda: events.append("idle"))
     job.start(
-        BackgroundIOWorker(lambda report: release.wait(5)),
+        BackgroundIOWorker(lambda report: release.wait(WAIT_TIMEOUT_MS / 1000)),
         on_progress=lambda _: None,
         on_finished=lambda _result: events.append("finished"),
         on_failed=pytest.fail,
@@ -208,7 +208,7 @@ def test_idle_follows_callbacks_and_wait_for_jobs_defers_to_event_loop(qtbot, jo
         [job],
         on_idle=lambda: events.append("all idle"),
         on_timeout=pytest.fail,
-        timeout_ms=5000,
+        timeout_ms=WAIT_TIMEOUT_MS,
         parent=owner,
     )
     job.cancel()
@@ -221,7 +221,7 @@ def test_wait_for_jobs_times_out_while_a_job_keeps_running(qtbot, job):
     release = threading.Event()
     outcome = []
     job.start(
-        BackgroundIOWorker(lambda report: release.wait(5)),
+        BackgroundIOWorker(lambda report: release.wait(WAIT_TIMEOUT_MS / 1000)),
         on_progress=lambda _: None,
         on_finished=lambda _result: None,
         on_failed=pytest.fail,

@@ -151,7 +151,7 @@ def test_hidden_workspace_receives_its_own_background_result(
 
     def simulate(*args, **kwargs):
         started.set()
-        release.wait(5)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return Experiment("result", 0.1, [], [])
 
     first.project.external_simulate_function = simulate
@@ -366,7 +366,7 @@ def _start_job(workspace, *, cancellable=True, honour_cancel=True):
     release = threading.Event()
     results = []
     assert workspace._dispatch_io_task(
-        lambda report: release.wait(5) and "done",
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000) and "done",
         "Long operation...",
         results.append,
         cancel_callback=(
@@ -510,7 +510,9 @@ def test_brian2_simulations_are_serialized_across_workspaces(
     release = threading.Event()
     runs = []
     monkeypatch.setattr(
-        first.project, "run_simulation", lambda *args, **kwargs: release.wait(5)
+        first.project,
+        "run_simulation",
+        lambda *args, **kwargs: release.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(
         second.project, "run_simulation", lambda *args, **kwargs: runs.append(1)
@@ -556,7 +558,9 @@ def test_simulation_guard_is_released_on_failure_cancel_and_close(
 
     cancelled = threading.Event()
     monkeypatch.setattr(
-        workspace.project, "run_simulation", lambda *a, **k: cancelled.wait(5)
+        workspace.project,
+        "run_simulation",
+        lambda *a, **k: cancelled.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(workspace.project, "request_cancel_simulation", cancelled.set)
     workspace._do_brian2_simulation_threaded(0.1)
@@ -566,7 +570,9 @@ def test_simulation_guard_is_released_on_failure_cancel_and_close(
 
     closing = threading.Event()
     monkeypatch.setattr(
-        workspace.project, "run_simulation", lambda *a, **k: closing.wait(5)
+        workspace.project,
+        "run_simulation",
+        lambda *a, **k: closing.wait(WAIT_TIMEOUT_MS / 1000),
     )
     monkeypatch.setattr(workspace.project, "request_cancel_simulation", closing.set)
     workspace._do_brian2_simulation_threaded(0.1)

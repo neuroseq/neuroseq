@@ -73,7 +73,7 @@ def test_worker_runs_on_a_non_main_thread(qtbot: QtBot) -> None:
         assert seen_thread_ids[0] != threading.main_thread().ident
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_worker_progress_signals_arrive_in_main_thread(qtbot: QtBot) -> None:
@@ -91,7 +91,7 @@ def test_worker_progress_signals_arrive_in_main_thread(qtbot: QtBot) -> None:
         )
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_worker_emits_finished_with_experiment(qtbot: QtBot) -> None:
@@ -104,7 +104,7 @@ def test_worker_emits_finished_with_experiment(qtbot: QtBot) -> None:
         assert experiment.name == "fake_success"
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_worker_emits_failed_on_simulator_exception(qtbot: QtBot) -> None:
@@ -121,4 +121,4 @@ def test_worker_emits_failed_on_simulator_exception(qtbot: QtBot) -> None:
         assert not finished_emitted
     finally:
         thread.quit()
-        thread.wait(2000)
+        thread.wait(WAIT_TIMEOUT_MS)

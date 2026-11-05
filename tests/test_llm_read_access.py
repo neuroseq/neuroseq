@@ -114,7 +114,7 @@ def test_worker_stop_while_waiting_for_read(qtbot):
     worker.read_requested.connect(lambda request: worker.request_stop())
     with qtbot.waitSignal(worker.completed, timeout=WAIT_TIMEOUT_MS):
         worker.start()
-    assert worker.wait(1000)
+    assert worker.wait(WAIT_TIMEOUT_MS)
 
 
 def test_worker_limits_reads(qtbot):

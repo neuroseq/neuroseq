@@ -60,7 +60,7 @@ def test_worker_returns_to_main_thread_even_when_run_raises(qtbot: QtBot) -> Non
         timeout=WAIT_TIMEOUT_MS,
     )
     thread.quit()
-    assert thread.wait(5000)
+    assert thread.wait(WAIT_TIMEOUT_MS)
 
 
 def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
@@ -72,7 +72,7 @@ def test_gui_io_worker_ends_up_on_the_main_thread(qtbot: QtBot) -> None:
 
     def task(report):
         # Hold the task open until the test has hooked thread.finished.
-        release.wait(5)
+        release.wait(WAIT_TIMEOUT_MS / 1000)
         return 1
 
     assert gui._dispatch_io_task(task, "t", lambda _r: None)

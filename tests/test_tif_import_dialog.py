@@ -982,7 +982,7 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     def slow_pipeline(*_args, progress, **_kwargs):
         progress("start", 0.0)
         started.set()
-        release.wait(timeout=5)
+        release.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         progress("next", 0.5)  # raises PipelineCancelled once cancelled
         raise AssertionError("pipeline kept running after cancel")
 
@@ -1039,7 +1039,7 @@ def test_running_pipeline_reports_progress_to_progress_dialog(qtbot, mocker, tmp
 
     def slow_pipeline(*_args, progress, **_kwargs):
         progress("halfway", 0.5)
-        release.wait(timeout=5)
+        release.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         raise RuntimeError("stop here")
 
     mocker.patch(

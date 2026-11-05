@@ -4325,7 +4325,9 @@ def test_brian2_busy_notifies_dynamic_input(
     gui.show()
     qtbot.waitUntil(gui.isVisible, timeout=WAIT_TIMEOUT_MS)
     release = threading.Event()
-    gui._dispatch_io_task(lambda report: release.wait(5), "Busy", lambda _: None)
+    gui._dispatch_io_task(
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000), "Busy", lambda _: None
+    )
     dropped: list[str] = []
     monkeypatch.setattr(
         gui.dynamic_input_controller,

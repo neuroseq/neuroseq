@@ -73,7 +73,7 @@ def test_brian2_progress_dialog_shows_label_transition(
     allow_report = threading.Event()
 
     def _spy_run_simulation(time_seconds, report=None, stim_array_padding_seconds=0.0):
-        allow_report.wait(timeout=5.0)
+        allow_report.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         if report is not None:
             report(0.1, 0.25, 0.0, 1.0)
 
@@ -229,7 +229,7 @@ def test_brian2_close_event_drains_inflight_sim(
     def _blocking_run_simulation(
         time_seconds, report=None, stim_array_padding_seconds=0.0
     ):
-        block.wait(timeout=5.0)
+        block.wait(timeout=WAIT_TIMEOUT_MS / 1000)
 
     monkeypatch.setattr(
         gui_with_b2_project.project,
@@ -253,7 +253,7 @@ def test_brian2_close_event_drains_inflight_sim(
     try:
         gui_with_b2_project.close()
     finally:
-        releaser.join(timeout=2.0)
+        releaser.join(timeout=WAIT_TIMEOUT_MS / 1000)
 
     qtbot.waitUntil(
         lambda: (

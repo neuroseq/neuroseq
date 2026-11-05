@@ -272,7 +272,7 @@ def test_pending_io_is_cancelled_and_closed_on_worker(
 
         def recv(self, n):
             entered.set()
-            if not self.cancel_event.wait(3):
+            if not self.cancel_event.wait(WAIT_TIMEOUT_MS / 1000):
                 raise AssertionError("Cancellation did not reach the transport")
             raise SysCon2ConnectionError("cancelled")
 

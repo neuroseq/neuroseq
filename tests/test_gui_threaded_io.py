@@ -71,7 +71,9 @@ def test_running_job_keeps_progress_and_ownership_when_another_is_requested(
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
-        lambda report: release.wait(5), "Original operation", lambda _: None
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000),
+        "Original operation",
+        lambda _: None,
     )
     original_worker = gui._background_job.worker
     original_label = gui.progress_dialog.labelText()
@@ -107,7 +109,9 @@ def test_close_keeps_window_open_when_worker_cannot_stop(
 ) -> None:
     release = threading.Event()
     assert gui._dispatch_io_task(
-        lambda report: release.wait(5), "Original operation", lambda _: None
+        lambda report: release.wait(WAIT_TIMEOUT_MS / 1000),
+        "Original operation",
+        lambda _: None,
     )
     gui._close_confirmed = True
     try:
@@ -156,7 +160,7 @@ def test_file_menu_disabled_during_save(
     original_save = Project.save
 
     def _blocking_save(self, filepath, options):
-        block.wait(timeout=5.0)
+        block.wait(timeout=WAIT_TIMEOUT_MS / 1000)
         return original_save(self, filepath, options)
 
     monkeypatch.setattr(Project, "save", _blocking_save)
