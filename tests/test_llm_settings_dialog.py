@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pytestqt.qtbot import QtBot
 
+from neuroseq.llm.codex_backend import CodexBackend
 from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 
 
@@ -11,6 +12,7 @@ class _FakeSettings:
         self.llm_model = "qwen2.5:7b"
         self.llm_ollama_base_url = "http://localhost:11434"
         self.llm_openai_base_url = ""
+        self.llm_codex_executable = ""
 
 
 def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
@@ -32,7 +34,7 @@ def test_dialog_has_no_qt_parent(qtbot: QtBot, monkeypatch) -> None:
     assert dialog.parent() is None
 
 
-def test_dialog_lists_three_providers(qtbot: QtBot, monkeypatch) -> None:
+def test_dialog_lists_providers(qtbot: QtBot, monkeypatch) -> None:
     dialog = _make_dialog(qtbot, monkeypatch)
     items = [
         dialog.provider_combo.itemText(i) for i in range(dialog.provider_combo.count())
@@ -40,6 +42,32 @@ def test_dialog_lists_three_providers(qtbot: QtBot, monkeypatch) -> None:
     assert "Ollama (local)" in items
     assert "OpenAI" in items
     assert "Anthropic" in items
+    assert "Codex (local sign-in)" in items
+
+
+def test_codex_settings_and_model_switching(qtbot: QtBot, monkeypatch) -> None:
+    settings = _FakeSettings()
+    dialog = _make_dialog(qtbot, monkeypatch)
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.codex_executable_edit.isVisible()
+    assert not dialog.endpoint_edit.isVisible()
+    assert not dialog.api_key_edit.isVisible()
+    assert dialog.model_combo.currentText() == "default"
+    dialog.codex_executable_edit.setText("C:/Tools/codex.exe")
+    dialog._save_settings()
+    assert settings.llm_codex_executable == "C:/Tools/codex.exe"
+    backend = dialog._make_backend()
+    assert isinstance(backend, CodexBackend)
+    assert backend.executable == "C:/Tools/codex.exe"
+    assert settings.llm_provider == "codex"
+    dialog.model_combo.setCurrentText("my-codex-model")
+    dialog.provider_combo.setCurrentText("Ollama (local)")
+    assert dialog.model_combo.currentText() == "qwen2.5:7b"
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.model_combo.currentText() == "my-codex-model"
 
 
 def test_switching_provider_shows_correct_fields(qtbot: QtBot, monkeypatch) -> None:

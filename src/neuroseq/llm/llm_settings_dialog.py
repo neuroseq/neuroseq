@@ -8,6 +8,7 @@ from neuroseq.llm import available_backends
 from neuroseq.llm.anthropic_backend import AnthropicBackend
 from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
+from neuroseq.llm.codex_backend import CodexBackend
 from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
 from neuroseq.llm.secrets import delete_api_key
@@ -28,12 +29,15 @@ class LLMSettingsDialog(SelfRaisingDialog):
         self.setModal(False)
         self.setWindowTitle("LLM assistant settings")
         self._loading = False
+        self._provider_models: dict[str, str] = {}
+        self._previous_provider = ""
         self._build_ui()
         self._load_settings()
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
         form = QtWidgets.QFormLayout()
+        self._form = form
 
         self.provider_combo = QtWidgets.QComboBox(self)
         for provider_name, label in available_backends():
@@ -50,6 +54,20 @@ class LLMSettingsDialog(SelfRaisingDialog):
 
         self.endpoint_edit = QtWidgets.QLineEdit(self)
         form.addRow("Endpoint:", self.endpoint_edit)
+
+        self.codex_executable_edit = QtWidgets.QLineEdit(self)
+        self.codex_executable_edit.setPlaceholderText(
+            "codex (from PATH), or full executable path"
+        )
+        form.addRow("Codex executable:", self.codex_executable_edit)
+        self.codex_help_label = QtWidgets.QLabel(
+            "Uses your local Codex sign-in. Run 'codex login' first.\n"
+            "Model 'default' uses your Codex configuration.\n"
+            "Project context and requested source are sent to Codex's provider.",
+            self,
+        )
+        self.codex_help_label.setWordWrap(True)
+        form.addRow("", self.codex_help_label)
 
         self.api_key_edit = QtWidgets.QLineEdit(self)
         self.api_key_edit.setEchoMode(QtWidgets.QLineEdit.EchoMode.Password)
@@ -76,6 +94,7 @@ class LLMSettingsDialog(SelfRaisingDialog):
         self.provider_combo.currentIndexChanged.connect(self._provider_changed)
         self.model_combo.currentTextChanged.connect(self._model_changed)
         self.endpoint_edit.editingFinished.connect(self._endpoint_changed)
+        self.codex_executable_edit.editingFinished.connect(self._save_settings)
         self.refresh_button.clicked.connect(self._refresh_models)
         self.save_key_button.clicked.connect(self._save_key)
         self.clear_key_button.clicked.connect(self._clear_key)
@@ -92,6 +111,9 @@ class LLMSettingsDialog(SelfRaisingDialog):
         self.model_combo.addItem(settings.llm_model)
         self.model_combo.setCurrentText(settings.llm_model)
         self.endpoint_edit.setText(self._current_endpoint_from_settings(settings))
+        self.codex_executable_edit.setText(settings.llm_codex_executable)
+        self._previous_provider = settings.llm_provider
+        self._provider_models[settings.llm_provider] = settings.llm_model
         self.api_key_edit.clear()
         self._update_provider_visibility()
         self.status_label.setText("Idle")
@@ -110,8 +132,7 @@ class LLMSettingsDialog(SelfRaisingDialog):
         show_endpoint = provider in {"ollama", "openai"}
         show_key = provider in {"openai", "anthropic"}
         self.endpoint_edit.setVisible(show_endpoint)
-        form = self.layout().itemAt(0).layout()
-        assert isinstance(form, QtWidgets.QFormLayout)
+        form = self._form
         endpoint_label = form.labelForField(self.endpoint_edit)
         if endpoint_label is not None:
             endpoint_label.setVisible(show_endpoint)
@@ -121,6 +142,11 @@ class LLMSettingsDialog(SelfRaisingDialog):
             api_key_label.setVisible(show_key)
         self.save_key_button.setVisible(show_key)
         self.clear_key_button.setVisible(show_key)
+        self.codex_executable_edit.setVisible(provider == "codex")
+        codex_label = form.labelForField(self.codex_executable_edit)
+        if codex_label is not None:
+            codex_label.setVisible(provider == "codex")
+        self.codex_help_label.setVisible(provider == "codex")
 
     def _save_settings(self) -> None:
         if self._loading:
@@ -128,11 +154,14 @@ class LLMSettingsDialog(SelfRaisingDialog):
         settings = GuiSettings()
         settings.llm_provider = self._current_provider()
         model = self.model_combo.currentText().strip()
-        settings.llm_model = model or "qwen2.5:7b"
+        settings.llm_model = model or (
+            "default" if settings.llm_provider == "codex" else "qwen2.5:7b"
+        )
+        settings.llm_codex_executable = self.codex_executable_edit.text().strip()
         endpoint = self.endpoint_edit.text().strip().rstrip("/")
         if settings.llm_provider == "openai":
             settings.llm_openai_base_url = endpoint
-        else:
+        elif settings.llm_provider == "ollama":
             settings.llm_ollama_base_url = endpoint or "http://localhost:11434"
         self.settings_changed.emit()
 
@@ -142,6 +171,13 @@ class LLMSettingsDialog(SelfRaisingDialog):
             return
         settings = GuiSettings()
         provider = self._current_provider()
+        self._provider_models[self._previous_provider] = self.model_combo.currentText()
+        if provider == "codex" or self._previous_provider == "codex":
+            with QtCore.QSignalBlocker(self.model_combo):
+                self.model_combo.setCurrentText(
+                    self._provider_models.get(provider, "default")
+                )
+        self._previous_provider = provider
         if provider == "openai":
             self.endpoint_edit.setText(settings.llm_openai_base_url)
         else:
@@ -165,6 +201,8 @@ class LLMSettingsDialog(SelfRaisingDialog):
                 api_key=api_key if use_typed_key else None,
                 base_url=endpoint,
             )
+        if provider == "codex":
+            return CodexBackend(executable=self.codex_executable_edit.text().strip())
         return AnthropicBackend(api_key=api_key if use_typed_key else None)
 
     def _refresh_models(self) -> None:
@@ -227,7 +265,10 @@ class LLMSettingsDialog(SelfRaisingDialog):
     def _test_connection(self) -> None:
         try:
             backend = self._make_backend(use_typed_key=True)
-            ok, reason = backend.is_available()
+            if isinstance(backend, CodexBackend):
+                ok, reason = backend.check_connection()
+            else:
+                ok, reason = backend.is_available()
         except LLMBackendError as e:
             self.status_label.setText(str(e))
             return

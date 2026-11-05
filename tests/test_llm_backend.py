@@ -316,6 +316,6 @@ def test_anthropic_strips_system_messages_into_top_level_field(
     assert recorded["messages"] == [{"role": "user", "content": "hi"}]
 
 
-def test_registry_exposes_three_backends() -> None:
+def test_registry_exposes_backends() -> None:
     names = {name for name, _label in available_backends()}
-    assert names == {"anthropic", "ollama", "openai"}
+    assert names == {"anthropic", "ollama", "openai", "codex"}

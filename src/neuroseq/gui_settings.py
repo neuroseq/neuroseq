@@ -67,6 +67,7 @@ class GuiSettings:
     llm_model: str = "qwen2.5:7b"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
+    llm_codex_executable: str = ""
     fiji_executable_path: str = ""
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
@@ -115,6 +116,7 @@ class GuiSettings:
                         "llm_model": self.llm_model,
                         "llm_ollama_base_url": self.llm_ollama_base_url,
                         "llm_openai_base_url": self.llm_openai_base_url,
+                        "llm_codex_executable": self.llm_codex_executable,
                         "fiji_executable_path": self.fiji_executable_path,
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
@@ -229,7 +231,7 @@ class GuiSettings:
                     f"Restoring default of {theme_module.DEFAULT}"
                 )
                 self.__dict__["theme"] = theme_module.DEFAULT
-            valid_providers = {"ollama", "openai", "anthropic"}
+            valid_providers = {"ollama", "openai", "anthropic", "codex"}
             if llm_provider in valid_providers:
                 self.__dict__["llm_provider"] = llm_provider
             else:
@@ -242,6 +244,9 @@ class GuiSettings:
                 self.__dict__["llm_provider"] = "ollama"
             llm_model = str(llm_model).strip()
             self.__dict__["llm_model"] = llm_model or "qwen2.5:7b"
+            self.__dict__["llm_codex_executable"] = str(
+                config.get("llm_codex_executable", "")
+            ).strip()
             self.__dict__["llm_ollama_base_url"] = (
                 str(llm_ollama_base_url).rstrip("/") or "http://localhost:11434"
             )
