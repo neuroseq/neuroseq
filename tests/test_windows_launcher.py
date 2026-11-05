@@ -85,13 +85,25 @@ def _launch(rig: dict[str, Path], *args: str, exit_code: int = 0):
         "GIT_CONFIG_GLOBAL": os.devnull,
     }
     script = rig["clone"] / "scripts" / "windows" / "launch_neuroseq.ps1"
-    return subprocess.run(
-        [PWSH, "-NoProfile", "-File", str(script), "-Console", "-Uv", str(rig["uv"])]
-        + list(args),
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=120,
+    command = [PWSH, "-NoProfile", "-File", str(script), "-Console"]
+    command += ["-Uv", str(rig["uv"]), *args]
+    # Output goes to files: processes started by the launcher inherit pipes, so
+    # one that hangs would also block reading the output after a timeout.
+    out, err = rig["logs"].with_name("pwsh.out"), rig["logs"].with_name("pwsh.err")
+    with out.open("w") as stdout, err.open("w") as stderr:
+        try:
+            # Below pytest's 60 s timeout, so a hang fails only this test.
+            process = subprocess.run(
+                command, stdout=stdout, stderr=stderr, env=env, timeout=30
+            )
+        except subprocess.TimeoutExpired:
+            log = rig["logs"] / "neuroseq" / "launcher.log"
+            pytest.fail(
+                f"launcher timed out\n{out.read_text()}{err.read_text()}"
+                f"{log.read_text() if log.exists() else 'no launcher.log'}"
+            )
+    return subprocess.CompletedProcess(
+        command, process.returncode, out.read_text(), err.read_text()
     )
 
 
