@@ -144,3 +144,6 @@ dmypy.json
 uv.lock
 uv.lock
 uv.lock
+
+# Stray pytest --basetemp directories
+.pytest-*/

@@ -445,19 +445,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
         right_layout.addWidget(self.mapping_group)
-        guidance_path = (
-            Path(__file__).resolve().parents[3]
-            / "example_data"
-            / "cellpose_guidance.png"
-        )
-        self.guidance_label = QtWidgets.QLabel()
-        self.guidance_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        if guidance_path.exists():
-            self.guidance_label.setPixmap(QtGui.QPixmap(str(guidance_path)))
-        else:
-            self.guidance_label.setVisible(False)
-        right_layout.addWidget(self.guidance_label)
-        self.guidance_label.setVisible(self._get_mapping_strategy() == "Custom")
         self.aoi_summary_browser = QtWidgets.QTextBrowser()
         self.aoi_summary_browser.setReadOnly(True)
         self.aoi_summary_browser.setOpenExternalLinks(False)
@@ -818,8 +805,6 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.show_shapes_checkbox.setVisible(shapes_editable)
         for radio in self._aoi_role_radios:
             radio.setVisible(is_aoi)
-        if hasattr(self, "guidance_label"):
-            self.guidance_label.setVisible(is_any_custom)
         if not is_aoi:
             self.aoi_summary_browser.setVisible(False)
         if is_aoi:

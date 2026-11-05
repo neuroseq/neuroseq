@@ -35,6 +35,7 @@ nav = [
         { "Implementation of Custom Simulators" = "developer/custom_simulators.md" },
         { "Analysis plugins" = "developer/analysis_plugins.md" },
         { "Project data history" = "developer/project_history.md" },
+        { "Making a release" = "developer/releases.md" },
         { Miscellaneous = "developer/miscellaneous.md" },
         { Testing = "developer/testing.md" },
         { Contributing = "developer/contributing.md" },

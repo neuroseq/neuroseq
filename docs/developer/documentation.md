@@ -23,7 +23,7 @@ Then open the local URL shown in the terminal.
 If NeuroSeq is installed directly into Conda, activate that environment,
 install the documentation packages with `python -m pip install --group docs`,
 and run `zensical serve` instead. See
-[environment selection](../getting_started/installation.md#using-uv-from-a-conda-shell).
+[environment selection](developer_installation.md#using-uv-from-a-conda-shell).
 
 ## Optional: build static docs
 

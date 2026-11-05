@@ -10,6 +10,29 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Andrey Formozov" }]
 requires-python = ">=3.12"
+keywords = [
+    "neuroscience",
+    "spiking neural networks",
+    "brian2",
+    "optogenetics",
+    "holographic stimulation",
+    "calcium imaging",
+    "gui",
+]
+classifiers = [
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Visualization",
+]
 dependencies = [
     "brian2",
     "matplotlib",
@@ -91,6 +114,22 @@ path = "src/neuroseq/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/neuroseq"]
+
+[tool.hatch.build.targets.wheel.force-include]
+# the chat assistant answers from the docs (neuroseq.llm.system_prompt)
+"docs" = "neuroseq/docs"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/neuroseq",
+    "tests",
+    "README.md",
+    # packaged into the wheel for the chat assistant
+    "docs",
+    # files the tests load
+    "scripts/windows",
+    "external_simulation_example",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
