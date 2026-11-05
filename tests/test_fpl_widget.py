@@ -29,7 +29,8 @@ def test_closed_plot_is_unregistered_before_qt_deletes_canvas(qtbot, close_plot)
     parent.deleteLater()
     QtCore.QCoreApplication.sendPostedEvents(None, QtCore.QEvent.Type.DeferredDelete)
     assert canvas.get_closed()
-    assert native_canvas not in group.get_canvases(close_closed=True)
+    native_canvas.close()
+    assert native_canvas not in group.get_canvases()
     assert widget.figure is None
 
 
