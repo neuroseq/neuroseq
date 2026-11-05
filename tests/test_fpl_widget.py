@@ -88,8 +88,8 @@ def test_fpl_widget_skips_rendering_until_canvas_is_sized(qtbot: QtBot) -> None:
     # invalid viewport so guarded renderer does not call the real renderer:
     assert rendered == []
 
-    widget.show()
-    qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS):
+        widget.show()
     qtbot.waitUntil(widget._fpl_canvas_ready, timeout=WAIT_TIMEOUT_MS)
     rendered.clear()
     widget._fpl_guarded_render()

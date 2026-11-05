@@ -21,6 +21,6 @@ def test_window_left_open_is_not_freed_while_it_is_painted(qtbot: QtBot) -> None
     window = QtWidgets.QWidget()
     window.cycle = window  # type: ignore[attr-defined]
     _CollectGarbageOnPaint(window).resize(50, 50)
-    window.show()
-    qtbot.waitExposed(window, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(window, timeout=WAIT_TIMEOUT_MS):
+        window.show()
     window.update()

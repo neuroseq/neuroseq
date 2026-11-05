@@ -1889,8 +1889,8 @@ def test_wheel_scrolling_moves_the_traces_at_once(
     trace_widget = TraceWidget(controller)
     qtbot.addWidget(trace_widget)
     trace_widget.resize(800, 400)
-    trace_widget.show()
-    qtbot.waitExposed(trace_widget, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(trace_widget, timeout=WAIT_TIMEOUT_MS):
+        trace_widget.show()
     trace_widget.set_data(make_trace_data(n_neurons=40, n_timestamps=10))
     controller.set_limits(0.01, 40)
     controller.set_vertical_view((8.0, 20.0))
@@ -1948,8 +1948,8 @@ def test_stim_overlay_marks_each_stimulus_start(qtbot: QtBot, make_trace_data) -
 def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) -> None:
     parent = QtWidgets.QWidget()
     trace_widget = TraceWidget(ConstrainedPanZoomController(), parent=parent)
-    parent.show()
-    qtbot.waitExposed(parent, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(parent, timeout=WAIT_TIMEOUT_MS):
+        parent.show()
     trace_widget.set_data(make_trace_data(n_neurons=10, n_timestamps=100))
     qtbot.wait(50)
     widget_ref = weakref.ref(trace_widget)

@@ -85,8 +85,8 @@ def test_cellpose_dialog_opens_at_compact_file_selection_size(qtbot: QtBot):
 
     dialog.showMaximized()
     dialog._set_ui_loaded_state(False)
-    dialog.show()
-    qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+        dialog.show()
 
     assert not dialog.isMaximized()
     assert dialog.main_content_container is not None

@@ -738,9 +738,8 @@ def test_stim_widget_select_mode(qtbot: QtBot, positive_stims: StimArray) -> Non
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
-    stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS):
+        stim_widget.show()
     stim_widget.set_mode(InteractMode.SELECT)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]
@@ -814,9 +813,8 @@ def test_stim_widget_draw_mode(qtbot: QtBot, positive_stims: StimArray) -> None:
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
-    stim_widget.show()
-    qtbot.waitUntil(lambda: stim_widget.isVisible(), timeout=WAIT_TIMEOUT_MS)
-    qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(stim_widget, timeout=WAIT_TIMEOUT_MS):
+        stim_widget.show()
     stim_widget.set_mode(InteractMode.DRAW)
     assert stim_widget.n_neurons == 0
     n_timestamps = positive_stims.values.shape[0]

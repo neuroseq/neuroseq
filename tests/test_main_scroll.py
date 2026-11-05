@@ -34,8 +34,8 @@ def _build(qtbot: QtBot):
     area = make_main_scroll_area(content, 300, 2000)
     qtbot.addWidget(area)
     area.resize(400, 300)
-    area.show()
-    qtbot.waitExposed(area, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(area, timeout=WAIT_TIMEOUT_MS):
+        area.show()
     return area, inner
 
 

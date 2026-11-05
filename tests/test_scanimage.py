@@ -812,8 +812,8 @@ def test_video_tab_canvas_overlays_cell_segmentation_canvas(qtbot, recording):
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    gui.show()
-    qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     footprint = gui.spatial_footprint_widget
     footprint.set_data(_cellpose_result())
     gui.project.add_calcium_video([Path(p) for p in recording[0]], 10)

@@ -151,8 +151,8 @@ def test_dropping_on_a_panel(
     gui: ProjectWorkspace, calls: list, qtbot: QtBot, tmp_path: Path
 ) -> None:
     """A real drop event, routed by the panel under the cursor."""
-    gui.show()
-    qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
     gui._auto_show_widget(gui.stim_editor)
     qtbot.wait(50)
     path = tmp_path / "wave.ibw"

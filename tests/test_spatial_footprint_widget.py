@@ -504,8 +504,8 @@ def test_switching_tabs_does_not_change_the_panels_size_hint(qtbot: QtBot) -> No
     qtbot.addWidget(widget)
     widget.set_data(_cellpose_result())
     widget.resize(400, 400)
-    widget.show()
-    qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(widget, timeout=WAIT_TIMEOUT_MS):
+        widget.show()
 
     assert widget.tabs.currentIndex() == 0
     size_hint_on_cell_tab = widget.sizeHint()

@@ -129,8 +129,8 @@ def test_theme_control_gallery_screenshot(
 
     try:
         theme.apply_app_theme(app, theme_name)
-        dialog.show()
-        qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
         app.processEvents()
         pixmap = dialog.grab()
         assert pixmap.save(str(actual_path))
@@ -180,8 +180,8 @@ def test_retro_combo_popup_selection_is_readable(qtbot: QtBot) -> None:
 
     try:
         theme.apply_app_theme(app, theme.RETRO)
-        dialog.show()
-        qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
         combo_box.showPopup()
         app.processEvents()
 
@@ -235,8 +235,8 @@ def test_retro_button_focus_does_not_look_pressed(qtbot: QtBot) -> None:
 
     try:
         theme.apply_app_theme(app, theme.RETRO)
-        dialog.show()
-        qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS)
+        with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+            dialog.show()
 
         other_control.setFocus(QtCore.Qt.FocusReason.TabFocusReason)
         app.processEvents()

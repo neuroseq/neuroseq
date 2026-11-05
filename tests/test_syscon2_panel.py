@@ -373,8 +373,8 @@ def test_scrolling_over_unfocused_combo_box_does_not_change_selection(
 def test_holo4d_advanced_options_hidden_by_default_and_toggle_reveals_them(
     panel: SysCon2Panel, qtbot: QtBot
 ) -> None:
-    panel.show()
-    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS):
+        panel.show()
     assert not panel.holo4d_advanced_panel.isVisible()
     assert not panel.btn_toggle_holo4d_advanced.isChecked()
 
@@ -394,8 +394,8 @@ def test_holo4d_advanced_options_hidden_by_default_and_toggle_reveals_them(
 def test_laser_advanced_controls_hidden_by_default_and_toggle_reveals_them(
     panel: SysCon2Panel, qtbot: QtBot
 ) -> None:
-    panel.show()
-    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS):
+        panel.show()
     assert not panel.laser_advanced_panel.isVisible()
     assert not panel.btn_toggle_laser_advanced.isChecked()
 
@@ -894,8 +894,8 @@ def test_trigger_wait_is_not_reported_as_completed(panel, mocker):
 
 def test_laser_controls_hidden_and_single_selector_defaults_940(panel, qtbot):
     panel._on_lightsources({"dummy_SN": ["dummy 1100 nm", "dummy 940 nm"]})
-    panel.show()
-    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS):
+        panel.show()
     assert panel.description_combo.currentText() == "940 nm"
     assert panel._selected_device_and_description() == ("dummy_SN", "dummy 940 nm")
     for widget in (
@@ -923,8 +923,8 @@ def test_generated_and_routine_exports_display_resizable_preview(
     source.save(str(path))
     submit = mocker.patch.object(panel, "_submit")
     panel._on_dialog_sequence_generated("example.seq", str(path), frozenset({1}))
-    panel.show()
-    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS):
+        panel.show()
     panel.btn_toggle_preview.click()
     panel.resize(460, 850)
     qtbot.waitUntil(
@@ -988,8 +988,8 @@ def test_disconnect_cancels_pending_run_and_ignores_old_ack(panel, mocker):
 
 
 def test_preview_hidden_by_default_and_toggle_expands_it(panel, qtbot):
-    panel.show()
-    qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS)
+    with qtbot.waitExposed(panel, timeout=WAIT_TIMEOUT_MS):
+        panel.show()
     assert not panel.preview_container.isVisible()
     assert panel.btn_toggle_preview.text() == "Show preview"
     panel.btn_toggle_preview.click()
