@@ -19,6 +19,7 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from tests.fake_stimulation_host import FakeBss2Host
 from tests.fake_stimulation_host import FakeStimulationHost
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 class _FakeProject:
@@ -383,6 +384,28 @@ def test_rheobase_plot_marks_converged_rheobase(qtbot, monkeypatch) -> None:
     assert dialog.rheobase_axes.get_title() == ""
     assert dialog.search_axes.get_title() == ""
     assert "Rheobase ~=" in dialog.lbl_status.text()
+
+
+def test_rheobase_plot_is_drawn_once_per_event_loop_pass(qtbot, monkeypatch) -> None:
+    _project, _editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    monkeypatch.setattr(
+        dialog, "_measure_spikes", lambda trace: int(dialog._pending_amplitude >= 2.6)
+    )
+    draws: list[object] = []
+    dialog.rheobase_plot.canvas.mpl_connect("draw_event", draws.append)
+    # matplotlib also redraws when the plot is first shown and sized
+    with qtbot.waitExposed(dialog.plot_window, timeout=WAIT_TIMEOUT_MS):
+        dialog.plot_window.show()
+    qtbot.waitUntil(lambda: bool(draws), timeout=WAIT_TIMEOUT_MS)
+    draws.clear()
+
+    dialog.start()
+    _finish_search(dialog)
+
+    assert draws == []
+    qtbot.waitUntil(lambda: bool(draws), timeout=WAIT_TIMEOUT_MS)
+    assert len(draws) == 1
 
 
 def test_rheobase_sweeps_duration_range_and_marks_chronaxie(qtbot, monkeypatch) -> None:
