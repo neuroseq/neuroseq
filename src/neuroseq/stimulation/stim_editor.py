@@ -82,6 +82,9 @@ class StimEditor(QtWidgets.QWidget):
         self.history_enabled = True
         self.cmb_stim = cmb_stim
         self.current_stim_modifier: StimArrayModifier | None = None
+        #: Data groups of hardware routine runs started in new arrays: the
+        #: workspace shows each one's traces and spikes once its first block is in.
+        self.followed_run_groups: set[str] = set()
         self.mode = InteractMode.DRAW
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT
@@ -526,6 +529,33 @@ class StimEditor(QtWidgets.QWidget):
         if nonzero_rows.size == 0:
             return 0
         return int(nonzero_rows[-1]) + 1
+
+    def add_empty_stim_array_like_current(self, name: str) -> str:
+        """Add an all-zero input array with the current one's type, neurons,
+        units, dt and length, and select it; the current one is left as it is.
+
+        ``name`` gets a " (2)", " (3)", ... suffix if already taken. Returns the
+        name used. Used by hardware routines so each run gets its own array.
+        """
+        if self.project is None or self.current_stim_modifier is None:
+            raise RuntimeError("No input array is selected.")
+        stim = self.current_stim_modifier.stim_array
+        unique = name
+        suffix = 2
+        while unique in self.project.stim_arrays:
+            unique = f"{name} ({suffix})"
+            suffix += 1
+        self.project.add_stim_array(
+            StimArray(
+                unique,
+                stim.stim_type,
+                np.zeros_like(stim.values),
+                stim.units,
+                float(stim.dt),
+            )
+        )
+        self.set_project(self.project, stim_to_select=unique)
+        return unique
 
     def zero_current_stim_array(self) -> None:
         """Set every value in the current stim array to zero, without prompting.

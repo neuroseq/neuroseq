@@ -14,6 +14,8 @@ from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 
+from neuroseq.image_scaling import scale_to_uint8
+
 DATA_MIN = 0
 DATA_MAX = 255
 # Fiji's ContrastAdjuster.autoAdjust constants.
@@ -89,6 +91,28 @@ def auto_display_range(histogram: np.ndarray) -> DisplayRange:
     return DisplayRange.clamped(int(above[0]), int(above[-1]))
 
 
+#: Fiji's Process > Enhance Contrast default: this percentage of pixels saturates.
+ENHANCE_SATURATED_PERCENT = 0.35
+
+
+def enhanced_display_range(
+    histogram: np.ndarray, saturated_percent: float = ENHANCE_SATURATED_PERCENT
+) -> DisplayRange:
+    """Fiji's Enhance Contrast: the window that saturates ``saturated_percent`` of
+    the pixels, half at each end. Unlike :func:`auto_display_range` it always
+    stretches an image that does not already fill the range up to that point."""
+    total = int(histogram.sum())
+    if total == 0:
+        return DisplayRange()
+    cumulative = np.cumsum(histogram)
+    tail = total * saturated_percent / 200.0
+    low = int(np.searchsorted(cumulative, tail, side="right"))
+    high = int(np.searchsorted(cumulative, total - tail, side="left"))
+    if high <= low:
+        return DisplayRange()
+    return DisplayRange.clamped(low, high)
+
+
 def build_lut(display_range: DisplayRange) -> np.ndarray:
     """uint8 lookup table mapping the display window onto 0-255."""
     levels = np.arange(DATA_MAX + 1, dtype=np.float32)
@@ -98,14 +122,12 @@ def build_lut(display_range: DisplayRange) -> np.ndarray:
 
 
 def to_8bit(image: np.ndarray) -> np.ndarray:
-    """Stretch any image's own minimum-maximum onto 0-255 (uint8), the
-    scale the display window works on."""
-    values = np.asarray(image, dtype=np.float32)
-    lo, hi = float(np.nanmin(values)), float(np.nanmax(values))
-    if hi <= lo:
-        return np.zeros(values.shape, dtype=np.uint8)
-    scaled = (values - lo) * (DATA_MAX / (hi - lo))
-    return np.clip(np.rint(np.nan_to_num(scaled)), DATA_MIN, DATA_MAX).astype(np.uint8)
+    """The 8-bit image the display window works on: an 8-bit image as it is (as
+    the Cellpose importer shows it), anything else scaled like the importer's
+    display image (see :func:`neuroseq.image_scaling.scale_to_uint8`)."""
+    if np.asarray(image).dtype == np.uint8:
+        return np.asarray(image)
+    return scale_to_uint8(image)
 
 
 def apply_display_range(image: np.ndarray, display_range: DisplayRange) -> np.ndarray:
@@ -113,6 +135,38 @@ def apply_display_range(image: np.ndarray, display_range: DisplayRange) -> np.nd
     if display_range.is_identity:
         return image
     return build_lut(display_range)[image]
+
+
+def adjust_fov_and_overlay(
+    background: np.ndarray | None,
+    overlay: np.ndarray,
+    segmentation: np.ndarray | None,
+    display_range: DisplayRange,
+    cell_opacity: float,
+) -> tuple[np.ndarray | None, np.ndarray]:
+    """(FOV background, overlay) with ``display_range`` applied to the FOV only, so
+    cell colors keep their exact legend colors.
+
+    The overlay is the FOV blended with cell color inside segmented pixels (see
+    CellPoseImporter.generate_overlay; ``segmentation`` uses -1 for background), so
+    the FOV's change is added back at the weight it carries there: 1 outside cells,
+    ``1 - cell_opacity`` inside. Returned unchanged when there is nothing to adjust.
+    """
+    if (
+        display_range.is_identity
+        or background is None
+        or segmentation is None
+        or background.shape != overlay.shape
+        or background.dtype != np.uint8
+    ):
+        return background, overlay
+    adjusted_background = apply_display_range(background, display_range)
+    weight = np.where(np.asarray(segmentation) >= 0, 1.0 - cell_opacity, 1.0).astype(
+        np.float32
+    )[..., np.newaxis]
+    delta = adjusted_background.astype(np.float32) - background.astype(np.float32)
+    adjusted_overlay = np.clip(overlay.astype(np.float32) + delta * weight, 0, 255)
+    return adjusted_background, adjusted_overlay.astype(np.uint8)
 
 
 class _HistogramView(QtWidgets.QWidget):

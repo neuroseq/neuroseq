@@ -9,6 +9,7 @@ import threading
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
+from typing import Literal
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -136,6 +137,10 @@ class DetachedPanelWindow(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
+#: Label prefix of the toolbar progress bar while a routine block's traces are extracted.
+EXTRACTION_PROGRESS_PREFIX = "Extracting traces: "
+
+
 class ToolbarProgressWidget(QtWidgets.QWidget):
     """Compact progress and cancellation controls embedded in a toolbar."""
 
@@ -176,6 +181,13 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         if self._toolbar_action is not None:
             self._toolbar_action.setVisible(False)
         super().hide()
+
+    def is_shown(self) -> bool:
+        """Whether the bar is shown, per its last show()/hide(). isVisible() and
+        isHidden() can lag for a widget embedded in a toolbar."""
+        if self._toolbar_action is not None:
+            return self._toolbar_action.isVisible()
+        return not self.isHidden()
 
     @QtCore.Slot()
     def _cancel(self) -> None:
@@ -452,6 +464,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        self.calcium_video_widget.locate_requested.connect(
+            self._on_calcium_video_locate_requested
+        )
         self.calcium_video_widget.channels_changed.connect(
             self._on_calcium_video_channels_changed
         )
@@ -465,10 +480,20 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             parent=self,
         )
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
+        self.acquisition_controller.block_recorded.connect(self._on_block_recorded)
+        #: The block whose trace extraction the toolbar progress bar shows.
+        self._extraction_progress_run: str | None = None
+        self.acquisition_controller.block_extraction_progress.connect(
+            self._on_block_extraction_progress
+        )
+        self.acquisition_controller.block_extraction_ended.connect(
+            self._on_block_extraction_ended
+        )
         # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
         self.acquisition_controller.fov_ready.connect(
             lambda path: self.btn_import_cellpose_data_clicked(
-                segment=pathlib.Path(path)
+                segment=pathlib.Path(path),
+                auto_brightness=self.settings.fov_auto_brightness,
             )
         )
         # Compatibility handles for integrations using the workspace directly.
@@ -2203,6 +2228,46 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
+    def _on_calcium_video_locate_requested(
+        self, *, path: pathlib.Path | None = None
+    ) -> None:
+        """Let the user point the selected video at its files' new place, e.g.
+        after opening the project on another computer."""
+        video = self.project.selected_calcium_video
+        if video is None or not video["paths"]:
+            return
+        missing = [p for p in video["paths"] if not pathlib.Path(p).is_file()]
+        if path is None:
+            first_missing = pathlib.Path(missing[0] if missing else video["paths"][0])
+            start = (
+                self.project.filepath.parent
+                if self.project.filepath is not None
+                else pathlib.Path.home()
+            )
+            suffix = first_missing.suffix or ".tif"
+            chosen, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                f"Locate {first_missing.name}",
+                str(start / first_missing.name),
+                f"{first_missing.name} (*{suffix});;All files (*)",
+            )
+            if not chosen:
+                return
+            path = pathlib.Path(chosen)
+        try:
+            still_missing = self.project.relocate_calcium_video(video["id"], path)
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(self, "Wrong imaging file", str(error))
+            return
+        self._refresh_calcium_video_widgets()
+        if still_missing:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Imaging files missing",
+                "These files of the imaging data were not found next to the chosen "
+                "one:\n" + "\n".join(str(p) for p in still_missing),
+            )
+
     def _on_calcium_video_channels_changed(
         self, channels: int, shown_channel: int
     ) -> None:
@@ -2231,6 +2296,47 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._refresh_calcium_video_widgets()
         self._update_combo_boxes()
         self.update_limits()
+
+    def _on_block_recorded(self, _run_id: str, payload: object) -> None:
+        """Show the traces and spikes of a run started in new arrays once its first
+        block is in, so it is followed without picking its data group. Other runs,
+        and later blocks, leave the selection to the user."""
+        group = payload.get("experiment") if isinstance(payload, dict) else None
+        followed = self.stim_editor.followed_run_groups
+        if not group or str(group) not in followed:
+            return
+        followed.discard(str(group))
+        self._select_experiment_data(str(group))
+
+    def _on_block_extraction_progress(
+        self, run_id: str, stage: str, percent: int
+    ) -> None:
+        """Show a routine block's trace extraction in the toolbar progress bar,
+        unless another operation (e.g. a simulation) is using it."""
+        bar = self.progress_dialog
+        if self._extraction_progress_run == run_id and not self._shows_extraction():
+            # Another operation took the bar over meanwhile: leave it to that one.
+            self._extraction_progress_run = None
+            return
+        if self._extraction_progress_run != run_id:
+            if bar.is_shown():
+                return
+            self._extraction_progress_run = run_id
+            bar.setRange(0, 100)
+            bar.setCancelButton(None)
+            bar.show()
+        bar.setLabelText(f"{EXTRACTION_PROGRESS_PREFIX}{stage}")
+        bar.setValue(percent)
+
+    def _shows_extraction(self) -> bool:
+        bar = self.progress_dialog
+        return bar.is_shown() and bar.labelText().startswith(EXTRACTION_PROGRESS_PREFIX)
+
+    def _on_block_extraction_ended(self, run_id: str) -> None:
+        if self._extraction_progress_run == run_id:
+            self._extraction_progress_run = None
+            if self._shows_extraction():
+                self.progress_dialog.reset()
 
     def _on_bss2_experiment_added(self, name: str) -> None:
         self._update_combo_boxes()
@@ -2264,17 +2370,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         video_id = self.cmb_video.itemData(index)
         if video_id is None or video_id == self.project.selected_calcium_video_id:
             return
-        video = next(v for v in self.project.calcium_videos if v["id"] == video_id)
-        missing = [path for path in video["paths"] if not pathlib.Path(path).is_file()]
-        if missing:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Imaging files missing",
-                "These files of the selected imaging data were not found:\n"
-                + "\n".join(missing),
-            )
-            self._refresh_video_selector()
-            return
+        # Missing files are shown in the video panel with a "Locate file…" button.
         self.project.select_calcium_video(video_id)
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
@@ -2299,10 +2395,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         resolve_fiji_path(self, force_prompt=True)
 
     def btn_import_cellpose_data_clicked(
-        self, *, segment: pathlib.Path | None = None, model: str | None = None
+        self,
+        *,
+        segment: pathlib.Path | None = None,
+        model: str | None = None,
+        auto_brightness: bool = False,
     ) -> None:
         """Open the cell segmentation dialog; with ``segment``, it segments
-        that image with ``model`` right away."""
+        that image with ``model`` right away, after automatic brightness/contrast
+        (Fiji's Enhance Contrast) if ``auto_brightness``."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
@@ -2312,7 +2413,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             if model is not None:
                 dialog.cellpose_model_combo.setCurrentText(model)
             # Once the dialog is shown, so it is there while Cellpose runs.
-            QtCore.QTimer.singleShot(0, lambda: dialog.segment_file(str(segment)))
+            QtCore.QTimer.singleShot(
+                0,
+                lambda: dialog.segment_file(
+                    str(segment), auto_brightness=auto_brightness
+                ),
+            )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             imported = dialog.get_imported_data()
             if imported is None:
@@ -2517,6 +2623,19 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 send_to_syscon=False
             ),
         )
+
+    def btn_export_numpy_clicked(self, kind: Literal["traces", "spikes"]) -> None:
+        """File > Export > Traces/Spikes as NumPy array, preselecting the shown data."""
+        from neuroseq.export.numpy_export_dialog import NumpyExportDialog
+
+        current = self.cmb_trace if kind == "traces" else self.cmb_spike
+        dialog = NumpyExportDialog(
+            self.project, kind, current_name=current.currentText(), parent=self
+        )
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
 
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
@@ -2860,6 +2979,21 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             None,
             icon="mdi6.file-code",
         )
+        export_data_menu.addSeparator()
+        add_action(
+            "&Traces as NumPy Array…",
+            lambda: self.btn_export_numpy_clicked("traces"),
+            export_data_menu,
+            None,
+            icon="mdi6.chart-line",
+        )
+        add_action(
+            "&Spikes as NumPy Array…",
+            lambda: self.btn_export_numpy_clicked("spikes"),
+            export_data_menu,
+            None,
+            icon="mdi6.chart-scatter-plot",
+        )
 
         toolbar.addSeparator()
         add_action(
@@ -3146,6 +3280,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 self.calcium_video_widget,
                 self.calcium_video_widget.widget,
                 self.calcium_video_widget.empty_state_widget,
+                self.calcium_video_widget.missing_state_widget,
                 # Deliberately excludes overlay_view/overlay_view.widget: a
                 # right click there is the panel's own lasso-select gesture
                 # (see SpatialFootprintWidget), not a request to detach.
@@ -3207,6 +3342,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.calcium_video_widget,
             self.calcium_video_widget.widget,
             self.calcium_video_widget.empty_state_widget,
+            self.calcium_video_widget.missing_state_widget,
         ):
             return self.spatial_footprint_widget
         return widget
@@ -3340,6 +3476,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         widget.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
+        )
+        widget.calcium_video_widget.locate_requested.connect(
+            self._on_calcium_video_locate_requested
         )
         widget.calcium_video_widget.channels_changed.connect(
             self._on_calcium_video_channels_changed

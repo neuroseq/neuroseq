@@ -30,7 +30,9 @@ from neuroseq.importers.importer_cellpose import point_in_square
 from neuroseq.utils import get_primary_available_geometry
 from neuroseq.utils import is_vertical_screen
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
+from neuroseq.visualization.spatial_footprint_widget import OVERLAY_CELL_OPACITY
 from neuroseq.visualization_support.brightness_contrast import DisplayRange
+from neuroseq.visualization_support.brightness_contrast import adjust_fov_and_overlay
 
 
 def ensure_unique_ids(values: list[int], error_message: str) -> list[int]:
@@ -62,6 +64,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
         self._base_segmentation_data: np.ndarray | None = None
+        #: Brightness/contrast window of the image: the one it was segmented with
+        #: (Auto or "Adjust brightness first"), or the existing data's. Shown in the
+        #: preview and stored with the import for the Spatial Footprints view.
+        self._display_range: DisplayRange | None = None
         self.importer = CellPoseImporter()
         self.overlay_widget = CellOverlayWidget("")
         self.overlay_widget.setSizePolicy(
@@ -748,6 +754,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.image_path = None
         self.segmentation_path = None
         self._base_segmentation_data = None
+        self._display_range = None
         self._aoi_initialized_shape = None
 
         self.image_path_label.setText("No image selected")
@@ -1262,21 +1269,37 @@ class CellposeImportDialog(QtWidgets.QDialog):
         else:
             return {}
 
+    def _preview_images(self) -> tuple[np.ndarray | None, np.ndarray | None]:
+        """(overlay, FOV) for the preview, with the brightness window applied."""
+        overlay = self.importer.overlay_image
+        image = self.importer.image_data
+        if self._display_range is None or overlay is None:
+            return overlay, image
+        adjusted_image, adjusted_overlay = adjust_fov_and_overlay(
+            image,
+            overlay,
+            self.importer.segmentation_data,
+            self._display_range,
+            OVERLAY_CELL_OPACITY,
+        )
+        return adjusted_overlay, adjusted_image
+
     def _update_preview_mapping(self) -> None:
         """Update the preview with current mapping strategy"""
         try:
             mapping_strategy = self._get_mapping_strategy()
             preview_mapping = self._generate_stimulus_mapping(mapping_strategy)
 
+            preview_overlay, preview_base = self._preview_images()
             self.overlay_widget.set_overlay(
-                self.importer.overlay_image,
+                preview_overlay,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
                 highlight_mappings=(
                     mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
                 ),
-                base_image=self.importer.image_data,
+                base_image=preview_base,
             )
             self._update_aoi_overlay_visibility()
         except Exception as exc:
@@ -1323,9 +1346,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if filename:
             self.segment_file(filename)
 
-    def segment_file(self, filename: str) -> None:
+    def segment_file(self, filename: str, *, auto_brightness: bool = False) -> None:
         """Segment ``filename`` with the chosen model and load the result, as
-        "Select file for segmentation..." does after choosing a file."""
+        "Select file for segmentation..." does after choosing a file.
+
+        With ``auto_brightness``, an automatic brightness/contrast window (Fiji's
+        Enhance Contrast) is applied first; "Adjust brightness first" then starts
+        from it."""
         if importlib.util.find_spec("cellpose") is None:
             QtWidgets.QMessageBox.information(
                 self,
@@ -1361,8 +1388,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
 
         display_range = None
+        if auto_brightness:
+            display_range = self._auto_segmentation_brightness(filename)
+            if display_range is None:
+                return
         if self.adjust_brightness_checkbox.isChecked():
-            display_range = self._choose_segmentation_brightness(filename)
+            display_range = self._choose_segmentation_brightness(
+                filename, initial=display_range
+            )
             if display_range is None:
                 return
 
@@ -1376,7 +1409,19 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 model_name=self.cellpose_model_combo.currentText(),
                 display_range=display_range,
             )
+            # A fresh image and segmentation: drop what the dialog showed before
+            # (e.g. a project's existing segmentation of another field of view, and
+            # its mapping), or the new image is checked against the old masks.
+            # The stored data itself is only replaced when this one is imported.
+            # A Linear mapping does not name cells, so it and its offset are kept;
+            # a Custom one lists the old cells' ids and is dropped.
+            strategy = self._get_mapping_strategy()
+            linear_offset = self._get_linear_offset()
+            self._reset_importer_state()
+            if strategy == "Linear":
+                self._apply_existing_mapping({}, "Linear", linear_offset)
             self._load_image_file(filename)
+            self._display_range = display_range
             self._load_segmentation_file(str(segmentation_path))
             QtWidgets.QMessageBox.information(
                 self,
@@ -1395,9 +1440,33 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.annotate_tiff_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
 
-    def _choose_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+    def _auto_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+        """An automatic brightness/contrast window for the image to segment, as
+        Fiji's Enhance Contrast (0.35% saturated); None (after saying so) if it
+        cannot be read."""
+        from neuroseq.cellpose_annotation import load_annotation_image
+        from neuroseq.visualization_support.brightness_contrast import (
+            enhanced_display_range,
+        )
+        from neuroseq.visualization_support.brightness_contrast import (
+            luminance_histogram,
+        )
+        from neuroseq.visualization_support.brightness_contrast import to_8bit
+
+        try:
+            image = load_annotation_image(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Could not read image", f"Could not read {filename}:\n{exc}"
+            )
+            return None
+        return enhanced_display_range(luminance_histogram(to_8bit(image)))
+
+    def _choose_segmentation_brightness(
+        self, filename: str, *, initial: DisplayRange | None = None
+    ) -> DisplayRange | None:
         """Show the image to segment with brightness/contrast controls
-        (issue #611); None if the user cancels."""
+        (issue #611), starting from ``initial``; None if the user cancels."""
         from neuroseq.cellpose_annotation import load_annotation_image
         from neuroseq.visualization_support.segmentation_brightness_dialog import (
             SegmentationBrightnessDialog,
@@ -1411,6 +1480,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             return None
         dialog = SegmentationBrightnessDialog(image, self)
+        if initial is not None:
+            dialog.controls.set_display_range(initial)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
         return dialog.display_range
@@ -1479,6 +1550,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
 
     def _load_image_file(self, filename: str) -> None:
+        # A new image is shown as it is unless segment_file says otherwise.
+        self._display_range = None
         try:
             self.image_path = Path(filename)
             self.image_path_label.setText(self.image_path.name)
@@ -1551,15 +1624,16 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 self.overlay_widget.height(),
                 mapping_strategy,
             )
+            preview_overlay, preview_base = self._preview_images()
             self.overlay_widget.set_overlay(
-                self.importer.overlay_image,
+                preview_overlay,
                 self.importer.segmentation_data,
                 self.importer._original_cellpose_ids,
                 preview_mapping,
                 highlight_mappings=(
                     mapping_strategy in ("Custom", CUSTOM_AOI_STRATEGY)
                 ),
-                base_image=self.importer.image_data,
+                base_image=preview_base,
             )
             if mapping_strategy == CUSTOM_AOI_STRATEGY:
                 self._regenerate_aoi_mapping()
@@ -1655,6 +1729,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 aoi_config=stored_aoi_config,
                 segmentation_path=self.segmentation_path,
             )
+            if self._display_range is not None and not self._display_range.is_identity:
+                self._imported_data.display_range = (
+                    self._display_range.minimum,
+                    self._display_range.maximum,
+                )
 
             info = self.importer.get_info()
             unique_ids = [uid for uid in info["unique_ids"] if uid > 0]
@@ -1706,6 +1785,10 @@ class CellposeImportDialog(QtWidgets.QDialog):
 
             # Load the existing image and segmentation data
             self.importer.restore_from_result(self.existing_data)
+            stored_range = getattr(self.existing_data, "display_range", None)
+            self._display_range = (
+                None if stored_range is None else DisplayRange.clamped(*stored_range)
+            )
             self._base_segmentation_data = (
                 None
                 if self.importer.segmentation_data is None

@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -61,6 +62,14 @@ def test_delta_f_over_f_uses_the_frames_before_the_stimulus() -> None:
     )
 
 
+def test_delta_f_over_f_divides_by_the_divisor_traces_baseline() -> None:
+    """A neuropil-subtracted baseline near zero does not blow ΔF/F up."""
+    subtracted = np.array([[0.5, 0.5, 10.5]])
+    raw = np.array([[100.0, 100.0, 110.0]])
+    dff = delta_f_over_f(subtracted, 2, raw)
+    np.testing.assert_allclose(dff, [[0.0, 0.0, 0.1]], atol=1e-6)
+
+
 def test_delta_f_over_f_of_a_negative_baseline() -> None:
     """Review: only the divisor is made positive (offset-corrected detectors)."""
     np.testing.assert_allclose(
@@ -98,6 +107,135 @@ def test_extracts_dff_of_each_mapped_roi_from_a_recording(tmp_path) -> None:
     rise = calcium_rise_fraction(trace, 7, onset, 250.0, 300.0)
     assert rise > 0.5
     assert calcium_rise_fraction(trace, 3, onset, 250.0, 300.0) == pytest.approx(0)
+
+
+@pytest.mark.parametrize("remove_artefact", [True, False])
+def test_stimulation_artefact_removal_can_be_turned_off(
+    tmp_path, remove_artefact: bool
+) -> None:
+    path = tmp_path / "2026-10-22_00002.tif"
+    onset = 0.5
+    _synthetic_recording(path, onset, frames=60)
+    pages = tifffile.imread(path)
+    lit = int(onset * FPS)  # the frame recorded while the laser is on
+    pages[2 * lit][:3, :4] = 1000  # stimulation light on the flat cell
+    tifffile.imwrite(path, pages)
+    trace = extract_recording_dff(
+        [path],
+        fps=FPS,
+        saved_channels=[1, 2],
+        functional_channel=1,
+        cellpose_data=_cellpose({7: 1, 3: 0}),
+        stim_block=_block(onset, 2.0),
+        remove_artefact=remove_artefact,
+    )
+    if remove_artefact:
+        np.testing.assert_allclose(trace.traces[0], 0.0, atol=1e-6)
+    else:
+        assert trace.traces[0, lit] == pytest.approx(9.0)
+        # Still measured against the frames before the stimulus.
+        np.testing.assert_allclose(trace.traces[0, :lit], 0.0, atol=1e-6)
+
+
+@pytest.mark.parametrize("remove_artefact", [True, False])
+def test_suite2p_extraction_subtracts_neuropil_with_the_same_masks(
+    tmp_path, monkeypatch, remove_artefact: bool
+) -> None:
+    from neuroseq.importers import importer_scanimage_traces as module
+    from neuroseq.importers.importer_tif import TifPipelineResult
+
+    onset = 0.5
+    lit = int(onset * FPS)
+    F = np.full((2, 60), 170.0)
+    F[1, lit + 1 :] = 240.0  # ROI 2 responds after the pulse
+    F[0, lit] = 1000.0  # stimulation light on ROI 1
+    Fneu = np.full((2, 60), 100.0)
+    calls: dict[str, Any] = {}
+
+    def fake_suite2p(
+        paths, masks, params, *, progress, register, reference_image, traces_only
+    ):
+        calls.update(
+            masks=masks,
+            fs=params.fs,
+            progress=progress,
+            register=register,
+            reference=reference_image,
+            traces_only=traces_only,
+        )
+        return TifPipelineResult(
+            F=F.copy(),
+            Fneu=Fneu,
+            spks=np.zeros_like(F),
+            stat=np.array([]),
+            iscell=np.ones((2, 2)),
+            ops={},
+            mean_image=np.zeros((6, 8)),
+            masks=masks,
+            extra={"registration": {"reference": "movie", "max_shift_px": 1.5}},
+        )
+
+    monkeypatch.setattr(module, "run_suite2p_pipeline", fake_suite2p)
+    registered: list[dict] = []
+    progress = lambda _message, _fraction: None  # noqa: E731
+    trace = extract_recording_dff(
+        [tmp_path / "block.tif"],
+        fps=FPS,
+        saved_channels=[1, 2],
+        functional_channel=1,
+        cellpose_data=_cellpose({7: 1, 3: 0}),
+        stim_block=_block(onset, 2.0),
+        remove_artefact=remove_artefact,
+        method="suite2p",
+        progress=progress,
+        on_registered=registered.append,
+    )
+    assert calls["fs"] == FPS and calls["progress"] is progress
+    # Motion-corrected; fov.tif does not exist, so Suite2p makes its own reference.
+    assert calls["register"] is True and calls["reference"] is None
+    assert calls["traces_only"] is True  # deconvolved here, not by Suite2p
+    assert registered == [{"reference": "movie", "max_shift_px": 1.5}]
+    assert set(np.unique(calls["masks"])) == {0, 1, 2}  # the Cellpose masks
+    np.testing.assert_array_equal(trace.indices, [3, 7])
+    # F - 0.7 Fneu rises from 100 to 170 for ROI 2, relative to the raw F
+    # baseline of 170 (not the neuropil-subtracted 100): ΔF/F 70/170.
+    assert trace.traces[1, -1] == pytest.approx(70.0 / 170.0)
+    if remove_artefact:
+        np.testing.assert_allclose(trace.traces[0], 0.0, atol=1e-6)
+    else:
+        assert trace.traces[0, lit] == pytest.approx(830.0 / 170.0)
+
+
+def test_fov_reference_image_is_the_segmented_tiff(tmp_path) -> None:
+    import dataclasses
+
+    from neuroseq.importers.importer_scanimage_traces import fov_reference_image
+
+    path = tmp_path / "fov_mean.tif"
+    tifffile.imwrite(path, np.stack([np.full((6, 8), 10), np.full((6, 8), 20)]))
+    image = fov_reference_image(dataclasses.replace(_cellpose(), image_path=path))
+    assert image is not None and image.shape == (6, 8)
+    np.testing.assert_allclose(image, 15.0)
+    png = tmp_path / "fov.png"
+    png.write_bytes(b"")
+    assert fov_reference_image(dataclasses.replace(_cellpose(), image_path=png)) is None
+    broken = tmp_path / "broken.tif"
+    broken.write_bytes(b"not a tiff")
+    assert (
+        fov_reference_image(dataclasses.replace(_cellpose(), image_path=broken)) is None
+    )
+
+
+def test_unknown_extraction_method_is_refused(tmp_path) -> None:
+    with pytest.raises(ValueError, match="Unknown trace extraction"):
+        extract_recording_dff(
+            [tmp_path / "block.tif"],
+            fps=FPS,
+            saved_channels=[1],
+            functional_channel=1,
+            cellpose_data=_cellpose(),
+            method="fiji",  # type: ignore[arg-type]
+        )
 
 
 def test_extraction_needs_masks_and_the_functional_channel(tmp_path) -> None:

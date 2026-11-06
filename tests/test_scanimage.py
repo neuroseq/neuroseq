@@ -866,21 +866,52 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
     gui._close_confirmed = True
 
 
-def test_selecting_a_video_with_missing_files_keeps_the_current_one(
-    qtbot, recording, qmessagebox_calls
+def test_a_video_with_missing_files_is_selected_and_can_be_located(
+    qtbot, tmp_path, qmessagebox_calls
 ):
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    present = Path(recording[0][0])
+    moved = tmp_path / "moved" / "video.tif"
+    moved.parent.mkdir()
+    tifffile.imwrite(
+        moved, np.zeros((3, 4, 5), dtype=np.uint16), photometric="minisblack"
+    )
     gui.project.add_calcium_video([Path("/missing/video.tif")], 10)
-    gui.project.add_calcium_video([present], 10)
+    gui.project.add_calcium_video([moved], 10)
     gui._refresh_calcium_video_widgets()
     gui.cmb_video.activated.emit(0)
-    assert gui.project.calcium_video_paths == [present]
-    assert gui.cmb_video.currentIndex() == 1
-    assert qmessagebox_calls
+    assert gui.project.calcium_video_paths == [Path("/missing/video.tif")]
+    widget = gui.calcium_video_widget
+    assert not widget.missing_state_widget.isHidden()
+    assert widget.widget.isHidden()
+    assert str(Path("/missing/video.tif")) in widget.missing_label.text()
+
+    gui.project.dirty = False
+    gui._on_calcium_video_locate_requested(path=moved)
+    assert gui.project.calcium_video_paths == [moved]
+    assert gui.project.dirty
+    assert widget.missing_state_widget.isHidden()
+    assert widget.frame_count() == 3
+    assert not [c for c in qmessagebox_calls if c["title"] == "Imaging files missing"]
+    gui._close_confirmed = True
+
+
+def test_locating_a_file_of_another_movie_is_refused(
+    qtbot, tmp_path, qmessagebox_calls
+):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    paths = [Path("/missing/part_0.tif"), Path("/missing/part_1.tif")]
+    gui.project.add_calcium_video(paths, 10)
+    gui._refresh_calcium_video_widgets()
+    gui._on_calcium_video_locate_requested(path=tmp_path / "other.tif")
+    assert gui.project.calcium_video_paths == paths
+    assert [c["title"] for c in qmessagebox_calls] == ["Wrong imaging file"]
+    assert not gui.calcium_video_widget.missing_state_widget.isHidden()
     gui._close_confirmed = True
 
 
@@ -1007,5 +1038,66 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     segment = mocker.patch.object(gui, "btn_import_cellpose_data_clicked")
     image = tmp_path / "2026-10-23_00001_mean.tif"
     gui.acquisition_controller.fov_ready.emit(str(image))
-    segment.assert_called_once_with(segment=image)
+    segment.assert_called_once_with(segment=image, auto_brightness=True)
+    gui.scanimage_controls.fov_auto_brightness_check.setChecked(False)
+    gui.acquisition_controller.fov_ready.emit(str(image))
+    segment.assert_called_with(segment=image, auto_brightness=False)
+    gui._close_confirmed = True
+
+
+def test_new_array_run_data_group_is_shown_on_its_first_block(qtbot, mocker):
+    """Only runs started in new arrays are followed; a Continue or Clear run (not
+    in followed_run_groups) leaves the user's selection alone."""
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    select = mocker.patch.object(gui, "_select_experiment_data")
+    gui.stim_editor.followed_run_groups.update(
+        {"rheobase_2026-11-06_120000", "rheobase_2026-11-06_130000"}
+    )
+    recorded = gui.acquisition_controller.block_recorded
+    recorded.emit("r0", {"experiment": "rheobase_2026-11-06_110000"})  # Continue
+    recorded.emit("r1", {"experiment": "rheobase_2026-11-06_120000"})
+    recorded.emit("r2", {"experiment": "rheobase_2026-11-06_120000"})
+    recorded.emit("r3", {"experiment": "rheobase_2026-11-06_130000"})
+    recorded.emit("r4", {})
+    assert [c.args[0] for c in select.call_args_list] == [
+        "rheobase_2026-11-06_120000",
+        "rheobase_2026-11-06_130000",
+    ]
+    gui._close_confirmed = True
+
+
+def test_block_trace_extraction_shows_in_the_toolbar_progress_bar(qtbot):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
+    controller = gui.acquisition_controller
+    bar = gui.progress_dialog
+    controller.block_extraction_progress.emit("r1", "Converting TIFF to binary", 9)
+    assert bar.is_shown()
+    assert bar.labelText() == "Extracting traces: Converting TIFF to binary"
+    assert bar.value() == 9
+    controller.block_extraction_ended.emit("other")  # not the one shown
+    assert bar.is_shown()
+    controller.block_extraction_ended.emit("r1")
+    assert not bar.is_shown()
+
+    # A bar already in use (e.g. a simulation) is left alone, and an extraction
+    # whose bar is taken over meanwhile does not hide the new owner's.
+    bar.setLabelText("Simulating...")
+    bar.show()
+    controller.block_extraction_progress.emit("r2", "Extracting", 50)
+    assert bar.labelText() == "Simulating..."
+    bar.reset()
+    controller.block_extraction_progress.emit("r3", "Extracting", 50)
+    bar.setLabelText("Simulating...")
+    controller.block_extraction_progress.emit("r3", "Extracting", 60)
+    controller.block_extraction_ended.emit("r3")
+    assert bar.is_shown() and bar.labelText() == "Simulating..."
+    bar.reset()
     gui._close_confirmed = True

@@ -140,3 +140,16 @@ def test_adjusted_annotation_image() -> None:
     assert adjusted.dtype == np.uint8
     # 500 of 2000 is level 64 of 255; the window 0-128 doubles it.
     np.testing.assert_array_equal(adjusted, [[0, 127], [255, 255]])
+
+
+def test_an_8bit_tiff_stack_stays_8bit_on_its_own_scale(tmp_path: Path) -> None:
+    """So brightness_contrast.to_8bit picks a window on the same values the
+    Cellpose importer shows."""
+    image_path = tmp_path / "recording8.tif"
+    frames = np.stack([np.full((5, 6), value, np.uint8) for value in (10, 20, 30, 40)])
+    tifffile.imwrite(image_path, frames, photometric="minisblack")
+
+    image = load_annotation_image(image_path)
+
+    assert image.dtype == np.uint8
+    np.testing.assert_array_equal(image, np.full((5, 6), 20))  # frames 0 and 2

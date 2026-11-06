@@ -15,7 +15,7 @@ from neuroseq.visualization.cell_overlay_widget import compute_segmentation_lege
 from neuroseq.visualization.fpl_widget import FPLWidget
 from neuroseq.visualization_support.brightness_contrast import BrightnessContrastDialog
 from neuroseq.visualization_support.brightness_contrast import DisplayRange
-from neuroseq.visualization_support.brightness_contrast import apply_display_range
+from neuroseq.visualization_support.brightness_contrast import adjust_fov_and_overlay
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 
@@ -492,22 +492,19 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         assert cellpose_data is not None
         background = cellpose_data.background_image
         overlay = cellpose_data.overlay_image
-        if self._display_range.is_identity or background is None:
-            return background, overlay
-        if background.shape != overlay.shape or background.dtype != np.uint8:
-            return background, overlay
         key = (id(background), id(overlay), self._display_range)
         if self._adjusted_cache is not None and self._adjusted_cache[0] == key:
             return self._adjusted_cache[1], self._adjusted_cache[2]
-        adjusted_background = apply_display_range(background, self._display_range)
-        weight = np.where(
-            cellpose_data.segmentation_array > 0, 1.0 - OVERLAY_CELL_OPACITY, 1.0
-        ).astype(np.float32)[..., np.newaxis]
-        delta = adjusted_background.astype(np.float32) - background.astype(np.float32)
-        adjusted_overlay = np.clip(
-            overlay.astype(np.float32) + delta * weight, 0, 255
-        ).astype(np.uint8)
-        self._adjusted_cache = (key, adjusted_background, adjusted_overlay)
+        adjusted_background, adjusted_overlay = adjust_fov_and_overlay(
+            background,
+            overlay,
+            cellpose_data.segmentation_array,
+            self._display_range,
+            OVERLAY_CELL_OPACITY,
+        )
+        if adjusted_background is not background:
+            assert adjusted_background is not None
+            self._adjusted_cache = (key, adjusted_background, adjusted_overlay)
         return adjusted_background, adjusted_overlay
 
     def _composed_overlay_image(self) -> np.ndarray:

@@ -136,6 +136,7 @@ class _FakeAcquisition(QtCore.QObject):
     block_armed = QtCore.Signal(str)
     block_recorded = QtCore.Signal(str, object)
     block_recording_failed = QtCore.Signal(str, str)
+    block_recording_note = QtCore.Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -233,6 +234,12 @@ def test_automatic_block_is_uploaded_recorded_and_run(
     client = _FakeClient(
         ["other\\probe_001.seq", "target\\probe_001.seq"], ["Uploading", "Idle"]
     )
+    steps: list[str] = []
+    host.block_note.connect(
+        lambda note_owner, message: (
+            steps.append(message) if note_owner is owner else None
+        )
+    )
 
     assert host.send_block(
         Project(), stim, 0, 5, owner=owner, automatic=True, recording=_recording(stim)
@@ -257,10 +264,22 @@ def test_automatic_block_is_uploaded_recorded_and_run(
     assert client.calls[-1] == ("run", "auto", "rising")
     assert host.phase == "running"  # until the recording is in
 
+    notes = []
+    host.block_note.connect(lambda *args: notes.append(args))
+    acquisition.block_recording_note.emit("other-run", "not this block")
+    acquisition.block_recording_note.emit("run1", "Suite2p is slow")
+    assert notes == [(owner, "Suite2p is slow")]
     with qtbot.waitSignal(host.block_completed, timeout=WAIT_TIMEOUT_MS) as completed:
         acquisition.block_recorded.emit("run1", {"trace": "Rec :: dF/F"})
     assert completed.args == [owner, {"trace": "Rec :: dF/F"}]
     assert host.phase == "idle"
+    assert [step for step in steps if step != "Suite2p is slow"] == [
+        "Importing and uploading probe_001.seq in SysCon2…",
+        "target\\probe_001.seq uploaded; waiting for ScanImage to arm the "
+        "triggered recording…",
+        "Running probe_001.seq while ScanImage records…",
+        "Block probe_001.seq done.",
+    ]
 
 
 def _armed_block(stim, tmp_path, qtbot, mocker, client):

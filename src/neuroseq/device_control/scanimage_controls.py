@@ -180,8 +180,20 @@ class ScanImageControls(QtWidgets.QWidget):
             "Frames grabbed for the FOV: all are saved in the recording's TIFF and "
             "averaged into the FOV image."
         )
+        self.fov_auto_brightness_check = QtWidgets.QCheckBox("Auto brightness")
+        self.fov_auto_brightness_check.setChecked(settings.fov_auto_brightness)
+        self.fov_auto_brightness_check.setToolTip(
+            "Before Cellpose segments the FOV image, stretch its contrast so 0.35% "
+            "of pixels saturate, like Fiji's Enhance Contrast; the segmentation "
+            "dialog and Spatial Footprints show it adjusted the same way. "
+            "Remembered as the default for next time."
+        )
+        self.fov_auto_brightness_check.toggled.connect(
+            lambda checked: setattr(self.settings, "fov_auto_brightness", checked)
+        )
         fov_row.addWidget(self.fov_button)
         fov_row.addWidget(self.fov_frames_spin)
+        fov_row.addWidget(self.fov_auto_brightness_check)
         fov_row.addStretch(1)
         layout.addLayout(fov_row)
         self.message_label = QtWidgets.QLabel()
