@@ -575,3 +575,50 @@ def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
     dialog.controls.set_display_range(DisplayRange(100, 150))
     assert dialog.display_range == DisplayRange(100, 150)
     assert dialog.preview.pixmap().toImage() != before
+
+
+@pytest.mark.parametrize("also_adjust", [False, True])
+def test_auto_brightness_is_applied_before_segmentation(
+    tmp_path, qtbot: QtBot, mocker, also_adjust: bool
+) -> None:
+    """Grab FOV's "Auto brightness": Fiji's Auto window is passed on to the
+    segmentation, and "Adjust brightness first" starts from it."""
+    from neuroseq.visualization_support.brightness_contrast import auto_display_range
+    from neuroseq.visualization_support.brightness_contrast import luminance_histogram
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
+
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    rng = np.random.default_rng(0)
+    pixels = np.clip(rng.normal(80, 20, (200, 200)), 0, 255).astype(np.uint8)
+    pixels[0, :4] = (0, 0, 255, 255)  # full 0-255 span, so to_8bit is identity
+    image_path = tmp_path / "fov_mean.png"
+    Image.fromarray(pixels).save(image_path)
+    segmentation_path = tmp_path / "fov_mean_cpsam_seg.npy"
+    np.save(segmentation_path, np.zeros((200, 200), dtype=np.int32))
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, tmp_path / "masks.png"),
+    )
+    expected = auto_display_range(luminance_histogram(pixels))
+    assert not expected.is_identity
+    shown = []
+
+    def _exec(brightness: SegmentationBrightnessDialog) -> int:
+        shown.append(brightness.display_range)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    mocker.patch.object(SegmentationBrightnessDialog, "exec", _exec)
+    dialog.adjust_brightness_checkbox.setChecked(also_adjust)
+    dialog.segment_file(str(image_path), auto_brightness=True)
+
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=expected
+    )
+    assert shown == ([expected] if also_adjust else [])

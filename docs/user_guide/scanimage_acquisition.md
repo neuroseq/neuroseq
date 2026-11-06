@@ -96,6 +96,12 @@ Cellpose on it. Because the image comes from the same scan, the masks share the
 recordings' pixel grid, as the dynamic input routines need. The snapshot is
 listed in the acquisition history but adds no data group or imaging entry.
 
+Tick **Auto brightness** to stretch the mean image's brightness/contrast like
+Fiji's **Auto** button before Cellpose segments it, which helps with dim fields of
+view. The choice is remembered across sessions. If **Adjust brightness first** is
+also ticked in the segmentation dialog, its controls start from the automatic
+window so you can refine it.
+
 NeuroSeq reports state from ScanImage, waits for completed/aborted acquisition
 events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame

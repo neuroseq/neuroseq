@@ -1323,9 +1323,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         if filename:
             self.segment_file(filename)
 
-    def segment_file(self, filename: str) -> None:
+    def segment_file(self, filename: str, *, auto_brightness: bool = False) -> None:
         """Segment ``filename`` with the chosen model and load the result, as
-        "Select file for segmentation..." does after choosing a file."""
+        "Select file for segmentation..." does after choosing a file.
+
+        With ``auto_brightness``, Fiji's Auto brightness/contrast window is
+        applied first; "Adjust brightness first" then starts from it."""
         if importlib.util.find_spec("cellpose") is None:
             QtWidgets.QMessageBox.information(
                 self,
@@ -1361,8 +1364,14 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
 
         display_range = None
+        if auto_brightness:
+            display_range = self._auto_segmentation_brightness(filename)
+            if display_range is None:
+                return
         if self.adjust_brightness_checkbox.isChecked():
-            display_range = self._choose_segmentation_brightness(filename)
+            display_range = self._choose_segmentation_brightness(
+                filename, initial=display_range
+            )
             if display_range is None:
                 return
 
@@ -1395,9 +1404,32 @@ class CellposeImportDialog(QtWidgets.QDialog):
             self.annotate_tiff_button.setEnabled(True)
             QtWidgets.QApplication.restoreOverrideCursor()
 
-    def _choose_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+    def _auto_segmentation_brightness(self, filename: str) -> DisplayRange | None:
+        """Fiji's Auto display window for the image to segment; None (after
+        saying so) if it cannot be read."""
+        from neuroseq.cellpose_annotation import load_annotation_image
+        from neuroseq.visualization_support.brightness_contrast import (
+            auto_display_range,
+        )
+        from neuroseq.visualization_support.brightness_contrast import (
+            luminance_histogram,
+        )
+        from neuroseq.visualization_support.brightness_contrast import to_8bit
+
+        try:
+            image = load_annotation_image(filename)
+        except Exception as exc:
+            QtWidgets.QMessageBox.critical(
+                self, "Could not read image", f"Could not read {filename}:\n{exc}"
+            )
+            return None
+        return auto_display_range(luminance_histogram(to_8bit(image)))
+
+    def _choose_segmentation_brightness(
+        self, filename: str, *, initial: DisplayRange | None = None
+    ) -> DisplayRange | None:
         """Show the image to segment with brightness/contrast controls
-        (issue #611); None if the user cancels."""
+        (issue #611), starting from ``initial``; None if the user cancels."""
         from neuroseq.cellpose_annotation import load_annotation_image
         from neuroseq.visualization_support.segmentation_brightness_dialog import (
             SegmentationBrightnessDialog,
@@ -1411,6 +1443,8 @@ class CellposeImportDialog(QtWidgets.QDialog):
             )
             return None
         dialog = SegmentationBrightnessDialog(image, self)
+        if initial is not None:
+            dialog.controls.set_display_range(initial)
         if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return None
         return dialog.display_range

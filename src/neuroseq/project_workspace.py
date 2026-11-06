@@ -468,7 +468,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
         self.acquisition_controller.fov_ready.connect(
             lambda path: self.btn_import_cellpose_data_clicked(
-                segment=pathlib.Path(path)
+                segment=pathlib.Path(path),
+                auto_brightness=self.settings.fov_auto_brightness,
             )
         )
         # Compatibility handles for integrations using the workspace directly.
@@ -2299,10 +2300,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         resolve_fiji_path(self, force_prompt=True)
 
     def btn_import_cellpose_data_clicked(
-        self, *, segment: pathlib.Path | None = None, model: str | None = None
+        self,
+        *,
+        segment: pathlib.Path | None = None,
+        model: str | None = None,
+        auto_brightness: bool = False,
     ) -> None:
         """Open the cell segmentation dialog; with ``segment``, it segments
-        that image with ``model`` right away."""
+        that image with ``model`` right away, after Fiji's Auto brightness if
+        ``auto_brightness``."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
@@ -2312,7 +2318,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             if model is not None:
                 dialog.cellpose_model_combo.setCurrentText(model)
             # Once the dialog is shown, so it is there while Cellpose runs.
-            QtCore.QTimer.singleShot(0, lambda: dialog.segment_file(str(segment)))
+            QtCore.QTimer.singleShot(
+                0,
+                lambda: dialog.segment_file(
+                    str(segment), auto_brightness=auto_brightness
+                ),
+            )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             imported = dialog.get_imported_data()
             if imported is None:

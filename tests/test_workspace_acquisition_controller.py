@@ -795,3 +795,12 @@ def test_fov_interrupted_by_a_project_change_says_why(setup):
     s.connection.run_finished.emit(request["run_id"])
     message = s.controller.controls.message_label.text()
     assert "project changed" in message and "without data" not in message
+
+
+def test_fov_auto_brightness_choice_is_remembered(setup):
+    from neuroseq.gui_settings import GuiSettings
+
+    check = setup.controller.controls.fov_auto_brightness_check
+    assert not check.isChecked()
+    check.setChecked(True)
+    assert GuiSettings().fov_auto_brightness is True

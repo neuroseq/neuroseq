@@ -73,6 +73,8 @@ class GuiSettings:
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
     syscon_export_directory: str = ""
+    #: "Grab FOV for segmentation" applies Fiji's Auto brightness before Cellpose.
+    fov_auto_brightness: bool = False
     #: BrainScaleS-2 tab settings (``bss2_protocol.Bss2Settings.to_dict()``).
     #: Never contains the EBRAINS token.
     bss2_settings: dict = field(default_factory=dict)
@@ -123,6 +125,7 @@ class GuiSettings:
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
                         "syscon_export_directory": self.syscon_export_directory,
+                        "fov_auto_brightness": self.fov_auto_brightness,
                         "bss2_settings": _without_secrets(self.bss2_settings),
                         "recent_projects": self.recent_projects,
                     },
@@ -174,6 +177,7 @@ class GuiSettings:
                 "scanimage_recording_directory", ""
             )
             syscon_export_directory = config.get("syscon_export_directory", "")
+            fov_auto_brightness = config.get("fov_auto_brightness", False)
             recent_projects = config.get("recent_projects", [])
             bss2_settings = config.get("bss2_settings", {})
 
@@ -273,6 +277,7 @@ class GuiSettings:
             self.__dict__["syscon_export_directory"] = str(
                 syscon_export_directory or ""
             )
+            self.__dict__["fov_auto_brightness"] = fov_auto_brightness is True
             self.__dict__["bss2_settings"] = (
                 _without_secrets(bss2_settings)
                 if isinstance(bss2_settings, dict)
