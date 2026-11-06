@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1118,7 +1119,7 @@ def test_finalize_roi_average_with_neuropil_and_dff(qtbot, mocker):
 
     dialog = TifImportDialog(parent=None, cellpose_import=None)
     qtbot.addWidget(dialog)
-    mocker.patch(
+    information = mocker.patch(
         "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
     )
     mocker.patch.object(dialog, "accept")
@@ -1136,9 +1137,19 @@ def test_finalize_roi_average_with_neuropil_and_dff(qtbot, mocker):
 
     # ΔF/F relative to the raw baseline, and its spikes.
     dialog._dff_checkbox.setChecked(True)
+    if importlib.util.find_spec("suite2p") is not None:
+        dialog._finalize_import(result)
+        _traces, spikes = dialog.imported_data
+        assert set(spikes.spike_indices) == {1}
+    # Without Suite2p (OASIS) the ΔF/F is still imported, without spikes.
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.importlib.util.find_spec",
+        return_value=None,
+    )
+    information.reset_mock()
     dialog._finalize_import(result)
-    traces, spikes = dialog.imported_data
+    (traces,) = dialog.imported_data
+    assert "not installed" in information.call_args.args[2]
     assert traces.units == "dF/F"
     assert traces.traces[1].max() == pytest.approx(1.0, abs=0.01)  # 200 / 200
     np.testing.assert_allclose(traces.traces[0], 0.0, atol=1e-5)
-    assert set(spikes.spike_indices) == {1}

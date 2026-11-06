@@ -1002,11 +1002,18 @@ class TifImportDialog(QtWidgets.QDialog):
                 dff=self._dff_checkbox.isChecked(),
                 spike_threshold=self._dff_spike_threshold_spin.value(),
             )
+            no_spikes = self._dff_checkbox.isChecked() and len(self.imported_data) == 1
             QtWidgets.QMessageBox.information(
                 self,
                 "Import successful",
                 f"Imported {n_neurons} neurons × {n_timepoints} frames "
-                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
+                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz)."
+                + (
+                    "\n\nSpikes were not deconvolved: Suite2p (for OASIS) is not "
+                    "installed."
+                    if no_spikes
+                    else ""
+                ),
             )
             self.accept()
             return
@@ -1049,7 +1056,8 @@ def roi_average_import_data(
 ) -> list[Data]:
     """The data the ROI average pipeline imports: raw (or neuropil-corrected)
     fluorescence, or with ``dff`` ΔF/F (see
-    :func:`neuroseq.importers.roi_traces.roi_delta_f_over_f`) and its OASIS spikes."""
+    :func:`neuroseq.importers.roi_traces.roi_delta_f_over_f`) and its OASIS spikes
+    (only the ΔF/F when Suite2p, which provides OASIS, is not installed)."""
     from neuroseq.importers.importer_scanimage_traces import DFF_TRACE_NAME
     from neuroseq.importers.importer_scanimage_traces import DFF_UNITS
     from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
@@ -1072,6 +1080,8 @@ def roi_average_import_data(
         trace = TraceData(
             DFF_TRACE_NAME, values, indices, DFF_UNITS, dt, raw_cellpose_ids
         )
+        if importlib.util.find_spec("suite2p") is None:
+            return [trace]
         return [
             trace,
             deconvolve_dff(trace, threshold=spike_threshold, tau=params.tau),
