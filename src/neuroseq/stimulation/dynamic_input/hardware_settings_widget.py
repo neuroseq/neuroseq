@@ -81,6 +81,17 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             "decay. The number of frames follows from the block length and this tail."
         )
         form.addRow("Record after block:", self.spn_tail_s)
+        self.chk_remove_artefact = QtWidgets.QCheckBox(
+            "Remove stimulation artefact", self
+        )
+        self.chk_remove_artefact.setChecked(True)
+        self.chk_remove_artefact.setToolTip(
+            "Replace the fluorescence of imaging frames recorded while the "
+            "stimulation laser is on with the mean of the nearest clean frames before "
+            "and after, so laser light is not measured as a calcium response. "
+            "Unticked, those frames are kept as recorded."
+        )
+        form.addRow(self.chk_remove_artefact)
         channel_note = QtWidgets.QLabel(
             "Measured on the Functional channel set in the ScanImage tab.", self
         )
@@ -141,6 +152,7 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
     def _update_recording_controls(self, automatic: bool) -> None:
         """Recording options only apply to blocks NeuroSeq records itself."""
         self.spn_tail_s.setEnabled(automatic)
+        self.chk_remove_artefact.setEnabled(automatic)
         self.spn_spike_threshold.setEnabled(automatic)
 
     def show_readout(self, dff: bool) -> None:
@@ -218,6 +230,7 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             stim_block=slice_stim_array(stim, start, stop),
             tail_s=self.spn_tail_s.value(),
             spike_threshold=self.spn_spike_threshold.value(),
+            remove_artefact=self.chk_remove_artefact.isChecked(),
             group=group,
             offset_s=start * float(stim.dt),
         )

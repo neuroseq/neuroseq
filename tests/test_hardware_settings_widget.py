@@ -45,8 +45,10 @@ def test_recording_options_only_apply_to_automatic_blocks(qtbot) -> None:
     widget.chk_automatic.setChecked(False)
     assert not widget.spn_tail_s.isEnabled()
     assert not widget.spn_spike_threshold.isEnabled()
+    assert not widget.chk_remove_artefact.isEnabled()
     widget.chk_automatic.setChecked(True)
     assert widget.spn_tail_s.isEnabled()
+    assert widget.chk_remove_artefact.isEnabled()
 
 
 def test_readout_shows_its_own_threshold(qtbot) -> None:
@@ -73,6 +75,9 @@ def test_block_recording_describes_the_block(qtbot) -> None:
     assert (recording.label, recording.tail_s) == ("rheobase", 4.0)
     assert recording.spike_threshold == 0.3
     assert recording.duration_s == 0.004
+    assert recording.remove_artefact  # on by default
+    widget.chk_remove_artefact.setChecked(False)
+    assert not widget.block_recording(stim, 2, 6, "rheobase").remove_artefact
 
 
 def test_refresh_leaves_a_running_routines_lock_alone(qtbot) -> None:

@@ -100,6 +100,34 @@ def test_extracts_dff_of_each_mapped_roi_from_a_recording(tmp_path) -> None:
     assert calcium_rise_fraction(trace, 3, onset, 250.0, 300.0) == pytest.approx(0)
 
 
+@pytest.mark.parametrize("remove_artefact", [True, False])
+def test_stimulation_artefact_removal_can_be_turned_off(
+    tmp_path, remove_artefact: bool
+) -> None:
+    path = tmp_path / "2026-10-22_00002.tif"
+    onset = 0.5
+    _synthetic_recording(path, onset, frames=60)
+    pages = tifffile.imread(path)
+    lit = int(onset * FPS)  # the frame recorded while the laser is on
+    pages[2 * lit][:3, :4] = 1000  # stimulation light on the flat cell
+    tifffile.imwrite(path, pages)
+    trace = extract_recording_dff(
+        [path],
+        fps=FPS,
+        saved_channels=[1, 2],
+        functional_channel=1,
+        cellpose_data=_cellpose({7: 1, 3: 0}),
+        stim_block=_block(onset, 2.0),
+        remove_artefact=remove_artefact,
+    )
+    if remove_artefact:
+        np.testing.assert_allclose(trace.traces[0], 0.0, atol=1e-6)
+    else:
+        assert trace.traces[0, lit] == pytest.approx(9.0)
+        # Still measured against the frames before the stimulus.
+        np.testing.assert_allclose(trace.traces[0, :lit], 0.0, atol=1e-6)
+
+
 def test_extraction_needs_masks_and_the_functional_channel(tmp_path) -> None:
     path = tmp_path / "rec.tif"
     _synthetic_recording(path, 0.5, frames=4)

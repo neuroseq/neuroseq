@@ -221,6 +221,7 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     assert spikes in data
     assert extract.call_args.kwargs["saved_channels"] == [1, 2]
     assert extract.call_args.kwargs["functional_channel"] == 1
+    assert extract.call_args.kwargs["remove_artefact"] is True
     assert deconvolve.call_args.args == (trace,)
     assert deconvolve.call_args.kwargs == {"threshold": 0.1}
     assert not controller.acquisition_in_progress

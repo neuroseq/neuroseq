@@ -581,6 +581,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 functional_channel=channel,
                 cellpose_data=cellpose,
                 stim_block=block.stim_block,
+                remove_artefact=block.remove_artefact,
             )
             return trace, deconvolve_dff(trace, threshold=block.spike_threshold)
 

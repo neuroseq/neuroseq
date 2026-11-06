@@ -66,14 +66,15 @@ def extract_recording_dff(
     functional_channel: int,
     cellpose_data: CellposeImportResult | None,
     stim_block: StimArray | None = None,
+    remove_artefact: bool = True,
 ) -> TraceData:
     """ΔF/F of every Cellpose ROI in a ScanImage recording.
 
     ``saved_channels`` are the ScanImage channel numbers interleaved in the TIFFs and
     ``functional_channel`` the one carrying the calcium indicator. ``stim_block`` is the
     stimulus delivered during the recording, starting at its first frame: frames lit by
-    the stimulation laser are interpolated, and the frames before its first stimulus are
-    the ΔF/F baseline.
+    the stimulation laser are interpolated (unless ``remove_artefact`` is False), and the
+    frames before its first stimulus are the ΔF/F baseline.
     """
     if cellpose_data is None:
         raise ValueError(
@@ -95,7 +96,10 @@ def extract_recording_dff(
         functional_chan=channels.index(functional_channel) + 1,
     )
     result = run_roi_average_pipeline(
-        [Path(path) for path in paths], masks, params, stim_array=stim_block
+        [Path(path) for path in paths],
+        masks,
+        params,
+        stim_array=stim_block if remove_artefact else None,
     )
     cellpose_ids = np.asarray(result.extra["roi_labels"], dtype=np.uint32) - 1
     return TraceData(

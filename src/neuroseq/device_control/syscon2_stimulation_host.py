@@ -71,6 +71,8 @@ class BlockRecording:
     tail_s: float
     #: OASIS event size (ΔF/F) counted as a deconvolved spike.
     spike_threshold: float = 0.1
+    #: Interpolate the imaging frames lit by the stimulation laser.
+    remove_artefact: bool = True
     #: The delivered ``.seq`` file and its SysCon2 sequence-manager entry (set by the
     #: host before arming), so the recording names the exact script it captured.
     seq_path: str = ""

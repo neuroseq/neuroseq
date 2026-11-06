@@ -181,8 +181,9 @@ routines run each block without manual steps:
 3. Run the sequence (start condition _auto_); its TTL output must trigger
    ScanImage, so the recording starts with the block.
 4. When the recording is complete, extract the ΔF/F trace of every cell with the
-   project's Cellpose masks (frames lit by the stimulation laser are
-   interpolated; F0 is the mean before the block's first stimulus), deconvolve
+   project's Cellpose masks (with **Remove stimulation artefact** ticked, the
+   default, frames lit by the stimulation laser are interpolated from the
+   nearest clean frames; F0 is the mean before the block's first stimulus), deconvolve
    it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
    event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
    the response on this block's trace.
