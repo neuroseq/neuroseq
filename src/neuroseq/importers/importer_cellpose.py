@@ -12,6 +12,7 @@ from PIL import ImageSequence
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.image_scaling import scale_to_uint8
 from neuroseq.utils import neuron_indices_to_colors
 
 
@@ -435,21 +436,9 @@ class CellPoseImporter:
 
     @staticmethod
     def _scale_float_image_to_uint8(image_array: np.ndarray) -> np.ndarray:
-        """Scale arbitray float RGB array into uint8 range using min/max normalization."""
-        finite_values = image_array[np.isfinite(image_array)]
-        if finite_values.size == 0:
-            raise ValueError("Image contains no finite pixels")
-
-        min_val = float(np.min(finite_values))
-        max_val = float(np.max(finite_values))
-
-        if max_val > min_val:
-            scaled = (image_array - min_val) / (max_val - min_val)
-        else:
-            scaled = np.zeros_like(image_array, dtype=np.float32)
-
-        scaled = np.clip(scaled * 255.0, 0, 255)
-        return scaled.astype(np.uint8)
+        """Scale a float RGB array onto uint8, ignoring the most extreme pixels so
+        a few hot pixels do not darken the whole image (see image_scaling)."""
+        return scale_to_uint8(image_array)
 
     def load_segmentation_file(self, filename: str | Path) -> None:
         """Load segmentation file saved as CSV or NPY."""

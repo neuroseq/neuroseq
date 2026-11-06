@@ -2403,8 +2403,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         auto_brightness: bool = False,
     ) -> None:
         """Open the cell segmentation dialog; with ``segment``, it segments
-        that image with ``model`` right away, after Fiji's Auto brightness if
-        ``auto_brightness``."""
+        that image with ``model`` right away, after automatic brightness/contrast
+        (Fiji's Enhance Contrast) if ``auto_brightness``."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,

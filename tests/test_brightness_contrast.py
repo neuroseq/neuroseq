@@ -82,8 +82,9 @@ def test_dialog_auto_uses_loaded_image(qtbot: QtBot) -> None:
 
 def _result() -> CellposeImportResult:
     background = np.full((4, 4, 3), 100, dtype=np.uint8)
-    segmentation = np.zeros((4, 4), dtype=np.int32)
-    segmentation[0, 0] = 1
+    # CellposeImportResult convention: background -1, cells 0..N-1.
+    segmentation = np.full((4, 4), -1, dtype=np.int32)
+    segmentation[0, 0] = 0
     overlay = background.copy()
     overlay[0, 0] = (0.5 * 100 + 0.5 * np.array([255, 0, 0])).astype(np.uint8)
     return CellposeImportResult(
@@ -159,3 +160,51 @@ def test_loaded_display_range_is_applied_and_shown_in_dialog(qtbot: QtBot) -> No
     widget._show_brightness_contrast_dialog()
     assert widget._brightness_contrast_dialog is not None
     assert widget._brightness_contrast_dialog.display_range == DisplayRange(50, 150)
+
+
+def test_adjust_fov_and_overlay_keeps_cell_colors_including_cell_zero() -> None:
+    from neuroseq.visualization_support.brightness_contrast import (
+        adjust_fov_and_overlay,
+    )
+
+    background = np.full((2, 2, 3), 100, dtype=np.uint8)
+    overlay = background.copy()
+    overlay[0, 0] = (50, 150, 100)  # cell 0, blended at opacity 0.5
+    segmentation = np.array([[0, -1], [-1, -1]])
+    window = DisplayRange(50, 150)  # 100 -> 127
+
+    adjusted_bg, adjusted_overlay = adjust_fov_and_overlay(
+        background, overlay, segmentation, window, 0.5
+    )
+
+    assert adjusted_bg is not None
+    assert adjusted_bg[1, 1, 0] == 127
+    np.testing.assert_array_equal(adjusted_overlay[1, 1], (127, 127, 127))
+    # Inside a cell only the FOV's half of the blend changes.
+    np.testing.assert_array_equal(adjusted_overlay[0, 0], (63, 163, 113))
+    unchanged = adjust_fov_and_overlay(
+        background, overlay, segmentation, DisplayRange(), 0.5
+    )
+    assert unchanged[0] is background and unchanged[1] is overlay
+
+
+def test_enhanced_display_range_saturates_the_requested_fraction() -> None:
+    from neuroseq.visualization_support.brightness_contrast import (
+        enhanced_display_range,
+    )
+
+    histogram = np.zeros(256, dtype=np.int64)
+    histogram[40:200] = 100  # 16000 pixels; 0.35% = 56, 28 at each end
+    window = enhanced_display_range(histogram)
+    assert window == DisplayRange(40, 199)
+    histogram[:] = 0
+    histogram[100] = 50  # a single level cannot be stretched
+    assert enhanced_display_range(histogram).is_identity
+    assert enhanced_display_range(np.zeros(256)).is_identity
+
+
+def test_to_8bit_keeps_8bit_images_as_shown() -> None:
+    from neuroseq.visualization_support.brightness_contrast import to_8bit
+
+    image = np.array([[10, 20], [30, 40]], dtype=np.uint8)
+    assert to_8bit(image) is image or np.array_equal(to_8bit(image), image)

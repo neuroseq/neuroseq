@@ -803,7 +803,9 @@ def test_fov_auto_brightness_choice_is_remembered(setup):
     from neuroseq.gui_settings import GuiSettings
 
     check = setup.controller.controls.fov_auto_brightness_check
-    assert not check.isChecked()
+    assert check.isChecked()  # on by default
+    check.setChecked(False)
+    assert GuiSettings().fov_auto_brightness is False
     check.setChecked(True)
     assert GuiSettings().fov_auto_brightness is True
 

@@ -1038,10 +1038,10 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     segment = mocker.patch.object(gui, "btn_import_cellpose_data_clicked")
     image = tmp_path / "2026-10-23_00001_mean.tif"
     gui.acquisition_controller.fov_ready.emit(str(image))
-    segment.assert_called_once_with(segment=image, auto_brightness=False)
-    gui.scanimage_controls.fov_auto_brightness_check.setChecked(True)
+    segment.assert_called_once_with(segment=image, auto_brightness=True)
+    gui.scanimage_controls.fov_auto_brightness_check.setChecked(False)
     gui.acquisition_controller.fov_ready.emit(str(image))
-    segment.assert_called_with(segment=image, auto_brightness=True)
+    segment.assert_called_with(segment=image, auto_brightness=False)
     gui._close_confirmed = True
 
 

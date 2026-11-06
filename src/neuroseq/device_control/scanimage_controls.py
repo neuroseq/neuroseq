@@ -183,8 +183,10 @@ class ScanImageControls(QtWidgets.QWidget):
         self.fov_auto_brightness_check = QtWidgets.QCheckBox("Auto brightness")
         self.fov_auto_brightness_check.setChecked(settings.fov_auto_brightness)
         self.fov_auto_brightness_check.setToolTip(
-            "Before Cellpose segments the FOV image, stretch its brightness/contrast "
-            "like Fiji's Auto button. Remembered as the default for next time."
+            "Before Cellpose segments the FOV image, stretch its contrast so 0.35% "
+            "of pixels saturate, like Fiji's Enhance Contrast; the segmentation "
+            "dialog and Spatial Footprints show it adjusted the same way. "
+            "Remembered as the default for next time."
         )
         self.fov_auto_brightness_check.toggled.connect(
             lambda checked: setattr(self.settings, "fov_auto_brightness", checked)
