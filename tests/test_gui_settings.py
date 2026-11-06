@@ -6,6 +6,28 @@ from pathlib import Path
 from neuroseq.gui_settings import GuiSettings
 
 
+def test_codex_settings_round_trip(tmp_config_dir) -> None:
+    settings = GuiSettings()
+    settings.llm_provider = "codex"
+    settings.llm_model = "default"
+    settings.llm_codex_executable = "C:/Tools/codex.exe"
+    loaded = GuiSettings()
+    assert loaded.llm_provider == "codex"
+    assert loaded.llm_model == "default"
+    assert loaded.llm_codex_executable == "C:/Tools/codex.exe"
+
+
+def test_claude_code_settings_round_trip(tmp_config_dir) -> None:
+    settings = GuiSettings()
+    settings.llm_provider = "claude_code"
+    settings.llm_model = "default"
+    settings.llm_claude_executable = "C:/Tools/claude.exe"
+    loaded = GuiSettings()
+    assert loaded.llm_provider == "claude_code"
+    assert loaded.llm_model == "default"
+    assert loaded.llm_claude_executable == "C:/Tools/claude.exe"
+
+
 def test_gui_save_config_settings(tmp_config_dir) -> None:
     settings = GuiSettings()
 

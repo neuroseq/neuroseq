@@ -4,7 +4,9 @@ import time
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
+import pytest
 from pytestqt.qtbot import QtBot
+from qtpy import QtCore
 
 from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
@@ -104,6 +106,49 @@ def test_send_appends_user_and_assistant_to_history(qtbot: QtBot, monkeypatch) -
     ]
     assert "hello" in widget.history_view.toPlainText()
     assert "Hi!" in widget.history_view.toPlainText()
+
+
+@pytest.mark.parametrize("key", [QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter])
+def test_enter_sends_message(qtbot: QtBot, monkeypatch, key) -> None:
+    backend = FakeBackend(tokens=["Hi!"])
+    widget = _make_widget(qtbot, monkeypatch, lambda self, settings: backend)
+    widget.input_edit.setPlainText("hello")
+
+    qtbot.keyClick(widget.input_edit, key)
+    qtbot.waitUntil(lambda: widget._worker is None)
+
+    assert widget._history == [
+        Message(Role.USER, "hello"),
+        Message(Role.ASSISTANT, "Hi!"),
+    ]
+    assert widget.input_edit.toPlainText() == ""
+
+
+def test_shift_enter_inserts_newline(qtbot: QtBot, monkeypatch) -> None:
+    backend = FakeBackend()
+    widget = _make_widget(qtbot, monkeypatch, lambda self, settings: backend)
+    qtbot.keyClicks(widget.input_edit, "first")
+    qtbot.keyClick(
+        widget.input_edit,
+        QtCore.Qt.Key.Key_Return,
+        QtCore.Qt.KeyboardModifier.ShiftModifier,
+    )
+    qtbot.keyClicks(widget.input_edit, "second")
+
+    assert widget.input_edit.toPlainText() == "first\nsecond"
+    assert widget._history == []
+    assert backend.seen_messages == []
+
+
+def test_enter_does_not_send_blank_message(qtbot: QtBot, monkeypatch) -> None:
+    backend = FakeBackend()
+    widget = _make_widget(qtbot, monkeypatch, lambda self, settings: backend)
+    widget.input_edit.setPlainText("   ")
+    qtbot.keyClick(widget.input_edit, QtCore.Qt.Key.Key_Return)
+
+    assert widget._history == []
+    assert backend.seen_messages == []
+    assert widget.input_edit.toPlainText() == "   "
 
 
 def test_send_disabled_while_streaming(qtbot: QtBot, monkeypatch) -> None:

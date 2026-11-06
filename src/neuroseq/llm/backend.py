@@ -35,6 +35,14 @@ class LLMBackend(abc.ABC):
     name: str = ""
     label: str = ""
 
+    def prepare(self) -> None:
+        """Prepare for a new worker before it starts."""
+        return None
+
+    def cancel(self) -> None:
+        """Interrupt a pending request, when supported by the transport."""
+        return None
+
     @abc.abstractmethod
     def stream_chat(
         self,

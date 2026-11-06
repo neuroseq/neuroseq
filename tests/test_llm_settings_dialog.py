@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pytestqt.qtbot import QtBot
 
+from neuroseq.llm.claude_code_backend import ClaudeCodeBackend
+from neuroseq.llm.codex_backend import CodexBackend
 from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -12,6 +14,8 @@ class _FakeSettings:
         self.llm_model = "qwen2.5:7b"
         self.llm_ollama_base_url = "http://localhost:11434"
         self.llm_openai_base_url = ""
+        self.llm_codex_executable = ""
+        self.llm_claude_executable = ""
 
 
 def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
@@ -33,7 +37,7 @@ def test_dialog_has_no_qt_parent(qtbot: QtBot, monkeypatch) -> None:
     assert dialog.parent() is None
 
 
-def test_dialog_lists_three_providers(qtbot: QtBot, monkeypatch) -> None:
+def test_dialog_lists_providers(qtbot: QtBot, monkeypatch) -> None:
     dialog = _make_dialog(qtbot, monkeypatch)
     items = [
         dialog.provider_combo.itemText(i) for i in range(dialog.provider_combo.count())
@@ -41,6 +45,60 @@ def test_dialog_lists_three_providers(qtbot: QtBot, monkeypatch) -> None:
     assert "Ollama (local)" in items
     assert "OpenAI" in items
     assert "Anthropic" in items
+    assert "Codex (local sign-in)" in items
+    assert "Claude Code (local sign-in)" in items
+
+
+def test_claude_code_settings_and_model_switching(qtbot: QtBot, monkeypatch) -> None:
+    settings = _FakeSettings()
+    dialog = _make_dialog(qtbot, monkeypatch)
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog.provider_combo.setCurrentText("Claude Code (local sign-in)")
+    assert dialog.claude_executable_edit.isVisible()
+    assert dialog.claude_help_label.isVisible()
+    assert not dialog.codex_executable_edit.isVisible()
+    assert not dialog.endpoint_edit.isVisible()
+    assert not dialog.api_key_edit.isVisible()
+    assert dialog.model_combo.currentText() == "default"
+    dialog.claude_executable_edit.setText("C:/Tools/claude.exe")
+    dialog._save_settings()
+    assert settings.llm_provider == "claude_code"
+    assert settings.llm_claude_executable == "C:/Tools/claude.exe"
+    backend = dialog._make_backend()
+    assert isinstance(backend, ClaudeCodeBackend)
+    assert backend.executable == "C:/Tools/claude.exe"
+    dialog.model_combo.setCurrentText("opus")
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.model_combo.currentText() == "default"
+    dialog.provider_combo.setCurrentText("Claude Code (local sign-in)")
+    assert dialog.model_combo.currentText() == "opus"
+
+
+def test_codex_settings_and_model_switching(qtbot: QtBot, monkeypatch) -> None:
+    settings = _FakeSettings()
+    dialog = _make_dialog(qtbot, monkeypatch)
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.codex_executable_edit.isVisible()
+    assert not dialog.endpoint_edit.isVisible()
+    assert not dialog.api_key_edit.isVisible()
+    assert dialog.model_combo.currentText() == "default"
+    dialog.codex_executable_edit.setText("C:/Tools/codex.exe")
+    dialog._save_settings()
+    assert settings.llm_codex_executable == "C:/Tools/codex.exe"
+    backend = dialog._make_backend()
+    assert isinstance(backend, CodexBackend)
+    assert backend.executable == "C:/Tools/codex.exe"
+    assert settings.llm_provider == "codex"
+    dialog.model_combo.setCurrentText("my-codex-model")
+    dialog.provider_combo.setCurrentText("Ollama (local)")
+    assert dialog.model_combo.currentText() == "qwen2.5:7b"
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.model_combo.currentText() == "my-codex-model"
 
 
 def test_switching_provider_shows_correct_fields(qtbot: QtBot, monkeypatch) -> None:

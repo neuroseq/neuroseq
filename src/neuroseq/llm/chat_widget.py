@@ -8,6 +8,7 @@ import threading
 from collections.abc import Callable
 
 from qtpy import QtCore
+from qtpy import QtGui
 from qtpy import QtWidgets
 
 from neuroseq.gui_settings import GuiSettings
@@ -16,6 +17,8 @@ from neuroseq.llm import Role
 from neuroseq.llm.anthropic_backend import AnthropicBackend
 from neuroseq.llm.backend import LLMBackend
 from neuroseq.llm.backend import LLMBackendError
+from neuroseq.llm.claude_code_backend import ClaudeCodeBackend
+from neuroseq.llm.codex_backend import CodexBackend
 from neuroseq.llm.ollama import OllamaBackend
 from neuroseq.llm.openai_backend import OpenAIBackend
 from neuroseq.llm.plugin_write_dialog import confirm_plugin_write
@@ -43,6 +46,22 @@ def _may_be_request(text: str) -> bool:
     return text.lstrip().startswith(("{", "`"))
 
 
+class _ChatInput(QtWidgets.QPlainTextEdit):
+    send_requested = QtCore.Signal()
+
+    def keyPressEvent(self, event: QtGui.QKeyEvent | None) -> None:
+        if (
+            event is not None
+            and event.key() in (QtCore.Qt.Key.Key_Return, QtCore.Qt.Key.Key_Enter)
+            and not event.modifiers() & QtCore.Qt.KeyboardModifier.ShiftModifier
+        ):
+            if not event.isAutoRepeat():
+                self.send_requested.emit()
+            event.accept()
+            return
+        super().keyPressEvent(event)
+
+
 class _ChatWorker(QtCore.QThread):
     token = QtCore.Signal(str)
     completed = QtCore.Signal()
@@ -57,6 +76,7 @@ class _ChatWorker(QtCore.QThread):
     ) -> None:
         super().__init__()
         self._backend = backend
+        getattr(self._backend, "prepare", lambda: None)()
         self._messages = messages
         self._model = model
         self._stop_requested = False
@@ -69,11 +89,14 @@ class _ChatWorker(QtCore.QThread):
 
     def request_stop(self) -> None:
         self._stop_requested = True
+        getattr(self._backend, "cancel", lambda: None)()
         self._read_ready.set()
 
     def run(self) -> None:
         try:
             for read_count in range(13):
+                if self._stop_requested:
+                    break
                 response = ""
                 # Buffer a possible JSON request, but stream ordinary answers.
                 deciding = True
@@ -178,7 +201,8 @@ class ChatWidget(QtWidgets.QWidget):
         layout.addWidget(self.history_view, stretch=1)
 
         input_row = QtWidgets.QHBoxLayout()
-        self.input_edit = QtWidgets.QPlainTextEdit(self)
+        self.input_edit = _ChatInput(self)
+        self.input_edit.setToolTip("Enter to send; Shift+Enter for a new line")
         self.send_button = QtWidgets.QPushButton("Send", self)
         self.stop_button = QtWidgets.QPushButton("Stop", self)
         self.stop_button.setEnabled(False)
@@ -197,6 +221,7 @@ class ChatWidget(QtWidgets.QWidget):
         layout.addWidget(self.status_label)
 
         self.send_button.clicked.connect(self._on_send_clicked)
+        self.input_edit.send_requested.connect(self._on_send_clicked)
         self.stop_button.clicked.connect(self._on_stop_clicked)
         self.clear_button.clicked.connect(self._on_clear_clicked)
         self.settings_button.clicked.connect(self.request_settings_dialog.emit)
@@ -237,6 +262,10 @@ class ChatWidget(QtWidgets.QWidget):
             return OpenAIBackend(base_url=settings.llm_openai_base_url or None)
         if settings.llm_provider == "anthropic":
             return AnthropicBackend()
+        if settings.llm_provider == "codex":
+            return CodexBackend(executable=settings.llm_codex_executable)
+        if settings.llm_provider == "claude_code":
+            return ClaudeCodeBackend(executable=settings.llm_claude_executable)
         raise LLMBackendError(f"Unknown provider '{settings.llm_provider}'")
 
     def _update_badge(self) -> None:
@@ -250,6 +279,8 @@ class ChatWidget(QtWidgets.QWidget):
         self.input_edit.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.stop_button.setEnabled(self._worker is not None)
+        self.clear_button.setEnabled(self._worker is None)
+        self.settings_button.setEnabled(self._worker is None)
 
     def _set_status(self, text: str) -> None:
         self.status_label.setText(text)
