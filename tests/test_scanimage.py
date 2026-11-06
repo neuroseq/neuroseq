@@ -1012,3 +1012,21 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     gui.acquisition_controller.fov_ready.emit(str(image))
     segment.assert_called_with(segment=image, auto_brightness=True)
     gui._close_confirmed = True
+
+
+def test_routine_run_data_group_is_shown_on_its_first_block(qtbot, mocker):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    select = mocker.patch.object(gui, "_select_experiment_data")
+    recorded = gui.acquisition_controller.block_recorded
+    recorded.emit("r1", {"experiment": "rheobase_2026-11-06_120000"})
+    recorded.emit("r2", {"experiment": "rheobase_2026-11-06_120000"})
+    recorded.emit("r3", {"experiment": "rheobase_2026-11-06_130000"})
+    recorded.emit("r4", {})
+    assert [c.args[0] for c in select.call_args_list] == [
+        "rheobase_2026-11-06_120000",
+        "rheobase_2026-11-06_130000",
+    ]
+    gui._close_confirmed = True

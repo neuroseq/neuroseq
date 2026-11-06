@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
@@ -513,6 +514,14 @@ class RheobaseBackend(RoutineBackend):
             self.chronaxie_ms = 0.5 * (low + shortest)
         else:
             self.chronaxie_upper_bound_ms = shortest
+
+
+#: The run name that "Start in new arrays" appends to an input array's name,
+#: stripped first so repeated runs don't stack them.
+_RUN_SUFFIX = re.compile(
+    r" (rheobase_\d{4}-\d\d-\d\d_\d{6}|BSS-2 rheobase \d{4}-\d\d-\d\d \d\d-\d\d-\d\d)"
+    r"( \(\d+\))?$"
+)
 
 
 @dataclass(frozen=True)
@@ -1111,14 +1120,15 @@ class RheobaseDialog(SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
-        choice = confirm_start_routine(self, self.editor)
+        hardware = self._target_is_syscon2() or self._target_is_bss2()
+        choice = confirm_start_routine(self, self.editor, offer_new=hardware)
         if choice == "cancel":
             self._append_log("Routine cancelled.")
             return
         stim = self._require_stim()
         project = self._require_project()
         if self._target_is_syscon2():
-            self._start_syscon2(choice, stim)
+            self._start_syscon2(choice)
             return
         if self._target_is_bss2():
             self._start_bss2(choice)
@@ -1333,7 +1343,25 @@ class RheobaseDialog(SelfRaisingDialog):
         self.refresh()
         return True
 
-    def _start_syscon2(self, choice: str, stim: StimArray) -> None:
+    def _hardware_start_sample(self, choice: str, run_label: str) -> int:
+        """Where a hardware run places its first block. With ``choice == "new"``
+        the run gets an input array of its own: an empty copy of the selected one,
+        named after the run (as its data group of traces and spikes is), so its
+        probes start at 0 and earlier runs keep their array and data."""
+        if choice != "new":
+            return hardware_start_sample(self.editor, choice)
+        old_name = self._require_stim().name
+        base = _RUN_SUFFIX.sub("", old_name) or old_name
+        name = self.editor.add_empty_stim_array_like_current(f"{base} {run_label}")
+        self.refresh()
+        recorded = self._target_is_bss2() or self._automatic()
+        self._append_log(
+            f"'{old_name}' is kept; this run uses the new input array '{name}'"
+            + (f" and the new data group '{run_label}'." if recorded else ".")
+        )
+        return 0
+
+    def _start_syscon2(self, choice: str) -> None:
         """Begin a routine whose probes are delivered through SysCon2."""
         if not self._fix_syscon_dt():
             return
@@ -1346,11 +1374,11 @@ class RheobaseDialog(SelfRaisingDialog):
             if reason is not None:
                 self._append_log(reason)
                 return
-        self._append_start_sample = hardware_start_sample(self.editor, choice)
+        self._run_name = routine_run_name("rheobase")
+        self._append_start_sample = self._hardware_start_sample(choice, self._run_name)
         # Nothing delivered yet: ending now keeps the array up to here.
         self._delivered_end_sample = self._append_start_sample
         self._last_measured_dataset = None
-        self._run_name = routine_run_name("rheobase")
         self._append_log(
             f"Block scripts are kept in {host.run_directory(self._run_name)}."
         )
@@ -1392,13 +1420,15 @@ class RheobaseDialog(SelfRaisingDialog):
         if reason is not None:
             self._append_log(reason)
             return
-        self._append_start_sample = hardware_start_sample(self.editor, choice)
+        self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
+        self._append_start_sample = self._hardware_start_sample(
+            choice, self._bss2_group
+        )
         # Nothing delivered yet: ending now keeps the array up to here.
         self._delivered_end_sample = self._append_start_sample
         # One scale and speed-up for the whole search, whatever happens in the tab.
         self._bss2_settings = host.current_settings()
         self._bss2_warnings_logged = False
-        self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
         self._append_log(
             "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
             f"tab's i_offset max ({self._bss2_settings.i_offset_max}). Each probe runs as its own "

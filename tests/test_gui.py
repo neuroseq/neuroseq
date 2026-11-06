@@ -4600,7 +4600,7 @@ def test_refused_hardware_rheobase_keeps_the_existing_input(qtbot, monkeypatch):
     gui.stim_editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
     # The start prompt is answered "continue after the last stimulus".
     monkeypatch.setattr(
-        rheobase_dialog, "confirm_start_routine", lambda *_args: "continue"
+        rheobase_dialog, "confirm_start_routine", lambda *_args, **_kwargs: "continue"
     )
     dialog = RheobaseDialog(gui.stim_editor)
     qtbot.addWidget(dialog)

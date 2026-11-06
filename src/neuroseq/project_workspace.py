@@ -465,6 +465,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             parent=self,
         )
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
+        #: Data groups of routine runs already shown (see _on_block_recorded).
+        self._shown_run_groups: set[str] = set()
+        self.acquisition_controller.block_recorded.connect(self._on_block_recorded)
         # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
         self.acquisition_controller.fov_ready.connect(
             lambda path: self.btn_import_cellpose_data_clicked(
@@ -2232,6 +2235,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._refresh_calcium_video_widgets()
         self._update_combo_boxes()
         self.update_limits()
+
+    def _on_block_recorded(self, _run_id: str, payload: object) -> None:
+        """Show a routine run's traces and spikes once its first block is in, so a
+        run started in new arrays is followed without picking its data group; later
+        blocks leave the selection to the user."""
+        group = payload.get("experiment") if isinstance(payload, dict) else None
+        if not group or group in self._shown_run_groups:
+            return
+        self._shown_run_groups.add(str(group))
+        self._select_experiment_data(str(group))
 
     def _on_bss2_experiment_added(self, name: str) -> None:
         self._update_combo_boxes()
