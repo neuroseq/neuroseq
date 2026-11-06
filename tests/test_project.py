@@ -1664,3 +1664,35 @@ def test_exported_simulated_traces_ignore_the_plotting_ram_budget() -> None:
     assert full.traces.shape[1] > budgeted.traces.shape[1]
     assert project.data_duration_seconds(trace_name) == pytest.approx(0.3)
     assert project.data_duration_seconds("Missing :: x") == 0.0
+
+
+def test_relocate_calcium_video_finds_the_other_files_by_name(tmp_path):
+    project = Project()
+    old = [Path("/old/part_0.tif"), Path("/old/part_1.tif")]
+    video = project.add_calcium_video(old, 30.0)
+    video["index"] = {"paths": [str(p) for p in old], "frames": {}}
+    new_folder = tmp_path / "new"
+    new_folder.mkdir()
+    (new_folder / "part_1.tif").write_bytes(b"")
+    project.dirty = False
+    still_missing = project.relocate_calcium_video(None, new_folder / "part_1.tif")
+    assert project.calcium_video_paths == [
+        new_folder / "part_0.tif",
+        new_folder / "part_1.tif",
+    ]
+    assert still_missing == [new_folder / "part_0.tif"]
+    assert video["index"]["paths"] == [str(p) for p in project.calcium_video_paths]
+    assert project.dirty
+
+
+def test_relocate_calcium_video_accepts_a_renamed_single_file(tmp_path):
+    project = Project()
+    project.add_calcium_video([Path("/old/movie.tif")], 30.0)
+    renamed = tmp_path / "renamed.tif"
+    renamed.write_bytes(b"")
+    assert project.relocate_calcium_video(None, renamed) == []
+    assert project.calcium_video_paths == [renamed]
+
+    project.add_calcium_video([Path("/old/a.tif"), Path("/old/b.tif")], 30.0)
+    with pytest.raises(ValueError, match="not one of"):
+        project.relocate_calcium_video(None, renamed)

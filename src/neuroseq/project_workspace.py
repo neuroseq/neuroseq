@@ -453,6 +453,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
         )
+        self.calcium_video_widget.locate_requested.connect(
+            self._on_calcium_video_locate_requested
+        )
         self.calcium_video_widget.channels_changed.connect(
             self._on_calcium_video_channels_changed
         )
@@ -2208,6 +2211,46 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.project.remove_calcium_video()
         self._refresh_calcium_video_widgets()
 
+    def _on_calcium_video_locate_requested(
+        self, *, path: pathlib.Path | None = None
+    ) -> None:
+        """Let the user point the selected video at its files' new place, e.g.
+        after opening the project on another computer."""
+        video = self.project.selected_calcium_video
+        if video is None or not video["paths"]:
+            return
+        missing = [p for p in video["paths"] if not pathlib.Path(p).is_file()]
+        if path is None:
+            first_missing = pathlib.Path(missing[0] if missing else video["paths"][0])
+            start = (
+                self.project.filepath.parent
+                if self.project.filepath is not None
+                else pathlib.Path.home()
+            )
+            suffix = first_missing.suffix or ".tif"
+            chosen, _ = QtWidgets.QFileDialog.getOpenFileName(
+                self,
+                f"Locate {first_missing.name}",
+                str(start / first_missing.name),
+                f"{first_missing.name} (*{suffix});;All files (*)",
+            )
+            if not chosen:
+                return
+            path = pathlib.Path(chosen)
+        try:
+            still_missing = self.project.relocate_calcium_video(video["id"], path)
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(self, "Wrong imaging file", str(error))
+            return
+        self._refresh_calcium_video_widgets()
+        if still_missing:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Imaging files missing",
+                "These files of the imaging data were not found next to the chosen "
+                "one:\n" + "\n".join(str(p) for p in still_missing),
+            )
+
     def _on_calcium_video_channels_changed(
         self, channels: int, shown_channel: int
     ) -> None:
@@ -2279,17 +2322,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         video_id = self.cmb_video.itemData(index)
         if video_id is None or video_id == self.project.selected_calcium_video_id:
             return
-        video = next(v for v in self.project.calcium_videos if v["id"] == video_id)
-        missing = [path for path in video["paths"] if not pathlib.Path(path).is_file()]
-        if missing:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Imaging files missing",
-                "These files of the selected imaging data were not found:\n"
-                + "\n".join(missing),
-            )
-            self._refresh_video_selector()
-            return
+        # Missing files are shown in the video panel with a "Locate file…" button.
         self.project.select_calcium_video(video_id)
         self._refresh_calcium_video_widgets()
         self._auto_show_widget(self.calcium_video_widget)
@@ -3199,6 +3232,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 self.calcium_video_widget,
                 self.calcium_video_widget.widget,
                 self.calcium_video_widget.empty_state_widget,
+                self.calcium_video_widget.missing_state_widget,
                 # Deliberately excludes overlay_view/overlay_view.widget: a
                 # right click there is the panel's own lasso-select gesture
                 # (see SpatialFootprintWidget), not a request to detach.
@@ -3260,6 +3294,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.calcium_video_widget,
             self.calcium_video_widget.widget,
             self.calcium_video_widget.empty_state_widget,
+            self.calcium_video_widget.missing_state_widget,
         ):
             return self.spatial_footprint_widget
         return widget
@@ -3393,6 +3428,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         widget.calcium_video_widget.remove_requested.connect(
             self._on_calcium_video_remove_requested
+        )
+        widget.calcium_video_widget.locate_requested.connect(
+            self._on_calcium_video_locate_requested
         )
         widget.calcium_video_widget.channels_changed.connect(
             self._on_calcium_video_channels_changed

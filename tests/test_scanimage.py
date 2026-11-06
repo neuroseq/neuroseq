@@ -866,21 +866,52 @@ def test_multiple_videos_are_selectable_and_persist(qtbot, tmp_path, recording):
     gui._close_confirmed = True
 
 
-def test_selecting_a_video_with_missing_files_keeps_the_current_one(
-    qtbot, recording, qmessagebox_calls
+def test_a_video_with_missing_files_is_selected_and_can_be_located(
+    qtbot, tmp_path, qmessagebox_calls
 ):
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
-    present = Path(recording[0][0])
+    moved = tmp_path / "moved" / "video.tif"
+    moved.parent.mkdir()
+    tifffile.imwrite(
+        moved, np.zeros((3, 4, 5), dtype=np.uint16), photometric="minisblack"
+    )
     gui.project.add_calcium_video([Path("/missing/video.tif")], 10)
-    gui.project.add_calcium_video([present], 10)
+    gui.project.add_calcium_video([moved], 10)
     gui._refresh_calcium_video_widgets()
     gui.cmb_video.activated.emit(0)
-    assert gui.project.calcium_video_paths == [present]
-    assert gui.cmb_video.currentIndex() == 1
-    assert qmessagebox_calls
+    assert gui.project.calcium_video_paths == [Path("/missing/video.tif")]
+    widget = gui.calcium_video_widget
+    assert not widget.missing_state_widget.isHidden()
+    assert widget.widget.isHidden()
+    assert "/missing/video.tif" in widget.missing_label.text()
+
+    gui.project.dirty = False
+    gui._on_calcium_video_locate_requested(path=moved)
+    assert gui.project.calcium_video_paths == [moved]
+    assert gui.project.dirty
+    assert widget.missing_state_widget.isHidden()
+    assert widget.frame_count() == 3
+    assert not [c for c in qmessagebox_calls if c["title"] == "Imaging files missing"]
+    gui._close_confirmed = True
+
+
+def test_locating_a_file_of_another_movie_is_refused(
+    qtbot, tmp_path, qmessagebox_calls
+):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    paths = [Path("/missing/part_0.tif"), Path("/missing/part_1.tif")]
+    gui.project.add_calcium_video(paths, 10)
+    gui._refresh_calcium_video_widgets()
+    gui._on_calcium_video_locate_requested(path=tmp_path / "other.tif")
+    assert gui.project.calcium_video_paths == paths
+    assert [c["title"] for c in qmessagebox_calls] == ["Wrong imaging file"]
+    assert not gui.calcium_video_widget.missing_state_widget.isHidden()
     gui._close_confirmed = True
 
 

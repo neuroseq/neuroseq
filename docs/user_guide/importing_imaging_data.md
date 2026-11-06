@@ -75,6 +75,17 @@ start with its channel count and functional channel. The choice is saved per
 imaging data entry. ScanImage recordings use **Functional channel** in the
 **ScanImage (imaging)** tab of the Stimulation setup pane instead.
 
+### Moved or missing imaging files
+
+A `.nseq` project does not contain the movie itself, only the path to the
+original imaging file(s); the traces, spikes and segmentation computed from it
+are saved in the project. When the file is not at that path — for example after
+opening the project on another computer — the Imaging tab lists the missing
+file(s) with a **Locate file…** button instead of the video. Choose the file's
+new location and the video plays again; for a movie split across several files,
+pick any one of them and the others are found by name in the same folder. Save
+the project to keep the new path.
+
 ### Saving imaging data
 
 **Save imaging data…** in the Imaging tab first asks which frames to save.
