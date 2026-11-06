@@ -622,3 +622,48 @@ def test_auto_brightness_is_applied_before_segmentation(
         str(image_path), model_name="cpsam", display_range=expected
     )
     assert shown == ([expected] if also_adjust else [])
+
+
+def test_segmenting_a_new_fov_replaces_an_existing_segmentation(
+    tmp_path, qtbot: QtBot, mocker, qmessagebox_calls: list
+) -> None:
+    """Grab FOV in a project that already has a segmentation of another size
+    (e.g. an example project's): the new image and its segmentation are loaded
+    together, not checked against the old masks or mapping."""
+    old = _make_cellpose_dialog(tmp_path, qtbot)
+    assert old.image_path is not None
+    existing = old.importer.create_result(
+        old.image_path, {0: 4, 1: 1}, mapping_strategy="Custom"
+    )
+    dialog = CellposeImportDialog(existing_data=existing)
+    qtbot.addWidget(dialog)
+    assert dialog._get_mapping_strategy() == "Custom"
+
+    fov = tmp_path / "2026-11-06_00001_mean.png"
+    Image.fromarray(np.arange(120, dtype=np.uint8).reshape(10, 12)).save(fov)
+    segmentation = np.zeros((10, 12), dtype=np.int32)
+    segmentation[2:5, 2:5] = 1
+    segmentation[6:9, 7:10] = 2
+    seg_path = tmp_path / "2026-11-06_00001_mean_cpsam_seg.npy"
+    np.save(seg_path, segmentation)
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(seg_path, tmp_path / "masks.png"),
+    )
+
+    dialog.segment_file(str(fov))
+
+    errors = [call for call in qmessagebox_calls if call["name"] == "critical"]
+    assert errors == []
+    assert dialog.image_path == fov
+    assert dialog.importer.image_data is not None
+    assert dialog.importer.image_data.shape[:2] == (10, 12)
+    assert dialog.importer.segmentation_data is not None
+    assert dialog.importer.segmentation_data.shape == (10, 12)
+    assert dialog.import_button.isEnabled()
+    # The old custom mapping does not carry over to the new cells.
+    assert dialog._get_mapping_strategy() != "Custom"

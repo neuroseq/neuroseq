@@ -1385,6 +1385,11 @@ class CellposeImportDialog(QtWidgets.QDialog):
                 model_name=self.cellpose_model_combo.currentText(),
                 display_range=display_range,
             )
+            # A fresh image and segmentation: drop what the dialog showed before
+            # (e.g. a project's existing segmentation of another field of view, and
+            # its mapping), or the new image is checked against the old masks.
+            # The stored data itself is only replaced when this one is imported.
+            self._reset_importer_state()
             self._load_image_file(filename)
             self._load_segmentation_file(str(segmentation_path))
             QtWidgets.QMessageBox.information(
