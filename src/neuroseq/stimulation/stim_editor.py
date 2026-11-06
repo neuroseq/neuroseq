@@ -82,6 +82,9 @@ class StimEditor(QtWidgets.QWidget):
         self.history_enabled = True
         self.cmb_stim = cmb_stim
         self.current_stim_modifier: StimArrayModifier | None = None
+        #: Data groups of hardware routine runs started in new arrays: the
+        #: workspace shows each one's traces and spikes once its first block is in.
+        self.followed_run_groups: set[str] = set()
         self.mode = InteractMode.DRAW
         self.draw_mode = DrawMode.DRAW
         self.select_mode = SelectMode.SELECT

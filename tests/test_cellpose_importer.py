@@ -52,7 +52,8 @@ def test_load_tiff_stack_mean(tmp_path):
 
     expected_arrays = [importer._frame_to_rgb_float(frame) for frame in pil_frames]
     expected_float = np.mean(np.stack(expected_arrays, axis=0), axis=0)
-    expected = importer._scale_float_image_to_uint8(expected_float)
+    # 8-bit frames stay on their own 0-255 scale (not stretched).
+    expected = np.rint(expected_float).astype(np.uint8)
 
     np.testing.assert_array_equal(importer.image_data, expected)
 
@@ -633,3 +634,20 @@ def test_restore_from_result_preserves_custom_mapping(tmp_path):
     np.testing.assert_array_equal(
         cloned_result.background_image, original_result.background_image
     )
+
+
+def test_an_8bit_tiff_is_shown_on_its_own_scale_not_stretched(tmp_path) -> None:
+    import tifffile
+
+    from neuroseq.importers.importer_cellpose import CellPoseImporter
+
+    path = tmp_path / "dim8.tif"
+    image = np.full((4, 5), 20, dtype=np.uint8)
+    image[0, 0] = 40
+    tifffile.imwrite(path, image, photometric="minisblack")
+    importer = CellPoseImporter()
+    importer.load_image_file(path)
+    assert importer.image_data is not None
+    assert importer.image_data.dtype == np.uint8
+    assert int(importer.image_data.max()) == 40
+    assert int(importer.image_data.min()) == 20

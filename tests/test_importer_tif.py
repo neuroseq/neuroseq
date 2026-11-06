@@ -367,15 +367,18 @@ def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
     np.testing.assert_array_equal(loaded, masks)
 
 
+@pytest.mark.parametrize("variant", ["full", "traces_only", "gpu_fails"])
 @pytest.mark.parametrize("reference", [None, "matching", "mismatched"])
 @pytest.mark.parametrize("register", [False, True])
 def test_run_suite2p_pipeline_orchestration(
-    monkeypatch, tmp_path: Path, register: bool, reference: str | None
+    monkeypatch, tmp_path: Path, register: bool, reference: str | None, variant: str
 ):
     """Exercise run_suite2p_pipeline with fully-mocked Suite2p modules.
 
     Validates the orchestration: db assembly, channel handling, stat building,
     extraction/preprocess/oasis call sequence, and cleanup of the tempdir.
+    ``traces_only`` stops after extraction; with ``gpu_fails`` the GPU registration
+    fails partway, and the binary is rewritten before registering on the CPU.
     """
     import sys
     import types
@@ -398,7 +401,15 @@ def test_run_suite2p_pipeline_orchestration(
 
     registered: list[dict] = []
 
+    conversions: list[int] = []
+    closed: list[object] = []
+
     def registration_wrapper(f_reg, f_reg_chan2, refImg, settings, device):
+        if getattr(device, "type", None) == "cuda":
+            f_reg.data += 1.0  # shifted some frames in place before failing
+            raise RuntimeError("CUDA out of memory")
+        # Registered from a freshly converted binary, never a half-shifted one.
+        assert not f_reg.data.any()
         registered.append(
             {"f_reg": f_reg, "chan2": f_reg_chan2, "ref": refImg, "settings": settings}
         )
@@ -419,6 +430,7 @@ def test_run_suite2p_pipeline_orchestration(
         ]
 
     def tiff_to_binary(dbs, settings, files, files_chan2):
+        conversions.append(1)
         return dbs
 
     class FakeBinaryFile:
@@ -427,6 +439,9 @@ def test_run_suite2p_pipeline_orchestration(
             self.Lx = Lx
             self.write = write
             self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
+
+        def close(self):
+            closed.append(self)
 
     def assign_overlaps(stat, Ly_, Lx_):
         return stat
@@ -442,6 +457,7 @@ def test_run_suite2p_pipeline_orchestration(
         return F, Fneu, None, None
 
     def preprocess(F, fs, batch_size, device, **kwargs):
+        assert variant != "traces_only"
         return F
 
     def oasis(F, batch_size, tau, fs):
@@ -513,6 +529,12 @@ def test_run_suite2p_pipeline_orchestration(
         _module("suite2p.registration", registration_wrapper=registration_wrapper),
     )
 
+    if variant == "gpu_fails":
+        monkeypatch.setattr(
+            "neuroseq.importers.importer_tif.select_torch_device",
+            lambda: (types.SimpleNamespace(type="cuda"), "CUDA"),
+        )
+
     tif = tmp_path / "data" / "stack.tif"
     tif.parent.mkdir()
     tif.write_bytes(b"")
@@ -530,7 +552,13 @@ def test_run_suite2p_pipeline_orchestration(
         progress=lambda msg, frac: progress_calls.append((msg, frac)),
         register=register,
         reference_image=reference_image,
+        traces_only=variant == "traces_only",
     )
+    retried = register and variant == "gpu_fails"
+    assert len(conversions) == (2 if retried else 1)
+    assert len(closed) == (2 if retried else 0)  # both channels' binaries
+    if retried:
+        assert result.extra["compute_device"] == "CPU (GPU fallback)"
     if not register:
         assert registered == [] and "registration" not in result.extra
     else:
@@ -554,9 +582,12 @@ def test_run_suite2p_pipeline_orchestration(
     assert result.mean_image.shape == (Ly, Lx)
     # All Cellpose ROIs were marked as cells.
     assert np.all(result.iscell[:, 0] == 1)
-    # Stat entries got snr/skew/std appended.
-    for entry in result.stat:
-        assert {"snr", "skew", "std"} <= set(entry.keys())
+    if variant == "traces_only":
+        assert not result.spks.any()
+    else:
+        # Stat entries got snr/skew/std appended.
+        for entry in result.stat:
+            assert {"snr", "skew", "std"} <= set(entry.keys())
     # Progress callback was invoked for the pipeline phases.
     assert progress_calls
     assert progress_calls[-1] == ("Done", 1.0)

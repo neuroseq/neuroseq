@@ -61,6 +61,7 @@ class _FakeEditor:
         self.project = project
         self.stimulation_host = None
         self.bss2_host = None
+        self.followed_run_groups: set[str] = set()
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -1539,6 +1540,7 @@ def test_syscon2_new_arrays_start_a_run_in_its_own_input_and_data_group(
     recording = host.recordings[0]
     assert (recording.group, recording.offset_s) == (run_name, 0.0)
     assert f"new data group '{run_name}'" in dialog.log.toPlainText()
+    assert run_name in editor.followed_run_groups
 
     # A run started from that array is named after the base name, not stacked.
     dialog.stop()
@@ -1549,6 +1551,23 @@ def test_syscon2_new_arrays_start_a_run_in_its_own_input_and_data_group(
     )
 
 
+def test_syscon2_new_arrays_are_not_made_for_settings_that_cannot_start(
+    qtbot, monkeypatch
+) -> None:
+    project, editor, dialog, host = _automatic_dialog(qtbot)
+    previous, _kept = _previous_run(editor, monkeypatch, "new")
+    arrays = set(project.stim_arrays)
+    dialog.spn_max_amplitude.setValue(dialog.spn_min_amplitude.value())
+    dialog.spn_fixed_amplitude.setValue(0.0)
+
+    dialog.start()
+
+    assert set(project.stim_arrays) == arrays
+    assert editor.current_stim_modifier.stim_array is previous
+    assert host.run_names == []
+    assert "uses the new input array" not in dialog.log.toPlainText()
+
+
 def test_syscon2_continue_still_appends_to_the_same_array(qtbot, monkeypatch) -> None:
     _project, editor, dialog, _host = _automatic_dialog(qtbot)
     previous, _kept = _previous_run(editor, monkeypatch, "continue")
@@ -1557,6 +1576,7 @@ def test_syscon2_continue_still_appends_to_the_same_array(qtbot, monkeypatch) ->
 
     assert editor.current_stim_modifier.stim_array is previous
     assert dialog._block_range[0] >= 6
+    assert editor.followed_run_groups == set()
 
 
 def test_bss2_new_arrays_use_the_runs_data_group_name(qtbot, monkeypatch) -> None:

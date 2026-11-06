@@ -1045,13 +1045,19 @@ def test_fov_image_opens_cell_segmentation(qtbot, mocker, tmp_path):
     gui._close_confirmed = True
 
 
-def test_routine_run_data_group_is_shown_on_its_first_block(qtbot, mocker):
+def test_new_array_run_data_group_is_shown_on_its_first_block(qtbot, mocker):
+    """Only runs started in new arrays are followed; a Continue or Clear run (not
+    in followed_run_groups) leaves the user's selection alone."""
     from neuroseq.project_workspace import ProjectWorkspace
 
     gui = ProjectWorkspace()
     qtbot.addWidget(gui)
     select = mocker.patch.object(gui, "_select_experiment_data")
+    gui.stim_editor.followed_run_groups.update(
+        {"rheobase_2026-11-06_120000", "rheobase_2026-11-06_130000"}
+    )
     recorded = gui.acquisition_controller.block_recorded
+    recorded.emit("r0", {"experiment": "rheobase_2026-11-06_110000"})  # Continue
     recorded.emit("r1", {"experiment": "rheobase_2026-11-06_120000"})
     recorded.emit("r2", {"experiment": "rheobase_2026-11-06_120000"})
     recorded.emit("r3", {"experiment": "rheobase_2026-11-06_130000"})

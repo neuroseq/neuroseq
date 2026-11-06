@@ -4,6 +4,7 @@ import pytest
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.export.exporter_numpy import save_matrix
+from neuroseq.export.exporter_numpy import spike_bin_count
 from neuroseq.export.exporter_numpy import spike_matrix
 from neuroseq.export.exporter_numpy import trace_matrix
 
@@ -55,3 +56,14 @@ def test_save_matrix_as_npy_or_npz(tmp_path) -> None:
         assert str(archive["units"]) == "dF/F"
     with pytest.raises(ValueError):
         save_matrix(matrix, tmp_path / "a.csv")
+
+
+def test_spike_bin_count_matches_the_matrix_and_huge_matrices_are_refused() -> None:
+    spikes = SpikeData("s", np.array([0, 3]), np.array([0.0, 0.95]))
+    assert (
+        spike_bin_count(spikes, 0.1, 0.5)
+        == spike_matrix(spikes, 0.1, 0.5).values.shape[1]
+        == 10
+    )
+    with pytest.raises(ValueError, match="too large"):
+        spike_matrix(spikes, 1e-9, 3600.0, neuron_ids=np.arange(100))

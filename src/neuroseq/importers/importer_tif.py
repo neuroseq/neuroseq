@@ -350,8 +350,13 @@ def run_suite2p_pipeline(
     progress: ProgressCallback | None = None,
     register: bool = False,
     reference_image: npt.NDArray[Any] | None = None,
+    traces_only: bool = False,
 ) -> TifPipelineResult:
     """Run TIFF → Suite2p binary → trace extraction → OASIS deconvolution.
+
+    With ``traces_only`` the pipeline stops after extracting F and Fneu: no
+    SNR/skew, baseline correction, OASIS or ROI classification (``spks`` is all
+    zeros and every ROI is a cell), for callers that deconvolve themselves.
 
     With ``register``, the binary is first motion-corrected in place by Suite2p's
     rigid + non-rigid registration, aligned to ``reference_image`` (e.g. the image
@@ -453,21 +458,21 @@ def run_suite2p_pipeline(
             _, gpu_msg = torch_gpu_status()
             logger.warning("Suite2p on CPU. %s", gpu_msg.replace("\n", " "))
 
-        progress("Initialising Suite2p output dirs", 0.05)
-        dbs = s2io.init_dbs(db)
-        plane_db = dbs[0]
+        def convert_to_binary() -> dict[str, Any]:
+            dbs = s2io.init_dbs(db)
+            plane_db = dbs[0]
+            with contextlib.ExitStack() as stack:
+                files = [stack.enter_context(open(plane_db["reg_file"], "wb"))]
+                files_chan2 = []
+                if params.nchannels >= 2:
+                    files_chan2 = [
+                        stack.enter_context(open(plane_db["reg_file_chan2"], "wb"))
+                    ]
+                dbs = s2io.tiff_to_binary(dbs, settings, files, files_chan2)
+            return dbs[0]
 
         progress("Converting TIFF to binary", 0.1)
-        with contextlib.ExitStack() as stack:
-            files = [stack.enter_context(open(plane_db["reg_file"], "wb"))]
-            files_chan2 = []
-            if params.nchannels >= 2:
-                files_chan2 = [
-                    stack.enter_context(open(plane_db["reg_file_chan2"], "wb"))
-                ]
-            dbs = s2io.tiff_to_binary(dbs, settings, files, files_chan2)
-
-        plane_db = dbs[0]
+        plane_db = convert_to_binary()
         Ly, Lx, nframes = (
             int(plane_db["Ly"]),
             int(plane_db["Lx"]),
@@ -484,12 +489,19 @@ def run_suite2p_pipeline(
         writable: dict[str, Any] = (
             {"n_frames": nframes, "write": True} if register else {}
         )
-        f_bin = s2io.BinaryFile(Ly=Ly, Lx=Lx, filename=plane_db["reg_file"], **writable)
-        f_bin_chan2 = None
-        if params.nchannels >= 2:
-            f_bin_chan2 = s2io.BinaryFile(
-                Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"], **writable
+
+        def open_binaries() -> tuple[Any, Any]:
+            f_bin = s2io.BinaryFile(
+                Ly=Ly, Lx=Lx, filename=plane_db["reg_file"], **writable
             )
+            f_bin_chan2 = None
+            if params.nchannels >= 2:
+                f_bin_chan2 = s2io.BinaryFile(
+                    Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"], **writable
+                )
+            return f_bin, f_bin_chan2
+
+        f_bin, f_bin_chan2 = open_binaries()
 
         registration: dict[str, Any] | None = None
         if register:
@@ -517,17 +529,43 @@ def run_suite2p_pipeline(
             if min(Ly, Lx) <= max(reg_settings.get("block_size", (128, 128))):
                 reg_settings["nonrigid"] = False
             progress(f"Motion-correcting with Suite2p ({device_label})", 0.2)
-            reg_outputs, device, device_label = _run_with_cpu_fallback(
-                lambda dev: s2reg.registration_wrapper(
+            try:
+                reg_outputs = s2reg.registration_wrapper(
                     f_bin,
                     f_reg_chan2=f_bin_chan2,
                     refImg=ref,
                     settings=reg_settings,
-                    device=dev,
-                ),
-                device,
-                device_label,
-            )
+                    device=device,
+                )
+            except Exception as exc:
+                if getattr(device, "type", None) == "cpu":
+                    raise
+                # Registration shifts the binary in place, so frames a failed GPU
+                # run already shifted must not be shifted again: rewrite the
+                # binary from the TIFFs before retrying on the CPU.
+                import torch
+
+                logger.warning(
+                    "Suite2p registration on %s failed (%s: %s); re-reading the "
+                    "movie and registering on CPU.",
+                    device_label,
+                    type(exc).__name__,
+                    exc,
+                )
+                for binary in (f_bin, f_bin_chan2):
+                    if binary is not None:
+                        binary.close()
+                plane_db = convert_to_binary()
+                f_bin, f_bin_chan2 = open_binaries()
+                device, device_label = torch.device("cpu"), "CPU (GPU fallback)"
+                progress(f"Motion-correcting with Suite2p ({device_label})", 0.2)
+                reg_outputs = s2reg.registration_wrapper(
+                    f_bin,
+                    f_reg_chan2=f_bin_chan2,
+                    refImg=ref,
+                    settings=reg_settings,
+                    device=device,
+                )
             shifts = np.hypot(
                 np.asarray(reg_outputs["yoff"], dtype=np.float64),
                 np.asarray(reg_outputs["xoff"], dtype=np.float64),
@@ -572,6 +610,29 @@ def run_suite2p_pipeline(
             device_label,
         )
 
+        extra: dict[str, Any] = {"compute_device": device_label}
+        if registration is not None:
+            extra["registration"] = registration
+        if masks is None:
+            extra["diameter"] = params.diameter
+        if params.nchannels >= 2:
+            extra["F_chan2"] = F_chan2
+            extra["Fneu_chan2"] = Fneu_chan2
+
+        if traces_only:
+            progress("Done", 1.0)
+            return TifPipelineResult(
+                F=np.asarray(F),
+                Fneu=np.asarray(Fneu),
+                spks=np.zeros(np.shape(F), dtype=np.float32),
+                stat=stat,
+                iscell=np.column_stack([np.ones(len(stat)), np.ones(len(stat))]),
+                ops={**settings, **plane_db},
+                mean_image=mean_image,
+                masks=masks_out,
+                extra=extra,
+            )
+
         progress("Computing per-cell SNR/skew/std", 0.7)
         try:
             from scipy.stats import skew as scipy_skew
@@ -615,15 +676,7 @@ def run_suite2p_pipeline(
             # All ROIs come from Cellpose — accept them all.
             iscell[:, 0] = 1
 
-        extra: dict[str, Any] = {"compute_device": device_label}
-        if registration is not None:
-            extra["registration"] = registration
-        if masks is None:
-            extra["diameter"] = params.diameter
-        if params.nchannels >= 2:
-            extra["F_chan2"] = F_chan2
-            extra["Fneu_chan2"] = Fneu_chan2
-
+        extra["compute_device"] = device_label
         progress("Done", 1.0)
 
         return TifPipelineResult(

@@ -748,3 +748,31 @@ def test_without_auto_brightness_the_fov_is_shown_as_stored(
     dialog._import_data()
     imported = dialog.get_imported_data()
     assert imported is not None and imported.display_range is None
+
+
+def test_segmenting_a_new_fov_keeps_a_linear_mapping_and_its_offset(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """A Linear mapping names no cells, so the user's choice survives Grab FOV."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    dialog._apply_existing_mapping({}, "Linear", 5)
+    fov = tmp_path / "2026-11-06_00002_mean.png"
+    Image.fromarray(np.arange(120, dtype=np.uint8).reshape(10, 12)).save(fov)
+    segmentation = np.zeros((10, 12), dtype=np.int32)
+    segmentation[2:5, 2:5] = 1
+    seg_path = tmp_path / "2026-11-06_00002_mean_cpsam_seg.npy"
+    np.save(seg_path, segmentation)
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(seg_path, tmp_path / "masks.png"),
+    )
+
+    dialog.segment_file(str(fov))
+
+    assert dialog.image_path == fov
+    assert dialog._get_mapping_strategy() == "Linear"
+    assert dialog._get_linear_offset() == 5

@@ -398,7 +398,9 @@ class CellPoseImporter:
     def _load_tiff_with_strategy(self, image: Image.Image) -> np.ndarray:
         """Project a TIFF stack with mean projection, then normalize to display range."""
         frames = []
+        all_8bit = True
         for frame in ImageSequence.Iterator(image):
+            all_8bit = all_8bit and np.asarray(frame).dtype == np.uint8
             frames.append(self._frame_to_rgb_float(frame))
 
         if not frames:
@@ -413,7 +415,11 @@ class CellPoseImporter:
 
         frame_stack = np.stack(frames, axis=0)
         result = np.mean(frame_stack, axis=0)
-
+        if all_8bit:
+            # Already on the 0-255 display scale, kept as a PNG is (and as
+            # brightness_contrast.to_8bit keeps it), so a brightness window chosen
+            # on it applies to the same values.
+            return np.clip(np.rint(result), 0, 255).astype(np.uint8)
         return self._scale_float_image_to_uint8(result)
 
     def _frame_to_rgb_float(self, frame: Image.Image) -> np.ndarray:

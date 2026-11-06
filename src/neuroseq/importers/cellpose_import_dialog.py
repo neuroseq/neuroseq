@@ -1413,7 +1413,13 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # (e.g. a project's existing segmentation of another field of view, and
             # its mapping), or the new image is checked against the old masks.
             # The stored data itself is only replaced when this one is imported.
+            # A Linear mapping does not name cells, so it and its offset are kept;
+            # a Custom one lists the old cells' ids and is dropped.
+            strategy = self._get_mapping_strategy()
+            linear_offset = self._get_linear_offset()
             self._reset_importer_state()
+            if strategy == "Linear":
+                self._apply_existing_mapping({}, "Linear", linear_offset)
             self._load_image_file(filename)
             self._display_range = display_range
             self._load_segmentation_file(str(segmentation_path))

@@ -1354,6 +1354,7 @@ class RheobaseDialog(SelfRaisingDialog):
         old_name = self._require_stim().name
         base = _RUN_SUFFIX.sub("", old_name) or old_name
         name = self.editor.add_empty_stim_array_like_current(f"{base} {run_label}")
+        self.editor.followed_run_groups.add(run_label)
         self.refresh()
         recorded = self._target_is_bss2() or self._automatic()
         self._append_log(
@@ -1375,6 +1376,12 @@ class RheobaseDialog(SelfRaisingDialog):
             if reason is not None:
                 self._append_log(reason)
                 return
+        # Checked before "Start in new arrays" adds an array the run never uses.
+        problem = self._settings_problem()
+        if problem is not None:
+            # Nothing has started: only say why (finishing would trim the array).
+            self._append_log(problem)
+            return
         self._run_name = routine_run_name("rheobase")
         self._append_start_sample = self._hardware_start_sample(choice, self._run_name)
         # Nothing delivered yet: ending now keeps the array up to here.
@@ -1421,6 +1428,11 @@ class RheobaseDialog(SelfRaisingDialog):
         if reason is not None:
             self._append_log(reason)
             return
+        problem = self._settings_problem()
+        if problem is not None:
+            # Nothing has started: only say why (finishing would trim the array).
+            self._append_log(problem)
+            return
         self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
         self._append_start_sample = self._hardware_start_sample(
             choice, self._bss2_group
@@ -1438,21 +1450,20 @@ class RheobaseDialog(SelfRaisingDialog):
         )
         self._begin_search(clear_log=False)
 
-    def _begin_search(self, *, clear_log: bool) -> None:
+    def _settings_problem(self) -> str | None:
+        """Why the amplitude/duration settings cannot start a search, or None."""
         strategy = self.cmb_sweeping_strategy.currentText()
         min_amplitude = self.spn_min_amplitude.value()
         max_amplitude = self.spn_max_amplitude.value()
         fixed_amplitude = strategy == self.FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY
         fixed_duration = strategy == self.FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY
         if not fixed_amplitude and max_amplitude <= min_amplitude:
-            self._finish("Maximum amplitude must be greater than minimum amplitude.")
-            return
+            return "Maximum amplitude must be greater than minimum amplitude."
         if (
             not fixed_duration
             and self.spn_max_pulse_ms.value() < self.spn_pulse_ms.value()
         ):
-            self._finish("Maximum pulse duration must be at least the minimum.")
-            return
+            return "Maximum pulse duration must be at least the minimum."
         if self._target_is_syscon2() or self._target_is_bss2():
             amplitudes = (
                 [self.spn_fixed_amplitude.value()]
@@ -1462,14 +1473,23 @@ class RheobaseDialog(SelfRaisingDialog):
             # Above 0: a zero-amplitude probe is an empty block, which SysCon2
             # cannot export.
             if min(amplitudes) <= 0.0 or max(amplitudes) > 1.0:
-                self._finish(
+                return (
                     "For SysCon2 the amplitudes must be above 0 and at most 1 "
                     "(fraction of the export target power)."
                     if self._target_is_syscon2()
                     else "For BrainScaleS-2 the amplitudes must be above 0 and at "
                     "most 1 (fraction of i_offset max)."
                 )
-                return
+        return None
+
+    def _begin_search(self, *, clear_log: bool) -> None:
+        strategy = self.cmb_sweeping_strategy.currentText()
+        min_amplitude = self.spn_min_amplitude.value()
+        max_amplitude = self.spn_max_amplitude.value()
+        problem = self._settings_problem()
+        if problem is not None:
+            self._finish(problem)
+            return
         stim = self._require_stim()
         config = RheobaseRunConfig(
             strategy=strategy,

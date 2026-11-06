@@ -41,6 +41,28 @@ def trace_matrix(trace: TraceData) -> NeuronTimeMatrix:
     )
 
 
+#: Largest matrix (in elements, 2 GB as float32) offered for export: a tiny spike
+#: bin over a long recording would otherwise exhaust the memory.
+MAX_MATRIX_ELEMENTS = 500_000_000
+
+
+def _spike_columns(spikes: SpikeData, bin_s: float) -> npt.NDArray[np.int64]:
+    times = np.asarray(spikes.spike_times, dtype=np.float64)
+    return np.floor(times / bin_s + 1e-9).astype(np.int64).clip(min=0)
+
+
+def spike_bin_count(spikes: SpikeData, bin_s: float, duration_s: float = 0.0) -> int:
+    """Number of time bins (columns) :func:`spike_matrix` makes, without making it."""
+    if bin_s <= 0:
+        raise ValueError("The bin size must be greater than zero.")
+    columns = _spike_columns(spikes, bin_s)
+    return max(
+        1,
+        int(np.ceil(float(duration_s) / bin_s - 1e-9)),
+        int(columns.max()) + 1 if columns.size else 0,
+    )
+
+
 def spike_matrix(
     spikes: SpikeData,
     bin_s: float,
@@ -53,21 +75,19 @@ def spike_matrix(
     ``neuron_ids`` (default: 0 up to the highest spiking neuron, so row ``i`` is
     neuron ``i``); spikes of neurons not listed are dropped.
     """
-    if bin_s <= 0:
-        raise ValueError("The bin size must be greater than zero.")
+    n_bins = spike_bin_count(spikes, bin_s, duration_s)
     indices = np.asarray(spikes.spike_indices, dtype=np.int64)
-    times = np.asarray(spikes.spike_times, dtype=np.float64)
     if neuron_ids is None:
         n_rows = int(indices.max()) + 1 if indices.size else 0
         ids = np.arange(n_rows, dtype=np.int64)
     else:
         ids = np.unique(np.asarray(neuron_ids, dtype=np.int64))
-    columns = np.floor(times / bin_s + 1e-9).astype(np.int64).clip(min=0)
-    n_bins = max(
-        1,
-        int(np.ceil(float(duration_s) / bin_s - 1e-9)),
-        int(columns.max()) + 1 if columns.size else 0,
-    )
+    if ids.size * n_bins > MAX_MATRIX_ELEMENTS:
+        raise ValueError(
+            f"{ids.size} neurons × {n_bins} bins is too large to export; "
+            "use a larger bin size."
+        )
+    columns = _spike_columns(spikes, bin_s)
     counts = np.zeros((ids.size, n_bins), dtype=np.float32)
     rows = np.searchsorted(ids, indices)
     known = np.zeros(indices.shape, dtype=bool)

@@ -196,7 +196,9 @@ routines run each block without manual steps:
    cell's fluorescence is measured:
    - **Suite2p (motion-corrected, neuropil-corrected)**, the default: Suite2p
      motion-corrects the recording (rigid and non-rigid registration), then
-     extracts each ROI with the same masks and uses F − 0.7 × neuropil. The
+     extracts each ROI with the same masks and uses F − 0.7 × neuropil. ΔF/F is
+     measured relative to the baseline of the raw F, so a dim cell whose
+     neuropil-corrected baseline is close to zero does not get a huge ΔF/F. The
      reference is the image the Cellpose masks were drawn on (e.g. the
      **Grab FOV** mean TIFF), so drift since the FOV was grabbed is corrected
      too. If that image is not a TIFF of the recording's size, each recording is

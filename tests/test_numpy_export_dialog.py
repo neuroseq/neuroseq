@@ -62,3 +62,35 @@ def test_nothing_to_export(qtbot: QtBot) -> None:
     qtbot.addWidget(dialog)
     assert not dialog.btn_export.isEnabled()
     assert "No spikes" in dialog.lbl_shape.text()
+
+
+def test_choosing_the_archive_type_writes_npz_despite_the_suggested_npy_name(
+    qtbot: QtBot, tmp_path, mocker
+) -> None:
+    dialog = NumpyExportDialog(_project(), "traces", "rec :: dF/F")
+    qtbot.addWidget(dialog)
+    mocker.patch(
+        "neuroseq.export.numpy_export_dialog.getsavefilename",
+        return_value=(str(tmp_path / "rec_dF_F.npy"), NPZ_FILTER),
+    )
+    dialog.btn_export.click()
+    assert dialog.saved_path == str(tmp_path / "rec_dF_F.npz")
+    with np.load(dialog.saved_path) as archive:
+        assert set(archive.files) == {"values", "neuron_ids", "times", "units"}
+
+
+def test_a_tiny_bin_only_updates_the_label_and_cannot_be_exported(
+    qtbot: QtBot, mocker
+) -> None:
+    """The shape label is worked out without building the matrix, so a bin far too
+    small for the recording does not try to allocate it."""
+    project = _project()
+    project.experiments["rec"].duration = 3600.0
+    dialog = NumpyExportDialog(project, "spikes", "rec :: Deconvolved spikes")
+    qtbot.addWidget(dialog)
+    build = mocker.patch("neuroseq.export.numpy_export_dialog.spike_matrix")
+    mocker.patch.object(project, "max_neurons", 1000)
+    dialog.spn_bin_ms.setValue(0.001)
+    build.assert_not_called()
+    assert "Too large to export" in dialog.lbl_shape.text()
+    assert not dialog.btn_export.isEnabled()

@@ -480,8 +480,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             parent=self,
         )
         self.acquisition_controller.recording_added.connect(self._on_recording_added)
-        #: Data groups of routine runs already shown (see _on_block_recorded).
-        self._shown_run_groups: set[str] = set()
         self.acquisition_controller.block_recorded.connect(self._on_block_recorded)
         #: The block whose trace extraction the toolbar progress bar shows.
         self._extraction_progress_run: str | None = None
@@ -2300,13 +2298,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.update_limits()
 
     def _on_block_recorded(self, _run_id: str, payload: object) -> None:
-        """Show a routine run's traces and spikes once its first block is in, so a
-        run started in new arrays is followed without picking its data group; later
-        blocks leave the selection to the user."""
+        """Show the traces and spikes of a run started in new arrays once its first
+        block is in, so it is followed without picking its data group. Other runs,
+        and later blocks, leave the selection to the user."""
         group = payload.get("experiment") if isinstance(payload, dict) else None
-        if not group or group in self._shown_run_groups:
+        followed = self.stim_editor.followed_run_groups
+        if not group or str(group) not in followed:
             return
-        self._shown_run_groups.add(str(group))
+        followed.discard(str(group))
         self._select_experiment_data(str(group))
 
     def _on_block_extraction_progress(

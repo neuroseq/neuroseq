@@ -236,9 +236,9 @@ def test_automatic_block_is_uploaded_recorded_and_run(
     )
     steps: list[str] = []
     host.block_note.connect(
-        lambda note_owner, message: steps.append(message)
-        if note_owner is owner
-        else None
+        lambda note_owner, message: (
+            steps.append(message) if note_owner is owner else None
+        )
     )
 
     assert host.send_block(

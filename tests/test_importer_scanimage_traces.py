@@ -62,6 +62,14 @@ def test_delta_f_over_f_uses_the_frames_before_the_stimulus() -> None:
     )
 
 
+def test_delta_f_over_f_divides_by_the_divisor_traces_baseline() -> None:
+    """A neuropil-subtracted baseline near zero does not blow ΔF/F up."""
+    subtracted = np.array([[0.5, 0.5, 10.5]])
+    raw = np.array([[100.0, 100.0, 110.0]])
+    dff = delta_f_over_f(subtracted, 2, raw)
+    np.testing.assert_allclose(dff, [[0.0, 0.0, 0.1]], atol=1e-6)
+
+
 def test_delta_f_over_f_of_a_negative_baseline() -> None:
     """Review: only the divisor is made positive (offset-corrected detectors)."""
     np.testing.assert_allclose(
@@ -144,13 +152,16 @@ def test_suite2p_extraction_subtracts_neuropil_with_the_same_masks(
     Fneu = np.full((2, 60), 100.0)
     calls: dict[str, Any] = {}
 
-    def fake_suite2p(paths, masks, params, *, progress, register, reference_image):
+    def fake_suite2p(
+        paths, masks, params, *, progress, register, reference_image, traces_only
+    ):
         calls.update(
             masks=masks,
             fs=params.fs,
             progress=progress,
             register=register,
             reference=reference_image,
+            traces_only=traces_only,
         )
         return TifPipelineResult(
             F=F.copy(),
@@ -182,15 +193,17 @@ def test_suite2p_extraction_subtracts_neuropil_with_the_same_masks(
     assert calls["fs"] == FPS and calls["progress"] is progress
     # Motion-corrected; fov.tif does not exist, so Suite2p makes its own reference.
     assert calls["register"] is True and calls["reference"] is None
+    assert calls["traces_only"] is True  # deconvolved here, not by Suite2p
     assert registered == [{"reference": "movie", "max_shift_px": 1.5}]
     assert set(np.unique(calls["masks"])) == {0, 1, 2}  # the Cellpose masks
     np.testing.assert_array_equal(trace.indices, [3, 7])
-    # F - 0.7 Fneu: a baseline of 100, rising to 170 (ΔF/F 0.7) for ROI 2.
-    assert trace.traces[1, -1] == pytest.approx(0.7)
+    # F - 0.7 Fneu rises from 100 to 170 for ROI 2, relative to the raw F
+    # baseline of 170 (not the neuropil-subtracted 100): ΔF/F 70/170.
+    assert trace.traces[1, -1] == pytest.approx(70.0 / 170.0)
     if remove_artefact:
         np.testing.assert_allclose(trace.traces[0], 0.0, atol=1e-6)
     else:
-        assert trace.traces[0, lit] == pytest.approx(8.3)
+        assert trace.traces[0, lit] == pytest.approx(830.0 / 170.0)
 
 
 def test_fov_reference_image_is_the_segmented_tiff(tmp_path) -> None:
