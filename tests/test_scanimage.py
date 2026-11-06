@@ -1061,3 +1061,37 @@ def test_routine_run_data_group_is_shown_on_its_first_block(qtbot, mocker):
         "rheobase_2026-11-06_130000",
     ]
     gui._close_confirmed = True
+
+
+def test_block_trace_extraction_shows_in_the_toolbar_progress_bar(qtbot):
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    with qtbot.waitExposed(gui, timeout=WAIT_TIMEOUT_MS):
+        gui.show()
+    controller = gui.acquisition_controller
+    bar = gui.progress_dialog
+    controller.block_extraction_progress.emit("r1", "Converting TIFF to binary", 9)
+    assert bar.is_shown()
+    assert bar.labelText() == "Extracting traces: Converting TIFF to binary"
+    assert bar.value() == 9
+    controller.block_extraction_ended.emit("other")  # not the one shown
+    assert bar.is_shown()
+    controller.block_extraction_ended.emit("r1")
+    assert not bar.is_shown()
+
+    # A bar already in use (e.g. a simulation) is left alone, and an extraction
+    # whose bar is taken over meanwhile does not hide the new owner's.
+    bar.setLabelText("Simulating...")
+    bar.show()
+    controller.block_extraction_progress.emit("r2", "Extracting", 50)
+    assert bar.labelText() == "Simulating..."
+    bar.reset()
+    controller.block_extraction_progress.emit("r3", "Extracting", 50)
+    bar.setLabelText("Simulating...")
+    controller.block_extraction_progress.emit("r3", "Extracting", 60)
+    controller.block_extraction_ended.emit("r3")
+    assert bar.is_shown() and bar.labelText() == "Simulating..."
+    bar.reset()
+    gui._close_confirmed = True

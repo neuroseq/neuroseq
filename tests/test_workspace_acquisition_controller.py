@@ -222,6 +222,7 @@ def test_block_is_armed_triggered_and_its_traces_extracted(setup, qtbot, mocker)
     assert extract.call_args.kwargs["saved_channels"] == [1, 2]
     assert extract.call_args.kwargs["functional_channel"] == 1
     assert extract.call_args.kwargs["remove_artefact"] is True
+    assert extract.call_args.kwargs["method"] == "suite2p"
     assert deconvolve.call_args.args == (trace,)
     assert deconvolve.call_args.kwargs == {"threshold": 0.1}
     assert not controller.acquisition_in_progress
@@ -805,3 +806,137 @@ def test_fov_auto_brightness_choice_is_remembered(setup):
     assert not check.isChecked()
     check.setChecked(True)
     assert GuiSettings().fov_auto_brightness is True
+
+
+def test_slow_suite2p_extraction_is_noted_and_the_block_carries_on(
+    setup, qtbot, mocker
+):
+    import threading
+
+    s = setup
+    _ready_for_blocks(s)
+    release = threading.Event()
+    trace = TraceData("dF/F", np.zeros((1, 90)), np.array([0]), "dF/F", 1 / 30)
+
+    def slow_suite2p(*_args, method, on_registered, **_kwargs):
+        assert method == "suite2p"
+        release.wait(WAIT_TIMEOUT_MS / 1000)
+        on_registered({"reference": "provided", "max_shift_px": 2.25})
+        return trace
+
+    mocker.patch.object(controller_module, "extract_recording_dff", slow_suite2p)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([]), np.array([])),
+    )
+    block = dataclasses.replace(_block(), extraction="suite2p", extraction_slow_s=0.05)
+    run_id = s.controller.arm_block(block)
+    arguments = s.command.call_args.args[1]
+    events: list[tuple] = []
+    s.controller.block_recording_note.connect(
+        lambda rid, message: events.append(("note", rid, message))
+    )
+    s.controller.block_recorded.connect(lambda rid, _p: events.append(("done", rid)))
+    s.controller.block_recording_failed.connect(lambda *a: events.append(("failed",)))
+
+    def notes() -> list[str]:
+        return [event[2] for event in events if event[0] == "note"]
+
+    try:
+        s.controller.scanimage_recording_ready(
+            _ready_result(run_id, arguments, s.folder)
+        )
+        qtbot.waitUntil(
+            lambda: any("still waiting" in note for note in notes()),
+            timeout=WAIT_TIMEOUT_MS,
+        )
+        assert (
+            "more than 0 s; still waiting" in s.controller.controls.message_label.text()
+        )
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: ("done", run_id) in events, timeout=WAIT_TIMEOUT_MS)
+    assert ("failed",) not in events
+    logged = notes()
+    assert logged[0].startswith("Recording complete: ")
+    assert logged[1] == (
+        "Extracting ΔF/F traces with Suite2p (motion correction, neuropil "
+        "subtraction); stimulation artefact removed."
+    )
+    assert logged[-2].startswith("Traces extracted in ")
+    # The motion correction is reported before the block completes.
+    assert logged[-1] == (
+        "Motion correction: largest shift 2.2 px, aligned to the segmented FOV image."
+    )
+    assert events[-1] == ("done", run_id)
+
+
+def test_registration_note_explains_a_block_aligned_to_itself() -> None:
+    note = controller_module.registration_note(
+        {"reference": "movie", "max_shift_px": 1.0}
+    )
+    assert "1.0 px" in note and "drift since the FOV was grabbed" in note
+
+
+def test_extraction_steps_are_reported_for_the_log_and_progress_bar(
+    setup, qtbot, mocker
+):
+    s = setup
+    _ready_for_blocks(s)
+    trace = TraceData("dF/F", np.zeros((2, 90)), np.array([0, 1]), "dF/F", 1 / 30)
+
+    def staged_extract(*_args, progress, **_kwargs):
+        progress("Converting TIFF to binary", 0.1)
+        progress("Converting TIFF to binary", 0.2)  # same stage: logged once
+        progress("Extracting fluorescence traces", 0.5)
+        return trace
+
+    mocker.patch.object(controller_module, "extract_recording_dff", staged_extract)
+    mocker.patch.object(
+        controller_module,
+        "deconvolve_dff",
+        return_value=SpikeData("Deconvolved spikes", np.array([1]), np.array([0.5])),
+    )
+    notes: list[str] = []
+    progress: list[tuple[str, int]] = []
+    ended: list[str] = []
+    s.controller.block_recording_note.connect(lambda _rid, note: notes.append(note))
+    s.controller.block_extraction_progress.connect(
+        lambda _rid, stage, percent: progress.append((stage, percent))
+    )
+    s.controller.block_extraction_ended.connect(ended.append)
+    block = dataclasses.replace(
+        _block(), extraction="roi_average", remove_artefact=False
+    )
+    run_id = s.controller.arm_block(block)
+    arguments = s.command.call_args.args[1]
+    s.controller.scanimage_status(
+        {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
+    )
+    assert notes == [
+        "ScanImage armed: 90 frames at 30.00 Hz, waiting for SysCon2's trigger."
+    ]
+    s.controller.scanimage_recording_ready(_ready_result(run_id, arguments, s.folder))
+    qtbot.waitUntil(lambda: ended == [run_id], timeout=WAIT_TIMEOUT_MS)
+
+    assert progress[0] == ("Starting", 0)
+    assert ("Extracting fluorescence traces", 45) in progress
+    assert ("Deconvolving ΔF/F into spikes (OASIS)", 95) in progress
+    stages = [
+        note.split("]: ", 1)[1]
+        for note in notes
+        if note.startswith("Trace extraction [")
+    ]
+    assert stages == [
+        "Converting TIFF to binary",
+        "Extracting fluorescence traces",
+        "Deconvolving ΔF/F into spikes (OASIS)",
+    ]
+    assert (
+        "Extracting ΔF/F traces with ROI average; stimulation artefact kept." in notes
+    )
+    assert notes[-1] == (
+        "Traces extracted in " + notes[-1].split("Traces extracted in ", 1)[1]
+    )
+    assert "2 cells, 90 frames; 1 deconvolved spike(s)." in notes[-1]

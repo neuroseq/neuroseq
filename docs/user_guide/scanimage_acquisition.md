@@ -186,7 +186,30 @@ routines run each block without manual steps:
    nearest clean frames; F0 is the mean before the block's first stimulus), deconvolve
    it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
    event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
-   the response on this block's trace.
+   the response on this block's trace. **Trace extraction** selects how each
+   cell's fluorescence is measured:
+   - **Suite2p (motion-corrected, neuropil-corrected)**, the default: Suite2p
+     motion-corrects the recording (rigid and non-rigid registration), then
+     extracts each ROI with the same masks and uses F − 0.7 × neuropil. The
+     reference is the image the Cellpose masks were drawn on (e.g. the
+     **Grab FOV** mean TIFF), so drift since the FOV was grabbed is corrected
+     too. If that image is not a TIFF of the recording's size, each recording is
+     aligned to its own mean instead, and the log says so. The log reports each
+     block's largest shift in pixels.
+   - **ROI average (fast)**: the mean of each ROI's pixels as recorded, without
+     motion or neuropil correction.
+
+   Suite2p is slower. If one block takes longer than **Warn if Suite2p takes
+   over** (120 s by default), the routine's log gets a warning, and the routine
+   keeps waiting for that block and then carries on.
+
+   While traces are extracted, the progress bar in the main window's toolbar
+   shows the current stage, unless a simulation is already using it. The
+   routine's activity log records every step of each block: the SysCon2 import
+   and upload, ScanImage arming and the recording, each extraction stage with
+   its elapsed time, the number of cells, frames and spikes extracted, the
+   motion-correction shift, and the measured response.
+
 5. Place both in the run's data group, named after the run folder (e.g.
    `rheobase_2026-10-27_153313`), at the block's time in the stim array. The
    run thus has one continuous ΔF/F trace and one spike dataset; a block

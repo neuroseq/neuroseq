@@ -1304,6 +1304,7 @@ class RheobaseDialog(SelfRaisingDialog):
         if syscon2 is not None and host is syscon2:
             # Only SysCon2 reports imported (not yet run) blocks.
             slots.append((syscon2.block_sent, self._on_block_sent))
+            slots.append((syscon2.block_note, self._on_block_note))
         bss2 = self.editor.bss2_host
         if bss2 is not None and host is bss2:
             slots.append((bss2.connection_changed, self._show_bss2_connection))
@@ -1611,6 +1612,10 @@ class RheobaseDialog(SelfRaisingDialog):
             # One data group for the whole run, not one per probe.
             group=self._bss2_group,
         )
+
+    def _on_block_note(self, owner: object, message: str) -> None:
+        if owner is self and self._running:
+            self._append_log(message)
 
     def _on_block_failed(self, owner: object, message: str) -> None:
         if owner is self and self._running:

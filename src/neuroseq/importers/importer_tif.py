@@ -182,10 +182,10 @@ def run_roi_average_pipeline(
     F = np.concatenate(trace_parts, axis=1)
     contaminated_frames = np.array([], dtype=np.int64)
     if stim_array is not None:
-        contaminated_frames = _stimulation_contaminated_frames(
+        contaminated_frames = stimulation_contaminated_frames(
             stim_array, params.fs, F.shape[1]
         )
-        _impute_contaminated_frames(F, contaminated_frames)
+        impute_contaminated_frames(F, contaminated_frames)
     assert first_stack is not None
     progress("Done", 1.0)
     return TifPipelineResult(
@@ -208,7 +208,7 @@ def run_roi_average_pipeline(
     )
 
 
-def _stimulation_contaminated_frames(
+def stimulation_contaminated_frames(
     stim_array: StimArray, fs: float, n_frames: int
 ) -> npt.NDArray[np.int64]:
     """Return camera frames whose exposure overlaps non-zero stimulation."""
@@ -233,7 +233,7 @@ def _stimulation_contaminated_frames(
     return np.flatnonzero(contaminated).astype(np.int64)
 
 
-def _impute_contaminated_frames(
+def impute_contaminated_frames(
     traces: npt.NDArray[Any], contaminated_frames: npt.NDArray[np.int64]
 ) -> None:
     """Replace each contaminated run with its neighboring clean-value mean.
@@ -348,8 +348,16 @@ def run_suite2p_pipeline(
     *,
     work_dir: Path | None = None,
     progress: ProgressCallback | None = None,
+    register: bool = False,
+    reference_image: npt.NDArray[Any] | None = None,
 ) -> TifPipelineResult:
     """Run TIFF → Suite2p binary → trace extraction → OASIS deconvolution.
+
+    With ``register``, the binary is first motion-corrected in place by Suite2p's
+    rigid + non-rigid registration, aligned to ``reference_image`` (e.g. the image
+    the masks were drawn on) when it has the movie's shape, else to a reference
+    Suite2p computes from the movie. ``extra["registration"]`` then reports which
+    reference was used and the largest rigid shift, in pixels.
 
     `masks` is an optional 2D integer label image (Cellpose output,
     0 = background). If `masks` is None, ROIs are detected automatically using
@@ -467,19 +475,69 @@ def run_suite2p_pipeline(
         )
         logger.info("Suite2p binary written: %d frames %dx%d", nframes, Ly, Lx)
 
-        progress("Computing mean projection", 0.3)
         if masks is not None and masks.shape != (Ly, Lx):
             raise ValueError(
                 f"masks shape {masks.shape} does not match TIFF shape ({Ly}, {Lx})"
             )
 
-        f_bin = s2io.BinaryFile(Ly=Ly, Lx=Lx, filename=plane_db["reg_file"])
+        # Registration motion-corrects the binary in place, so it must be writable.
+        writable: dict[str, Any] = (
+            {"n_frames": nframes, "write": True} if register else {}
+        )
+        f_bin = s2io.BinaryFile(Ly=Ly, Lx=Lx, filename=plane_db["reg_file"], **writable)
         f_bin_chan2 = None
         if params.nchannels >= 2:
             f_bin_chan2 = s2io.BinaryFile(
-                Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"]
+                Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"], **writable
             )
 
+        registration: dict[str, Any] | None = None
+        if register:
+            import suite2p.registration as s2reg
+
+            ref = None
+            if reference_image is not None:
+                if np.shape(reference_image) == (Ly, Lx):
+                    ref = np.clip(
+                        np.rint(np.asarray(reference_image, dtype=np.float64)),
+                        np.iinfo(np.int16).min,
+                        np.iinfo(np.int16).max,
+                    ).astype(np.int16)
+                else:
+                    logger.warning(
+                        "Reference image %s does not match the movie (%d, %d); "
+                        "registering to the movie's own reference",
+                        np.shape(reference_image),
+                        Ly,
+                        Lx,
+                    )
+            reg_settings = dict(settings["registration"])
+            # Non-rigid registration needs more than one block across the frame
+            # (Suite2p fails on a single one); small frames are registered rigidly.
+            if min(Ly, Lx) <= max(reg_settings.get("block_size", (128, 128))):
+                reg_settings["nonrigid"] = False
+            progress(f"Motion-correcting with Suite2p ({device_label})", 0.2)
+            reg_outputs, device, device_label = _run_with_cpu_fallback(
+                lambda dev: s2reg.registration_wrapper(
+                    f_bin,
+                    f_reg_chan2=f_bin_chan2,
+                    refImg=ref,
+                    settings=reg_settings,
+                    device=dev,
+                ),
+                device,
+                device_label,
+            )
+            shifts = np.hypot(
+                np.asarray(reg_outputs["yoff"], dtype=np.float64),
+                np.asarray(reg_outputs["xoff"], dtype=np.float64),
+            )
+            registration = {
+                "reference": "provided" if ref is not None else "movie",
+                "max_shift_px": float(shifts.max()) if shifts.size else 0.0,
+            }
+
+        progress("Computing mean projection", 0.3)
         mean_image = f_bin.data.mean(axis=0).astype(np.float32)
 
         if masks is not None:
@@ -558,6 +616,8 @@ def run_suite2p_pipeline(
             iscell[:, 0] = 1
 
         extra: dict[str, Any] = {"compute_device": device_label}
+        if registration is not None:
+            extra["registration"] = registration
         if masks is None:
             extra["diameter"] = params.diameter
         if params.nchannels >= 2:

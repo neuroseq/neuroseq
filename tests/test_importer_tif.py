@@ -367,7 +367,11 @@ def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
     np.testing.assert_array_equal(loaded, masks)
 
 
-def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("reference", [None, "matching", "mismatched"])
+@pytest.mark.parametrize("register", [False, True])
+def test_run_suite2p_pipeline_orchestration(
+    monkeypatch, tmp_path: Path, register: bool, reference: str | None
+):
     """Exercise run_suite2p_pipeline with fully-mocked Suite2p modules.
 
     Validates the orchestration: db assembly, channel handling, stat building,
@@ -389,7 +393,16 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     def default_settings():
         return {
             "extraction": {"neuropil_coefficient": 0.7, "batch_size": 200},
+            "registration": {"nonrigid": True},
         }
+
+    registered: list[dict] = []
+
+    def registration_wrapper(f_reg, f_reg_chan2, refImg, settings, device):
+        registered.append(
+            {"f_reg": f_reg, "chan2": f_reg_chan2, "ref": refImg, "settings": settings}
+        )
+        return {"yoff": np.array([0.0, 3.0]), "xoff": np.array([0.0, 4.0])}
 
     def get_file_list(db):
         return ["/tmp/x.tif"], np.array([1], dtype=np.int64)
@@ -409,9 +422,10 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
         return dbs
 
     class FakeBinaryFile:
-        def __init__(self, Ly, Lx, filename):
+        def __init__(self, Ly, Lx, filename, n_frames=None, write=False):
             self.Ly = Ly
             self.Lx = Lx
+            self.write = write
             self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
 
     def assign_overlaps(stat, Ly_, Lx_):
@@ -421,6 +435,8 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
         return stat
 
     def extraction_wrapper(stat, f_bin, f_reg_chan2, settings, device):
+        # Writable only when it is motion-corrected in place.
+        assert f_bin.write is register
         F = np.full((n_neurons, nframes), 5.0, dtype=np.float32)
         Fneu = np.full((n_neurons, nframes), 1.0, dtype=np.float32)
         return F, Fneu, None, None
@@ -491,18 +507,46 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     monkeypatch.setitem(sys.modules, "suite2p.extraction", s2extraction_mod)
     monkeypatch.setitem(sys.modules, "suite2p.classification", s2classification_mod)
     monkeypatch.setitem(sys.modules, "torch", torch_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "suite2p.registration",
+        _module("suite2p.registration", registration_wrapper=registration_wrapper),
+    )
 
     tif = tmp_path / "data" / "stack.tif"
     tif.parent.mkdir()
     tif.write_bytes(b"")
 
     progress_calls: list[tuple[str, float]] = []
+    reference_image = {
+        None: None,
+        "matching": np.full((Ly, Lx), 7.6),
+        "mismatched": np.zeros((Ly + 1, Lx)),
+    }[reference]
     result = run_suite2p_pipeline(
         [tif],
         masks,
         TifPipelineParams(nchannels=2),
         progress=lambda msg, frac: progress_calls.append((msg, frac)),
+        register=register,
+        reference_image=reference_image,
     )
+    if not register:
+        assert registered == [] and "registration" not in result.extra
+    else:
+        assert len(registered) == 1
+        assert registered[0]["chan2"] is not None  # channel 2 follows the shifts
+        # A 16 px frame is smaller than one non-rigid block: registered rigidly.
+        assert registered[0]["settings"] == {"nonrigid": False}
+        if reference == "matching":
+            assert registered[0]["ref"].dtype == np.int16
+            assert np.all(registered[0]["ref"] == 8)
+        else:
+            assert registered[0]["ref"] is None
+        assert result.extra["registration"] == {
+            "reference": "provided" if reference == "matching" else "movie",
+            "max_shift_px": 5.0,
+        }
 
     assert result.F.shape == (n_neurons, nframes)
     assert result.Fneu.shape == (n_neurons, nframes)

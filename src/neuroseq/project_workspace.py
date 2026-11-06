@@ -137,6 +137,10 @@ class DetachedPanelWindow(QtWidgets.QWidget):
         super().closeEvent(event)
 
 
+#: Label prefix of the toolbar progress bar while a routine block's traces are extracted.
+EXTRACTION_PROGRESS_PREFIX = "Extracting traces: "
+
+
 class ToolbarProgressWidget(QtWidgets.QWidget):
     """Compact progress and cancellation controls embedded in a toolbar."""
 
@@ -177,6 +181,13 @@ class ToolbarProgressWidget(QtWidgets.QWidget):
         if self._toolbar_action is not None:
             self._toolbar_action.setVisible(False)
         super().hide()
+
+    def is_shown(self) -> bool:
+        """Whether the bar is shown, per its last show()/hide(). isVisible() and
+        isHidden() can lag for a widget embedded in a toolbar."""
+        if self._toolbar_action is not None:
+            return self._toolbar_action.isVisible()
+        return not self.isHidden()
 
     @QtCore.Slot()
     def _cancel(self) -> None:
@@ -472,6 +483,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         #: Data groups of routine runs already shown (see _on_block_recorded).
         self._shown_run_groups: set[str] = set()
         self.acquisition_controller.block_recorded.connect(self._on_block_recorded)
+        #: The block whose trace extraction the toolbar progress bar shows.
+        self._extraction_progress_run: str | None = None
+        self.acquisition_controller.block_extraction_progress.connect(
+            self._on_block_extraction_progress
+        )
+        self.acquisition_controller.block_extraction_ended.connect(
+            self._on_block_extraction_ended
+        )
         # "Grab FOV" in the ScanImage tab: segment the averaged field of view.
         self.acquisition_controller.fov_ready.connect(
             lambda path: self.btn_import_cellpose_data_clicked(
@@ -2289,6 +2308,36 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             return
         self._shown_run_groups.add(str(group))
         self._select_experiment_data(str(group))
+
+    def _on_block_extraction_progress(
+        self, run_id: str, stage: str, percent: int
+    ) -> None:
+        """Show a routine block's trace extraction in the toolbar progress bar,
+        unless another operation (e.g. a simulation) is using it."""
+        bar = self.progress_dialog
+        if self._extraction_progress_run == run_id and not self._shows_extraction():
+            # Another operation took the bar over meanwhile: leave it to that one.
+            self._extraction_progress_run = None
+            return
+        if self._extraction_progress_run != run_id:
+            if bar.is_shown():
+                return
+            self._extraction_progress_run = run_id
+            bar.setRange(0, 100)
+            bar.setCancelButton(None)
+            bar.show()
+        bar.setLabelText(f"{EXTRACTION_PROGRESS_PREFIX}{stage}")
+        bar.setValue(percent)
+
+    def _shows_extraction(self) -> bool:
+        bar = self.progress_dialog
+        return bar.is_shown() and bar.labelText().startswith(EXTRACTION_PROGRESS_PREFIX)
+
+    def _on_block_extraction_ended(self, run_id: str) -> None:
+        if self._extraction_progress_run == run_id:
+            self._extraction_progress_run = None
+            if self._shows_extraction():
+                self.progress_dialog.reset()
 
     def _on_bss2_experiment_added(self, name: str) -> None:
         self._update_combo_boxes()

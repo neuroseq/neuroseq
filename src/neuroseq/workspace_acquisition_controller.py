@@ -8,6 +8,7 @@ and deconvolved into spikes with OASIS.
 
 from __future__ import annotations
 
+import collections
 import dataclasses
 import hashlib
 import json
@@ -55,6 +56,23 @@ _FAILED_STATES = {"failed", "aborted", "interrupted", "finalization_failed", "un
 #: Slack beyond a block's length before an armed recording that has not finished
 #: is aborted (e.g. ScanImage never received the trigger).
 BLOCK_DEADLINE_MARGIN_S = 15.0
+
+
+def registration_note(registration: dict) -> str:
+    """The routine-log line for a block's Suite2p motion correction."""
+    shift = float(registration.get("max_shift_px", 0.0))
+    if registration.get("reference") == "provided":
+        return (
+            f"Motion correction: largest shift {shift:.1f} px, aligned to the "
+            "segmented FOV image."
+        )
+    return (
+        f"Motion correction: largest shift {shift:.1f} px, aligned to this "
+        "recording's own mean: the segmented image is not a TIFF of the same size, "
+        "so drift since the FOV was grabbed is not corrected."
+    )
+
+
 #: Recording folder key in ``Project.device_folders``.
 RECORDING_FOLDER = "scanimage_recording"
 
@@ -81,6 +99,11 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     block_armed = QtCore.Signal(str)
     block_recorded = QtCore.Signal(str, object)
     block_recording_failed = QtCore.Signal(str, str)
+    block_recording_note = QtCore.Signal(str, str)
+    #: (run_id, stage, percent) while a block's traces are extracted, for the
+    #: workspace's progress bar; ``block_extraction_ended(run_id)`` when it stops.
+    block_extraction_progress = QtCore.Signal(str, str, int)
+    block_extraction_ended = QtCore.Signal(str)
 
     def __init__(
         self,
@@ -325,6 +348,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 self._armed.add(run_id)
                 self._armed_at[run_id] = time.monotonic()
                 self._start_deadline(run_id, self._blocks[run_id])
+                frames, fps = self._block_frames.get(run_id, (0, 0.0))
+                self.block_recording_note.emit(
+                    run_id,
+                    f"ScanImage armed: {frames} frames at {fps:.2f} Hz, waiting for "
+                    "SysCon2's trigger.",
+                )
                 self.block_armed.emit(run_id)
             elif state == "aborted" and "error" not in run:
                 # A triggered Grab can end through ScanImage's abort() after its
@@ -443,6 +472,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 or f"The recording was {result['status']}.",
             )
             return
+        files = ", ".join(pathlib.Path(p).name for p in result["paths"])
+        self.block_recording_note.emit(
+            run_id,
+            f"Recording complete: {files} ({float(result['duration_s']):.1f} s at "
+            f"{float(result['fps']):.2f} Hz).",
+        )
         self._extract_block(run_id, block, result, name)
 
     def _save_fov_image(
@@ -483,6 +518,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         task: Callable[[Callable[[int], None]], object],
         finished: Callable[[object], None],
         failed: Callable[[str], None],
+        on_progress: Callable[[object], None] | None = None,
     ) -> None:
         """Run ``task`` for recording ``run_id`` in its own background job."""
         job = BackgroundJob(self)
@@ -490,7 +526,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         job.idle.connect(lambda: self._extraction_done(run_id))
         job.start(
             BackgroundIOWorker(task),
-            on_progress=lambda _value: None,
+            on_progress=on_progress or (lambda _value: None),
             on_finished=finished,
             on_failed=failed,
         )
@@ -504,6 +540,29 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         timer.timeout.connect(lambda: self._deadline_passed(run_id, limit_s))
         self._deadlines[run_id] = timer
         timer.start(int(limit_s * 1000))
+
+    def _start_slow_extraction_note(self, run_id: str, limit_s: float) -> None:
+        """Say so in the routine's log if Suite2p has not extracted the block's
+        traces within ``limit_s``; the routine keeps waiting for them."""
+        timer = QtCore.QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda: self._extraction_is_slow(run_id, limit_s))
+        self._deadlines[run_id] = timer
+        timer.start(int(limit_s * 1000))
+
+    def _extraction_is_slow(self, run_id: str, limit_s: float) -> None:
+        self._stop_deadline(run_id)
+        if run_id not in self._blocks:
+            return
+        message = (
+            f"Warning: Suite2p has been extracting this block's traces for more than "
+            f"{limit_s:.0f} s; still waiting for it. Suite2p converts and motion-"
+            "corrects each recording first, which is slow for long recordings and "
+            "without a GPU. For quicker probes, shorten 'Record after block' or use "
+            "ROI average extraction."
+        )
+        self.controls.show_message(message)
+        self.block_recording_note.emit(run_id, message)
 
     def _stop_deadline(self, run_id: str) -> None:
         timer = self._deadlines.pop(run_id, None)
@@ -573,7 +632,22 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         channel = self._block_channels.pop(run_id, self.controls.channel_spin.value())
         self._block_frames.pop(run_id, None)
 
-        def task(_report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
+        #: Suite2p's motion-correction summary, set by the background task.
+        registration: dict = {}
+        #: (stage, percent) updates queued by the worker thread; each report() makes
+        #: ``progressed`` drain them on the main thread, in order.
+        updates: collections.deque[tuple[str, int]] = collections.deque()
+        logged_stages: list[str] = []
+        started = time.monotonic()
+
+        def task(report: Callable[[int], None]) -> tuple[TraceData, SpikeData]:
+            def update(message: str, percent: int) -> None:
+                updates.append((message, percent))
+                report(percent)
+
+            def pipeline_progress(message: str, fraction: float) -> None:
+                update(message, int(round(90 * max(0.0, min(1.0, fraction)))))
+
             trace = extract_recording_dff(
                 paths,
                 fps=fps,
@@ -582,12 +656,42 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 cellpose_data=cellpose,
                 stim_block=block.stim_block,
                 remove_artefact=block.remove_artefact,
+                method=block.extraction,  # type: ignore[arg-type]
+                on_registered=registration.update,
+                progress=pipeline_progress,
             )
+            update("Deconvolving ΔF/F into spikes (OASIS)", 95)
             return trace, deconvolve_dff(trace, threshold=block.spike_threshold)
+
+        def progressed(_percent: object) -> None:
+            while updates:
+                message, percent = updates.popleft()
+                if run_id not in self._blocks:
+                    continue
+                self.block_extraction_progress.emit(run_id, message, percent)
+                # Each stage once in the routine's log (the ROI average reports
+                # every ROI under the same stage).
+                if message not in logged_stages:
+                    logged_stages.append(message)
+                    self.block_recording_note.emit(
+                        run_id,
+                        f"Trace extraction [{time.monotonic() - started:.1f} s]: "
+                        f"{message}",
+                    )
 
         def finished(result: object) -> None:
             trace, spikes = cast(tuple["TraceData", "SpikeData"], result)
             self._extracting.discard(run_id)
+            self._stop_deadline(run_id)
+            if run_id in self._blocks:
+                self.block_recording_note.emit(
+                    run_id,
+                    f"Traces extracted in {time.monotonic() - started:.1f} s: "
+                    f"{trace.traces.shape[0]} cells, {trace.traces.shape[1]} frames; "
+                    f"{spikes.spike_indices.size} deconvolved spike(s).",
+                )
+            if registration and run_id in self._blocks:
+                self.block_recording_note.emit(run_id, registration_note(registration))
             if self._blocks.pop(run_id, None) is None:
                 return
             group = block.group or experiment
@@ -635,15 +739,31 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             self._fail_block(run_id, f"Trace extraction failed: {message}")
 
         self._extracting.add(run_id)
+        suite2p = block.extraction == "suite2p"
         self.controls.show_message(
-            f"Extracting ΔF/F traces and spikes of {experiment}…"
+            f"Extracting ΔF/F traces and spikes of {experiment}"
+            f"{' with Suite2p' if suite2p else ''}…"
         )
-        self._start_job(run_id, task, finished, failed)
+        method = (
+            "Suite2p (motion correction, neuropil subtraction)"
+            if suite2p
+            else "ROI average"
+        )
+        self.block_recording_note.emit(
+            run_id,
+            f"Extracting ΔF/F traces with {method}; stimulation artefact "
+            + ("removed." if block.remove_artefact else "kept."),
+        )
+        self.block_extraction_progress.emit(run_id, "Starting", 0)
+        if suite2p:
+            self._start_slow_extraction_note(run_id, block.extraction_slow_s)
+        self._start_job(run_id, task, finished, failed, on_progress=progressed)
 
     def _extraction_done(self, run_id: str) -> None:
         job = self._extractions.pop(run_id, None)
         if job is not None:
             job.deleteLater()
+        self.block_extraction_ended.emit(run_id)
 
     # ---- BlockAcquisition, for the SysCon2 stimulation host ----
 

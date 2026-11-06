@@ -1588,3 +1588,14 @@ def test_simulation_target_does_not_offer_new_arrays(qtbot, monkeypatch) -> None
     )
     dialog.start()
     assert offered == [False]
+
+
+def test_syscon2_block_notes_go_to_the_running_routines_log(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    host.block_note.emit(dialog, "before start")
+    dialog.start()
+    host.block_note.emit(object(), "another routine's block")
+    host.block_note.emit(dialog, "Suite2p is slow")
+    log = dialog.log.toPlainText()
+    assert "Suite2p is slow" in log
+    assert "before start" not in log and "another routine" not in log
