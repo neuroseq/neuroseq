@@ -886,7 +886,7 @@ def test_a_video_with_missing_files_is_selected_and_can_be_located(
     widget = gui.calcium_video_widget
     assert not widget.missing_state_widget.isHidden()
     assert widget.widget.isHidden()
-    assert "/missing/video.tif" in widget.missing_label.text()
+    assert str(Path("/missing/video.tif")) in widget.missing_label.text()
 
     gui.project.dirty = False
     gui._on_calcium_video_locate_requested(path=moved)
