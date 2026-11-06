@@ -179,6 +179,25 @@ auto-detection), the pipeline (Suite2p, or a simple ROI average) and the
 acquisition parameters, then **Run pipeline**. The pipeline runs in the
 background; the resulting traces are imported like Suite2p outputs.
 
+The **Simply average from ROI** pipeline reads the stacks a few frames at a time,
+so a long recording (e.g. 15 minutes of 512×512 frames, about 14 GB) does not
+have to fit in memory. Its options:
+
+- **Neuropil correction** also averages an annulus around each ROI, as Suite2p
+  does: the 350 nearest pixels that are more than 2 px from every cell. The
+  annulus times the **Neuropil coefficient** is subtracted from the ROI's trace.
+- **Compute ΔF/F and deconvolve spikes** imports ΔF/F instead of raw
+  fluorescence. The baseline is Suite2p's sliding maximin (30 s window). ΔF/F is
+  relative to the raw fluorescence baseline, so a dim cell whose
+  neuropil-corrected baseline is near zero does not get a huge ΔF/F. Spikes are
+  deconvolved with OASIS (**Indicator tau**). An event counts as a spike when it
+  reaches **Spike threshold (ΔF/F)**.
+- **Input artefact suppression** replaces the frames lit by an input array's
+  stimulation with the mean of the clean frames around them. **Imaging started
+  at** is when the first frame was recorded on that input array's time axis: 0
+  if imaging and the input started together, positive if imaging started later,
+  negative if it started first.
+
 ## Suite2p calcium imaging
 
 **File → Import data → Output → Calcium Imaging (Suite2p outputs)** opens the

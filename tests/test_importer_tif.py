@@ -172,24 +172,25 @@ def test_run_roi_average_pipeline_validates_inputs(tmp_path):
         )
 
 
-def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
+def test_run_roi_average_pipeline_validates_tiff_layout(tmp_path):
     import tifffile
 
     from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "stack.tif"
-    path.touch()
     masks = np.ones((2, 2), dtype=np.int32)
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 1, 1, 2, 2)))
+    tifffile.imwrite(
+        path, np.ones((1, 1, 1, 2, 2), np.uint16), photometric="minisblack"
+    )
     with pytest.raises(ValueError, match="must have shape"):
         run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2, 2)))
+    tifffile.imwrite(path, np.ones((1, 2, 2, 2), np.uint16), photometric="minisblack")
     with pytest.raises(ValueError, match="contains 2 channel"):
         run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2)))
+    tifffile.imwrite(path, np.ones((1, 2, 2), np.uint16), photometric="minisblack")
     with pytest.raises(ValueError, match="not divisible by nchannels"):
         run_roi_average_pipeline(
             [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
