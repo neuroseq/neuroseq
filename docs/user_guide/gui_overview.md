@@ -22,6 +22,7 @@ All data import and export actions are grouped under two sub-menus:
 - `File → Export`
   - `Patch Clamp Input` — Igor2 stimulus CSV/`.ibw`/`.pxp` export for SutterPatch (see [Export stimuli for patch clamp recordings](export_patch_clamp_stimuli.md))
   - `Optogenetic Input` — SysCon2 `.seq` (or Igor2) export for holographic hardware (see [Multiphoton Holographic Stimulation](multiphoton_holographic_stimulation.md)). This only writes files; to also import the sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel.
+  - `Traces as NumPy Array…` / `Spikes as NumPy Array…` — save simulated or imported traces or spikes as a NumPy array with rows = neurons (by id) and columns = time points. Traces keep their own samples, at full resolution even for simulated traces, which plots downsample. Spikes are counted per time bin. The bin size defaults to the frame period of a trace in the same data group, else 1 ms, and the bins cover the data group's duration. A `.npy` file holds only the array; a `.npz` archive also holds `neuron_ids`, `times` (s) and `units`, with the array as `values`.
 
 `File → Cell segmentation` imports or runs Cellpose segmentation, and
 `File → Manage Data` lists the imported and simulated data groups so they can

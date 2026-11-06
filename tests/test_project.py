@@ -1650,3 +1650,17 @@ def test_empty_block_trace_is_skipped():
     spikes = SpikeData("s", np.array([0]), np.array([0.1]))
     project.place_block_data("Run", [spikes, empty], 0.0, 0.2)
     assert [type(d) for d in project.experiments["Run"].data] == [SpikeData]
+
+
+def test_exported_simulated_traces_ignore_the_plotting_ram_budget() -> None:
+    project = default_project()
+    project.b2_model.define_neuronnumber("P", 100)
+    project.run_simulation(0.3)
+    trace_name = project.get_data_names(TraceData)[0]
+    project.max_ram_trace_plot_matrix = 1  # plots are downsampled
+    budgeted = project.get_data(trace_name, TraceData)
+    full = project.get_full_resolution_trace(trace_name)
+    assert budgeted is not None and full is not None
+    assert full.traces.shape[1] > budgeted.traces.shape[1]
+    assert project.data_duration_seconds(trace_name) == pytest.approx(0.3)
+    assert project.data_duration_seconds("Missing :: x") == 0.0

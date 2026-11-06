@@ -9,6 +9,7 @@ import threading
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
+from typing import Literal
 
 import brian2 as b2
 import brian2.numpy_ as np
@@ -2542,6 +2543,19 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             ),
         )
 
+    def btn_export_numpy_clicked(self, kind: Literal["traces", "spikes"]) -> None:
+        """File > Export > Traces/Spikes as NumPy array, preselecting the shown data."""
+        from neuroseq.export.numpy_export_dialog import NumpyExportDialog
+
+        current = self.cmb_trace if kind == "traces" else self.cmb_spike
+        dialog = NumpyExportDialog(
+            self.project, kind, current_name=current.currentText(), parent=self
+        )
+        try:
+            dialog.exec()
+        finally:
+            dialog.deleteLater()
+
     def choose_brian2_backend(self) -> None:
         backends = ["cython", "numpy"]
         try:
@@ -2883,6 +2897,21 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             export_data_menu,
             None,
             icon="mdi6.file-code",
+        )
+        export_data_menu.addSeparator()
+        add_action(
+            "&Traces as NumPy Array…",
+            lambda: self.btn_export_numpy_clicked("traces"),
+            export_data_menu,
+            None,
+            icon="mdi6.chart-line",
+        )
+        add_action(
+            "&Spikes as NumPy Array…",
+            lambda: self.btn_export_numpy_clicked("spikes"),
+            export_data_menu,
+            None,
+            icon="mdi6.chart-scatter-plot",
         )
 
         toolbar.addSeparator()

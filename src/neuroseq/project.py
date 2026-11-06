@@ -653,6 +653,23 @@ class Project:
         self.logger.info(f"  - data '{data_name}' not found")
         return None
 
+    def get_full_resolution_trace(self, name: str) -> TraceData | None:
+        """Like ``get_data(name, TraceData)``, but a simulated trace is not
+        downsampled to the plotting RAM limit (for exporting it)."""
+        if name.split(" :: ", 1)[0] == "Simulation":
+            return self._clip_trace_to_timeline(
+                self.b2_model.get_simulation_trace_data(name)
+            )
+        return self.get_data(name, TraceData)
+
+    def data_duration_seconds(self, name: str) -> float:
+        """Duration of the data group (or simulation) holding the data ``name``."""
+        group = name.split(" :: ", 1)[0]
+        if group == "Simulation":
+            return float(self.b2_model.get_sim_time_secs())
+        experiment = self.experiments.get(group)
+        return float(experiment.duration) if experiment is not None else 0.0
+
     def simulation_timeline_seconds(self) -> float:
         """Duration of the authoritative stim timeline in seconds.
 
