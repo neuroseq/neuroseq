@@ -6,7 +6,7 @@
 
 NeuroSeq is an open-source framework to bring biological neuronal circuits, neuromorphic hardware, and computational neural network models into a unified experimental environment. It integrates experimental protocol design, data acquisition and control, and methods for data analysis and parameter inference across these fundamentally different neural network implementations.
 
-<img width="2112" height="355" alt="readme_3_domains" src="https://github.com/user-attachments/assets/d8033daa-4aaa-484d-86fb-99f49355c673" />
+<img width="2112" height="540" alt="readme_3_domains" src="https://github.com/user-attachments/assets/1c2f2227-c3a6-4b5e-aac1-b7e97286862b" />
 
 ## What is a neuronal sequencer?
 
