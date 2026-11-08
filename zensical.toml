@@ -10,10 +10,10 @@ nav = [
     { "Getting Started" = [
         { Installation = "getting_started/installation.md" },
         { Quickstart = "getting_started/quickstart.md" },
+        { "GUI Overview" = "getting_started/gui_overview.md" },
         { "In-App LLM Assistant (Experimental)" = "getting_started/chat_assistant.md" },
     ] },
     { "User Guide" = [
-        { "GUI Overview" = "user_guide/gui_overview.md" },
         { Simulations = "user_guide/simulations.md" },
         { "Design dynamic input" = "user_guide/stdp_synaptic_tuning.md" },
         { "Run External Simulators" = "user_guide/run_external_simulators.md" },

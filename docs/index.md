@@ -14,11 +14,11 @@ The source code is available in the [official NeuroSeq repository](https://githu
 
 - [Installation](getting_started/installation.md)
 - [Quickstart](getting_started/quickstart.md)
+- [GUI overview](getting_started/gui_overview.md)
 - [In-app LLM assistant (experimental)](getting_started/chat_assistant.md)
 
 ### User guide
 
-- [GUI overview](user_guide/gui_overview.md)
 - [Simulations](user_guide/simulations.md)
 - [Design dynamic input](user_guide/stdp_synaptic_tuning.md)
 - [Run external simulators](user_guide/run_external_simulators.md)

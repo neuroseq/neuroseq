@@ -41,7 +41,7 @@ Brian2 code-generation target:
 
 The stim editor is the left-hand pane and operates in either _draw_ or _select_
 mode, switched from the top of its toolbar. The general workflow is covered in
-[GUI Overview → Stimulation editor](gui_overview.md#stimulation-editor); this
+[GUI Overview → Stimulation editor](../getting_started/gui_overview.md#stimulation-editor); this
 section documents the editor's auxiliary tools.
 
 ### Managing stim arrays
@@ -143,7 +143,7 @@ the loop runs in place — the array is extended to accommodate the repeats.
   its dialog.
 - **Settings → Brian2 simulation backend** — described above.
 - **Settings → Synapse matrix RAM limit** — see
-  [GUI Overview → Synaptic data widget](gui_overview.md#synaptic-data-widget).
+  [GUI Overview → Synaptic data widget](../getting_started/gui_overview.md#synaptic-data-widget).
 
 ## Editing the model
 
