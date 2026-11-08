@@ -39,6 +39,11 @@ Then launch the GUI with:
 neuroseq
 ```
 
+The first launch can take longer while dependencies prepare local caches.
+A loading window appears during initialization, and the plotting workspace loads
+after you choose a project on the welcome screen. Reuse the same Python
+environment to retain its caches for later launches.
+
 To upgrade to the latest release, run `python -m pip install --upgrade neuroseq`.
 
 For GPU-accelerated cell segmentation, see

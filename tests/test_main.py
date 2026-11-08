@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +37,27 @@ class FakeQApplication:
     def quit(self) -> None:
         self.quit_called = True
 
+    def processEvents(self) -> None:
+        pass
+
+
+class FakeSplash:
+    def __init__(self) -> None:
+        self.closed = False
+        self.finished_with: Any | None = None
+
+    def hide(self) -> None:
+        pass
+
+    def show(self) -> None:
+        pass
+
+    def finish(self, gui: Any) -> None:
+        self.finished_with = gui
+
+    def close(self) -> None:
+        self.closed = True
+
 
 class FakeGuiSettings:
     def __init__(self) -> None:
@@ -57,7 +81,16 @@ class FakeStartupDialog:
 
 
 @pytest.fixture()
-def cli_runner_fake_gui(monkeypatch: pytest.MonkeyPatch) -> CliRunner:
+def loading_splash(monkeypatch: pytest.MonkeyPatch) -> FakeSplash:
+    splash = FakeSplash()
+    monkeypatch.setattr("neuroseq.__main__._show_loading_splash", lambda app: splash)
+    return splash
+
+
+@pytest.fixture()
+def cli_runner_fake_gui(
+    monkeypatch: pytest.MonkeyPatch, loading_splash: FakeSplash
+) -> CliRunner:
     FakeGui.last_instance = None
     FakeStartupDialog.accepts = True
     FakeStartupDialog.chosen_filename = "/fake/chosen_project.nseq"
@@ -121,6 +154,7 @@ def test_main_logging_valid(
 
 def test_main_shows_startup_dialog_and_opens_its_choice_when_no_filename_given(
     cli_runner_fake_gui: CliRunner,
+    loading_splash: FakeSplash,
 ) -> None:
     FakeStartupDialog.chosen_filename = "/fake/chosen_project.nseq"
     result = cli_runner_fake_gui.invoke(main)
@@ -128,6 +162,8 @@ def test_main_shows_startup_dialog_and_opens_its_choice_when_no_filename_given(
     assert FakeGui.last_instance is not None
     assert FakeGui.last_instance.filename == "/fake/chosen_project.nseq"
     assert FakeGui.last_instance.shown is True
+    assert loading_splash.finished_with is FakeGui.last_instance
+    assert loading_splash.closed
 
 
 def test_main_skips_startup_dialog_when_a_filename_is_given(
@@ -141,11 +177,82 @@ def test_main_skips_startup_dialog_when_a_filename_is_given(
 
 def test_main_exits_without_launching_gui_when_startup_dialog_is_dismissed(
     cli_runner_fake_gui: CliRunner,
+    loading_splash: FakeSplash,
 ) -> None:
     FakeStartupDialog.accepts = False
     result = cli_runner_fake_gui.invoke(main)
     assert result.exit_code == 0
     assert FakeGui.last_instance is None
+    assert loading_splash.closed
+    assert loading_splash.finished_with is None
+
+
+def test_main_closes_loading_splash_if_project_loading_fails(
+    cli_runner_fake_gui: CliRunner,
+    loading_splash: FakeSplash,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_to_load(*args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("Cannot load project")
+
+    monkeypatch.setattr("neuroseq.gui.Gui", fail_to_load)
+    result = cli_runner_fake_gui.invoke(main, ["broken.nseq"])
+
+    assert isinstance(result.exception, RuntimeError)
+    assert loading_splash.closed
+    assert loading_splash.finished_with is None
+
+
+def test_startup_paints_before_scientific_imports_and_defers_workspace() -> None:
+    # A fresh interpreter matters: conftest has already imported the full GUI.
+    script = """
+import sys
+from neuroseq import __main__ as entry
+
+assert 'numpy' not in sys.modules
+show_splash = entry._show_loading_splash
+apps = []
+
+def cancel_welcome(self):
+    assert 'neuroseq.gui' not in sys.modules
+    assert 'fastplotlib' not in sys.modules
+    return False
+
+def check_splash(app):
+    assert 'brian2' not in sys.modules
+    assert 'matplotlib' not in sys.modules
+    splash = show_splash(app)
+    assert splash.isVisible()
+    # Keep a reference so we can check cleanup after cancelling the welcome.
+    app.loading_splash = splash
+    apps.append(app)
+
+    # The welcome screen must not import project/model assembly or plots.
+    from neuroseq import startup_dialog
+    assert 'neuroseq.project' not in sys.modules
+    assert 'neuroseq.gui' not in sys.modules
+    assert 'fastplotlib' not in sys.modules
+    startup_dialog.StartupDialog.exec = cancel_welcome
+    return splash
+
+entry._show_loading_splash = check_splash
+entry.main.main(args=[], standalone_mode=False)
+
+assert not apps[0].loading_splash.isVisible()
+assert 'neuroseq.gui' not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={
+            **os.environ,
+            "QT_QPA_PLATFORM": "offscreen",
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("log_level", ["INVALIDLEVEL", "Warn"])

@@ -6,11 +6,33 @@ import signal
 import sys
 from collections.abc import Callable
 from types import FrameType
+from typing import TYPE_CHECKING
 from typing import Any
 
 import click
 
-from neuroseq.cellpose_test_data import save_cellpose_test_data
+if TYPE_CHECKING:
+    from neuroseq.project import Project
+
+
+def _show_loading_splash(app: Any) -> Any:
+    """Paint feedback before importing the scientific and plotting stack."""
+    from qtpy import QtCore
+    from qtpy import QtGui
+    from qtpy import QtWidgets
+
+    pixmap = QtGui.QPixmap(440, 140)
+    pixmap.fill(app.palette().color(QtGui.QPalette.ColorRole.Window))
+    splash = QtWidgets.QSplashScreen(pixmap)
+    splash.setWindowTitle("Starting NeuroSeq")
+    splash.showMessage(
+        "Starting NeuroSeq…\nThe first launch may take longer to prepare caches.",
+        QtCore.Qt.AlignmentFlag.AlignCenter,
+        app.palette().color(QtGui.QPalette.ColorRole.WindowText),
+    )
+    splash.show()
+    app.processEvents()
+    return splash
 
 
 def _install_interrupt_handlers(
@@ -172,6 +194,8 @@ def main(
         )
 
     if test_cellpose_image_path is not None:
+        from neuroseq.cellpose_test_data import save_cellpose_test_data
+
         image_path, segmentation_path = save_cellpose_test_data(
             test_cellpose_image_path,
             segmentation_path=test_cellpose_segmentation_path,
@@ -190,29 +214,13 @@ def main(
         )
         return
 
-    from neuroseq.utils import init_brian2_logging
-
-    init_brian2_logging()
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s :: %(levelname)s :: %(name)s :: %(funcName)s :: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        filename=log_file,
-    )
     from qtpy import API_NAME
     from qtpy import QtCore
     from qtpy import QtGui
     from qtpy import QtWidgets
 
-    from neuroseq.gui import Gui
-    from neuroseq.gui_settings import GuiSettings
-    from neuroseq.project import Project
-    from neuroseq.startup_dialog import StartupDialog
-    from neuroseq.theme import apply_app_theme
-
     msg = f"Launching {API_NAME} GUI with {log_level} logging to {log_file if log_file else 'console'}"
     click.echo(msg)
-    logging.getLogger(__name__).info(msg)
 
     # Keep icon raster sizes on integer scale steps to reduce blur on HiDPI displays.
     if hasattr(QtGui.QGuiApplication, "setHighDpiScaleFactorRoundingPolicy"):
@@ -227,27 +235,50 @@ def main(
 
     app = QtWidgets.QApplication(sys.argv)
     app._interrupt_timer = _install_interrupt_handlers(app)
+    splash = _show_loading_splash(app)
+    try:
+        from neuroseq.utils import init_brian2_logging
 
-    initial_project: str | pathlib.Path | Project | None = filename
-    if initial_project is None:
-        settings = GuiSettings()
-        # Applied to the whole application (not just the eventual main
-        # window) so the startup dialog itself already matches the user's
-        # persisted theme, instead of appearing unthemed until a project
-        # is chosen.
-        apply_app_theme(app, settings.theme)
-        startup_dialog = StartupDialog(settings)
-        if not startup_dialog.exec():
-            logging.getLogger(__name__).info(
-                "Startup dialog dismissed without a choice, exiting"
-            )
-            return
-        initial_project = (
-            startup_dialog.chosen_filename or startup_dialog.chosen_project
+        init_brian2_logging()
+        logging.basicConfig(
+            level=log_level,
+            format="%(asctime)s :: %(levelname)s :: %(name)s :: %(funcName)s :: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+            filename=log_file,
         )
+        logging.getLogger(__name__).info(msg)
 
-    gui = Gui(filename=initial_project)
-    gui.show()
+        initial_project: str | pathlib.Path | Project | None = filename
+        if initial_project is None:
+            from neuroseq.gui_settings import GuiSettings
+            from neuroseq.startup_dialog import StartupDialog
+            from neuroseq.theme import apply_app_theme
+
+            settings = GuiSettings()
+            # Theme the welcome dialog before the user chooses a project.
+            apply_app_theme(app, settings.theme)
+            startup_dialog = StartupDialog(settings)
+            splash.hide()
+            if not startup_dialog.exec():
+                logging.getLogger(__name__).info(
+                    "Startup dialog dismissed without a choice, exiting"
+                )
+                return
+            initial_project = (
+                startup_dialog.chosen_filename or startup_dialog.chosen_project
+            )
+            splash.show()
+            app.processEvents()
+
+        # The welcome dialog does not need the plotting workspace. Import it
+        # only after a project is chosen, with the loading message visible.
+        from neuroseq.gui import Gui
+
+        gui = Gui(filename=initial_project)
+        gui.show()
+        splash.finish(gui)
+    finally:
+        splash.close()
     logging.getLogger(__name__).info("GUI initialized, entering Qt event loop")
     app.exec()
 

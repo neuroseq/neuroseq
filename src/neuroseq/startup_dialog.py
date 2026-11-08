@@ -2,21 +2,18 @@ from __future__ import annotations
 
 import pathlib
 import random
+from typing import TYPE_CHECKING
 
-import numpy as np
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq import console_art
-from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
-from neuroseq.project import Project
-from neuroseq.stimulation.stim import StimArray
-from neuroseq.stimulation.stim import StimType
-from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
-from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
+
+if TYPE_CHECKING:
+    from neuroseq.project import Project
 
 BLANK_STIM_DURATION_SECONDS = 5.0
 # Matches the neuron count "Create input array" (StimEditor) starts from.
@@ -27,6 +24,14 @@ def new_blank_project() -> Project:
     """An empty project holding a blank (all-zero) 5 s input array, so
     there is something to draw on right away instead of an empty plot that
     first needs "Design static/dynamic input" followed by "Clear" (#584)."""
+    import numpy as np
+
+    from neuroseq.project import Project
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+    from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
+    from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
+
     project = Project()
     project.add_stim_array(
         StimArray(
@@ -134,6 +139,8 @@ class StartupDialog(QtWidgets.QDialog):
         return label
 
     def _choose_example(self) -> None:
+        from neuroseq.example_projects import getting_started_project
+
         self.chosen_project = getting_started_project()
         self.accept()
 
