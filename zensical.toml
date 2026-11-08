@@ -39,6 +39,7 @@ nav = [
         { Miscellaneous = "developer/miscellaneous.md" },
         { Testing = "developer/testing.md" },
         { Contributing = "developer/contributing.md" },
+        { "Responsible use of AI" = "developer/responsible_ai.md" },
     ] },
     { Troubleshooting = "common_issues.md" },
 ]
