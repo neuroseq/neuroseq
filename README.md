@@ -35,6 +35,7 @@ or Conda environment:
 ```bash
 pip install neuroseq
 ```
+
 Then launch the GUI with:
 
 ```bash
