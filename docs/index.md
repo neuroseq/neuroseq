@@ -1,6 +1,10 @@
-# Neuroseq
+# NeuroSeq
 
-![screenshot](images/screenshot.png)
+Welcome to the official documentation for NeuroSeq, a first implementation of the neuronal sequencer.
+
+The source code is available in the [official NeuroSeq repository](https://github.com/neuroseq/neuroseq).
+
+![NeuroSeq graphical user interface](https://raw.githubusercontent.com/neuroseq/neuroseq/main/docs/images/screenshot.png)
 
 ### Getting started
 
