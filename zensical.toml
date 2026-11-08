@@ -10,7 +10,6 @@ nav = [
     { "Getting Started" = [
         { Installation = "getting_started/installation.md" },
         { Quickstart = "getting_started/quickstart.md" },
-        { "Windows desktop shortcut" = "getting_started/windows_shortcut.md" },
     ] },
     { "User Guide" = [
         { "GUI Overview" = "user_guide/gui_overview.md" },

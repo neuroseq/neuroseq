@@ -52,11 +52,8 @@ For GPU-accelerated cell segmentation, see
 To work on NeuroSeq itself from a repository checkout (with uv or Conda), see the
 [developer installation guide](../developer/developer_installation.md).
 
-## Windows desktop shortcut
-
-On Windows, NeuroSeq can instead be installed with a desktop shortcut that
-updates it from GitHub before each start. See
-[Windows desktop shortcut](windows_shortcut.md).
+For Windows desktop shortcuts, see
+[Windows desktop shortcut](../developer/miscellaneous.md#windows-desktop-shortcut).
 
 ## How to install Cython on Windows
 
