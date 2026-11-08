@@ -10,6 +10,7 @@ nav = [
     { "Getting Started" = [
         { Installation = "getting_started/installation.md" },
         { Quickstart = "getting_started/quickstart.md" },
+        { "In-App LLM Assistant (Experimental)" = "getting_started/chat_assistant.md" },
     ] },
     { "User Guide" = [
         { "GUI Overview" = "user_guide/gui_overview.md" },
@@ -25,7 +26,6 @@ nav = [
         { "Export stimuli for patch clamp recordings" = "user_guide/export_patch_clamp_stimuli.md" },
         { "Multiphoton Holographic Stimulation" = "user_guide/multiphoton_holographic_stimulation.md" },
         { "Deliver stimuli to BrainScaleS-2" = "user_guide/brainscales2_delivery.md" },
-        { "In-App LLM Assistant (Experimental)" = "user_guide/chat_assistant.md" },
     ] },
     { Examples = "examples.md" },
     { "Developer Guide" = [

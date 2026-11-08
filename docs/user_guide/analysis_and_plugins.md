@@ -46,7 +46,7 @@ NeuroSeq also discovers plugins from a per-user folder outside the package
 `~/.local/share/neuroseq/analysis_plugins` on Linux, or the folder named by the
 `NEUROSEQ_USER_PLUGIN_DIR` environment variable). Plugins written by the chat
 assistant go there, and only after you confirm them in a **Save plugin**
-dialog (see [Chat assistant](chat_assistant.md)). A user plugin whose filename or `PLUGIN_ID` matches a
+dialog (see [Chat assistant](../getting_started/chat_assistant.md)). A user plugin whose filename or `PLUGIN_ID` matches a
 built-in plugin is skipped with a warning.
 
 Plugins can be added and tested during the operation of NeuroSeq: no restarts are necessary.

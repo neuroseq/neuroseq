@@ -14,6 +14,7 @@ The source code is available in the [official NeuroSeq repository](https://githu
 
 - [Installation](getting_started/installation.md)
 - [Quickstart](getting_started/quickstart.md)
+- [In-app LLM assistant (experimental)](getting_started/chat_assistant.md)
 
 ### User guide
 
