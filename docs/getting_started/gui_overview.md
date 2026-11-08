@@ -14,14 +14,14 @@ settings are shared), so starting a second one shows a notice instead.
 All data import and export actions are grouped under two sub-menus:
 
 - `File → Import data`
-  - `Input → Optogenetics` — SysCon2 `.seq` import (see [Multiphoton Holographic Stimulation](../user_guide/multiphoton_holographic_stimulation.md))
-  - `Input → Patch Clamp` — Igor2 `.ibw` / `.pxp` or `.csv` / `.txt` input waveform import (see [Importing Igor2 Waves](../user_guide/importing_igor2_waves.md))
+  - `Input → Optogenetics` — SysCon2 `.seq` import (see [Multiphoton Holographic Stimulation](../Neural%20Networks/multiphoton_holographic_stimulation.md))
+  - `Input → Patch Clamp` — Igor2 `.ibw` / `.pxp` or `.csv` / `.txt` input waveform import (see [Importing Igor2 Waves](../Input%20Design%20and%20Readout%20Analysis/importing_igor2_waves.md))
   - `Output → Calcium Imaging (raw .tif)` — raw 2-photon TIFF through the Cellpose + Suite2p pipeline
   - `Output → Calcium Imaging (Suite2p outputs)` — Suite2p fluorescence import
   - `Output → Patch Clamp` — patch-clamp recording (trace) import
 - `File → Export`
-  - `Patch Clamp Input` — Igor2 stimulus CSV/`.ibw`/`.pxp` export for SutterPatch (see [Export stimuli for patch clamp recordings](../user_guide/export_patch_clamp_stimuli.md))
-  - `Optogenetic Input` — SysCon2 `.seq` (or Igor2) export for holographic hardware (see [Multiphoton Holographic Stimulation](../user_guide/multiphoton_holographic_stimulation.md)). This only writes files; to also import the sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel.
+  - `Patch Clamp Input` — Igor2 stimulus CSV/`.ibw`/`.pxp` export for SutterPatch (see [Export stimuli for patch clamp recordings](../Input%20Design%20and%20Readout%20Analysis/export_patch_clamp_stimuli.md))
+  - `Optogenetic Input` — SysCon2 `.seq` (or Igor2) export for holographic hardware (see [Multiphoton Holographic Stimulation](../Neural%20Networks/multiphoton_holographic_stimulation.md)). This only writes files; to also import the sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel.
 
 `File → Cell segmentation` imports or runs Cellpose segmentation, and
 `File → Manage Data` lists the imported and simulated data groups so they can
@@ -66,7 +66,7 @@ Each widget can be shown or hidden in menu "View" by using the corresponding too
 
 In addition to elements 1-6, the toolbar contains a universal widget that can dupicate widgets (2) and (3), useful for subsequent visulisation and data analysis. The button with capital "T" toggles and untoggles text annotation next to a mouse cursor — turn it off when the per-pixel coordinate label gets in the way of dense plots, and back on when you need it for precise selection.
 
-**View → Show Stimulation setup** opens the stimulus-delivery pane, with one tab per target: **SysCon2 (HOLO4D)** for the holographic stimulation rig (see [Multiphoton Holographic Stimulation](../user_guide/multiphoton_holographic_stimulation.md)) and **BrainScaleS-2** for the neuromorphic chip (see [Deliver stimuli to BrainScaleS-2](../user_guide/brainscales2_delivery.md)).
+**View → Show Stimulation setup** opens the stimulus-delivery pane, with one tab per target: **SysCon2 (HOLO4D)** for the holographic stimulation rig (see [Multiphoton Holographic Stimulation](../Neural%20Networks/multiphoton_holographic_stimulation.md)) and **BrainScaleS-2** for the neuromorphic chip (see [Deliver stimuli to BrainScaleS-2](../Neural%20Networks/brainscales2_delivery.md)).
 
 **View → Toggle Grid** turns the time/neuron grid overlays on or off for the stim editor. The grid spacing follows the stim array's `dt`, so it doubles as a sample ruler.
 
@@ -179,7 +179,7 @@ application:
 
 | Setting                   | What it does                                                                                                                                                |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../user_guide/simulations.md#choosing-a-brian2-backend)).                                                           |
+| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../Neural%20Networks/simulations.md#choosing-a-brian2-backend)).                                                           |
 | Input automatic padding   | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
 | LLM assistant             | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
 | Synapse matrix RAM limit  | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |
@@ -198,7 +198,7 @@ The user can select a given region of the "neuron data" widget and access an ana
 The result lands in the dedicated **Custom analysis** dock widget — toggled
 from **View → Show Custom analysis** — or, with the `(new window)` variant
 of the action, in a separate window. See
-[Analysis Tools and Custom Plugins](../user_guide/analysis_and_plugins.md) for the full
+[Analysis Tools and Custom Plugins](../Input%20Design%20and%20Readout%20Analysis/analysis_and_plugins.md) for the full
 list of built-in analyses and how to write your own plugin.
 
 ## GUI Console
