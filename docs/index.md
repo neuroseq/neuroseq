@@ -2,6 +2,10 @@
 
 Welcome to the official documentation for NeuroSeq, a first implementation of the neuronal sequencer.
 
+NeuroSeq is an open-source framework for designing and running experiments with biological neuronal circuits, neuromorphic hardware, and computational neural network models. It brings stimulation design, simulation, data acquisition, visualization, and analysis into a shared graphical workspace.
+
+A neuronal sequencer organizes precisely timed patterns of inputs to neural networks and helps analyze their responses. With NeuroSeq, users can create stimulation sequences, run simulations and experimental hardware. It supports predefined stimulation protocols and interactive closed-loop experiments, where network responses guide subsequent stimulation.
+
 The source code is available in the [official NeuroSeq repository](https://github.com/neuroseq/neuroseq).
 
 ![NeuroSeq graphical user interface](https://raw.githubusercontent.com/neuroseq/neuroseq/main/docs/images/screenshot.png)
