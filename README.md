@@ -6,8 +6,6 @@
 
 NeuroSeq is an open-source framework to bring biological neuronal circuits, neuromorphic hardware, and computational neural network models into a unified experimental environment. It integrates experimental protocol design, data acquisition and control, and methods for data analysis and parameter inference across these fundamentally different neural network implementations.
 
-<img width="2112" height="540" alt="readme_3_domains" src="https://github.com/user-attachments/assets/1c2f2227-c3a6-4b5e-aac1-b7e97286862b" />
-
 ## What is a neuronal sequencer?
 
 NeuroSeq is a first implementation of a neuronal sequencer. We define a neuronal sequencer as a software system for controlling structured sequences of inputs to neural networks and analyzing their responses. It provides a unified framework for designing, delivering, and dynamically adjusting spatiotemporal patterns of neuronal stimulation, enabling systematic exploration of neural network input–output relationships.
@@ -20,13 +18,13 @@ A neuronal sequencer provides a common experimental interface for biological neu
 
 ## Graphical User Interface
 
-**Neuronal Sequencer (NeuroSeq) provides a graphical user interface (GUI)** for defining, configuring, and executing experimental protocols across biological neural circuits, computational models, and neuromorphic hardware.
+NeuroSeq provides a graphical user interface (GUI) for defining, configuring, and executing experimental protocols across biological neural circuits, computational models, and neuromorphic hardware.
 
-The GUI serves as a unified control environment, allowing users to **define and manage input arrays delivered to neural systems**, including stimulation patterns, timing, intensity, and spatial or temporal organization. It also provides control over experimental hardware, simulation parameters, data acquisition, and the execution of experimental sequences. Acquired data can subsequently be processed using integrated analysis and inference tools.
+The GUI serves as a unified control environment, allowing users to define and manage input arrays delivered to neural systems, including stimulation patterns, timing, intensity, and spatial or temporal organization. It also provides control over experimental hardware, simulation parameters, data acquisition, and the execution of experimental sequences. Acquired data can subsequently be processed using integrated analysis and inference tools.
 
 By bringing stimulation, system control, data acquisition, and analysis into a single interface, NeuroSeq enables users to interact with different neural substrates through a common experimental workflow.
 
-<img width="1920" height="1140" alt="image" src="https://github.com/user-attachments/assets/4f8ef933-cc96-47dc-8f77-cbe8eb535316" />
+![screenshot](https://raw.githubusercontent.com/neuroseq/neuroseq/main/docs/images/screenshot.png)
 
 ## Installation
 
@@ -67,8 +65,8 @@ In contrast, **modifications to the core architecture or fundamental functionali
 ### How to Contribute
 
 - **Report a bug or suggest a feature:** Open a new [GitHub issue](https://github.com/neuroseq/neuroseq/issues) describing the problem, proposed improvement, or requested functionality.
-- **Implement a new feature:** Fork the [NeuroSeq repository](https://github.com/neuroseq/neuroseq), make the necessary modifications, and submit a pull request to initiate a review and discussion with the core developers.
 - **Extend NeuroSeq through plugins:** Contributions introducing new neural substrates, analysis pipelines, or inference tools are particularly welcome and are expected to have the most straightforward integration process.
+- **Implement a new feature:** Fork the [NeuroSeq repository](https://github.com/neuroseq/neuroseq), make the necessary modifications, and submit a pull request to initiate a review and discussion with the core developers.
 - **Improve reliability and stability:** Bug fixes, performance optimizations, testing, and improvements to existing functionality are equally valuable contributions.
 
 We encourage open discussions and collaborative development to make NeuroSeq a flexible, reliable, and accessible framework for experimentation with biological, computational, and neuromorphic neural networks.
