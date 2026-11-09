@@ -107,6 +107,9 @@ class StdpWindowBackend(RoutineBackend):
         self.epsp_trajectory = []
         self.probe_pulse_times = []
         self.saturation_warned = False
+        # Each sweep logs its own Δt snapping warning (the dialog logs it just
+        # before this call, so the next sweep finds the flag clear again).
+        self.resolution_warning_logged = False
         self.phase = "idle"
         if weight_baseline is not None:
             self.baseline_epsp = weight_baseline
