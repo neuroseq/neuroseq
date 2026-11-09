@@ -2094,3 +2094,24 @@ def test_trace_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
     assert set(ticks) <= set(centers)
     assert ticks
     dialog.close()
+
+
+def test_auto_extend_vertical_space_survives_set_limits(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_limits(1.0, 5)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+    total_height = sum(2 * h for h in trace_widget._row_half_heights)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # e.g. the project's limits being refreshed after an unrelated edit
+    trace_widget.set_limits(1.0, 6)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # the refreshed neuron count, not the one from before, comes back
+    trace_widget.set_data(None)
+    assert controller.max_height == pytest.approx(6.0)

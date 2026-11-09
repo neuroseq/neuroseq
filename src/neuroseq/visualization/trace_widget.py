@@ -412,6 +412,21 @@ class TraceWidget(TimeseriesWidget):
             return self._row_centers[display_row]
         return float(display_row)
 
+    def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        super().set_limits(max_time_secs, max_neurons)
+        if (
+            self._base_max_height is None
+            or self.controller is None
+            or float(max_time_secs) <= 0.0
+            or int(max_neurons) <= 0
+        ):
+            return
+        # The controller's height was just reset to the project's neuron
+        # count: that is the new height to restore when auto-extend ends, and
+        # the auto-extended rows still need their grown extent on top of it.
+        self._base_max_height = self.controller.max_height
+        self._grow_view_extent_for_visible_neurons()
+
     def _display_rows_y_extent(self, first: int, last: int) -> tuple[float, float]:
         """The y range covering display rows ``first`` to ``last``."""
         if self.auto_extend_vertical_space and last < len(self._row_centers):
