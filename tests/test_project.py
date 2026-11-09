@@ -1077,9 +1077,9 @@ def test_remap_cellpose_indices_reports_experiments_with_invalid_mapping() -> No
     )
     project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
 
-    # Cellpose id 0 maps explicitly to stim 1, but cellpose id 1 falls back to
-    # identity (stim 1 too) - a collision that _resolve_suite2p_indices rejects.
-    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    # Two stimulus IDs target Cellpose id 0 - a duplicate that
+    # _resolve_suite2p_indices rejects.
+    project.cellpose_data = _cellpose_data_with_mapping({0: 0, 1: 0})
     failed = project.remap_cellpose_indices()
 
     assert failed == ["exp"]

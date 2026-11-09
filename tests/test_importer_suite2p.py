@@ -119,14 +119,40 @@ def test_resolve_suite2p_indices_uses_identity_for_missing_ids() -> None:
     np.testing.assert_array_equal(indices, np.array([4, 7, 2, 3], dtype=np.uint32))
 
 
-def test_resolve_suite2p_indices_rejects_duplicate_target_stim_ids() -> None:
-    with pytest.raises(ValueError, match="Resolved stimulus IDs are not unique"):
-        _resolve_suite2p_indices(
-            2,
-            {
-                1: 0,
-            },
-        )
+def test_resolve_suite2p_indices_gives_unmapped_ids_non_colliding_stim_ids() -> None:
+    """Cellpose 0 -> stim 1; unmapped Cellpose 1 cannot keep stim 1, so it takes
+    the stim ID freed by the mapping (0) instead of raising."""
+    indices = _resolve_suite2p_indices(2, {1: 0})
+    np.testing.assert_array_equal(indices, np.array([1, 0], dtype=np.uint32))
+
+
+def test_resolve_suite2p_indices_accepts_sparse_custom_mapping() -> None:
+    indices = _resolve_suite2p_indices(20, {1: 12, 2: 3})
+    assert len(set(indices.tolist())) == 20
+    assert indices[12] == 1
+    assert indices[3] == 2
+    # Unmapped cells never claim a stimulated neuron's ID.
+    unmapped = [i for i in range(20) if i not in (12, 3)]
+    assert not {1, 2} & set(indices[unmapped].tolist())
+
+
+def test_remap_raw_cellpose_ids_handles_cellpose_id_gaps() -> None:
+    """Linear mapping over Cellpose IDs [0, 1, 3] (ID 2 absent)."""
+    raw_ids = np.array([0, 1, 3], dtype=np.uint32)
+    result = remap_raw_cellpose_ids(raw_ids, {0: 0, 1: 1, 2: 3})
+    np.testing.assert_array_equal(result, np.array([0, 1, 2], dtype=np.uint32))
+
+
+def test_remap_raw_cellpose_ids_is_consistent_for_subsets() -> None:
+    mapping = {1: 12, 2: 3}
+    full = remap_raw_cellpose_ids(np.arange(20, dtype=np.uint32), mapping)
+    subset = np.array([1, 2, 5], dtype=np.uint32)
+    np.testing.assert_array_equal(remap_raw_cellpose_ids(subset, mapping), full[subset])
+
+
+def test_resolve_suite2p_indices_rejects_duplicate_cellpose_ids() -> None:
+    with pytest.raises(ValueError, match="duplicate Cellpose IDs"):
+        _resolve_suite2p_indices(2, {0: 0, 1: 0})
 
 
 def test_prepare_suite2p_spikes_remaps_indices_by_cellpose_order() -> None:
@@ -169,10 +195,10 @@ def test_remap_raw_cellpose_ids_applies_mapping() -> None:
     np.testing.assert_array_equal(result, np.array([4, 7, 4, 7], dtype=np.uint32))
 
 
-def test_remap_raw_cellpose_ids_rejects_colliding_mapping() -> None:
+def test_remap_raw_cellpose_ids_avoids_colliding_fallback() -> None:
     raw_ids = np.array([0, 1], dtype=np.uint32)
-    with pytest.raises(ValueError, match="Resolved stimulus IDs are not unique"):
-        remap_raw_cellpose_ids(raw_ids, {1: 0})
+    result = remap_raw_cellpose_ids(raw_ids, {1: 0})
+    np.testing.assert_array_equal(result, np.array([1, 0], dtype=np.uint32))
 
 
 def test_remap_raw_cellpose_ids_matches_a_fresh_import_under_new_mapping(

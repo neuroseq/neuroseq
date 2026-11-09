@@ -100,9 +100,19 @@ def _resolve_suite2p_indices(
         )
 
     # Suite2p rows are expected to be ordered by Cellpose ID 0..N-1.
-    # Missing explicit mappings fall back to identity import (cellpose id -> same stim id).
+    # Unmapped Cellpose IDs keep their own number as stimulus ID, unless that
+    # number is already a mapped stimulus ID (a sparse Custom mapping, or a
+    # Linear one over Cellpose IDs with gaps). Those are paired, in sorted
+    # order, with the mapped Cellpose IDs that are not themselves stimulus IDs,
+    # so the mapping extends to a permutation: every Cellpose ID gets a unique
+    # stimulus ID, and the result depends only on the ID and the mapping (not
+    # on which other IDs are present), keeping remaps of subsets consistent.
+    stim_ids_in_use = set(cellpose_to_stim.values())
+    displaced_ids = sorted(stim_ids_in_use - cellpose_to_stim.keys())
+    free_ids = sorted(cellpose_to_stim.keys() - stim_ids_in_use)
+    fallback = dict(zip(displaced_ids, free_ids, strict=True))
     stim_ids = [
-        cellpose_to_stim.get(cellpose_id, cellpose_id)
+        cellpose_to_stim.get(cellpose_id, fallback.get(cellpose_id, cellpose_id))
         for cellpose_id in range(n_neurons_to_import)
     ]
     if len(set(stim_ids)) != len(stim_ids):
