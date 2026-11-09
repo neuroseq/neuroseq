@@ -223,7 +223,7 @@ class GuiSettings:
                 )
             except ValueError:
                 self.logger.warning(
-                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
+                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 0 s"
                 )
                 self.__dict__["stim_padding_secs"] = 0
             if theme in theme_module.THEMES:

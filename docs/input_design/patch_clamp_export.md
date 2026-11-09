@@ -1,19 +1,28 @@
-# Export stimuli for patch clamp recordings
+# Export stimuli for patch clamp
 
-A user can export stimuli from a given stimulation array to be used in patch clamp experiments. The most most universal format for export is \*.csv supported by a large variety of 3rd party software.
+**File → Export → Patch Clamp Input** writes input arrays for acquisition
+software. First choose the format:
 
-The dialog for export can be found in `File → Export → Patch Clamp Input`. The pre-dialog asks for the export format — `Igor2 - single array (.ibw / .csv)` or `Igor2 - all arrays (.pxp)`. A single-array export uses the input array currently shown in the editor; the user can then indicate the index of a neuron that was patched and the desired file format (default is .csv file).
+| Format                             | Exports                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Igor2 - single array (.ibw / .csv) | One neuron of the array shown in the editor. Set **Neuron to export**, **Experiment name**, optional unit and scaling factor. The file type follows the save dialog (`.ibw` by default, or `.csv`). |
+| Igor2 - all arrays (.pxp)          | Selected input arrays as one Igor packed experiment, one wave per array. Inhibitory arrays are negated.                                                                                             |
 
-More specific data formats tailored to a given 3rd party software may be provide an advantage in automatization and speed up data transfer from Neuroseq to this software. Below, we consider a concreate example(s) of integration with currently availibe hardwave/software for patch clamp recordings.
+**Export as sweeps (auto-detect period)** splits a repeating column into a
+multi-sweep `.ibw` (one column per repeat); it is ignored for `.csv`. The
+scaling factor accepts forms like `1e-12` or `2.5*10^(-12)`.
 
-## SutterPatch&reg;- Igor Pro&reg
+`.csv` is the most portable format; `.ibw` imports directly into Igor Pro.
 
-The operation Sutter amplifiers is controlled via SutterPatch software run in the Igor Pro environment.
+## SutterPatch (Igor Pro)
 
-The generation of stimuli in Igor Pro environment is controled in "Routine Editor". There, a single routine in the routine pool can be modified to represent a given sequence of stimulations composed from distinct segments. A user will need only a single segment setting in to "Template" as a type of stimuli. The \*.csv file created by Neuroseq for SutterPatch can be imported in a form of a Template.
+SutterPatch runs Sutter amplifiers inside Igor Pro. Stimuli are built in the
+**Routine Editor**: one segment of type **Template** is enough.
 
-The environment also has its own file format .ibw to store a stimuli of arbitraty shape. Neuroseq can directly generate the files of this format and facilitates import to SutterPatch. In this case, .ibw file with a sequence can be directly imported via Tempate Editor by cliking "Import":
+1. Export the neuron's waveform as `.ibw` (or `.csv`).
+2. In the **Template Editor**, click **Import** and pick the file.
+3. The template then appears in the Routine Editor's template list.
 
 ![SutterPatch Template Editor](../images/SutterPatch_TemplateEditor.png)
 
-The imported template will become availible in routine editor in the list of availible templates.
+To bring recordings back, see [Igor2 waves](../readout/igor2_waves.md).

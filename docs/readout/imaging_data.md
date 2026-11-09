@@ -1,237 +1,133 @@
-# Importing imaging data
+# Imaging data
 
-NeuroSeq accepts imaging data from two distinct sources:
+Calcium imaging enters a project in two parts:
 
-- **Cellpose** — spatial cell segmentation (which pixels belong to which
-  neuron). This is what NeuroSeq needs to map drawn stimuli back onto the
-  physical sample for holographic export.
-- **Suite2p** — fluorescence traces extracted from a calcium imaging
-  recording. These appear as `TraceData` in the project alongside any
-  simulated traces.
+- **Cell segmentation** (Cellpose): which pixels belong to which cell, and
+  which cell is which project neuron. Required for
+  [holographic stimulation](../networks/holographic_stimulation.md).
+- **Traces**: fluorescence per cell, extracted from raw TIFFs or imported from
+  Suite2p output, added as trace (and spike) data.
 
-Patch-clamp electrophysiology imports are also covered here for completeness.
+Patch-clamp recordings are covered in [Igor2 waves](igor2_waves.md).
 
-## Cellpose segmentation
+## Cell segmentation
 
-Open **File → Cell segmentation**. Dropping a TIFF or PNG on the Cell
-segmentation tab opens the same dialog and segments the image right away.
+Open **File → Cell segmentation**, or drop a TIFF or PNG on the Cell
+segmentation tab (this segments it right away).
 
-### Dialog sections
+**Segment an image**: choose a **Model** (`cpsam`, `cpsam_v2`, `cpdino`,
+`cpdino-vitb`; `cpsam_v2` is more sensitive on low-SNR fields) and click
+**Select file for segmentation…** with a mean-fluorescence TIFF or a PNG.
+Results are saved next to the image with the model in the name
+(`fov_cpsam_seg.npy`, `fov_cpsam_cp_masks.png`), so other models' results and
+a Cellpose GUI `fov_seg.npy` are kept. **Adjust brightness first** lets you set
+brightness/contrast before segmenting; Cellpose then segments the adjusted
+image.
 
-- **File Selection** — point at the Cellpose output (a NumPy `.npy` array of
-  per-pixel segmentation IDs, or the `_seg.npy` file produced by the Cellpose
-  GUI).
-- **Select file for segmentation…** — segments a mean-fluorescence TIFF or
-  PNG with the chosen Cellpose model and loads the result. The files are saved
-  beside the image with the model in their name, e.g. `fov_cpsam_seg.npy` and
-  `fov_cpsam_cp_masks.png`, so segmenting with another model keeps the
-  earlier results, and an `fov_seg.npy` made in the Cellpose GUI is not
-  overwritten. With **Adjust brightness first** ticked, the image is shown
-  with the Brightness/Contrast controls of the Spatial Footprints panel before
-  Cellpose runs, and Cellpose segments the adjusted image; **Reset** keeps the
-  original. The window used is stored in the `_seg.npy`.
-- **Data Information** — read-only summary: image dimensions, number of
-  detected cells, value range.
-- **ID Mapping Options** — choose how Cellpose IDs are mapped onto the
-  project's neuron indices:
-  - **By ID** — use the segmentation IDs as-is.
-  - **By order** — renumber sequentially in the order Cellpose found cells.
-  - **Custom shape mapping** — assign each cell to a target neuron index via
-    a `SquareAOI` or `CircleAOI` overlay role. Use this when the project's
-    neuron layout (e.g. a grid of square AOIs) does not match Cellpose's
-    discovery order.
-- **Areas of Interest** — optional roles drawn on top of the segmentation
-  (square/circle AOIs). Cells that fall inside an AOI inherit its role. The
-  **Linear** strategy shows the same shapes, which can be moved and resized
-  there too, but they do not change its mapping; they are kept with the
-  imported segmentation.
+**Or load existing files**: an image (PNG/TIF) and a segmentation (`.npy`,
+including Cellpose `_seg.npy`, or `.csv`). **Open Cellpose** and **Open Fiji**
+launch the external tools.
 
-After import, the cell footprints are available in the cell overlay widget
-and are bundled into the project file. They are required for the
-[SysCon2 holographic export](../networks/holographic_stimulation.md).
+### Neuron ID mapping
 
-### Cell overlay widget
+**Mapping strategy** decides which Cellpose cell is which input neuron:
 
-The cell overlay widget visualizes the imported segmentation on top of the
-sample image. You can:
+| Strategy                      | Mapping                                                                                                                                                                               |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Linear                        | Input neuron 0 is the cell with Cellpose ID equal to the offset, then upward; lower IDs wrap to the end.                                                                              |
+| Custom                        | Type pairs `input:cellpose` (e.g. `1:12,2:3`), or tick **Assign by clicking cells** and click cells in order (unclicked cells get the remaining IDs in Cellpose order).               |
+| Custom with areas of interest | A square and/or circle, each **preferential** or **exclusion**. Cells in preferential areas get the lowest IDs, cells in exclusion areas the highest, each tier in Cellpose-ID order. |
 
-- Pan and zoom with the mouse wheel and middle-button drag, matching the
-  other widgets.
-- See cells that have been mapped to project neurons highlighted relative
-  to unmapped ones.
-- Drag the corner/edge handles of square and circle AOI overlays to refine
-  their position after import — the cell-to-neuron assignment recomputes
-  whenever an AOI moves.
+Area shapes can be set in pixels or percent, and dragged and resized in the
+viewer; the mapping updates as they move. Under **Linear** the shapes are shown
+and kept but do not change the mapping.
 
-### Showing one channel of a movie
+The segmentation is saved in the project. **Delete Cellpose Data** removes it.
 
-Movies recorded with several channels store them interleaved frame by frame,
-so playing every frame makes the Imaging tab flicker between channels. Set
-**Channels** in the Imaging tab's bottom bar to the number of channels and pick
-the one to watch under **Show**; **All frames** plays every frame in file
-order. The frame rate entered on import is the rate of each channel, so one
-channel plays in step with the time slider. Imports through the TIFF pipeline
-start with its channel count and functional channel. The choice is saved per
-imaging data entry. ScanImage recordings use **Functional channel** in the
-**ScanImage (imaging)** tab of the Stimulation setup pane instead.
+## Raw calcium imaging TIFFs
 
-### Moved or missing imaging files
+**File → Import data → Output → Calcium Imaging (raw .tif)** extracts traces
+from one or more 2-photon TIFF stacks in the background.
 
-A `.nseq` project does not contain the movie itself, only the path to the
-original imaging file(s); the traces, spikes and segmentation computed from it
-are saved in the project. When the file is not at that path — for example after
-opening the project on another computer — the Imaging tab lists the missing
-file(s) with a **Locate file…** button instead of the video. Choose the file's
-new location and the video plays again; for a movie split across several files,
-pick any one of them and the others are found by name in the same folder. Save
-the project to keep the new path.
+1. **Add TIFF…** the stack(s).
+2. Pick **Cellpose masks**: those loaded in the project (with mapping), a
+   `_seg.npy` file, or Suite2p auto-detection (set **Cell diameter**).
+3. Set the parameters and click **Run pipeline**.
 
-### Saving imaging data
+Raw stacks over ~1 GB crash Cellpose. Segment a projection instead: **Open
+Fiji**, **Image → Stacks → Z Project…** (Max for sparse, Mean for dense
+activity), save it, segment it with **Open Cellpose**, then load the
+`_seg.npy`. The pipeline still runs on the full stack.
 
-**Save imaging data…** in the Imaging tab first asks which frames to save.
-Frames are counted from 1, as in the time slider tooltip and in Fiji; **Current
-frame** fills in the frame shown at the slider position, so a short period found
-by scrubbing can be saved directly. Choose what to save:
+| Parameter            | Default | Notes                           |
+| -------------------- | ------- | ------------------------------- |
+| Pipeline             | Suite2p | Or **Simply average from ROI**. |
+| Frame rate (fs)      | 30 Hz   | Per channel.                    |
+| # channels           | 2       | 1 when ROI average is chosen.   |
+| Functional channel   | 1       |                                 |
+| Indicator tau        | 0.5 s   | jGCaMP8m.                       |
+| Neuropil coefficient | 0.7     |                                 |
+| Spike threshold      | 0.02    | Suite2p.                        |
 
-- **Original frames (TIFF substack)** — the recorded pixel values of the shown
-  channel, as one stack that Fiji opens with its frame interval.
-- **With stimulation marks (TIFF or GIF)** — the frames as displayed, with the
-  stimulated cells marked by a red "x" sized to the image. All saved frames
-  share one grey scale, taken from robust percentiles of the saved frames, so
-  the background does not flicker from frame to frame.
+**Simply average from ROI** streams the stack, so long recordings (15 min at
+512×512, about 14 GB) need not fit in memory. Options:
 
-### Generating test data
+- **Neuropil correction**: subtracts coefficient × an annulus of the 350
+  nearest pixels more than 2 px from any cell.
+- **Compute ΔF/F and deconvolve spikes**: ΔF/F against Suite2p's sliding
+  maximin baseline (30 s) of the raw fluorescence; OASIS spikes counted above
+  **Spike threshold (ΔF/F)** (default 0.1).
+- **Input artefact suppression**: replaces frames lit by an input array's
+  stimulation with the mean of the neighbouring clean frames. **Imaging
+  started at** is the first frame's time on that array's axis (0 if both
+  started together, positive if imaging started later).
 
-If you do not have a real recording yet, NeuroSeq can synthesize a Cellpose
-test image with a clean grid of cells:
+## Suite2p output
 
-```bash
-neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif \
-  --cellpose-grid-rows 10 \
-  --cellpose-grid-cols 10 \
-  --cellpose-radius 11 \
-  --cellpose-gap 30
-```
+**File → Import data → Output → Calcium Imaging (Suite2p outputs)**: choose
+the output folder (with `F.npy`, `Fneu.npy`, `spks.npy`, `stat.npy`), or pick
+files under **Individual File Selection** (`.npy` or `.csv`).
 
-See [Multiphoton Holographic Stimulation → Generating test data](../networks/holographic_stimulation.md#generating-test-data-cli)
-for the full set of options.
+- Traces are `F − 0.7·Fneu` (when `Fneu` is present), normalised to 0-1 per
+  neuron.
+- Spikes come from `spks.npy`, kept above **Spike threshold** (default 0.02).
+- **Max neurons to import** defaults to 2; **Sample rate** to 30 Hz.
+- Rows are mapped to input neurons through the Cellpose mapping when one is
+  loaded.
 
-## GPU acceleration (Cellpose & Suite2p)
+## Imaging tab
 
-Both Cellpose segmentation and the Suite2p extraction/deconvolution step run on
-**PyTorch** and are dramatically faster on a GPU. NeuroSeq uses the GPU
-automatically when one is available — **CUDA** on NVIDIA cards or **MPS** on
-Apple Silicon — and otherwise falls back to the CPU (which can be unusably slow
-for segmentation).
+- **Channels / Show**: for interleaved multi-channel movies, set the channel
+  count and pick the channel to play; **All frames** plays every frame. The
+  TIFF pipeline presets both. ScanImage recordings use **Functional channel**
+  in the ScanImage tab instead.
+- **Moved files**: projects store only the movie path. If it is missing, click
+  **Locate file…**; other parts of a split movie are found in the same folder.
+  Save the project to keep the new path.
+- **Save imaging data…**: choose frames (counted from 1; **Current frame** and
+  **All frames** buttons), then **Original frames (TIFF substack)** or **With
+  stimulation marks (TIFF or GIF)**, which marks stimulated cells with a red
+  "x" on a fixed grey scale.
 
-Two things are required: a GPU that these tools support, and a GPU build of
-PyTorch. **Cellpose can use only NVIDIA (CUDA) and Apple (MPS) GPUs — Intel
-integrated graphics (Iris Xe / UHD) are not supported.**
+## GPU acceleration
 
-**Check what you have** (in the NeuroSeq environment):
+Cellpose and Suite2p run on PyTorch and are far faster on an NVIDIA (CUDA) or
+Apple Silicon (MPS) GPU. Intel integrated graphics are not supported. Check:
 
 ```bash
 python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 ```
 
-A version ending in `+cpu` (e.g. `2.13.0+cpu`), or `False`, means a CPU-only
-build is installed — the Cellpose "use GPU" option will be greyed out.
-
-**Enable the GPU** (on a machine with an NVIDIA or Apple-Silicon GPU) by
-installing a GPU build of PyTorch into the NeuroSeq environment:
+A `+cpu` version or `False` means a CPU-only build (the Cellpose GPU option is
+greyed out). Install a GPU build:
 
 ```bash
 uv pip install --torch-backend=auto torch
 ```
 
-`uv` auto-detects the machine's CUDA driver and installs the matching wheel.
-On **Windows this step is required**, because PyPI's default `torch` wheel is
-CPU-only there (on Linux the default PyPI wheel is already CUDA-enabled). A
-later `uv sync` can revert to the CPU build; re-run the command, or set
-`UV_TORCH_BACKEND=auto` in the environment. Verify with the check command above
-(expect e.g. `2.x.x+cu128 True`), then relaunch NeuroSeq.
-
-If NeuroSeq is installed into an environment `uv` doesn't manage (e.g. a conda
-environment), install a CUDA build directly with pip instead:
-
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-```
-
-Pick the `cuXXX` index matching your NVIDIA driver if `cu128` doesn't fit
-(check the [PyTorch install page](https://pytorch.org/get-started/locally/)).
-
-**No supported GPU** (e.g. an Intel-only laptop)? GPU segmentation is not
-possible on that machine. Instead, run Cellpose on one machine that _does_ have
-an NVIDIA/Apple GPU and import its `_seg.npy` output (the file-selection path
-above needs only the segmentation, not a GPU), and/or use a lighter Cellpose
-model or downsample the image before segmenting.
-
-When a GPU is unavailable, NeuroSeq shows a one-time hint after launching
-Cellpose and logs the same information before running the Suite2p pipeline.
-
-## Raw calcium imaging TIFFs
-
-**File → Import data → Output → Calcium Imaging (raw .tif)** extracts traces
-directly from one or more 2-photon TIFF stacks. Choose the Cellpose masks
-(those already loaded in the project, a `_seg.npy` file, or Suite2p
-auto-detection), the pipeline (Suite2p, or a simple ROI average) and the
-acquisition parameters, then **Run pipeline**. The pipeline runs in the
-background; the resulting traces are imported like Suite2p outputs.
-
-The **Simply average from ROI** pipeline reads the stacks a few frames at a time,
-so a long recording (e.g. 15 minutes of 512×512 frames, about 14 GB) does not
-have to fit in memory. Its options:
-
-- **Neuropil correction** also averages an annulus around each ROI, as Suite2p
-  does: the 350 nearest pixels that are more than 2 px from every cell. The
-  annulus times the **Neuropil coefficient** is subtracted from the ROI's trace.
-- **Compute ΔF/F and deconvolve spikes** imports ΔF/F instead of raw
-  fluorescence. The baseline is Suite2p's sliding maximin (30 s window). ΔF/F is
-  relative to the raw fluorescence baseline, so a dim cell whose
-  neuropil-corrected baseline is near zero does not get a huge ΔF/F. Spikes are
-  deconvolved with OASIS (**Indicator tau**). An event counts as a spike when it
-  reaches **Spike threshold (ΔF/F)**.
-- **Input artefact suppression** replaces the frames lit by an input array's
-  stimulation with the mean of the clean frames around them. **Imaging started
-  at** is when the first frame was recorded on that input array's time axis: 0
-  if imaging and the input started together, positive if imaging started later,
-  negative if it started first.
-
-## Suite2p calcium imaging
-
-**File → Import data → Output → Calcium Imaging (Suite2p outputs)** opens the
-Suite2p importer.
-
-- **File Selection** — point at a Suite2p output folder (the directory that
-  contains `F.npy`, `Fneu.npy`, `iscell.npy`, …). Individual file paths can
-  also be supplied directly via the **Individual File Selection** group when
-  the folder layout is non-standard.
-- **Data Preview** — shows a few representative traces so you can confirm
-  the right cells are being imported before committing.
-- **Import Options** — neuropil subtraction, dF/F normalization, decimation,
-  and which Suite2p classification mask (`iscell`) to apply.
-
-Imported traces become a new `TraceData` entry under the project's experiments
-and appear in the **Neuron data** dropdown.
-
-## Patch-clamp electrophysiology
-
-**File → Import data → Output → Patch Clamp** loads recorded traces (voltage
-in current clamp, current in voltage clamp):
-
-- **File Selection** — an Igor2 `.ibw` / `.pxp` file, or a `.csv` / `.txt`
-  table with one trace per column. Packed experiments list their waves in a
-  **Wave Selection** panel; import as many as you need, then click **Close**.
-- **Wave Preview** and **Source Wave Settings** — check the wave and set the
-  source sampling rate where the file does not store it.
-- **Import Target** — create new trace data or add to existing trace data.
-  If the existing data uses a different sample interval, NeuroSeq offers to
-  resample the wave (default) or remap the target, as described in
-  [Importing Igor2 Waves](igor2_waves.md#import-targets).
-- **Spike detection** — optional peak detection to derive a `SpikeData`
-  alongside the trace.
-
-For patch-clamp input (command) waveforms use
-**File → Import data → Input → Patch Clamp**; see
-[Importing Igor2 Waves](igor2_waves.md).
+This is required on Windows, where the default wheel is CPU-only. A later
+`uv sync` can revert it; set `UV_TORCH_BACKEND=auto` to avoid that. In a conda
+environment use
+`pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128`
+(pick the `cuXXX` matching your driver). Without a supported GPU, segment on
+another machine and import the `_seg.npy`.

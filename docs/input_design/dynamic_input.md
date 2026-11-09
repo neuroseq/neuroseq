@@ -1,178 +1,122 @@
-# STDP synaptic tuning
+# Dynamic input
 
-**Design dynamic input** is a closed-loop stimulation feature in NeuroSeq. Unlike
-**Design static input**, which writes a complete pattern before a simulation,
-Design dynamic input repeatedly performs three operations:
+A dynamic input routine runs an experiment step by step: append one input
+block to the selected input array, deliver it, read the response, choose the
+next block. Test a routine on a Brian2 simulation, then switch its
+**Stimulation target** to run the same protocol on hardware.
 
-1. append stimulation to the selected stim array,
-2. continue the Brian2 simulation, and
-3. analyze the resulting voltage trace to decide what to append next.
+## Starting a routine
 
-This guide covers **STDP synaptic tuning**, a routine that targets a
-postsynaptic EPSP amplitude by applying spike-timing-dependent plasticity
-(STDP) pairings. The decision policy and protocol described below target this
-specific use case.
+1. Select the input array to extend.
+2. Click **Design dynamic input** (View toolbar or the editor's right-click
+   menu), pick a routine and click **Continue**.
+3. Set the parameters and click **Start** (**Start routine** for STDP tuning).
 
-## Opening Design dynamic input
+If the array already holds input, choose **Clear and start over** or
+**Continue after last stimulus** (hardware rheobase also offers **Start in new
+arrays**). Blocks are appended after the simulated time, never into the past,
+and stay in the array afterwards (undo, edit, save as usual).
 
-Select the stim array that should receive the generated protocol, then click
-**Design dynamic input** in the stimulation-editor toolbar. A prompt asks which
-design routine to run; choose **STDP synaptic tuning** to open the designer.
-The selected array must have columns for both the pre- and postsynaptic
-neuron IDs.
+**Pause** and **Stop** act before the next block (a running Brian2 run is not
+cancelled). **Clear input array** zeroes the array; **Reset input array**
+trims it back to the simulated time. The log records every probe and decision;
+live plots open in a separate window.
 
-For a ready-to-run model, open:
+On a fresh model the routine first runs a short simulation to create trace
+monitors. If no `/ v` trace appears, add a `StateMonitor` for `v` in
+**File → Edit Model**.
 
-**File → Open example project → Network → Two Hodgkin-Huxley Neurons with STDP**
+## Stimulation targets
 
-In that example, use:
+| Target                       | Routines              | Amplitude means                            |
+| ---------------------------- | --------------------- | ------------------------------------------ |
+| Brian2 simulation            | all                   | Input array units                          |
+| SysCon2 (calcium imaging)    | rheobase, STDP window | Fraction (0-1) of the export target power  |
+| BrainScaleS-2 (neuromorphic) | rheobase              | Fraction (0-1) of the tab's `i_offset` max |
 
-- stim array: `Exc_stimulation`,
-- trace: `Simulation :: P / v`,
-- presynaptic neuron ID: `0`, and
-- postsynaptic neuron ID: `1`.
+For SysCon2, **Hardware settings** sets power, laser, spots, recording tail
+(3 s), artefact removal and trace extraction (Suite2p or ROI average). With
+**Run blocks automatically and record them with ScanImage** (default) each
+block is run, recorded and extracted for you. Unticked, you run, record and
+import each block, then click **Calcium data imported** (rheobase) or **Block
+done / data imported** (STDP window). **Use SysCon2 dt** sets the array
+timestep to the SysCon2 grid. Details:
+[Holographic stimulation](../networks/holographic_stimulation.md),
+[ScanImage acquisition](../networks/scanimage_acquisition.md),
+[BrainScaleS-2](../networks/brainscales2.md).
 
-STDP synaptic tuning appends data; it does not clear an existing stim array. New
-blocks are placed after both the current array end and the current simulation
-time, so generated stimulation is never inserted into the already simulated
-past.
+## Minimal input for spiking (rheobase)
 
-## Closed-loop routine
+Finds the smallest input that makes one neuron spike, by bisection rather than
+a full grid scan. Each probe is a recovery period, a pulse, and a post-pulse
+window in which spikes are counted. The search tests the maximum amplitude (no
+spike: stop, raise it), then the minimum (spike: threshold is at or below it),
+then halves the bracket until it is below the tolerance or **Maximum
+iterations** (25) is reached.
 
-When **Start routine** is pressed, STDP synaptic tuning performs the following
-sequence:
+**Sweeping strategy**:
 
-1. Append five probe pulses (default 1 ms each) for the presynaptic neuron.
-   Probe pulses are spaced 100 ms apart.
-2. Continue the simulation through the appended block.
-3. Detect and average the five EPSP amplitudes in the postsynaptic voltage
-   trace. This first average is the baseline and is defined as **100%**.
-4. Compare the current percentage with **Target relative EPSP amplitude**.
-5. Append and simulate one plasticity-induction pairing. The selected pairing
-   strategy determines the pulse order and timing.
+- **Amplitude and duration**: rheobase at the longest duration, then the
+  chronaxie (duration at twice the rheobase) by bisecting duration.
+- **Fixed duration, varying amplitude**: threshold at one duration.
+- **Fixed amplitude, varying duration**: shortest spiking duration.
 
-6. Append and simulate another five-pulse presynaptic probe block.
-7. Measure the new five-EPSP average and repeat from step 4 until the target is
-   reached or the maximum number of induction pairings is exhausted.
+| Parameter                        | Brian2          | SysCon2            |
+| -------------------------------- | --------------- | ------------------ |
+| Amplitude range / tolerance      | 1-100 / 0.05    | 0.1-1.0 / 0.05     |
+| Fixed pulse amplitude            | 10              | 0.5                |
+| Pulse duration range / tolerance | 10-50 ms / 1 ms | 16.7-100 ms / 1 ms |
+| Recovery time                    | 200 ms          | 1000 ms            |
+| Post-pulse window                | 20 ms           | 300 ms             |
+| Repeats per probe                | 1               | 3                  |
 
-The target is achieved when:
+With several repeats a probe counts as a response when most trials respond.
+Brian2 counts crossings of **Spike threshold** (-20 mV). SysCon2 uses the
+**Calcium readout**: a ΔF/F rise of at least **Response threshold** (20 %), or
+OASIS-deconvolved spikes above **Spike threshold** (0.1 ΔF/F). BrainScaleS-2
+starts with the hardware amplitudes and repeats and counts the chip neuron's
+spikes; connect from the dialog or the BrainScaleS-2 tab.
 
-```text
-abs(current EPSP % - target EPSP %) < tolerance %
-```
+## STDP timing window (LTP/LTD vs Δt)
 
-## Controls
+Sweeps Δt = t_post − t_pre and measures the synaptic change at each point. Use
+a suprathreshold amplitude (the rheobase routine can find one).
 
-| Control                                                                  | Meaning                                                                        |                     Default |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ | --------------------------: |
-| **Trace to analyze**                                                     | Simulation voltage trace containing the postsynaptic neuron                    |       First available trace |
-| **Presynaptic neuron ID**                                                | Stim-array column receiving probe pulses and the presynaptic side of a pairing |                         `0` |
-| **Postsynaptic neuron ID**                                               | Trace index used for EPSP measurement and the postsynaptic side of a pairing   |                         `1` |
-| **Pulse amplitude**                                                      | Value written into the selected stim array during each pulse                   |        `1.0` in array units |
-| **Pulse duration (ms)**                                                  | Width of every probe and pairing pulse                                         |                      `1 ms` |
-| **Pairing strategy**                                                     | Fixed timing with automatic direction, or adaptive signed timing               | Fixed pre-post pairing time |
-| **Pre-post pairing time**                                                | Fixed-strategy interval; pulse order is selected automatically                 |                     `30 ms` |
-| **Initial guess for pre-post pairing time**                              | Adaptive-strategy starting magnitude                                           |                     `30 ms` |
-| **dt increment**                                                         | Adaptive-strategy change applied to the signed pairing time each iteration     |                      `1 ms` |
-| **Target relative EPSP amplitude**                                       | Desired EPSP relative to the first five-pulse baseline                         |                      `120%` |
-| **Tolerance window (deadband)**                                          | Maximum absolute distance from the target that counts as success               |                        `1%` |
-| **Maximum plasticity induction iterations**                              | Safety limit for closed-loop iterations                                        |                        `20` |
-| **Run until the last iteration regardless of convergence to the target** | Ignore early convergence and continue until the maximum pairing count          |                    Disabled |
-| **Follow new input on each iteration**                                   | Move the synchronized timeline camera to each appended block                   |                     Enabled |
-| **Visible history**                                                      | Number of generated-block lengths kept visible throughout execution            |                         `3` |
+- **Readout**: **EPSP amplitude change (%)** (five presynaptic probe pulses
+  after each point) or **Synaptic weight change (%)** (reads the synapse
+  weight directly; use it on recurrent networks).
+- **Sweep mode**: **Reset to baseline each Δt** restores a Brian2 checkpoint
+  before every point. **Continuous sweep** keeps one synapse and visits Δt by
+  increasing magnitude, alternating sign. SysCon2 is always continuous, with a
+  calcium readout.
 
-Set **Visible history** to `0` to show only the newly appended block. Disable
-**Follow new input on each iteration** to retain manual control of the shared pan and zoom state.
+Defaults: amplitude 100 (0.8 on SysCon2), pulse 5 ms, Δt -100 to 100 ms in 21
+points (Δt = 0 excluded), 1 pairing per point, recovery 150 ms, post-pulse
+window 50 ms.
 
-Normally, entering the tolerance stops the routine immediately. Enable **Run
-until the last iteration regardless of convergence to the target** to keep
-applying induction pairings until **Maximum plasticity induction iterations** is reached.
-Convergence is still measured and recorded in the log while this override is
-active.
+## STDP synaptic tuning
 
-### Pairing strategies
+Drives one synapse's EPSP to a target relative to its initial size (Brian2
+only). Try it in **File → Open example project → Network → Two Hodgkin-Huxley
+Neurons with STDP** with array `Exc_stimulation`, trace `Simulation :: P / v`,
+presynaptic 0, postsynaptic 1.
 
-**Fixed pre-post pairing time** keeps the configured interval magnitude
-constant. Below the EPSP target it uses pre-before-post timing; above the target
-it uses post-before-pre timing.
+1. Five presynaptic probe pulses, 100 ms apart; their mean EPSP is the 100 %
+   baseline.
+2. Outside the **Tolerance window** (1 %) of **Target relative EPSP amplitude**
+   (120 %), append one pairing: pre before post below target, post before pre
+   above.
+3. Probe again; repeat until within tolerance or after **Maximum plasticity
+   induction iterations** (20). **Run until the last iteration regardless of
+   convergence** keeps pairing.
 
-**Adaptive (single parameter, dt increment)** starts with the initial pairing
-time magnitude. After each new EPSP measurement, it compares the remaining
-target error with the change since the preceding measurement. If
-`abs(EPSP new - target) > abs(EPSP new - EPSP old)`, the magnitude is reduced by
-**dt increment** (not below zero); otherwise it is increased by **dt
-increment**. The current target side determines the sign: positive/pre-before-
-post below target and negative/post-before-pre above target.
+**Pairing strategy**: **Fixed pre-post pairing time** (30 ms) uses the same
+interval each time. **Adaptive (single parameter, dt increment)** starts at
+30 ms and shrinks the interval by **dt increment** (1 ms) when the remaining
+error exceeds the last EPSP change, otherwise grows it (between one sample and
+1000 ms).
 
-## EPSP measurement
-
-STDP synaptic tuning reuses NeuroSeq's existing **EPSP amplitudes** analysis plugin.
-The plugin:
-
-- converts supported voltage units to millivolts,
-- detects peaks using an adaptive prominence threshold,
-- measures amplitude relative to a local pre-peak baseline, and
-- rejects action-potential-sized peaks.
-
-STDP synaptic tuning associates detections with the five known probe times and uses
-their mean as the current EPSP amplitude. If the selected trace does not record
-the postsynaptic neuron, or if an EPSP cannot be detected after every probe,
-the routine stops and reports the reason in its log.
-
-## Creating simulation trace monitors
-
-A freshly loaded model may not expose its simulation trace names until Brian2
-has initialized the network. If no trace is available when the routine starts,
-STDP synaptic tuning opens **Create stimulation trace monitor** and offers to run a
-short initialization simulation.
-
-- default duration: `0.001 s`,
-- precision: three decimal places,
-- minimum duration: `0.001 s`.
-
-After the initialization run, STDP synaptic tuning refreshes the trace list and
-starts the EPSP routine automatically. If no trace becomes available, add a
-Brian2 `StateMonitor` for the membrane-voltage variable in **File → Edit
-model**, then try again.
-
-## Live plots
-
-The dialog contains three synchronized Matplotlib plots with enough spacing to
-keep their labels and tick marks separate:
-
-- **EPSP amplitude (%)** shows every five-pulse measurement relative to the
-  initial baseline. The target appears as a dashed horizontal line after the
-  baseline has been measured. The shaded region is the tolerance deadband.
-- **Δ target (%)** shows the signed difference between the current EPSP and the
-  target. Zero means that the measured value equals the target; the shaded band
-  shows the same tolerance around zero.
-- **Pairing time (ms)** shows the signed pre-post pairing time used for each
-  induction. Positive points are pre-before-post and negative points are
-  post-before-pre.
-
-The text below the plots reports the signed difference, absolute difference,
-and active tolerance. Plot colors follow NeuroSeq's light or dark theme.
-
-## Stopping and reviewing the result
-
-**Stop** prevents the routine from appending another block after the current
-simulation finishes. It does not cancel a Brian2 task already in progress; use
-the simulation progress dialog's cancellation control when the active run must
-be interrupted.
-
-All generated blocks remain in the selected stim array and can be inspected,
-edited, undone, saved with the project, or used for subsequent simulations.
-The routine log records baseline measurements, relative changes, induction
-direction, termination, and errors.
-
-## Current limitations
-
-- The routine currently supports the built-in Brian2 simulation path.
-- The decision policy assumes excitatory EPSPs and an STDP model in which
-  pre-before-post potentiates and post-before-pre depresses.
-- Probe timing is fixed to five pulses (of configurable duration) at 100 ms
-  intervals.
-- Only one selected stim array is modified, although NeuroSeq pads other arrays
-  as needed to maintain a compatible project timeline.
-- EPSP detection requires a voltage `TraceData` object and a detectable response
-  after each probe pulse.
+Pulses default to 100 (array units) for 5 ms. EPSPs are measured with the
+**EPSP amplitudes** plugin; the routine stops if the trace lacks the
+postsynaptic neuron or an EPSP is missed. It assumes excitatory EPSPs and
+pre-before-post potentiation, and timings snap to the array timestep.
