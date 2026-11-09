@@ -256,7 +256,8 @@ class _SanitizedStimModel:
     sanitized_segments: list[_WindowSegment]
     holograms: list[_Hologram]
     fixes: list[_SanityFix]
-    truncated_tail_windows: int
+    # Windows appended past the input's end so preblank insertions lose nothing.
+    extended_tail_windows: int
     # Set when shapes are placed at exact ticks; ``None`` for the window grid.
     exact_shapes: list[_ExactShape] | None = None
 
@@ -1249,17 +1250,35 @@ def _enforce_preblank_windows(
 ) -> tuple[np.ndarray, list[_Hologram], list[_SanityFix], int, list[int]]:
     """Ensure every hologram has a blank load window immediately before it.
 
-    Returns the adjusted window matrix, final holograms, fix records, count of
-    truncated tail windows, and the list of insertion positions (in the
-    cumulative/current frame at the time of each insertion).  The insertion
-    positions are used by callers to compute tick-accurate adjusted raw segment
-    positions.
+    Each insertion shifts the tail right by one window. The matrix grows when
+    a shift would push active windows past the input's end, so no hologram is
+    ever dropped; trailing blank windows beyond the original length are not
+    kept.
+
+    Returns the adjusted window matrix, final holograms, fix records, the
+    number of windows appended past the original length, and the list of
+    insertion positions (in the cumulative/current frame at the time of each
+    insertion).  The insertion positions are used by callers to compute
+    tick-accurate adjusted raw segment positions.
     """
     adjusted = np.array(window_values, copy=True)
     fixes: list[_SanityFix] = []
     insertion_positions: list[int] = []
-    truncated_tail_windows = 0
     n_windows = adjusted.shape[0]
+
+    def finish() -> tuple[
+        np.ndarray, list[_Hologram], list[_SanityFix], int, list[int]
+    ]:
+        active_rows = np.flatnonzero(np.any(adjusted != 0, axis=1))
+        n_rows = max(n_windows, int(active_rows[-1]) + 1 if active_rows.size else 0)
+        trimmed = adjusted[:n_rows, :]
+        return (
+            trimmed,
+            _build_holograms_from_window_values(trimmed),
+            fixes,
+            n_rows - n_windows,
+            insertion_positions,
+        )
 
     max_iterations = max(1, n_windows * 3)
     for _ in range(max_iterations):
@@ -1269,27 +1288,11 @@ def _enforce_preblank_windows(
             None,
         )
         if violation is None:
-            return (
-                adjusted,
-                holograms,
-                fixes,
-                truncated_tail_windows,
-                insertion_positions,
-            )
+            return finish()
 
         shift_start = violation.start_win
         insertion_positions.append(shift_start)
-        tail = adjusted[shift_start:, :].copy()
-        adjusted[shift_start:, :] = 0
-        write_start = shift_start + 1
-        if write_start < n_windows:
-            writable = n_windows - write_start
-            adjusted[write_start:, :] = tail[:writable, :]
-            dropped = max(0, tail.shape[0] - writable)
-        else:
-            dropped = tail.shape[0]
-        if dropped > 0:
-            truncated_tail_windows += dropped
+        adjusted = np.insert(adjusted, shift_start, 0, axis=0)
 
         fixes.append(
             _SanityFix(
@@ -1305,8 +1308,7 @@ def _enforce_preblank_windows(
             )
         )
 
-    final_holograms = _build_holograms_from_window_values(adjusted)
-    return adjusted, final_holograms, fixes, truncated_tail_windows, insertion_positions
+    return finish()
 
 
 def _apply_preblank_insertions_to_raw_segments(
@@ -1512,14 +1514,14 @@ def _sanitize_stim_array_for_export(
             sanitized_segments=sanitized_segments_unshifted,
             holograms=holograms,
             fixes=[*quantization_fixes, *overlap_fixes, *exact_fixes],
-            truncated_tail_windows=0,
+            extended_tail_windows=0,
             exact_shapes=exact_shapes,
         )
     (
         adjusted_windows,
         holograms,
         preblank_fixes,
-        truncated_tail_windows,
+        extended_tail_windows,
         insertion_positions,
     ) = _enforce_preblank_windows(window_values)
     adjusted_raw_segments = _apply_preblank_insertions_to_raw_segments(
@@ -1536,7 +1538,7 @@ def _sanitize_stim_array_for_export(
         sanitized_segments=sanitized_segments,
         holograms=holograms,
         fixes=[*quantization_fixes, *overlap_fixes, *preblank_fixes],
-        truncated_tail_windows=truncated_tail_windows,
+        extended_tail_windows=extended_tail_windows,
     )
 
 
@@ -2211,10 +2213,11 @@ def check_syscon2_input_sanity(
                 "Non-binary export mode clips ON amplitudes to [0, 1] before export."
             )
 
-    if sanitized.truncated_tail_windows > 0:
+    if sanitized.extended_tail_windows > 0:
         warnings.append(
-            "Sanity fixes inserted preload blank windows and truncated "
-            f"{sanitized.truncated_tail_windows} trailing window(s)."
+            "Sanity fixes inserted preload blank windows and extended the "
+            f"sequence by {sanitized.extended_tail_windows} window(s) so no "
+            "pulse is cut off."
         )
 
     # Report overlapping-pulse group fixes — these require changes to the stim array.
@@ -2241,11 +2244,26 @@ def check_syscon2_input_sanity(
     all_fix_messages = overlap_fix_messages + [
         fix.message for fix in sanitized.fixes if fix.code == "insert_preblank_window"
     ]
+    # Shifted pulses may end past the input's last sample; grow the fixed array
+    # to hold them rather than clipping (the export keeps them too).
     sanitized_values_out = _adjusted_raw_segments_to_sample_values(
         sanitized.adjusted_raw_segments,
-        n_timepoints=values.shape[0],
+        n_timepoints=max(
+            values.shape[0],
+            max(
+                (segment.end_idx for segment in sanitized.adjusted_raw_segments),
+                default=0,
+            ),
+        ),
         n_neurons=values.shape[1],
     )
+    if sanitized_values_out.shape[0] > values.shape[0]:
+        extension_msg = (
+            "Sanity fixes shift pulses past the end of the input; the fixed array "
+            f"is extended from {values.shape[0]} to {sanitized_values_out.shape[0]} "
+            "ticks."
+        )
+        warnings.append(extension_msg)
 
     # Pre-compute all pulse overrun violations so we can return a complete fix
     # even though generate_syscon2_sequence_text raises on the first one.
@@ -3188,6 +3206,21 @@ def _compute_cell_stimulation_spots(
     return result
 
 
+def _mapping_keys_are_one_based(mapping: dict[int, int], n_neurons: int) -> bool:
+    """Whether a whole explicit mapping uses 1-based stimulus keys.
+
+    Mapping keys are 0-based input IDs. Older mappings were written 1-based;
+    they are recognised only when the key set as a whole can only be read that
+    way: no key 0, every key within 1..n_neurons, and key n_neurons (out of
+    range for 0-based keys) present. A sparse 0-based mapping such as
+    ``{1: 12, 2: 3}`` therefore stays 0-based.
+    """
+    keys = {int(key) for key in mapping}
+    if not keys or 0 in keys:
+        return False
+    return n_neurons in keys and all(1 <= key <= n_neurons for key in keys)
+
+
 def _resolve_neuron_to_cellpose_mapping(
     cellpose_data: CellposeImportResult,
     n_neurons: int,
@@ -3199,16 +3232,17 @@ def _resolve_neuron_to_cellpose_mapping(
     resolved: dict[int, int] = {}
 
     if explicit_mapping:
+        key_offset = (
+            1 if _mapping_keys_are_one_based(explicit_mapping, n_neurons) else 0
+        )
         for neuron_idx in range(n_neurons):
-            raw_cellpose_id: int | None = None
-            if neuron_idx in explicit_mapping:
-                raw_cellpose_id = int(explicit_mapping[neuron_idx])
-            elif (neuron_idx + 1) in explicit_mapping:
-                # Accept 1-based mapping keys for backwards compatibility.
-                raw_cellpose_id = int(explicit_mapping[neuron_idx + 1])
-
-            if raw_cellpose_id is None:
+            key = neuron_idx + key_offset
+            if key not in explicit_mapping:
+                # Unmapped neurons stay unmapped so the export warns about them;
+                # never borrow a neighbouring key (that would aim two neurons
+                # at the same cell).
                 continue
+            raw_cellpose_id = int(explicit_mapping[key])
             if raw_cellpose_id in available_cellpose_ids:
                 resolved[neuron_idx] = raw_cellpose_id
         return resolved

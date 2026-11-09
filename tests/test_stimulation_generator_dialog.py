@@ -477,6 +477,44 @@ def test_stimulation_generator_dialog_applies_sanitized_values_after_confirmatio
     assert "17ms" in qmessagebox_calls[0]["text"]
 
 
+def test_stimulation_generator_dialog_applies_longer_sanitized_values(
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    monkeypatch,
+) -> None:
+    """Sanity fixes that shift a pulse past the end return a longer array; the
+    dialog must apply it (one undoable project edit) instead of ignoring it."""
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[36:40, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
+    sanitized_values = np.zeros((48, 1), dtype=np.float32)
+    sanitized_values[44:48, 0] = 1.0
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        lambda *args, **kwargs: _build_sanity_report(
+            is_valid=True,
+            export_report=_build_export_report(),
+            sanitized_values=sanitized_values,
+            fix_messages=["Delayed hologram 0 by 8 ticks."],
+        ),
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
+
+    dialog.check_sanity_button.click()
+
+    np.testing.assert_array_equal(project.stim_arrays["stim"].values, sanitized_values)
+    assert project.history.can_undo()
+    project.history.undo()
+    np.testing.assert_array_equal(project.stim_arrays["stim"].values, values)
+
+
 def test_stimulation_generator_dialog_declines_sanitized_values_when_confirmation_is_no(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],

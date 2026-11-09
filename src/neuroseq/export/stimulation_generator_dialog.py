@@ -780,9 +780,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         sanity_report = self._input_sanity_report(stim_array)
 
         sanitized_values = sanity_report.sanitized_values
+        # The fixes may lengthen the array (pulses shifted past its end), never
+        # shorten it or change the neuron count.
         has_sanitized_update = (
             sanitized_values is not None
-            and sanitized_values.shape == stim_array.values.shape
+            and sanitized_values.ndim == 2
+            and sanitized_values.shape[1] == stim_array.values.shape[1]
+            and sanitized_values.shape[0] >= stim_array.values.shape[0]
             and not np.array_equal(sanitized_values, stim_array.values)
         )
         if has_sanitized_update:
@@ -1153,16 +1157,22 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 if parent_widget is not None
                 else None
             )
-            if stim_editor is not None and hasattr(
+            target_shape = self.project.stim_arrays[stim_name].values.shape
+            if new_values.shape != target_shape:
+                # A longer sample grid (sanity fixes shifted pulses past the end)
+                # replaces the whole grid through the project as one undoable edit.
+                self.project.replace_stim_values(
+                    stim_name,
+                    np.array(new_values, copy=True),
+                    label=f"Apply SysCon2 sanity fixes to {stim_name}",
+                )
+                if stim_editor is not None and hasattr(stim_editor, "select_stim"):
+                    stim_editor.select_stim(stim_name)
+            elif stim_editor is not None and hasattr(
                 stim_editor, "replace_stim_values_with_undo"
             ):
                 stim_editor.replace_stim_values_with_undo(stim_name, new_values)
             else:
-                target = self.project.stim_arrays[stim_name]
-                if target.values.shape != new_values.shape:
-                    raise ValueError(
-                        "Automatic sanity fixes require matching input-array shape."
-                    )
                 self.project.replace_stim_values(
                     stim_name, np.array(new_values, copy=True)
                 )

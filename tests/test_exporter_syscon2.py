@@ -10,6 +10,7 @@ from neuroseq.export.exporter_syscon2 import PulseOverrunViolation
 from neuroseq.export.exporter_syscon2 import _compute_cell_centroids
 from neuroseq.export.exporter_syscon2 import _compute_cell_stimulation_spots
 from neuroseq.export.exporter_syscon2 import _find_pulse_overrun_violations
+from neuroseq.export.exporter_syscon2 import _resolve_neuron_to_cellpose_mapping
 from neuroseq.export.exporter_syscon2 import _ScheduledEntityWindow
 from neuroseq.export.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.export.exporter_syscon2 import align_stim_values_left_for_slm
@@ -1052,6 +1053,52 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
     assert len(entities) == 1
     assert report.exported_segments == 1
     assert report.unmapped_active_neurons == []
+
+
+def test_sparse_custom_mapping_never_targets_one_cell_twice() -> None:
+    """A sparse 0-based Custom mapping must not borrow key i+1 for an unmapped
+    neuron i: {1: 12, 2: 3} used to give neuron 0 cell 12 as well."""
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((1, 1), dtype=np.int32),
+        overlay_image=np.zeros((1, 1, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=None,
+        stimulus_to_cellpose_mapping={1: 12, 2: 3},
+        mapping_strategy="Custom",
+    )
+
+    resolved = _resolve_neuron_to_cellpose_mapping(cellpose, 4, set(range(20)))
+
+    assert resolved == {1: 12, 2: 3}
+
+
+@pytest.mark.parametrize(
+    ("mapping", "n_neurons", "expected"),
+    [
+        ({1: 5, 2: 6, 3: 7}, 3, {0: 5, 1: 6, 2: 7}),  # whole key set 1-based
+        ({0: 5, 1: 6, 3: 7}, 3, {0: 5, 1: 6}),  # 0 key: 0-based, key 3 ignored
+        ({2: 6, 3: 7}, 3, {1: 6, 2: 7}),  # key n_neurons, all keys in 1..n
+        ({1: 6}, 3, {1: 6}),  # sparse 0-based
+    ],
+)
+def test_one_based_mapping_detection_uses_whole_key_set(
+    mapping: dict[int, int], n_neurons: int, expected: dict[int, int]
+) -> None:
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((1, 1), dtype=np.int32),
+        overlay_image=np.zeros((1, 1, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=None,
+        stimulus_to_cellpose_mapping=mapping,
+        mapping_strategy="Custom",
+    )
+    resolved = _resolve_neuron_to_cellpose_mapping(cellpose, n_neurons, set(range(20)))
+    assert resolved == expected
+    assert len(set(resolved.values())) == len(resolved)
 
 
 def test_export_seq_applies_the_linear_mapping_offset() -> None:
@@ -2283,3 +2330,54 @@ def test_original_stim_sidecar_restores_exact_timings_and_rows(
     # A sidecar that does not belong to the file is ignored.
     seq_path.write_text(seq_text + "\n", encoding="utf-8", newline=newline)
     assert parse_syscon2_seq_file(seq_path).original_values is None
+
+
+@pytest.mark.parametrize("exact_slm_timing", [True, False])
+def test_sanity_fixes_extend_array_instead_of_dropping_shifted_pulses(
+    exact_slm_timing: bool,
+) -> None:
+    """Preblank/SLM-load shifts push neuron 1's pulse past tick 100; the fixed
+    array must grow to keep it rather than silently cutting it."""
+    values = np.zeros((100, 2), dtype=np.float32)
+    values[0:10, 0] = 1.0
+    values[40:50, 1] = 1.0
+    stim = StimArray(
+        name="s", stim_type=StimType.External, values=values, units="", dt=_DT_S
+    )
+
+    report = check_syscon2_input_sanity(
+        stim, None, template_text="", exact_slm_timing=exact_slm_timing
+    )
+
+    fixed = report.sanitized_values
+    assert fixed is not None
+    assert fixed.shape[0] > values.shape[0]
+    np.testing.assert_array_equal((fixed > 0).sum(axis=0), [10, 10])
+    assert any("extended from 100" in warning for warning in report.warnings)
+    # No phantom "truncated" warning for windows that were empty anyway.
+    assert not any("truncated" in warning for warning in report.warnings)
+
+
+def test_preblank_insertion_grows_window_matrix_only_when_needed() -> None:
+    from neuroseq.export.exporter_syscon2 import _enforce_preblank_windows
+
+    # Trailing windows are blank: shifting loses nothing, nothing is appended.
+    windows = np.zeros((4, 2), dtype=np.float32)
+    windows[0, 0] = 1.0
+    windows[1, 1] = 1.0
+    adjusted, _, fixes, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 0
+    assert adjusted.shape == (4, 2)
+    assert len(fixes) == 2
+
+    # Last window active: the shift must append a window instead of dropping it.
+    windows = np.zeros((3, 1), dtype=np.float32)
+    windows[1:3, 0] = 1.0
+    adjusted, _, _, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 0  # window 0 is already a blank preload
+    windows = np.zeros((2, 2), dtype=np.float32)
+    windows[0, 0] = 1.0
+    windows[1, 1] = 1.0
+    adjusted, _, _, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 2
+    np.testing.assert_array_equal(adjusted.sum(axis=0), [1.0, 1.0])
