@@ -214,3 +214,17 @@ def test_llm_private_project_data_ignores_invalid_config(tmp_config_dir) -> None
     settings = GuiSettings()
     assert settings.llm_private_project_data == {"codex": False}
     assert settings.llm_project_data_private("openai")
+
+
+def test_long_lived_settings_do_not_overwrite_other_instances(tmp_config_dir) -> None:
+    long_lived = GuiSettings()
+    dialog = GuiSettings()
+    dialog.llm_provider = "codex"
+    dialog.set_llm_project_data_private("ollama", True)
+    long_lived.set_llm_project_data_private("openai", False)
+    long_lived.add_recent_project(str(tmp_config_dir / "x.nseq"))
+    loaded = GuiSettings()
+    assert loaded.llm_provider == "codex"
+    assert loaded.llm_project_data_private("ollama") is True
+    assert loaded.llm_project_data_private("openai") is False
+    assert loaded.recent_projects == [_resolved(str(tmp_config_dir / "x.nseq"))]

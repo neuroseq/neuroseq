@@ -31,7 +31,9 @@ def _project() -> Project:
 
 @pytest.fixture
 def window(qtbot, monkeypatch):
-    monkeypatch.setattr(GuiSettings, "save_config_settings", lambda self: None)
+    monkeypatch.setattr(
+        GuiSettings, "save_config_settings", lambda self, only=None: None
+    )
     widget = Gui(_project())
     qtbot.addWidget(widget)
     yield widget

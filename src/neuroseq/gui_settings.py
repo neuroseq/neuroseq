@@ -56,6 +56,16 @@ def _without_secrets(values: dict) -> dict:
     }
 
 
+def _read_config_file() -> dict:
+    config_file = pathlib.Path(user_config_dir("neuroseq", "ssciwr")) / "config.json"
+    try:
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
@@ -107,46 +117,56 @@ class GuiSettings:
         return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
 
     def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        stored = _read_config_file().get("llm_private_project_data")
+        current = stored if isinstance(stored, dict) else {}
         self.llm_private_project_data = {
             **self.llm_private_project_data,
+            **{k: v for k, v in current.items() if isinstance(v, bool)},
             provider: bool(private),
         }
 
     def __setattr__(self, prop, val):
         super().__setattr__(prop, val)
-        # save changes to the config file
-        self.save_config_settings()
+        # Write only this key: other GuiSettings instances (e.g. a settings
+        # dialog) may have changed other keys since this one was loaded.
+        self.save_config_settings(only=prop)
 
-    def save_config_settings(self) -> None:
+    def _config_values(self) -> dict:
+        return {
+            "brian2_backend": self.brian2_backend,
+            "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
+            "max_ram_trace_plot_matrix": self.max_ram_trace_plot_matrix,
+            "stim_padding_secs": self.stim_padding_secs,
+            "theme": self.theme,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "llm_ollama_base_url": self.llm_ollama_base_url,
+            "llm_openai_base_url": self.llm_openai_base_url,
+            "llm_codex_executable": self.llm_codex_executable,
+            "llm_claude_executable": self.llm_claude_executable,
+            "llm_private_project_data": self.llm_private_project_data,
+            "fiji_executable_path": self.fiji_executable_path,
+            "scanimage_python_path": self.scanimage_python_path,
+            "scanimage_recording_directory": self.scanimage_recording_directory,
+            "syscon_export_directory": self.syscon_export_directory,
+            "fov_auto_brightness": self.fov_auto_brightness,
+            "bss2_settings": _without_secrets(self.bss2_settings),
+            "recent_projects": self.recent_projects,
+        }
+
+    def save_config_settings(self, only: str | None = None) -> None:
+        """Write the settings; with ``only``, merge just that key into the file."""
+        values = self._config_values()
+        if only is not None:
+            if only not in values:
+                return
+            values = {**_read_config_file(), only: values[only]}
         try:
             config_dir = pathlib.Path(user_config_dir("neuroseq", "ssciwr"))
             config_dir.mkdir(parents=True, exist_ok=True)
             config_file = config_dir / "config.json"
             with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "brian2_backend": self.brian2_backend,
-                        "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
-                        "max_ram_trace_plot_matrix": self.max_ram_trace_plot_matrix,
-                        "stim_padding_secs": self.stim_padding_secs,
-                        "theme": self.theme,
-                        "llm_provider": self.llm_provider,
-                        "llm_model": self.llm_model,
-                        "llm_ollama_base_url": self.llm_ollama_base_url,
-                        "llm_openai_base_url": self.llm_openai_base_url,
-                        "llm_codex_executable": self.llm_codex_executable,
-                        "llm_claude_executable": self.llm_claude_executable,
-                        "llm_private_project_data": self.llm_private_project_data,
-                        "fiji_executable_path": self.fiji_executable_path,
-                        "scanimage_python_path": self.scanimage_python_path,
-                        "scanimage_recording_directory": self.scanimage_recording_directory,
-                        "syscon_export_directory": self.syscon_export_directory,
-                        "fov_auto_brightness": self.fov_auto_brightness,
-                        "bss2_settings": _without_secrets(self.bss2_settings),
-                        "recent_projects": self.recent_projects,
-                    },
-                    f,
-                )
+                json.dump(values, f)
             self.logger.info(f"Saved config settings to {config_file}")
         except Exception as e:
             self.logger.warning(f"Could not save config file: {e}")
