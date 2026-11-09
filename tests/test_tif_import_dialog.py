@@ -1153,3 +1153,54 @@ def test_finalize_roi_average_with_neuropil_and_dff(qtbot, mocker):
     assert traces.units == "dF/F"
     assert traces.traces[1].max() == pytest.approx(1.0, abs=0.01)  # 200 / 200
     np.testing.assert_allclose(traces.traces[0], 0.0, atol=1e-5)
+
+
+def test_finalize_roi_average_uses_roi_labels_for_cellpose_ids(qtbot, mocker):
+    """Rows are ROIs for mask labels [1, 2, 4, 5] (Cellpose ID 2 absent): row k
+    is Cellpose ID label-1, not k, matching extract_recording_dff."""
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    result = _make_pipeline_result()
+    result.extra["pipeline"] = "roi_average"
+    result.extra["roi_labels"] = np.array([1, 2, 4, 5])
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    np.testing.assert_array_equal(
+        dialog.imported_data[0].raw_cellpose_ids, [0, 1, 3, 4]
+    )
+
+
+def test_finalize_suite2p_follows_mask_labels_and_neuropil_coefficient(qtbot, mocker):
+    from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog._neucoeff_spin.setValue(0.3)
+    result = _make_pipeline_result()
+    result.Fneu = np.random.default_rng(1).random(result.F.shape).astype(np.float32)
+    masks = np.zeros((16, 16), dtype=np.int32)
+    for row, label in enumerate([1, 3, 4, 6]):
+        masks[row, 0] = label
+    result.masks = masks
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
+    mocker.patch.object(dialog, "accept")
+
+    dialog._finalize_import(result)
+
+    traces, spikes = dialog.imported_data
+    np.testing.assert_array_equal(traces.raw_cellpose_ids, [0, 2, 3, 5])
+    np.testing.assert_array_equal(traces.indices, [0, 2, 3, 5])
+    # spks rows 0 and 1 spike -> Cellpose IDs 0 and 2
+    assert set(spikes.raw_cellpose_ids.tolist()) == {0, 2}
+    expected, _, _ = compute_normalized_suite2p_traces(result.F, result.Fneu, 0.3)
+    np.testing.assert_allclose(traces.traces, expected)

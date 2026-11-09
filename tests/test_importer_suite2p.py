@@ -228,3 +228,43 @@ def test_remap_raw_cellpose_ids_matches_a_fresh_import_under_new_mapping(
         stimulus_to_cellpose_mapping=new_mapping,
     )
     np.testing.assert_array_equal(remapped, fresh_import_under_mapping_b.indices)
+
+
+def test_compute_normalized_suite2p_traces_uses_neuropil_coefficient() -> None:
+    f_data = np.array([[1.0, 2.0, 4.0]], dtype=np.float32)
+    fneu_data = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+    _, mins, maxs = compute_normalized_suite2p_traces(f_data, fneu_data, 0.5)
+    # f - 0.5 * fneu = [1.0, 1.5, 4.0]
+    assert mins[0] == pytest.approx(1.0)
+    assert maxs[0] == pytest.approx(4.0)
+    _, mins_default, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
+    assert mins_default[0] == pytest.approx(1.0)  # 2.0 - 0.7 = 1.3 > 1.0
+
+
+def test_prepare_suite2p_rows_follow_given_raw_cellpose_ids() -> None:
+    f_data = np.random.default_rng(0).random((3, 5)).astype(np.float32)
+    traces = prepare_suite2p_traces(
+        f_data,
+        None,
+        max_neurons=3,
+        raw_cellpose_ids=np.array([0, 2, 5]),
+        stimulus_to_cellpose_mapping={1: 2},
+    )
+    np.testing.assert_array_equal(traces.raw_cellpose_ids, [0, 2, 5])
+    assert traces.indices[1] == 1  # Cellpose 2 -> stimulus 1
+
+    spike_data = np.zeros((3, 4), dtype=np.float32)
+    spike_data[2, 1] = 1.0
+    spikes = prepare_suite2p_spikes(
+        spike_data,
+        dt=1.0,
+        threshold=0.5,
+        max_neurons=3,
+        raw_cellpose_ids=np.array([0, 2, 5]),
+    )
+    np.testing.assert_array_equal(spikes.raw_cellpose_ids, [5])
+    np.testing.assert_array_equal(spikes.spike_indices, [5])
+    with pytest.raises(ValueError, match="raw_cellpose_ids"):
+        prepare_suite2p_traces(
+            f_data, None, max_neurons=3, raw_cellpose_ids=np.array([0])
+        )
