@@ -161,3 +161,29 @@ def test_time_slider_speed_change_during_playback_does_not_jump(
     slider._tick()
     assert slider.t_ms == 6000
     slider.toggle_pause()
+
+
+def test_time_slider_drag_during_playback_continues_from_dragged_time(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slider = TimeSliderWidget()
+    qtbot.addWidget(slider)
+    slider.set_max_time_secs(100.0)
+    elapsed = {"ms": 0}
+    monkeypatch.setattr(slider.elapsed_timer, "elapsed", lambda: elapsed["ms"])
+    monkeypatch.setattr(
+        slider.elapsed_timer, "restart", lambda: elapsed.__setitem__("ms", 0)
+    )
+    slider.set_relative_playback_speed(1.0)
+    slider.toggle_pause()  # play
+    elapsed["ms"] = 2000
+    slider._tick()
+    assert slider.t_ms == 2000
+
+    slider.slider.setValue(50000)  # the user drags the handle
+    assert slider.t_ms == 50000
+    elapsed["ms"] = 40
+    slider._tick()
+    # Previously playback snapped back to 2040 ms.
+    assert slider.t_ms == 50040
+    slider.toggle_pause()
