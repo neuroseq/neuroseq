@@ -68,3 +68,19 @@ def test_package_does_not_import_visualization(package: str) -> None:
             if _is_forbidden(module)
         )
     assert not violations, "\n".join(violations)
+
+
+def test_core_does_not_import_analysis_plugins() -> None:
+    """Plugins are thin, auto-discovered add-ons; core code never imports them."""
+    plugins = SRC / "resources" / "analysis_plugins"
+    violations: list[str] = []
+    for path in sorted(SRC.rglob("*.py")):
+        if path.is_relative_to(plugins):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations.extend(
+            f"{path.relative_to(SRC).as_posix()}:{line} imports {module}"
+            for line, module in _runtime_imports(tree)
+            if module.startswith("neuroseq.resources.analysis_plugins")
+        )
+    assert not violations, "\n".join(violations)
