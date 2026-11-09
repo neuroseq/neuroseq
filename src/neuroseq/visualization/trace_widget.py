@@ -191,6 +191,9 @@ class TraceWidget(TimeseriesWidget):
         self._stim_overlay_enabled = False
         self._stim_overlay_array: StimArray | None = None
         self._stim_overlay_graphic: fpl.ImageGraphic | None = None
+        # Under auto-extend rows differ in height, so the overlay is one
+        # single-row image per visible row instead of _stim_overlay_graphic.
+        self._stim_overlay_row_graphics: list[fpl.ImageGraphic] = []
         self._stim_onset_graphic: fpl.LineGraphic | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
@@ -347,6 +350,8 @@ class TraceWidget(TimeseriesWidget):
                 self._apply_visible_neuron_layout()
                 if self.grid_lines is not None:
                     self.grid_lines.update_neuron_extent(self.n_neurons)
+            # The overlay rows and onset marks follow the row layout.
+            self._rebuild_stim_overlay()
 
     def _compute_row_layout(self) -> None:
         """Recompute per-row half-heights/centers/boundaries so that every
@@ -726,6 +731,7 @@ class TraceWidget(TimeseriesWidget):
         # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
         # the setting survives a data refresh.
         self._stim_overlay_graphic = None
+        self._stim_overlay_row_graphics = []
         self._stim_onset_graphic = None
         if self._base_max_height is not None and self.controller is not None:
             self.controller.max_height = self._base_max_height
@@ -749,11 +755,16 @@ class TraceWidget(TimeseriesWidget):
         self._rebuild_stim_overlay()
 
     def _rebuild_stim_overlay(self) -> None:
-        for graphic in (self._stim_overlay_graphic, self._stim_onset_graphic):
+        for graphic in (
+            self._stim_overlay_graphic,
+            self._stim_onset_graphic,
+            *self._stim_overlay_row_graphics,
+        ):
             if graphic is not None:
                 with contextlib.suppress(Exception):
                     self.subplot.remove_graphic(graphic)
         self._stim_overlay_graphic = None
+        self._stim_overlay_row_graphics = []
         self._stim_onset_graphic = None
 
         stim_array = self._stim_overlay_array
@@ -782,16 +793,37 @@ class TraceWidget(TimeseriesWidget):
             vmax = 1.0
         vmin = -vmax if stim_array.stim_type == StimType.External else 0.0
         cmap = get_cmap(stim_array.stim_type, alpha=self.STIM_OVERLAY_ALPHA)
-        self._stim_overlay_graphic = self.subplot.add_image(
-            visible_values.T,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-        )
-        apply_cmap_alpha(self._stim_overlay_graphic, cmap)
         dt_ms = float(stim_array.dt) * 1000.0
-        self._stim_overlay_graphic.offset = (0.5 * dt_ms, 0.0, self.STIM_OVERLAY_Z)
-        self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
+        if self.auto_extend_vertical_space and self._row_centers:
+            # Auto-extended rows differ in height: give each row its own
+            # image, centred on and as tall as the row.
+            for row, (center, half_height) in enumerate(
+                zip(self._row_centers, self._row_half_heights, strict=True)
+            ):
+                graphic = self.subplot.add_image(
+                    visible_values[:, row][np.newaxis, :],
+                    vmin=vmin,
+                    vmax=vmax,
+                    cmap=cmap,
+                )
+                apply_cmap_alpha(graphic, cmap)
+                graphic.offset = (0.5 * dt_ms, center, self.STIM_OVERLAY_Z)
+                graphic.world_object.world.scale = (dt_ms, 2.0 * half_height, 1.0)
+                self._stim_overlay_row_graphics.append(graphic)
+        else:
+            self._stim_overlay_graphic = self.subplot.add_image(
+                visible_values.T,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=cmap,
+            )
+            apply_cmap_alpha(self._stim_overlay_graphic, cmap)
+            self._stim_overlay_graphic.offset = (
+                0.5 * dt_ms,
+                0.0,
+                self.STIM_OVERLAY_Z,
+            )
+            self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
         self._add_stim_onsets(visible_values, dt_ms, stim_array.stim_type)
 
     def _add_stim_onsets(

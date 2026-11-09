@@ -2017,3 +2017,42 @@ def test_trace_norm_dialog_checkboxes_reflect_widget_settings(
 
     assert dialog.chk_offset.isChecked()
     assert dialog.chk_clip.isChecked()
+
+
+def test_stim_overlay_follows_auto_extended_rows(qtbot: QtBot) -> None:
+    """Under auto-extend the onset marks sit at the grown row centers, so the
+    overlay must too; replot_traces() must also rebuild the overlay when the
+    row layout changes."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.set_stim_overlay_data(_stim_array(n_neurons=5))
+    trace_widget.set_stim_overlay_enabled(True)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    centers = trace_widget._row_centers
+    half_heights = trace_widget._row_half_heights
+    rows = trace_widget._stim_overlay_row_graphics
+    assert len(rows) == 5
+    for graphic, center, half in zip(rows, centers, half_heights, strict=True):
+        assert graphic.offset[1] == pytest.approx(center)
+        assert graphic.world_object.world.scale[1] == pytest.approx(2 * half)
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx(centers))
+
+    trace_widget.auto_extend_vertical_space = False
+    trace_widget.replot_traces()
+    assert trace_widget._stim_overlay_row_graphics == []
+    assert trace_widget._stim_overlay_graphic is not None
+    marks = trace_widget._stim_onset_graphic
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0]))
