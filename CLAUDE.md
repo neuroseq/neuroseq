@@ -133,7 +133,10 @@ dialog and its helpers sit together in one package rather than in global
   shared undo history (`project_history.py`) is recorded or cleared; never assign
   `stim_array.values`/`.dt` or `project.experiments[...]` from a dialog.
 - **Plugin folder is not a code location.** `resources/analysis_plugins/` holds
-  only thin, auto-discovered analysis plugins; core code must never import from it.
+  only thin, auto-discovered analysis plugins; core code must never import from it
+  (`tests/test_import_layering.py` enforces this). Logic shared by a plugin and core
+  lives in core and the plugin imports it (e.g. `epsp_detection.py`,
+  `elise_support/plugin_keys.py`).
   LLM-authored plugins are written (after user confirmation) to the per-user folder
   from `analysis_plugins.user_plugins_directory()`.
 - **Example projects** are one factory per file under `example_projects/neurons/`

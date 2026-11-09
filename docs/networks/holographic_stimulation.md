@@ -44,6 +44,8 @@ directly in the input array (undoable):
   value)**), and overlapping pulse groups (align to the shortest),
 
 then proposes any remaining timing or amplitude changes for confirmation.
+If shifted pulses no longer fit, the array is extended (with a warning)
+instead of cutting them off.
 
 ## Export
 
