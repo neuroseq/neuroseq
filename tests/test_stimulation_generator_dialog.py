@@ -905,7 +905,7 @@ def test_stimulation_generator_dialog_applies_slm_load_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "shift_stim_values_right_for_initial_slm_load",
-        lambda *a, **kw: (shifted_values, None),
+        lambda *a, **kw: (shifted_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,
@@ -926,6 +926,52 @@ def test_stimulation_generator_dialog_applies_slm_load_fix(
     dialog.check_sanity_button.click()
 
     assert np.array_equal(project.stim_arrays["stim"].values, shifted_values)
+
+
+def test_slm_load_fix_extends_the_array_instead_of_dropping_late_pulses(
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real initial-load shift keeps a pulse near the end (it used to fall
+    off the fixed-length array) and warns that the array grew, undoably."""
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[2:4, 0] = 1.0
+    values[60:64, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    for name in (
+        "find_slm_gap_violations",
+        "find_slm_off_on_overlap_violations",
+        "find_simultaneous_duration_violations",
+    ):
+        monkeypatch.setattr(
+            stimulation_generator_dialog_module, name, lambda *a, **kw: []
+        )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_initial_slm_start_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._InitialSlmFixChoice.SHIFT_RIGHT,
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        lambda *args, **kwargs: _build_sanity_report(
+            is_valid=True,
+            export_report=_build_export_report(),
+        ),
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.check_sanity_button.click()
+
+    fixed = project.stim_arrays["stim"].values
+    assert fixed.shape == (96, 1)
+    assert int(np.count_nonzero(fixed)) == int(np.count_nonzero(values))
+    assert np.all(fixed[92:96, 0] == 1.0)
+    assert any(call["title"] == "Input Array Extended" for call in qmessagebox_calls)
+    project.history.undo()
+    assert np.array_equal(project.stim_arrays["stim"].values, values)
 
 
 # ---------------------------------------------------------------------------
@@ -998,7 +1044,7 @@ def test_stimulation_generator_dialog_applies_slm_gap_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "space_out_stim_values_for_slm",
-        lambda *a, **kw: (spaced_values, None),
+        lambda *a, **kw: (spaced_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,
@@ -1096,7 +1142,7 @@ def test_stimulation_generator_dialog_applies_slm_offon_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "space_out_stim_values_for_slm_off_on_overlap",
-        lambda *a, **kw: (spaced_values, None),
+        lambda *a, **kw: (spaced_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,

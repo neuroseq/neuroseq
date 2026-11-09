@@ -2579,6 +2579,21 @@ def resample_stim_values_to_dt(
     return new_values, n_new
 
 
+def _insert_blank_samples(
+    values: np.ndarray, start: int, n_samples: int, min_length: int
+) -> np.ndarray:
+    """Delay everything from ``start`` on by ``n_samples`` blank rows.
+
+    The array grows when active samples would otherwise fall off its end;
+    trailing blank rows beyond ``min_length`` are dropped, so it never grows
+    more than needed (like ``_enforce_preblank_windows``).
+    """
+    shifted = np.insert(values, [start] * n_samples, 0, axis=0)
+    active_rows = np.flatnonzero(np.any(shifted != 0, axis=1))
+    n_rows = max(min_length, int(active_rows[-1]) + 1 if active_rows.size else 0)
+    return shifted[:n_rows, :]
+
+
 def shift_stim_values_right_for_initial_slm_load(
     stim_array: StimArray,
     *,
@@ -2586,8 +2601,10 @@ def shift_stim_values_right_for_initial_slm_load(
 ) -> tuple[np.ndarray, int]:
     """Translate entire stim array to the right by the SLM load-up window.
 
+    The array grows rather than losing samples shifted past its end.
+
     Returns:
-      (new_values, truncated_tail_timepoints)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
@@ -2601,12 +2618,8 @@ def shift_stim_values_right_for_initial_slm_load(
     shift_samples = int(np.ceil((min_start_us * 1e-6) / float(stim_array.dt)))
     shift_samples = max(1, shift_samples)
 
-    shifted = np.zeros_like(values)
-    if shift_samples < n_timepoints:
-        shifted[shift_samples:, :] = values[: n_timepoints - shift_samples, :]
-
-    truncated_tail_timepoints = min(shift_samples, n_timepoints)
-    return shifted, truncated_tail_timepoints
+    shifted = _insert_blank_samples(values, 0, shift_samples, n_timepoints)
+    return shifted, shifted.shape[0] - n_timepoints
 
 
 def space_out_stim_values_for_slm(
@@ -2615,16 +2628,17 @@ def space_out_stim_values_for_slm(
     active_threshold: float = 0.0,
     min_gap_us: int = _SLM_LEAD_IN_US,
 ) -> tuple[np.ndarray, int]:
-    """Right-shift tail segments to enforce SLM gap in-place (fixed length).
+    """Right-shift tail segments to enforce the SLM gap.
+
+    The array grows rather than losing samples shifted past its end.
 
     Returns:
-      (new_values, truncated_tail_samples)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
-    truncated_tail_samples = 0
 
     max_iterations = max(1, n_timepoints * 2)
     for _ in range(max_iterations):
@@ -2648,16 +2662,11 @@ def space_out_stim_values_for_slm(
         if shift_samples <= 0:
             break
 
-        shift_start = violation.current_start_idx
-        tail_before_shift = values[shift_start:, :].copy()
-        values[shift_start:, :] = 0
-        write_start = shift_start + shift_samples
-        if write_start < n_timepoints:
-            writable_rows = n_timepoints - write_start
-            values[write_start:, :] = tail_before_shift[:writable_rows, :]
-        truncated_tail_samples += min(shift_samples, tail_before_shift.shape[0])
+        values = _insert_blank_samples(
+            values, violation.current_start_idx, shift_samples, n_timepoints
+        )
 
-    return values, truncated_tail_samples
+    return values, values.shape[0] - n_timepoints
 
 
 def align_stim_values_left_for_slm(
@@ -2724,14 +2733,15 @@ def space_out_stim_values_for_slm_off_on_overlap(
 ) -> tuple[np.ndarray, int]:
     """Right-shift tail segments to eliminate SLM off/on overlap violations.
 
+    The array grows rather than losing samples shifted past its end.
+
     Returns:
-      (new_values, truncated_tail_samples)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
-    truncated_tail_samples = 0
 
     max_iterations = max(1, n_timepoints * 2)
     for _ in range(max_iterations):
@@ -2753,18 +2763,12 @@ def space_out_stim_values_for_slm_off_on_overlap(
         violation = violations[0]
         shift_samples = violation.required_shift_samples
         shift_start = violation.phase_start_idx
-        if shift_samples <= 0 or shift_start >= n_timepoints:
+        if shift_samples <= 0 or shift_start >= values.shape[0]:
             break
 
-        tail_before_shift = values[shift_start:, :].copy()
-        values[shift_start:, :] = 0
-        write_start = shift_start + shift_samples
-        if write_start < n_timepoints:
-            writable_rows = n_timepoints - write_start
-            values[write_start:, :] = tail_before_shift[:writable_rows, :]
-        truncated_tail_samples += min(shift_samples, tail_before_shift.shape[0])
+        values = _insert_blank_samples(values, shift_start, shift_samples, n_timepoints)
 
-    return values, truncated_tail_samples
+    return values, values.shape[0] - n_timepoints
 
 
 def find_simultaneous_duration_violations(

@@ -706,10 +706,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if load_choice == self._InitialSlmFixChoice.CANCEL:
                 return
-            fixed_values, _ = shift_stim_values_right_for_initial_slm_load(stim_array)
+            fixed_values, extended_samples = (
+                shift_stim_values_right_for_initial_slm_load(stim_array)
+            )
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Shifted stim '%s' right for initial SLM load-up.", stim_name
             )
@@ -722,10 +725,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if gap_choice == self._SlmFixChoice.CANCEL:
                 return
-            fixed_values, _ = space_out_stim_values_for_slm(stim_array)
+            fixed_values, extended_samples = space_out_stim_values_for_slm(stim_array)
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Spaced out stim '%s' to resolve SLM gap violations.", stim_name
             )
@@ -738,10 +742,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if offon_choice == self._SlmOffOnFixChoice.CANCEL:
                 return
-            fixed_values, _ = space_out_stim_values_for_slm_off_on_overlap(stim_array)
+            fixed_values, extended_samples = (
+                space_out_stim_values_for_slm_off_on_overlap(stim_array)
+            )
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Spaced out stim '%s' to resolve SLM off/on overlap.", stim_name
             )
@@ -1136,6 +1143,21 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         if clicked == shift_button:
             return self._InitialSlmFixChoice.SHIFT_RIGHT
         return self._InitialSlmFixChoice.CANCEL
+
+    def _warn_input_extended(
+        self, stim_name: str, extended_samples: int, dt_seconds: float
+    ) -> None:
+        """Tell the user a sanity fix lengthened the array instead of cutting
+        pulses shifted past its end."""
+        if extended_samples <= 0:
+            return
+        message = (
+            f"Shifting pulses extended input array '{stim_name}' by "
+            f"{extended_samples} sample(s) ({extended_samples * dt_seconds * 1e3:.3f} ms) "
+            "so no pulse is cut off."
+        )
+        self._log_status("%s", message)
+        QtWidgets.QMessageBox.warning(self, "Input Array Extended", message)
 
     def _replace_stim_values_preserving_undo(
         self,

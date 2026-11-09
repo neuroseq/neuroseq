@@ -1450,7 +1450,7 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = shift_stim_values_right_for_initial_slm_load(
+    new_values, extended_samples = shift_stim_values_right_for_initial_slm_load(
         stim_array
     )
     shifted = StimArray(
@@ -1461,7 +1461,8 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         dt=stim_array.dt,
     )
 
-    assert truncated_tail_samples == 32
+    assert extended_samples == 0  # the shifted pulses still fit
+    assert new_values.shape == values.shape
     assert np.all(new_values[0:32, :] == 0.0)
     assert np.all(new_values[32:35, 0] == 1.0)
     assert np.all(new_values[42:44, 1] == 1.0)
@@ -1480,7 +1481,7 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = space_out_stim_values_for_slm(
+    new_values, extended_samples = space_out_stim_values_for_slm(
         stim_array,
         active_threshold=0.0,
     )
@@ -1493,7 +1494,40 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
     )
 
     assert len(find_slm_gap_violations(resolved, active_threshold=0.0)) == 0
-    assert truncated_tail_samples > 0
+    assert extended_samples == 0
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
+
+
+@pytest.mark.parametrize(
+    "shifter",
+    [
+        shift_stim_values_right_for_initial_slm_load,
+        space_out_stim_values_for_slm,
+        space_out_stim_values_for_slm_off_on_overlap,
+    ],
+)
+def test_slm_shift_fixes_grow_the_array_instead_of_dropping_pulses(
+    shifter: object,
+) -> None:
+    """Shifting pulses right must never push active samples off the end."""
+    values = np.zeros((200, 2), dtype=np.float32)
+    values[40:50, 0] = 1.0
+    values[52:62, 0:2] = 1.0  # new hologram too soon: gap and off/on violation
+    values[190:200, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    new_values, extended_samples = shifter(stim_array)  # type: ignore[operator]
+
+    assert extended_samples > 0
+    assert new_values.shape == (200 + extended_samples, 2)
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
+    assert np.any(new_values[-1] != 0)  # grown just enough for the last pulse
 
 
 def test_align_stim_values_left_for_slm_resolves_violations() -> None:
@@ -1537,7 +1571,7 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = space_out_stim_values_for_slm_off_on_overlap(
+    new_values, extended_samples = space_out_stim_values_for_slm_off_on_overlap(
         stim_array,
         active_threshold=0.0,
     )
@@ -1549,7 +1583,8 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         dt=_DT_S,
     )
 
-    assert truncated_tail_samples > 0
+    assert extended_samples == 0
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
     assert len(find_slm_off_on_overlap_violations(resolved, active_threshold=0.0)) == 0
 
 
