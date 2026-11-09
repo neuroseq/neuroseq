@@ -979,9 +979,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             "Choose how to resolve:",
             "1) Clear array: set dt and blank all stimuli — you redraw from scratch.",
             "2) Resample: nearest-neighbor resample the existing pattern onto the new "
-            "tick grid, preserving it as closely as the new grid allows. This replaces "
-            "the array directly and cannot be undone with Ctrl+Z, unlike the other "
-            "fixes in this dialog.",
+            "tick grid, preserving it as closely as the new grid allows (undoable).",
             "3) Cancel",
         ]
         msg_box = QtWidgets.QMessageBox(self)

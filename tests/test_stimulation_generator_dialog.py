@@ -839,6 +839,26 @@ def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
     np.testing.assert_array_equal(stim.values, values)
 
 
+def test_dt_prompt_does_not_claim_the_resample_is_irreversible(
+    qtbot: QtBot,
+) -> None:
+    """The resample goes through project.replace_stim_values, which records
+    undo (see the test above), so the prompt must not say otherwise."""
+    project = _build_project(np.zeros((10, 1), dtype=np.float32), mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+
+    dialog._prompt_dt_fix_choice(
+        current_dt=_SYSCON2_TTL_PULSE_QUANTUM_S / 2,
+        required_dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
+    )
+
+    boxes = dialog.findChildren(QtWidgets.QMessageBox)
+    assert boxes
+    assert "cannot be undone" not in boxes[-1].text()
+    assert "undoable" in boxes[-1].text()
+
+
 # ---------------------------------------------------------------------------
 # Pre-sanity SLM load violation (lines 457, 460-468)
 # ---------------------------------------------------------------------------
