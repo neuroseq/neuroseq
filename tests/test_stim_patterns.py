@@ -12,6 +12,7 @@ from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
 from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
 from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
 from neuroseq.stimulation.static_input.stim_patterns import parse_neuron_indices
+from neuroseq.stimulation.static_input.stim_patterns import pattern_total_samples
 from neuroseq.stimulation.stim import DrawStimType
 
 
@@ -469,3 +470,17 @@ def test_pulse_shorter_than_one_sample_is_rejected(generate) -> None:
     dialog shows."""
     with pytest.raises(ValueError, match="shorter than one sample"):
         generate()
+
+
+def test_pattern_durations_round_half_up_like_the_rest_of_neuroseq() -> None:
+    """Python's round() rounds 0.5 and 2.5 to even (0 and 2 samples); the stim
+    timing helpers round half up, so a 2.5 ms pulse at 1 ms dt is 3 samples."""
+    assert (
+        pattern_total_samples(pulse_ms=2.5, ipi_ms=0.5, repeats=1, dt_seconds=0.001)
+        == 4
+    )
+
+
+def test_too_short_pulse_message_suggests_one_full_sample() -> None:
+    with pytest.raises(ValueError, match=r"use at least 16\.6 ms"):
+        generate_sequential(2, 5.0, 10.0, 1.0, 0.0166)

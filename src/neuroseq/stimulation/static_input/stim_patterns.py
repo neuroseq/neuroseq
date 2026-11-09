@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim_timing import milliseconds_to_samples_nearest
 
 # Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
 # Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
@@ -56,14 +57,14 @@ def _validate_common(
         raise ValueError("repeats must be at least 1")
     if dt_seconds <= 0.0:
         raise ValueError("dt_seconds must be positive")
-    pulse_n = int(round(pulse_ms / 1000.0 / dt_seconds))
-    ipi_n = int(round(ipi_ms / 1000.0 / dt_seconds))
+    pulse_n = milliseconds_to_samples_nearest(pulse_ms, dt_seconds)
+    ipi_n = milliseconds_to_samples_nearest(ipi_ms, dt_seconds)
     if pulse_n < 1:
         # An all-zero block would overwrite existing stimuli with nothing.
         raise ValueError(
             f"Pulse duration {pulse_ms:g} ms is shorter than one sample of the "
             f"input array (dt {dt_seconds * 1000.0:g} ms); use at least "
-            f"{dt_seconds * 500.0:g} ms."
+            f"{dt_seconds * 1000.0:g} ms."
         )
     return pulse_n, ipi_n
 
