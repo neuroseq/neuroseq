@@ -68,17 +68,9 @@ def _make_controls(widget) -> QtWidgets.QWidget:
 
 
 def _inject_controls(widget, on_update) -> QtWidgets.QWidget:
-    layout = widget.layout()
-    if hasattr(widget, _CONTROLS_ATTR):
-        old_bar = getattr(widget, _CONTROLS_ATTR)
-        if old_bar is not None:
-            if layout is not None:
-                layout.removeWidget(old_bar)
-            old_bar.deleteLater()
-
+    # The widget removes the bar again before the next analysis renders.
     bar = _make_controls(widget)
-    if layout is not None:
-        layout.insertWidget(0, bar)
+    widget.add_plugin_controls(bar)
     bar._update_btn.clicked.connect(lambda: on_update(bar._spin_cycle.value()))
     setattr(widget, _CONTROLS_ATTR, bar)
     return bar

@@ -18,14 +18,6 @@ _CONTROLS_ATTR = "_epsp_amplitude_controls"
 _NEURON_MARKERS = ("+", "x", "o", "s", "^", "v", "D", "P", "*", "<", ">")
 
 
-def _remove_controls(widget) -> None:
-    old = getattr(widget, _CONTROLS_ATTR, None)
-    if old is not None and widget.layout() is not None:
-        widget.layout().removeWidget(old)
-        old.deleteLater()
-    setattr(widget, _CONTROLS_ATTR, None)
-
-
 def _replot(
     widget,
     data: TraceData,
@@ -89,10 +81,6 @@ def _replot(
 
 
 def _inject_controls(widget, data: TraceData, neuron_slice, time_slice) -> None:
-    _remove_controls(widget)
-    layout = widget.layout()
-    if layout is None:
-        return
     bar = QtWidgets.QWidget(widget)
     controls = QtWidgets.QHBoxLayout(bar)
     controls.setContentsMargins(4, 2, 4, 2)
@@ -130,12 +118,13 @@ def _inject_controls(widget, data: TraceData, neuron_slice, time_slice) -> None:
     percent.toggled.connect(count.setEnabled)
     percent.toggled.connect(update)
     count.valueChanged.connect(update)
-    layout.insertWidget(0, bar)
+    # The widget removes the bar again before the next analysis renders.
+    widget.add_plugin_controls(bar)
     setattr(widget, _CONTROLS_ATTR, bar)
 
 
 def render_analysis(widget, data, neuron_slice, time_slice) -> None:
-    _remove_controls(widget)
+    setattr(widget, _CONTROLS_ATTR, None)
     if isinstance(data, SynapseData) or not isinstance(data, TraceData):
         widget.subplot.text(
             0.5,

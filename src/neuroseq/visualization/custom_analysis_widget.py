@@ -63,6 +63,10 @@ class CustomAnalysisWindow(QtWidgets.QWidget):
 class CustomAnalysisWidget(MatplotlibWidget):
     """A custom analysis widget that analyses a slice of data and displays the results using matplotlib."""
 
+    # objectName of the controls bars that analysis plugins add above the
+    # plot; set_data()/clear_data() remove every such bar before rendering.
+    PLUGIN_CONTROLS_OBJECT_NAME = "analysis_plugin_controls"
+
     def __init__(
         self,
         parent: QtWidgets.QWidget | None = None,
@@ -110,8 +114,35 @@ class CustomAnalysisWidget(MatplotlibWidget):
         self.spike_indices = None
         self.spike_neuron_indices = None
         self.neuron_ids = None
-        self.subplot.clear()
+        self._reset_plot()
         self._redraw()
+
+    def add_plugin_controls(self, bar: QtWidgets.QWidget) -> None:
+        """Show an analysis plugin's controls bar above the plot. The bar is
+        removed again by the next set_data() or clear_data()."""
+        bar.setObjectName(self.PLUGIN_CONTROLS_OBJECT_NAME)
+        layout = self.layout()
+        if layout is not None:
+            layout.insertWidget(0, bar)
+
+    def _reset_plot(self) -> None:
+        """Clear the plot and drop what earlier analyses added around it:
+        extra axes (colorbars, twin axes) and plugin controls bars."""
+        for bar in self.findChildren(
+            QtWidgets.QWidget,
+            self.PLUGIN_CONTROLS_OBJECT_NAME,
+            Qt.FindChildOption.FindDirectChildrenOnly,
+        ):
+            layout = self.layout()
+            if layout is not None:
+                layout.removeWidget(bar)
+            bar.hide()
+            bar.setParent(None)
+            bar.deleteLater()
+        for axes in list(self.getFigure().axes):
+            if axes is not self.subplot:
+                axes.remove()
+        self.subplot.clear()
 
     def apply_theme(self, theme: str) -> None:
         """Recolor the matplotlib figure to match the application theme."""
@@ -210,7 +241,7 @@ class CustomAnalysisWidget(MatplotlibWidget):
         neuron_slice: slice | Sequence[int] | None,
         time_slice: slice | None,
     ) -> None:
-        self.subplot.clear()
+        self._reset_plot()
         if data is None or analysis_type is None:
             return
         self.logger.info(

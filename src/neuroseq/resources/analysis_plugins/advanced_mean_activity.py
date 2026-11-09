@@ -63,22 +63,11 @@ def _make_controls(widget, data, neuron_slice, time_slice) -> QtWidgets.QWidget 
 
 
 def _inject_controls(widget, data, neuron_slice, time_slice) -> None:
-    """Insert the controls bar into the widget layout, replacing any previous one."""
-    layout = widget.layout()
-    if layout is None:
-        return
-
-    # Remove existing controls bar if present
-    if hasattr(widget, _CONTROLS_ATTR):
-        old_bar = getattr(widget, _CONTROLS_ATTR)
-        if old_bar is not None:
-            layout.removeWidget(old_bar)
-            old_bar.deleteLater()
-
+    """Show the controls bar above the plot; the widget removes it again
+    before the next analysis renders."""
     bar = _make_controls(widget, data, neuron_slice, time_slice)
     if bar is not None:
-        # MatplotlibWidget wraps its canvas in a QVBoxLayout; insert bar at top (index 0)
-        layout.insertWidget(0, bar)
+        widget.add_plugin_controls(bar)
     setattr(widget, _CONTROLS_ATTR, bar)
 
 
