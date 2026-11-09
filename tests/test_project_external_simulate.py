@@ -280,17 +280,6 @@ def test_load_neuroseq_module_without_entrypoint_raises(
         project.load_NN()
 
 
-def test_load_external_simulator_wrapper_calls_load_nn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    project = Project()
-    called: list[str] = []
-    monkeypatch.setattr(project, "load_NN", lambda: called.append("load_NN"))
-
-    project.load_external_simulator()
-    assert called == ["load_NN"]
-
-
 def test_legacy_u_inp_stim_migrated_to_opsin_pair_on_load() -> None:
     project = Project()
     project.external_simulate_path = "neuroseq:elise"

@@ -228,6 +228,9 @@ class Project:
                             _meta["syscon_export_settings"]
                         )
                     self.device_folders = dict(_meta.get("device_folders", {}))
+                    self.syscon2_export_template_text = _meta.get(
+                        "syscon2_export_template_text"
+                    )
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
                     for acquisition in self.imaging_acquisitions:
                         if "recording" in acquisition:
@@ -266,12 +269,6 @@ class Project:
                                 f"External simulation backend migration failed "
                                 f"for {self.external_simulate_path!r}"
                             )
-            for experiment in self.experiments.values():
-                self.max_time_secs = max(self.max_time_secs, experiment.duration)
-            for stim_array in self.stim_arrays.values():
-                self.max_time_secs = max(
-                    self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
-                )
 
         self.update_limits()
         # Constructing a Project (fresh or loaded from filepath) always
@@ -1521,23 +1518,6 @@ class Project:
         self.update_limits()
         self.mark_dirty()
 
-    def trim_stim_arrays(self, total_time_seconds: float):
-        """
-        Trim all StimArrays in the project to a length of total_time_seconds
-        """
-        for name, stim_array in self.stim_arrays.items():
-            n_timestamps = stim_array.values.shape[0]
-            new_n_timestamps = seconds_to_samples_nearest(
-                total_time_seconds, stim_array.dt
-            )
-            if new_n_timestamps < n_timestamps:
-                self.logger.info(
-                    f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
-                )
-                self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
-        self.update_limits()
-        self.mark_dirty()
-
     def loop_stim_arrays(self, n_loops: int) -> None:
         """Tile every stim array's values along the time axis."""
         if n_loops < 1:
@@ -1608,9 +1588,8 @@ class Project:
             new_n_timestamps = seconds_to_samples_nearest(
                 total_time_seconds, stim_array.dt
             )
-            if (
-                new_n_timestamps < stim_array.values.shape[0]
-                and np.sum(stim_array.values[new_n_timestamps:, :]) > 0
+            if new_n_timestamps < stim_array.values.shape[0] and np.any(
+                stim_array.values[new_n_timestamps:, :] != 0
             ):
                 return True
         return False
@@ -1652,13 +1631,6 @@ class Project:
             self.external_simulator = None
             self.external_simulate_function = runpy.run_path(path)["simulate"]
 
-    def load_external_simulator(self) -> None:
-        """Compatibility wrapper for loading external simulation entry points.
-
-        This delegates to `load_NN`, which remains the canonical implementation.
-        """
-        self.load_NN()
-
     def external_simulate_params_flat(self) -> dict[str, object]:
         """Flatten `external_simulate_params` to `{name: value}` for the call site."""
         return {k: v["value"] for k, v in self.external_simulate_params.items()}
@@ -1686,6 +1658,16 @@ class Project:
         self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
+        self.mark_dirty()
+
+    def store_checkpoint(self, checkpoint: str) -> None:
+        """Store the simulation state as a named checkpoint (saved with the project)."""
+        self.b2_model.store(checkpoint)
+        self.mark_dirty()
+
+    def restore_checkpoint(self, checkpoint: str) -> None:
+        """Restore the simulation state of a named checkpoint."""
+        self.b2_model.restore(checkpoint)
         self.mark_dirty()
 
     def request_cancel_simulation(self) -> None:
@@ -1769,6 +1751,10 @@ class Project:
                 )
             if self.device_folders:
                 metadata["device_folders"] = self.device_folders
+            if self.syscon2_export_template_text is not None:
+                metadata["syscon2_export_template_text"] = (
+                    self.syscon2_export_template_text
+                )
             zf.writestr(
                 "project_metadata.json",
                 json.dumps(metadata, default=_metadata_json_default),

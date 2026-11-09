@@ -487,7 +487,9 @@ def test_trim_windows_simulated_trace_and_restores_on_regrow() -> None:
     full_samples = full.traces.shape[1]
 
     # Trim to 0.02 s: the trace is windowed to that many of its own samples.
-    project.trim_stim_arrays(0.02)
+    for name, stim_array in project.stim_arrays.items():
+        n_rows = round(0.02 / stim_array.dt)
+        project.replace_stim_values(name, stim_array.values[:n_rows])
     clipped = project.get_data(trace_name, TraceData)
     assert clipped is not None
     expected_samples = round(0.02 / full.dt)
@@ -629,66 +631,22 @@ def test_stim_array_trimming(project_ornstein: Project) -> None:
     assert project_ornstein.trim_stim_array_would_delete_data(1.0) is False
     assert project_ornstein.trim_stim_array_would_delete_data(0.901) is False
     assert project_ornstein.trim_stim_array_would_delete_data(0.899) is True
-    # trim to 0.95s
     assert project_ornstein.trim_stim_array_would_delete_data(0.95) is False
-    project_ornstein.trim_stim_arrays(0.95)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(950, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
-    # trim to 0.5s
     assert project_ornstein.trim_stim_array_would_delete_data(0.5) is True
-    project_ornstein.trim_stim_arrays(0.5)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(500, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
-    # trim to 0s
     assert project_ornstein.trim_stim_array_would_delete_data(0) is True
-    project_ornstein.trim_stim_arrays(0)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(0, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
 
 
-@pytest.mark.parametrize(
-    "padded_rows,trim_seconds",
-    [
-        (4151, 0.5),
-        (4151, 1.0),
-        (4425, 2.5),
-        (5247, 5.0),
-        (8398, 5.0),
-    ],
-)
-def test_trim_stim_arrays_exact_after_padding(
-    padded_rows: int, trim_seconds: float
-) -> None:
-    """Trimming removes exactly the requested duration.
-
-    Running a simulation pads stim arrays to non-round lengths (via ceil).
-    Trimming those lengths used ``int(seconds / dt)``, which floor-truncated
-    float-representation error and removed one sample too many. The
-    conversion now rounds to the nearest sample so the trim is exact.
-    """
-    dt = 0.001
-    values = np.zeros((padded_rows, 3), dtype=np.float32)
-    project = default_project()
+def test_trim_would_delete_negative_or_cancelling_values() -> None:
+    project = Project()
+    values = np.zeros((10, 2))
+    values[8, 0] = -1.0
+    values[9, :] = [1.0, -1.0]
     project.stim_arrays["stim"] = StimArray(
-        "stim", StimType.Excitation, values, "mS", dt=dt
+        "stim", StimType.Excitation, values, "mS", dt=0.001
     )
-    current_length_secs = dt * padded_rows
-    new_length_secs = current_length_secs - trim_seconds
-    project.trim_stim_arrays(new_length_secs)
-    expected_rows = padded_rows - round(trim_seconds / dt)
-    assert project.stim_arrays["stim"].values.shape[0] == expected_rows
+    assert project.trim_stim_array_would_delete_data(0.009) is True
+    project.stim_arrays["stim"].values[9, :] = 0
+    assert project.trim_stim_array_would_delete_data(0.008) is True
 
 
 def test_simulation_timeline_seconds_uses_longest_stim() -> None:
@@ -1487,7 +1445,6 @@ def test_mark_dirty_and_save_roundtrip(tmp_path: Path) -> None:
         lambda p: p.pad_stim_arrays(1.0),
         lambda p: p.pad_stim_arrays_to_neuron_count(5),
         lambda p: p.resize_stim_arrays_to_neuron_count(5),
-        lambda p: p.trim_stim_arrays(0.0),
         lambda p: p.loop_stim_arrays(2),
         lambda p: p.tile_stim_arrays_to_length(0.5),
         lambda p: p.add_experiment(
@@ -1525,6 +1482,27 @@ def test_import_project_marks_dirty(tmp_path: Path) -> None:
     assert project.dirty is False
     project.import_project(tmp_file, SaveLoadOptions(True, True, True, True))
     assert project.dirty is True
+
+
+def test_checkpoint_store_and_restore_mark_the_project_dirty() -> None:
+    project = default_project()
+    assert project.dirty is False
+    project.store_checkpoint("a")
+    assert project.dirty is True
+    project.dirty = False
+    project.restore_checkpoint("a")
+    assert project.dirty is True
+
+
+def test_syscon2_export_template_is_saved_with_the_project(tmp_path):
+    project = Project()
+    project.set_syscon2_export_template_text("template text")
+    path = tmp_path / "template.nseq"
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    assert Project(path).syscon2_export_template_text == "template text"
+    project.set_syscon2_export_template_text(None)
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    assert Project(path).syscon2_export_template_text is None
 
 
 def test_device_settings_are_saved_with_the_project(tmp_path):

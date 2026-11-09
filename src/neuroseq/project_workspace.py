@@ -1647,7 +1647,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         if not ok:
             return
-        self.project.b2_model.store(checkpoint)
+        self.project.store_checkpoint(checkpoint)
 
     def btn_restore_checkpoint_clicked(self) -> None:
         if len(self.project.b2_model.checkpoints) == 0:
@@ -1668,7 +1668,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if not ok:
             return
         try:
-            self.project.b2_model.restore(checkpoint)
+            self.project.restore_checkpoint(checkpoint)
             self._update_data(keep_undo_history=False)
         except ValueError as error:
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
