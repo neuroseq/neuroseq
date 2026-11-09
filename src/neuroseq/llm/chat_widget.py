@@ -358,7 +358,12 @@ class ChatWidget(QtWidgets.QWidget):
             self._worker = None
 
     def _on_worker_finished(self) -> None:
-        self._history.append(Message(Role.ASSISTANT, self._current_assistant_buffer))
+        # Stop before the first token leaves nothing to keep; an empty
+        # assistant message would be rejected by later Anthropic requests.
+        if self._current_assistant_buffer.strip():
+            self._history.append(
+                Message(Role.ASSISTANT, self._current_assistant_buffer)
+            )
         self._transient_assistant_html = None
         self._current_assistant_buffer = ""
         self._cleanup_worker()

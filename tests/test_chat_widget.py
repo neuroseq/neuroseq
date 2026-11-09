@@ -269,3 +269,25 @@ def test_stop_button_interrupts_stream(qtbot: QtBot, monkeypatch) -> None:
     assert widget._history[1].role == Role.ASSISTANT
     assert 0 < len(widget._history[1].content) < 4
     assert widget.send_button.isEnabled()
+
+
+class _SilentBackend(FakeBackend):
+    """Ends the stream before any token, as Stop before the first token does."""
+
+    def stream_chat(self, messages, *, model, temperature=0.7, max_tokens=None):
+        self.seen_messages.append(list(messages))
+        yield from ()
+
+
+def test_stream_without_tokens_adds_no_empty_assistant_message(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    backend = _SilentBackend()
+    widget = _make_widget(qtbot, monkeypatch, lambda self, settings: backend)
+
+    widget.input_edit.setPlainText("hello")
+    widget.send_button.click()
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert [message.role for message in widget._history] == [Role.USER]
+    assert all(message.content for message in widget._history)
