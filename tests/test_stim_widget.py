@@ -1095,6 +1095,27 @@ def test_stim_widget_set_data_with_every_neuron_hidden(qtbot: QtBot) -> None:
     assert np.asarray(stim_widget.graphic.data.value).shape[0] == 1
 
 
+def test_stim_widget_hiding_every_neuron_hides_the_drawn_stimuli(
+    qtbot: QtBot,
+) -> None:
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    stim_array = StimArray("", StimType.Excitation, np.ones((5, 2)), "mV", dt=0.001)
+    stim_widget.set_data(stim_array)
+    assert stim_widget.graphic is not None
+    assert stim_widget.minimum_size_graphic is not None
+
+    stim_widget.set_neurons_greyed([0, 1], [])
+    assert not stim_widget.graphic.visible
+    assert stim_widget.minimum_size_graphic is None
+
+    stim_widget.set_neurons_greyed([], [1])
+    assert stim_widget.graphic.visible
+    assert np.asarray(stim_widget.graphic.data.value).shape[0] == 1
+    assert stim_widget.minimum_size_graphic is not None
+    assert stim_widget.minimum_size_graphic.visible
+
+
 def test_stim_widget_background_arrays_follow_hidden_neurons(qtbot: QtBot) -> None:
     stim_widget = StimWidget(ConstrainedPanZoomController())
     qtbot.addWidget(stim_widget)

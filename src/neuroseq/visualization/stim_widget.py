@@ -324,13 +324,17 @@ class StimWidget(TimeseriesWidget):
         return compact
 
     def _apply_visible_neuron_layout(self) -> None:
-        if (
-            self.graphic is None
-            or self.data_values is None
-            or not self._visible_neuron_ids
-        ):
-            # Leave the existing graphic in place rather than trying to build a
-            # zero-height image if every neuron is currently hidden.
+        if self.graphic is None or self.data_values is None:
+            return
+        if not self._visible_neuron_ids:
+            # Every neuron is hidden: keep the image (a zero-height one can't
+            # be built) but hide it, as set_data() does, and drop the overlays
+            # still drawn for the old rows. The next layout rebuilds them.
+            self.graphic.visible = False
+            if self.minimum_size_graphic is not None:
+                self.subplot.remove_graphic(self.minimum_size_graphic)
+                self.minimum_size_graphic = None
+            self._rebuild_background_graphics()
             return
         # ImageGraphic's buffer is fixed-size at creation (like the lasso-line
         # buffer issue) - it can't be resized via `.data = ...`, so rebuild it
