@@ -1,305 +1,153 @@
 # ScanImage acquisition on the same PC
 
-The **ScanImage (imaging)** tab of the **Stimulation setup** pane connects to a
-running ScanImage MATLAB session; the **Image acquisition** toolbar button shows
-it (as does View → Show Stimulation setup). It starts Focus, starts or externally arms a recording, aborts an
-acquisition, and opens completed TIFF files in the Imaging tab. ScanImage owns
-the scanner, its own live display and the original recording.
+The **ScanImage (imaging)** tab of the **Stimulation setup** pane (toolbar
+button **Image acquisition**, or **View → Show Stimulation setup**) controls a
+running ScanImage MATLAB session: Focus, record or arm a recording, abort, and
+grab a field of view for Cellpose. Completed recordings open in the Imaging tab.
+There is no live image in NeuroSeq (streaming frames slowed ScanImage down);
+watch ScanImage's own display.
 
-NeuroSeq does not stream live images. Fetching frames through MATLAB ran on the
-thread that also runs ScanImage and slowed acquisition down (issues #628, #651),
-so the tab has controls only; watch the image in ScanImage's display windows.
-Placing acquisition next to stimulation also lets the dynamic input routines
-drive both (see [below](#dynamic-input-routines)).
-
-This integration targets **ScanImage Premium 2023.1.0**, single-plane raster
-imaging. Its MATLAB adapter requires validation on the actual acquisition PC;
-automated Python tests do not establish hardware compatibility or timing.
-Volumes, FastZ, multi-ROI and arbitrary-line acquisitions are outside this
-initial implementation. A configured Z-stack is fine as long as stacks are
-disabled. For its own recordings NeuroSeq sets logging averaging and
-acquisitions per loop to 1, so every raw frame is saved in one acquisition, and
-restores your values when the recording ends, is aborted or fails to start.
-NeuroSeq uses Grab, not Loop, so the loop repeat period is not used.
+Scope: **ScanImage Premium 2023.1.0**, single-plane raster imaging. Volumes,
+FastZ, multi-ROI and arbitrary-line scans are not supported (a configured
+Z-stack is fine with stacks disabled). Validate on the acquisition PC before
+experiments; automated tests do not prove hardware compatibility or timing.
 
 ## Setup
 
-1. Start ScanImage normally and load the microscope's configuration. In that
-   MATLAB window run:
+1. Start ScanImage with the rig configuration and, in its MATLAB window, run:
 
    ```matlab
    matlab.engine.shareEngine('NeuroSeqScanImage')
    ```
 
-2. Prepare a separate Python installation compatible with that MATLAB release.
-   NeuroSeq itself requires Python 3.12+, so do not install an incompatible
-   engine into NeuroSeq's environment. For example, MATLAB R2023a supports
-   Python 3.10; R2023b also supports Python 3.11. Consult the
-   [MathWorks compatibility table](https://www.mathworks.com/support/requirements/python-compatibility.html).
-   Install MATLAB Engine **matching the installed MATLAB release**, plus
-   `numpy` and `tifffile`, in the helper interpreter. A current unpinned engine
-   package is not necessarily compatible with older MATLAB.
+2. Create a separate Python interpreter supported by that MATLAB release (e.g.
+   3.10 for R2023a, 3.10/3.11 for R2023b; see the
+   [MathWorks table](https://www.mathworks.com/support/requirements/python-compatibility.html))
+   with the **matching** MATLAB Engine version, `numpy` and `tifffile`. Do not
+   install it into NeuroSeq's own environment (Python 3.12+).
+3. In the tab, choose that Python executable, enter the session name and click
+   **Connect**. NeuroSeq only attaches to an existing session; it never starts
+   MATLAB. The Python path is remembered; the recording folder is remembered per
+   project.
+4. Configure scanners, PMTs, channels and trigger wiring in ScanImage. Set
+   **Functional channel** to the calcium indicator channel (shown in the Imaging
+   tab and measured by routines; it must be saved). It resets to 1 each session.
 
-3. Click **Image acquisition** in the toolbar, select that Python executable and enter
-   the shared session name. Click **Connect**. The helper connects only to an
-   existing session with that name; it never starts another MATLAB instance.
-   Required ScanImage properties and user-function registration are probed.
-   NeuroSeq remembers the Python executable as the default for next time; the
-   recording folder is remembered per project (and the last one used becomes
-   the default for new projects).
+NeuroSeq adds its `.m` files to the MATLAB path and registers its callbacks next
+to existing user functions (ScanImage must be idle). Disconnecting removes them;
+MATLAB keeps running.
 
-4. Configure scanners, PMTs, saved/displayed channels and trigger wiring in
-   ScanImage. Set **Functional channel** to the channel of the calcium
-   indicator: it is the channel shown for recordings in the Imaging tab and
-   the one dynamic input routines measure (it must be among the saved channels).
+## Recording
 
-The bundled `.m` files are added to the MATLAB path for the session. The adapter
-registers acquisition lifecycle callbacks alongside existing user functions;
-it does not replace the user's callback table. Reconnecting reconciles the
-adapter's entries without duplicating them, including after clearing MATLAB
-functions. New callback registration requires ScanImage to be idle. A normal
-idle disconnect removes its callbacks. It does not shut down MATLAB.
+| Control                                   | Default / behaviour                                                                          |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| **Recording folder**                      | Each recording is one `<date>_<number>.tif`; **Next file** shows the name. Never overwrites. |
+| **Experiment name**                       | Optional name of the recording's data group (else the file name)                             |
+| **Frames**                                | 300 (routines set their own)                                                                 |
+| **Save channels**                         | Channel 1; tick several to save them together                                                |
+| **Wait for external acquisition trigger** | Off: software start. On: waits for ScanImage's configured trigger input.                     |
+| **First-frame timeout**                   | 60 s, then abort                                                                             |
 
-## Focus and recording
+- **Focus** starts unsaved continuous imaging. Abort it before recording.
+- **Record / Arm** starts or arms the recording. "Waiting for first frame" does
+  not prove the hardware is ready for a TTL.
+- **Abort acquisition** stops it.
 
-**Focus** starts ScanImage's continuous unsaved imaging, shown in ScanImage.
-Abort Focus before starting a recording.
+For each recording NeuroSeq temporarily sets ScanImage's logging folder, file
+stem and counter, frames per file (unlimited), logging averaging and
+acquisitions per loop (1), saved channels and trigger, uses Grab (not Loop), and
+restores your values once ScanImage is idle after completion, abort or a failed
+start. A setting you change in ScanImage meanwhile is kept.
 
-Choose a recording folder and frame count; the experiment name is optional.
-**Save channels** lists ScanImage's channels and starts with channel 1 ticked;
-tick several to record them together in one acquisition. ScanImage's own
-selection is restored after the recording, like the other settings NeuroSeq
-changes.
+A recording completes when ScanImage reports it and the files are stable. It
+must contain all requested frames; an "aborted" recording that has them all
+counts as complete, other aborted ones are attached as aborted. The recording
+becomes the project's selected imaging data; the selector next to **Image
+acquisition** lists all imaging data (**Import Imaging Data**, **Remove imaging
+data** act on the list).
 
-Every recording is **one TIFF directly in the recording folder**, named after the
-date and a recording number that continues from the files already there, e.g.
-`2026-10-22_00003.tif`; **Next file** shows the name the next recording gets.
-NeuroSeq sets ScanImage's file stem to the date, its file counter to the
-recording number, and frames per file to unlimited, and restores them
-afterwards. A recording never overwrites an existing file. The experiment name,
-which keeps its capitalisation, names the recording's data group in the project;
-without one, the file name is used.
+Files beside each TIFF, written before the hardware command:
 
-**Record / Arm** enables ScanImage TIFF logging. When
-**Wait for external acquisition trigger** is selected, ScanImage waits for
-its configured trigger input. Otherwise it starts through software.
-The first-frame timeout requests an abort if no acquisition start is observed.
-"Waiting for first frame" is not proof that hardware is ready to accept a TTL.
+- `<date>_<number>.json`: request, stimulus (name, `dt`, shape, SHA-256),
+  routine block (`.seq` path, SysCon2 entry) and export settings. It records the
+  request, not proof of completion.
+- `<date>_<number>_stimulus.npy`: the stimulus samples.
+
+The `.nseq` stores only metadata and a frame index; keep the TIFFs at their
+paths. **Save imaging data…** exports a rendered copy, not the original. GIF
+keeps recorded frame intervals; other movie formats use a constant rate.
 
 ### Field of view for cell segmentation
 
-**Grab FOV for segmentation** records a short recording (300 frames by default,
-started by software, without stimulation). The whole recording is kept as
-`<date>_<number>.tif`; its **Functional channel** is averaged into one image
-saved beside it as `<date>_<number>_mean.tif`. The cell segmentation dialog then opens and runs
-Cellpose on it. Because the image comes from the same scan, the masks share the
-recordings' pixel grid, as the dynamic input routines need. The snapshot is
-listed in the acquisition history but adds no data group or imaging entry.
-
-**Auto brightness** is ticked by default. Before Cellpose segments the mean
-image, it stretches the contrast so that 0.35% of pixels saturate, as Fiji's
-**Enhance Contrast** does, which helps with dim fields of view. The segmentation
-dialog's preview and the Spatial Footprints panel show the image with the same
-adjustment, which is saved with the project. You can refine it there with
-**Brightness/Contrast**. The choice is remembered across sessions. If **Adjust
-brightness first** is also ticked in the segmentation dialog, its controls start
-from the automatic window.
-
-Mean images are shown on a 0–255 scale that ignores the brightest and darkest
-0.02% of pixels, so a few hot pixels do not turn the field of view black.
-
-NeuroSeq reports state from ScanImage, waits for completed/aborted acquisition
-events and readable, stable files, then indexes the saved channels and frame
-timestamps. A successful complete acquisition must contain the requested frame
-count. Should ScanImage still split a recording into several files, they are grouped as
-one recording. Aborted recordings with readable complete
-channel groups can also be attached, labeled as aborted. An externally triggered
-Grab can end through ScanImage's abort after its last frame, so an "aborted"
-recording that holds every requested frame counts as completed.
-
-After completion, abort, or a failed start, the adapter restores the previous
-logging folder, filename stem/counter, frames per file, logging enable,
-external-trigger enable, and frames-per-slice settings once ScanImage is idle. If the terminal callback
-precedes the idle state, the next status poll retries restoration; idle
-Disconnect also restores pending settings, as do the next Preview and Record if
-ScanImage became idle without any terminal callback. If ScanImage goes idle
-without a terminal callback, the recording is marked interrupted and its settings
-are restored at the next status poll. An acquisition you start yourself after
-such a missed callback is never taken for NeuroSeq's recording. A setting you
-change in ScanImage after NeuroSeq set it is kept, not restored. Verify restoration on your rig,
-including after abort, before starting another manual Grab. Acquisition metadata
-retains the settings used during the recording.
-
-A completed acquisition is added to the project that requested it and becomes
-its selected imaging data. Imported imaging data and earlier recordings stay in
-the list.
-The tab's **Functional channel** picks the channel shown for recorded
-playback. When the shown recording did not save it, its first saved channel is
-shown instead, with a message; the setting itself stays, since dynamic input
-routines measure that channel.
-
-The imaging data selector next to **Image acquisition** lists all imaging data in
-the project: imported TIFF/GIF/movie files and finished recordings. **Import
-Imaging Data** adds to this list, and **Remove imaging data** removes only the
-selected entry.
-Files remain external to `.nseq`; moving them without restoring their paths
-makes playback unavailable. Projects save the run metadata and index, not the
-raw movie. Frame indexes use compact columns and file indices and are stored
-once per run; the selected movie references that run. Full frame descriptions
-remain in the original TIFFs and can be reread for future alignment analysis.
-Save the project to retain its acquisition history.
-
-A small, human-readable `<date>_<number>.json` beside the TIFF stores the
-request, the stimulus it relates to (name, sample interval, shape and SHA-256 of
-its samples; the samples themselves are in `<date>_<number>_stimulus.npy`
-beside it, so the folder alone reproduces the stimulus), the block of a dynamic input routine
-(with the path of its `.seq` file and its SysCon2 sequence-manager entry), and
-the SysCon export settings. Both files are written before the hardware command,
-so they aid recovery if NeuroSeq exits before the project is saved, and both are
-removed again if ScanImage refuses to start. The requested state in the JSON is
-not evidence that the acquisition completed.
-
-The existing **Save imaging data…** action exports a rendered derivative. It does not
-replace ScanImage's original TIFF recording. Recorded ScanImage playback uses channel-specific frame
-timestamps; brightness conversion affects only the display/derivative. GIF
-exports use the recorded inter-frame intervals, subject to GIF timing precision.
-Other movie formats use a constant frame rate and do not preserve irregular
-acquisition timing; retain the TIFF timestamps for analysis.
+**Grab FOV for segmentation** records 300 frames (software start, no
+stimulation), saves the mean of the **Functional channel** as
+`<date>_<number>_mean.tif`, and opens Cellpose on it, so masks share the
+recordings' pixel grid. **Auto brightness** (default on, remembered) stretches
+contrast to 0.35 % saturated pixels, like Fiji's _Enhance Contrast_; the same
+adjustment is shown in the segmentation dialog and Spatial Footprints.
 
 ## Stimulation and timing
 
-For manual recordings, use the SysCon2 tab to export/select/upload stimulation.
-Imaging can be armed here and triggered through the configured physical input.
-Manual recordings are marked as having unverified synchronization: software
-command arrival times are not measured stimulation times, so planned
-stimulation crosses are suppressed for them.
-The 2023 [auxiliary trigger feature](https://archive.scanimage.org/SI2023/Concepts/Triggers/Auxiliary%2BTrigger.html)
-can record stimulation markers on supported resonant systems. Their frame
-descriptions remain in the original TIFFs for a future calibrated alignment
-step.
+For manual runs, export, select and upload in the SysCon2 tab and arm imaging
+here with the external trigger. Manual recordings are marked as unverified
+synchronization, so planned stimulation markers are not drawn.
 
 ## Dynamic input routines
 
 With the SysCon2 target and **Run blocks automatically and record them with
-ScanImage** ticked in their hardware settings, the rheobase and STDP window
-routines run each block without manual steps:
+ScanImage**, rheobase and STDP window blocks run without manual steps:
 
-1. Export the block, import it into SysCon2, select it and upload it (1 run).
-2. Arm a ScanImage recording that **waits for the external trigger**, with
-   enough frames for the block plus the **Record after block** time at
-   ScanImage's frame rate.
-3. Run the sequence (start condition _auto_); its TTL output must trigger
-   ScanImage, so the recording starts with the block.
-4. When the recording is complete, extract the ΔF/F trace of every cell with the
-   project's Cellpose masks (with **Remove stimulation artefact** ticked, the
-   default, frames lit by the stimulation laser are interpolated from the
-   nearest clean frames; F0 is the mean before the block's first stimulus), deconvolve
-   it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
-   event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
-   the response on this block's trace. **Trace extraction** selects how each
-   cell's fluorescence is measured:
-   - **Suite2p (motion-corrected, neuropil-corrected)**, the default: Suite2p
-     motion-corrects the recording (rigid and non-rigid registration), then
-     extracts each ROI with the same masks and uses F − 0.7 × neuropil. ΔF/F is
-     measured relative to the baseline of the raw F, so a dim cell whose
-     neuropil-corrected baseline is close to zero does not get a huge ΔF/F. The
-     reference is the image the Cellpose masks were drawn on (e.g. the
-     **Grab FOV** mean TIFF), so drift since the FOV was grabbed is corrected
-     too. If that image is not a TIFF of the recording's size, each recording is
-     aligned to its own mean instead, and the log says so. The log reports each
-     block's largest shift in pixels.
-   - **ROI average (fast)**: the mean of each ROI's pixels as recorded, without
-     motion or neuropil correction.
+1. Export the block, import, select and upload it in SysCon2 (1 run).
+2. Arm ScanImage to wait for the external trigger, for the block plus
+   **Record after block** (default 3 s).
+3. Run the sequence (start condition _auto_); its TTL must trigger ScanImage.
+4. Extract ΔF/F per Cellpose ROI (F0 = mean before the block's first stimulus)
+   and deconvolve it with OASIS (jGCaMP8m, 0.5 s decay; events of at least
+   **Spike threshold** are spikes). Options:
+   - **Remove stimulation artefact** (default on): frames lit by the laser are
+     replaced by the nearest clean frames.
+   - **Trace extraction**: **Suite2p (motion-corrected, neuropil-corrected)**
+     (default; rigid and non-rigid registration to the image the masks were
+     drawn on, F − 0.7 × neuropil, ΔF/F relative to raw F) or **ROI average
+     (fast)**. **Warn if Suite2p takes over** (120 s) only logs a warning.
+5. Place the traces and spikes in the run's data group (e.g.
+   `rheobase_2026-10-27_153313`) at the block's time.
 
-   Suite2p is slower. If one block takes longer than **Warn if Suite2p takes
-   over** (120 s by default), the routine's log gets a warning, and the routine
-   keeps waiting for that block and then carries on.
+STDP pairing blocks are not recorded. Progress appears in the toolbar progress
+bar and the routine's log.
 
-   While traces are extracted, the progress bar in the main window's toolbar
-   shows the current stage, unless a simulation is already using it. The
-   routine's activity log records every step of each block: the SysCon2 import
-   and upload, ScanImage arming and the recording, each extraction stage with
-   its elapsed time, the number of cells, frames and spikes extracted, the
-   motion-correction shift, and the measured response.
+Requirements and limits:
 
-5. Place both in the run's data group, named after the run folder (e.g.
-   `rheobase_2026-10-27_153313`), at the block's time in the stim array. The
-   run thus has one continuous ΔF/F trace and one spike dataset; a block
-   overwrites the previous recording's tail where it starts. Each recording is
-   still listed as imaging data, without a data group of its own.
+- SysCon2 and ScanImage connected, ScanImage frame rate reported, Cellpose masks
+  of the same FOV on the same pixel grid.
+- A recording not finished 15 s after block plus tail is aborted and the routine
+  stops (usually a missing trigger).
+- Check the **Functional channel** before each run.
+- Verify the trigger wiring (SysCon2 `TargetConnectorPort`) and the delay from
+  sequence start to first frame on the rig.
 
-A recording that has not finished 15 s after the block plus its **Record after
-block** time is aborted and the routine stops (the usual cause is a trigger that
-never reached ScanImage). The **Functional channel** measured starts at 1
-in every session; check it before a run. STDP pairing blocks need no data, so
-they are run without recording. The
-routine needs SysCon2 and ScanImage connected, ScanImage's frame rate reported,
-and a Cellpose segmentation of the same field of view whose masks share the
-TIFFs' pixel grid. These recordings are marked `stimulation_trigger`
-synchronization. Verify the trigger wiring (the SysCon2 configuration's
-`TargetConnectorPort`) and the delay between sequence start and the first frame
-on the rig before relying on the measured windows.
+## Interruptions
 
-## Interruptions and rig acceptance
+The helper is terminated if it does not answer within 30 s; MATLAB and the
+scanner keep running and the acquisition state is unknown, so check ScanImage
+before reconnecting. Closing NeuroSeq does not stop a running acquisition: use
+**Abort acquisition** first.
 
-An unresponsive helper is terminated after 30 seconds; MATLAB and the scanner
-are not killed. Acquisition state is then unknown. Inspect ScanImage before
-reconnecting. Closing NeuroSeq stops its helper transport; it does not promise
-to stop an independently running microscope acquisition. Use **Abort acquisition**
-and verify idle before closing when you intend to stop imaging.
+## Rig acceptance checklist
 
-Before experimental use, verify on the acquisition PC:
+Verify on the acquisition PC:
 
-- Previous ScanImage logging/trigger/frame-count settings are restored after
-  completion, abort, failed start, and idle disconnect; a subsequent manual Grab
-  uses the original settings.
-- The probe succeeds on the exact ScanImage/MATLAB build and reports settings.
-- Recorded playback orientation matches a known asymmetric target and the
-  Cellpose masks of the same field of view.
-- Recordings are written as `<date>_<number>.tif` in the chosen folder, the
-  number continues across restarts, and ScanImage's own stem, counter and
-  frames-per-file settings are restored afterwards.
-- A short software-triggered recording has the requested frames and original
-  pixel values, including a two-channel recording and a file rollover.
-- External triggering, first-frame timeout and abort behave as expected.
-- An automatic routine block arms ScanImage, the sequence's TTL starts the
-  recording, and the response window lines up with the delivered pulse.
-- ScanImage runs as fast with NeuroSeq connected as without: compare its frame
-  rate and dropped frames during Focus and a recording. Each status reply
-  reports `elapsed_ms`, the time the call spent in ScanImage's MATLAB thread;
-  NeuroSeq polls status five times a second. (The removed live view
-  base64-encoded every frame in MATLAB, about 160 ms per 512×512 frame on
-  that same thread, which is what slowed ScanImage down.)
-- Completed and interrupted recordings survive project save/reopen, and a
-  recording finishing after a project switch attaches to its originating project.
-- Hardware stimulation markers and image timestamps agree before claiming any
-  synchronization accuracy.
+- ScanImage settings are restored after completion, abort, failed start and
+  disconnect, and a following manual Grab uses them.
+- File names continue across restarts; frame counts and pixel values are
+  correct, including two-channel recordings.
+- Playback orientation matches a known asymmetric target and the Cellpose masks.
+- External trigger, first-frame timeout and abort work; a routine block's TTL
+  starts the recording and the response window lines up with the pulse.
+- Frame rate and dropped frames are the same with NeuroSeq connected (it polls
+  status 5 times a second; each reply reports `elapsed_ms`).
+- Recordings survive save/reopen and attach to their own project after a
+  project switch.
 
-## Future remote transport
-
-`ScanImageConnection` exchanges request IDs and JSON operations with a separate
-helper process. Commands, lifecycle status and recording indexes are independent
-of Qt rendering. A future remote transport can implement the
-same operations on the acquisition PC, with authentication, bounded messages,
-connection-loss reconciliation, and explicit recording transfer/path mapping.
-MATLAB Engine itself is used only locally. The current implementation opens no
-network server and relies on local filesystem access for recording verification.
-
-Do not assume the built-in ScanImage TCP server speaks this protocol: its
-[2023 documentation](<https://archive.scanimage.org/SI2023/Premium%2BFeatures/ScanImage%2BRemote%2BControl%2B(TCP_IP).html>)
-describes a MATLAB client. Native [ZeroMQ streaming](https://docs.scanimage.org/Premium%2BFeatures/ZeroMQ.html)
-requires ScanImage Premium 2025 or later and is not used here.
-
-## Adapter regression tests without a microscope
-
-In a separate MATLAB session with no `hSI` variable, from the repository root:
-
-```matlab
-results = runtests('tests/matlab');
-assertSuccess(results);
-```
-
-These tests use simulated ScanImage components to exercise settings restoration,
-callback registration, single-acquisition validation, and file naming.
-They do not establish compatibility with the installed ScanImage version or
-hardware timing.
+MATLAB adapter tests without a microscope (separate session, no `hSI`, from the
+repository root): `assertSuccess(runtests('tests/matlab'))`.

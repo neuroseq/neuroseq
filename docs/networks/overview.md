@@ -1,86 +1,37 @@
 # Neural Networks overview
 
-NeuroSeq provides a shared workspace for designing stimulation protocols,
-running them on neural networks, and inspecting the resulting activity. The
-networks can be computational models, neuromorphic hardware, or biological
-neuronal circuits. The implementation is evolving, with existing integrations
-providing the basis for additional substrates, third-party software, and APIs.
+NeuroSeq is a neuronal sequencer: it controls the input to a neural network and
+reads out its output, whether the network is digital, biological or
+neuromorphic. For any network, input is split into **controlled** (what
+NeuroSeq delivers) and **uncontrolled** (everything else), and output into
+**observed** (what is recorded) and **unobserved**. The same input protocol and
+the same analysis run on every substrate.
 
-This section describes network execution and device integrations. For the shared
-stimulation and analysis tools, see
-[Input Design and Readout Analysis](../input_design/overview.md).
+Input arrays have one row per neuron. On biological networks, neuron ID matching
+links each row to a real cell through a Cellpose segmentation
+(**File → Cell segmentation**, _ID Mapping Options_).
 
-## Overall structure
+## Supported substrates
 
-A project brings together stimulation arrays, network or device settings, and
-experiments containing the recorded responses. The workflow has four parts:
+| Substrate    | Network                                               | Input                                                                                           | Readout                                                                                             |
+| ------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Digital      | [Brian2](simulations.md)                              | Input arrays drive the built-in model                                                           | Simulated traces, spikes, synapses                                                                  |
+| Digital      | [External simulators](external_simulators.md)         | Input arrays passed to your Python `simulate(...)`                                              | The `Experiment` your backend returns                                                               |
+| Biological   | [Holographic stimulation](holographic_stimulation.md) | Two-photon holographic optogenetics on HOLO4D: export `.seq`, upload and run through SysCon2    | [ScanImage](scanimage_acquisition.md) calcium imaging: ΔF/F and deconvolved spikes per Cellpose ROI |
+| Biological   | Patch clamp                                           | [Export protocols](../input_design/patch_clamp_export.md) for the acquisition software          | [Import Igor2 waves](../readout/igor2_waves.md) or CSV                                              |
+| Neuromorphic | [BrainScaleS-2](brainscales2.md)                      | Constant current per neuron, or spikes from a virtual source population; chip runs 1000x faster | Spikes of all driven neurons and the membrane voltage of one neuron                                 |
 
-1. **Design input.** Create stimulation arrays with the static input editor or
-   generate successive blocks with a dynamic input routine.
-2. **Deliver stimulation.** Run a computational model, export a protocol for
-   external software, or send commands to a connected device.
-3. **Collect readout.** Import recordings or receive results through an API,
-   then add them to the project as traces, spikes, or imaging data.
-4. **Inspect and adapt.** Compare stimulation and responses, apply analysis
-   tools, and use the results to decide the next input. Supported dynamic input
-   routines automate this cycle for their configured targets.
+## Workflow
 
-The stimulation editor, visualization, and analysis tools form the shared
-workspace. Backend-specific integrations translate its stimulation arrays into
-the input expected by a model or device and return the supported readout data.
+1. **Design input** with the [static input editor](../input_design/static_input.md)
+   or a [dynamic input routine](../input_design/dynamic_input.md) (rheobase, STDP).
+2. **Deliver** it: run a simulation, export a file, or send it to a connected
+   device from the **Stimulation setup** pane (**View → Show Stimulation setup**).
+3. **Read out**: the result is added to the project as a data group of traces,
+   spikes or imaging data.
+4. **Analyse and adapt**. Dynamic input routines close this loop automatically on
+   Brian2 and SysCon2 + ScanImage (rheobase also on BrainScaleS-2).
 
-## Interaction mechanisms
-
-NeuroSeq currently uses several mechanisms to interact with external neural
-networks and their control software:
-
-- **File export and import:** export stimulation protocols for execution in
-  another application and import its readout data afterward. Existing protocols
-  can also be imported where the format is supported.
-- **Direct API access:** call a simulation backend or a device-control API to
-  configure and run a network and retrieve its response.
-- **Combined workflows:** generate protocol files, automatically upload and run
-  them through a control API, and import the resulting recordings. Holographic
-  stimulation combined with ScanImage acquisition is one example.
-
-The mechanism depends on the capabilities of the target software and hardware.
-A file-based connection can therefore be useful on its own or as part of an
-automated experiment.
-
-## Current implementations
-
-The following groups list implementations currently in use. They are starting
-points for integration rather than a fixed list of supported neural substrates.
-
-| Domain                        | Implementation or device                       | Stimulation and execution                                                                                                                     | Readout in NeuroSeq                                                                                                                                                                                       |
-| ----------------------------- | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Computational**             | **Brian2**                                     | Run the built-in model directly from the project, using its stimulation arrays.                                                               | Simulation traces, spikes, and monitored synaptic data. See [Simulations](simulations.md).                                                                                                                |
-|                               | **Native Python neural networks**              | Connect a Python backend that receives stimulation arrays and executes its own network code.                                                  | The backend returns an experiment with supported response data. See [Run external simulators](external_simulators.md).                                                                                    |
-| **Neuromorphic**              | **BrainScaleS-2**                              | Interactive control through a container helper and the remote hardware service; PyNN-based execution delivers stimulation to the chip.        | Spikes and membrane-voltage recordings are returned to the project. See [BrainScaleS-2 delivery](brainscales2.md).                                                                                        |
-| **Experimental (biological)** | **Patch clamp**                                | Export stimulation protocols for execution by patch-clamp acquisition software.                                                               | Import patch-clamp recordings, including Igor2 waves and supported CSV data. See [Export patch-clamp stimuli](../input_design/patch_clamp_export.md) and [Import Igor2 waves](../readout/igor2_waves.md). |
-|                               | **Calcium imaging / ScanImage**                | Control microscope acquisition through the ScanImage MATLAB API, including starting or arming a recording.                                    | Import completed ScanImage TIFF recordings; supported dynamic input routines extract calcium traces and inferred spikes. See [ScanImage acquisition](scanimage_acquisition.md).                           |
-|                               | **Holographic stimulation / SysCon2 (Holo4D)** | Design stimulation scripts, export SysCon2 sequences, and automatically import, upload, and run them through the connected control interface. | Combine stimulation with acquisition, such as ScanImage, to collect the biological response. See [Multiphoton holographic stimulation](holographic_stimulation.md).                                       |
-
-BrainScaleS-2 provides interactive submission and readback, while the chip runs
-on an accelerated time base. This differs from real-time execution at biological
-speed; the [speed-up setting](brainscales2.md#time-base-speed-up) maps
-between hardware time and the project's biological timeline.
-
-## Planned extensions
-
-The planned direction is to extend these interaction mechanisms to additional
-neural substrates, third-party software, and APIs while keeping stimulation
-design, readout visualization, and analysis in the same workspace.
-
-For neuromorphic workflows, this includes general-purpose automatic upload of
-PyNN scripts to a remote machine, execution on the chip, and return of readout
-data to NeuroSeq. The current BrainScaleS-2 integration already automates
-PyNN-based stimulus delivery and readback through its dedicated helper; arbitrary
-remote script upload is a further extension of that workflow. Real-time
-interaction will depend on the timing and control capabilities of each target.
-
-Other extensions can add file formats, device adapters, or simulation backends.
-The existing [custom simulator interface](../developer/custom_simulators.md)
-provides an entry point for Python integrations, and the
-[ScanImage guide](scanimage_acquisition.md#future-remote-transport) describes a
-possible remote acquisition transport.
+Integrations use file export/import, a direct API, or both (for example, SysCon2
+export plus automatic upload, run and ScanImage recording). New backends can be
+added through the [custom simulator interface](../developer/custom_simulators.md).

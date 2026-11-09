@@ -1,319 +1,168 @@
-# Multiphoton Holographic Stimulation (SysCon2 Export)
+# Multiphoton Holographic Stimulation (SysCon2)
 
-NeuroSeq can export stimulation patterns as SysCon2 `.seq` files for use with
-Holo4D multiphoton holographic stimulation hardware.
+NeuroSeq exports input arrays as SysCon2 `.seq` sequences for the HOLO4D
+two-photon holographic stimulation rig and can import, upload and run them
+through SysCon2. SysCon2 must run on the same Windows PC (local named pipe).
 
----
+## Requirements
 
-## Overview
+| Item              | Requirement                                                                               |
+| ----------------- | ----------------------------------------------------------------------------------------- |
+| Input array `dt`  | `0.0005208125` s (520.8125 µs, one SysCon2 tick). Presets in **Create/Edit input array**. |
+| Cell segmentation | Cellpose masks loaded (**File → Cell segmentation**), rows mapped to ROIs                 |
+| Power calibration | A SysCon `.lut` per laser wavelength, if power control is used                            |
 
-The stim array you draw in NeuroSeq represents **laser TTL pulses** directly.
-Each sample corresponds to one SysCon2 hardware tick
-(`dt = 0.0005208125 s = 520.8125 µs`). NeuroSeq infers the SLM shape objects
-needed for each neuron from the drawn TTL pulse positions — you do not need to
-manually define hologram boundaries.
+## Drawing input
 
----
+Each active sample is a laser TTL pulse at that tick; NeuroSeq derives the SLM
+holograms from the pulses.
 
-## Required setup
+- Pulses can be one tick (520.8 µs) long. With spiral scanning, use at least
+  16.7 ms (one spiral).
+- The SLM needs one blank 16.666 ms window (32 ticks) before the first pulse to
+  load the hologram.
+- A new hologram starts whenever the set of active neurons changes between
+  consecutive non-empty windows. Empty gaps keep the current hologram loaded.
+- Each hologram needs one blank load window before its first pulse. With
+  **Exact stimulus timing** (default) its shape starts one window before that
+  pulse and pulses are delayed only where the previous hologram leaves no room
+  (the first stimulus is always delayed by one window). Unticked, shapes snap to
+  the 16.7 ms window grid, which can delay stimuli by up to one window.
+- TTL pulses keep their exact tick. Re-importing an export at the SysCon2 `dt`
+  restores each pulse at the same sample.
 
-| Parameter             | Required value                                        |
-| --------------------- | ----------------------------------------------------- |
-| `stim_array.dt`       | `0.0005208125` s (one SysCon2 tick)                   |
-| Cellpose segmentation | loaded and mapped to stimulus channels                |
-| SysCon2 template      | a previously imported `.seq` file in the same session |
+## Sanity check
 
-The dialog will reject (or offer to fix) stim arrays whose `dt` does not match
-the SysCon2 tick quantum.
+Click **Check Input Sanity** in the export dialog. It detects and offers to fix,
+directly in the input array (undoable):
 
----
+- wrong `dt` (**Clear Array** or **Resample (Nearest-Neighbor)**),
+- first input less than 16.66 ms from the start (**Translate All Inputs Right**),
+- SLM load-time gaps between neuron groups (**Translate Inputs Right**),
+- SLM off/on overlaps (**Space Input Right**),
+- neurons stimulated together with unequal durations (**Equalize (to lowest
+  value)**), and overlapping pulse groups (align to the shortest),
 
-## Drawing TTL pulses
+then proposes any remaining timing or amplitude changes for confirmation.
 
-Draw active samples in the stimulation editor exactly where you want the laser
-to fire. A few rules apply:
+## Export
 
-- **No minimum duration**: pulses can be as short as one tick (520.8 µs).
-- **dt must be the SysCon2 tick**: use the _Fix dt_ button in the sanity-check
-  dialog if you need to convert an existing array.
-- **Blank lead-in required**: the SLM hardware needs one full 16.666 ms window
-  (32 ticks) of blank time before the first laser pulse to load the hologram.
-  The sanity fixer inserts this automatically if it is missing, but you can also
-  add it yourself with _Shift right for initial SLM load_.
+Open the export dialog with **File → Export → Optogenetic Input → SysCon2**
+(writes files only) or **Export with settings…** in the SysCon2 panel (also
+imports into SysCon2 when connected).
 
----
+| Setting                                  | Default                                                      |
+| ---------------------------------------- | ------------------------------------------------------------ |
+| Laser timeline                           | 940 nm digital (also 1030, 1100 nm)                          |
+| Target power                             | 1 mW; `0` disables power control (intensity 0)               |
+| Force binary export intensity            | off (amplitudes kept, clipped to 0-1)                        |
+| Spiralling (TTL 1 tick before SLM ready) | off                                                          |
+| Exact stimulus timing                    | on                                                           |
+| Use 10 input spots per ROI               | on (placement: farthest apart, or equal spacing from border) |
+| Output folder                            | last used, first `Documents\NeuroSeq\SysCon exports`         |
 
-## How shape objects are derived
+Then click **Generate Scripts**. Files written:
 
-The export pipeline maps your raw TTL pulses onto SLM shape objects as follows:
+| File                       | Content                                                                   |
+| -------------------------- | ------------------------------------------------------------------------- |
+| `<name>.seq`               | Shape and TTLPulse objects                                                |
+| `<name>_original_stim.npz` | The exact input array; restored on re-import. Keep it next to the `.seq`. |
+| `<name>_overview.png`      | Timeline overview                                                         |
 
-1. **Window coverage** — each raw pulse is mapped to the 32-tick window(s) it
-   falls in. This determines which SLM pattern windows must be loaded.
-2. **Hologram grouping** — active windows are grouped into holograms. A new
-   hologram starts when the active neuron set changes relative to the previous
-   non-empty window: either a neuron disappears or a new neuron appears.
-   Gaps (fully empty windows) do **not** break the hologram — the pattern stays
-   loaded across the gap.
-3. **Pre-load blank window** — a blank 16.666 ms window is placed immediately
-   before the first active window of each hologram. The SLM uses this time to
-   load the pattern before any laser pulse fires. If the blank is missing the
-   sanitizer inserts one by shifting the tail right.
-4. **Shape object bounds** — for each neuron within a hologram:
-   - shape starts at `(first_active_window - 1) × 32` ticks (the blank load window),
-   - shape ends at `last_active_window_excl × 32` ticks (minimum span: load + 1 active window).
+**Power LUT.** **Load LUT…** loads a SysCon `.lut` for the selected wavelength
+(one slot per wavelength). The requested mW is converted to the laser's
+intensity percentage and written as a fraction (0-1): with a linear 85 mW
+maximum, 5 mW is written as `0.058824`. Each object's description records
+`neuron=… power_mW=… target_mW=…`. LUTs, export settings and the export folder
+are saved in the `.nseq`; save the project after loading a LUT. Use the rig's
+measured LUT, not a linear example.
 
----
+## SysCon2 panel
 
-## TTL pulse timing
+**View → Show Stimulation setup**, tab **SysCon2 (HOLO4D)**:
 
-Laser TTL pulses are emitted at **exact tick positions**, not at window
-boundaries. If a pulse was drawn at tick 100, the exported `.seq` file
-contains a `TTLPulse` starting at tick 100 (= 52.08 ms).
+- **Connection**: **Connect** / **Disconnect**.
+- **Sequence Manager**: **Export with settings…**; **Export current array to
+  stimulation setup** re-exports the shown array with the last settings and its
+  own **Target power** box (these scripts are temporary and deleted when
+  NeuroSeq closes). **Refresh**, **Select**, **Delete** the sequences in
+  SysCon2, or **Browse…** and **Import** a local `.seq` into the **Target
+  directory** (default `neuroseq\<date>`).
+- **Preview**: collapsed by default (**Show preview**).
+- **Holo4D**: select the imported sequence, set **Runs** (0 = endless, asks for
+  confirmation), **Start condition** and **Trigger behavior** under _Advanced
+  options_, then **Upload** (waits for Idle) and **Run**. The panel shows
+  Busy/Idle and elapsed time, not percent complete. A triggered run waits until
+  Busy is seen. **Stop** also cancels a queued Run.
+- **Laser**: read-only. **Get Status** discovers the lightsources (preferring
+  940 nm). Set power, shutter and emission in SysCon2.
 
-If the sanitizer inserted a blank window before the first active window (because
-the first pulse was too early), all raw pulse positions are shifted by 32 ticks
-per inserted blank. The shift preserves the sub-window offset of each drawn
-pulse relative to its containing window.
+## Dynamic input routines on the rig
 
-**Roundtrip accuracy** — when a `.seq` file exported in this mode is imported
-back into NeuroSeq with `dt = 0.0005208125 s`, each pulse reconstructs at the
-same sample index it was exported from (`sample_idx == tick_idx`).
+Choose the **SysCon2 (calcium imaging)** target in the rheobase or STDP window
+dialog; **Use SysCon2 dt** fixes the array's timestep.
 
----
+**Hardware settings (SysCon2 / ScanImage)** holds target power, laser, spiral
+scanning and 10 spots per cell (shared with the SysCon2 panel) and the recording
+options:
 
-## Hologram boundary rule
+- **Run blocks automatically and record them with ScanImage** (default on):
+  each block is uploaded, run and recorded, and ΔF/F and spikes are extracted;
+  see [ScanImage acquisition](scanimage_acquisition.md#dynamic-input-routines).
+  Rheobase counts a response when ΔF/F rises by the **Response threshold**
+  (default 20 %) in the post-pulse window, or when OASIS finds a spike of at
+  least the **Spike threshold**, depending on **Calcium readout**.
+- Unticked: each block is only imported into SysCon2. Run, record and import
+  it yourself, then click **Calcium data imported**. Suite2p's normalised traces
+  are refused for ΔF/F rise.
 
-| Situation                                                            | Effect                                    |
-| -------------------------------------------------------------------- | ----------------------------------------- |
-| Same neuron set, contiguous windows                                  | continue same hologram                    |
-| Same neuron set, gap between windows                                 | continue same hologram (SLM stays loaded) |
-| A neuron that was active in the **last** non-empty window disappears | start new hologram                        |
-| A neuron that was **never** in the current hologram appears          | start new hologram                        |
+Safety limits: a block is refused without a target power above 0 mW and a LUT
+for the chosen laser, with a target above the LUT maximum, with amplitudes
+outside (0, 1], or with a stimulated neuron lacking a Cellpose ROI. Export
+warnings are asked once per routine.
 
-A new hologram is triggered whenever the active neuron set changes — either a neuron
-leaves or a new one joins relative to the last non-empty window. Gaps (fully empty
-windows) are ignored when checking for disappearances; only transitions between
-consecutive non-empty windows matter.
+Rheobase defaults on this target: 16.7 ms pulse (one spiral), up to 100 ms, 1 s
+recovery, 300 ms post-pulse window, **Fixed duration, varying amplitude**, 3
+repeats per probe. Each target keeps its own values. With deconvolved spikes, a
+spike in the frame after the window still counts.
 
----
+If the input array already holds stimuli, **Start** offers **Clear and start
+over**, **Continue after last stimulus**, or **Start in new arrays** (new empty
+array and data group named after the run, e.g.
+`Exc_stimulation rheobase_2026-10-22_143012`).
 
-## Sanity checks
+Each run saves its blocks in its own folder in the export folder, e.g.
+`SysCon exports\rheobase_2026-10-22_143012\rheobase_2026-10-22_143012_001.seq`
+(with PNG and sidecar), imported into SysCon2 under the same name.
 
-Run **Check Input Sanity** in the stimulation generator dialog before exporting.
-The checker validates:
+## Importing a `.seq` file
 
-- `dt` is the SysCon2 tick quantum (offers _Fix dt_ button if not),
-- first active sample is at least 32 ticks from the start (SLM lead-in),
-- no SLM gap violations between successive neuron groups,
-- no off→on SLM overlap violations,
-- no simultaneous neurons with mismatched durations (optional; use
-  _Equalize durations_),
-- all active neurons have a valid Cellpose mapping.
+**File → Import data → Input → Optogenetics** rebuilds a sequence in a new or
+existing input array at 520.8125 µs.
 
-Feedback is shown in a scrollable dialog. If fixes were applied you can write
-the corrected values back to the stim array via _Apply fixes_.
-
----
-
-## Exporting
-
-1. Open **File → Export → Optogenetic Input** and choose `SysCon2` in the pre-dialog. This writes the files only; to also import the generated sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel instead.
-2. Select the stim array and Cellpose segmentation.
-3. Choose laser wavelength (`940 nm`, `1030 nm`, or `1100 nm` digital; default `940 nm`).
-4. Optionally set a **Target power** and load a power LUT (see below).
-5. Click **Check Input Sanity** and resolve any errors.
-6. Enter an output script name and click **Export**.
-
-The output folder starts as the one used last, or `Documents\NeuroSeq\SysCon
-exports` the first time, so scripts can be generated without browsing for a
-folder. Scripts imported into SysCon2 go to its **Target directory**, which
-defaults to one folder per day, `neuroseq\<date>` (e.g. `neuroseq\2026-10-15`).
-
-In the SysCon2 panel, the **Target power** box next to **Export current array to
-stimulation setup** sets the power of that quick export. Changing only the power
-there keeps all other settings of the last export; **Export with settings…**
-starts from the same value.
-
-Export settings and the export folder belong to the project: they are saved with
-it and restored when you switch between open projects.
-
-### Target power and power LUT
-
-The dialog has a **Target power** (mW) spinner next to a **Load LUT…**
-button:
-
-- Setting **Target power** to `0` disables power control — the exported
-  `Intensity_0` fields are written as zero, which matches the historical
-  default behaviour.
-- Loading a SysCon `.lut` file maps the requested mW to the laser's
-  intensity percentage at the currently selected wavelength. The exporter divides
-  that percentage by 100 for the `.seq` intensity fields (0–1). Each
-  wavelength has its own LUT slot. The mW those fractions stand for are kept in
-  each Shape's and laser pulse's description, e.g.
-  `neuron=3 power_mW=12.5 target_mW=25` (the requested power for that object,
-  i.e. the target times its amplitude, and the target power).
-- LUTs are bundled into the `.nseq` archive when you save the project, so
-  the export stays reproducible across machines. Loading a LUT marks the project
-  as modified; save it to retain the calibration.
-
-The **status label** next to the button shows which LUT (if any) is
-currently loaded for the active wavelength. Switching the wavelength
-combobox swaps to that wavelength's LUT slot.
-
-The exporter writes:
-
-| File                       | Content                                             |
-| -------------------------- | --------------------------------------------------- |
-| `<name>.seq`               | SysCon2 sequence — Shape objects + TTLPulse objects |
-| `<name>_original_stim.npz` | the exported input array, restored on re-import     |
-| `<name>_overview.png`      | timeline overview image                             |
-
----
+- If the `_original_stim.npz` sidecar is next to the file and matches it, the
+  exact original array is restored. Otherwise timings are the hardware-adjusted
+  ones (SLM load delays).
+- Targets map to consecutive rows from **Target neuron offset**, in order of
+  first occurrence, not to project neuron IDs or Cellpose cells.
+- **Replace mapped target channels** clears only the receiving rows; unticked,
+  values merge by maximum.
+- Amplitudes are raw file intensities (1 for zero-intensity shapes), not optical
+  power. One sequence pass is imported (`runs` ignored).
+- Rejected: files with no stimulation, arrays over 512 MiB, objects with several
+  timing entries or lightsources.
+- A differing `dt` of an existing target array is resampled after confirmation.
 
 ## Generating test data (CLI)
 
 ```bash
-# 512 × 512 image with 10 × 10 grid
+# 512 × 512 image with a 10 × 10 grid of cells
 neuroseq --generate-cellpose-test-data ./cellpose_512.tif \
- --cellpose-grid-rows 10 \
- --cellpose-grid-cols 10 \
- --cellpose-radius 11 \
- --cellpose-gap 30
+ --cellpose-grid-rows 10 --cellpose-grid-cols 10 \
+ --cellpose-radius 11 --cellpose-gap 30
 
-# 1300 × 1300 with auto-fitted radius/gap
+# 1300 × 1300 with auto-fitted radius and gap
 neuroseq --generate-cellpose-test-data ./cellpose_1300.tif \
- --cellpose-grid-rows 10 \
- --cellpose-grid-cols 10 \
+ --cellpose-grid-rows 10 --cellpose-grid-cols 10 \
  --cellpose-square-size 1300
 ```
-
-## Importing a `.seq` file
-
-Use **File → Import data → Input → Optogenetics** to reconstruct a
-sequence in a new or existing input array. Browsing and cancelling do not change the
-project. Import applies the file's header as the session's export template only
-after conversion succeeds. The imported input uses 520.8125 µs samples. If an
-existing target input uses a different interval, only that input is resampled
-after confirmation. Other input arrays and trace datasets keep their own intervals
-and align by time in the plots.
-
-Targets map to consecutive channels starting at **Target neuron offset**, in their
-first-occurrence order for Holo4D sequences. They are not matched to project neuron
-IDs or Cellpose identities. Repeated point Shapes at identical coordinates and
-with the same lightsource share a channel; nearby legacy Entities retain the
-1 µm grouping rule. Multiple spots in one ROI may therefore import as separate
-channels. The preview shows the same grouping used for conversion.
-
-**Replace mapped target channels** clears only channels receiving imported data;
-other channels are preserved. Disable it to merge using the maximum value at
-each sample. Dropped channels, clipped duration, and capped legacy repeats require
-confirmation before the project changes. Files that reconstruct no stimulation
-are rejected, as are arrays exceeding the 512 MiB import allocation limit.
-
-Holo4D timing is reconstructed from each target's laser TTL pulses and SLM
-availability windows. The **Legacy repeat tick** setting does not change Holo4D's
-520.8125 µs TTL quantum. One sequence pass is imported; the header's `runs` count
-is not expanded. Imported amplitudes are raw file intensity values, with a nominal
-1 used for zero-intensity shapes, rather than recovered optical power or the
-original drawing amplitudes. Spiralling latency and hardware behavior cannot be
-inferred from the file, so this is not a measurement of delivered stimulation.
-Objects with multiple timing entries or multiple lightsources are rejected rather
-than partially imported.
-
-Every export also writes `<name>_original_stim.npz` next to the `.seq`: the exact
-input array, including silent neurons. The `.seq` holds hardware-adjusted timings
-(SLM load delays), so importing it alone reproduces those adjusted timings. When
-the sidecar sits next to the file and still matches it, the import restores the
-original array with its exact timings and neuron rows. Keep the two files together.
-
-## Setup panel and hardware execution
-
-Export defaults are **940 nm**, **Force binary export intensity off**,
-**Spiralling off**, **Exact stimulus timing on**, and **Use 10 input spots per ROI on**.
-With exact timing, each hologram shape starts one 16.7 ms SLM load window before
-its first pulse instead of on the window grid, and stimuli are delayed only where
-the previous hologram leaves no room for that load (the first stimulus is always
-delayed by one window). Untick it to snap shapes to the window grid, which can
-delay stimuli by up to a window per hologram. Previously remembered
-settings still apply to quick exports. With a linear 85 mW maximum calibration,
-5 mW is exported as approximately `0.058824`, not `5.8824`, in both Shape and
-laser TTL intensity fields. Use the rig's measured wavelength-specific LUT;
-the linear example is not a replacement calibration.
-
-Main-menu exports populate the setup panel's generated preview without importing
-into hardware. Exports from the setup panel import when connected. Routine blocks
-also update the preview after import acknowledgement. Preview images resize with
-the panel and remain distinct from hardware status.
-
-Laser controls are currently read-only: **Get Status** discovers lightsources on
-its first use, preferring 940 nm, and retrieves status. The single selector displays
-friendly names while retaining the original SCI identifiers internally. Set power,
-shutter, and emission in SysCon2 itself.
-
-Select the imported sequence, choose Runs and trigger settings, and click
-**Upload**. After confirmation of an endless upload, NeuroSeq uploads and waits for
-hardware Idle. Then click **Run** and confirm to start the sequence. The panel shows
-phases, elapsed time, and hardware Busy/Idle state; SCI provides no
-percentage-complete measurement. A triggered run remains waiting until Busy is
-observed. A short automatic run can finish between polls; that case is reported
-without claiming measured completion. **Stop** also cancels any queued Run.
-
-The preview is collapsed by default; click **Show preview** to expand it.
-
-The dynamic-routine dialogs offer **Use SysCon2 dt** and prompt for resampling when
-starting with the wrong timestep.
-
-### Dynamic input routines on the rig
-
-With the **SysCon2 (calcium imaging)** target, the rheobase and STDP window
-dialogs show **Hardware settings**: target power, laser, spiral scanning and spots
-per cell (the project's export settings, shared with the SysCon2 tab, so no
-**Export with settings…** is needed first), plus how blocks are recorded. With
-**Run blocks automatically and record them with ScanImage**, each block is
-uploaded and run by NeuroSeq while ScanImage records it, triggered by the
-sequence, and its ΔF/F traces are extracted with the project's Cellpose masks;
-see [ScanImage acquisition](scanimage_acquisition.md#dynamic-input-routines).
-Rheobase then counts a probe as evoking a response, depending on **Calcium
-readout**, when the neuron's ΔF/F rises by the **Response threshold** within
-the post-pulse window, or when OASIS deconvolution of that ΔF/F finds a spike
-(an event of at least the **Spike threshold**) in it. Unticked, each block
-is only imported into SysCon2 and you run, record and import it yourself, then
-click **Calcium data imported** (rheobase can then measure the rise of an
-imported ΔF/F or raw fluorescence trace, e.g. the TIFF import's ROI averages,
-or deconvolved spikes; Suite2p's normalised traces are refused, since a rise
-relative to their baseline is meaningless). Export warnings are asked once per
-routine rather than failing every block. Since probe amplitudes are fractions of
-the target power, a routine refuses to send a block without a target power above
-0 mW and a power LUT for the chosen laser, or with a target above the LUT's
-maximum (higher amplitudes would all be delivered at that maximum); every
-stimulated neuron must have a Cellpose ROI. Amplitudes must be above 0 and at
-most 1.
-
-Choosing the SysCon2 target first gives rheobase settings for cells in a slice: a
-16.7 ms pulse (one spiral; a shorter pulse with spiral scanning on is logged as a
-warning, since only part of the spiral is delivered), up to 100 ms, 1 s recovery,
-a 300 ms post-pulse window and **Fixed duration, varying amplitude**, since every
-probe is a recording. Each target keeps its own values when you switch back and
-forth. With deconvolved spikes, a spike in the imaging frame after the
-post-pulse window still counts: the frames lit by a short pulse are imputed, so
-its response first shows in full in the next frame. Simulations finishing or
-failing meanwhile do not affect a hardware run.
-
-If the selected input array already holds stimuli, for example from an earlier
-run that finished or was stopped, **Start** asks how to continue. **Clear and
-start over** empties the array, and **Continue after last stimulus** appends to it.
-On the SysCon2 and BrainScaleS-2 targets, **Start in new arrays** keeps the old
-array and its data unchanged and switches to a new, empty input array named after
-the run (e.g. `Exc_stimulation rheobase_2026-10-22_143012`). The probes then start
-at 0, and the run's trace and spikes go to a new data group of the same run name,
-which the trace and spike views switch to once its first block is recorded.
-
-Each routine run keeps its block scripts in its own folder inside the project's
-export folder (the one **Export with settings…** used last), for example
-`SysCon exports\rheobase_2026-10-22_143012\`. Every block is saved there as
-`rheobase_2026-10-22_143012_001.seq`, with its overview PNG and stimulus sidecar,
-and imported into SysCon2 under the same name, so names never repeat across
-runs. A recording of a block records the path of its `.seq`. Scripts exported
-with **Export current array to stimulation setup** stay temporary and are
-deleted when NeuroSeq closes. The **Create input array** and **Edit input
-array** dialogs also provide exact presets for SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, and 30 Hz imaging.

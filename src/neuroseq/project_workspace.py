@@ -2590,7 +2590,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Custom simulate function loaded",
-                f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment -> Run external simulation function menu option.",
+                f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment → Run External Input Function menu item.",
             )
         except Exception as e:
             self.project.external_simulate_path = None
