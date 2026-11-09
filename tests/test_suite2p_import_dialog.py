@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
@@ -8,6 +11,7 @@ from qtpy.QtCore import Qt
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
+from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -223,6 +227,63 @@ class TestSuite2pImportDialog:
         assert dialog.imported_data[0].traces.shape == (5, 900)
         assert isinstance(dialog.imported_data[1], SpikeData)
         assert len(dialog.imported_data[1].spike_indices) > 0
+
+    def test_import_maps_rows_through_the_project_mapping(
+        self,
+        qtbot: QtBot,
+        suite2p_import_data_dir,
+        qmessagebox_calls: list,
+    ) -> None:
+        """Indices are mapped at import, so a later remap keeps them unchanged."""
+        mapping = {0: 4, 1: 3, 2: 2, 3: 1, 4: 0}
+        dialog = Suite2pImportDialog(stimulus_to_cellpose_mapping=mapping)
+        qtbot.addWidget(dialog)
+
+        dialog.load_f_file(str(suite2p_import_data_dir / "F.csv"))
+        dialog.load_fneu_file(str(suite2p_import_data_dir / "Fneu.csv"))
+        dialog.load_spks_file(str(suite2p_import_data_dir / "spks.csv"))
+        dialog.import_data()
+
+        traces, spikes = dialog.imported_data
+        assert isinstance(traces, TraceData)
+        assert isinstance(spikes, SpikeData)
+        assert list(traces.raw_cellpose_ids) == [0, 1, 2, 3, 4]
+        assert list(traces.indices) == [4, 3, 2, 1, 0]
+        assert np.array_equal(spikes.spike_indices, 4 - spikes.raw_cellpose_ids)
+
+
+def test_workspace_passes_the_project_mapping_to_the_suite2p_dialog(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from qtpy import QtWidgets
+
+    from neuroseq.project_workspace import ProjectWorkspace
+
+    seen: dict[str, Any] = {}
+
+    class _FakeDialog:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            seen.update(kwargs)
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr("neuroseq.project_workspace.Suite2pImportDialog", _FakeDialog)
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.project.cellpose_data = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=np.array([[0, 1]], dtype=np.int32),
+        overlay_image=np.zeros((1, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 1], dtype=np.int32),
+        stimulus_to_cellpose_mapping={0: 1, 1: 0},
+    )
+
+    gui.btn_import_suite2p_data_clicked()
+
+    assert seen["stimulus_to_cellpose_mapping"] == {0: 1, 1: 0}
 
 
 class TestSuite2pDataValidation:

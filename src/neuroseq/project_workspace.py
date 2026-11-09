@@ -51,6 +51,7 @@ from neuroseq.icon_manager import icons
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import clone_cellpose_result
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_tif import DEFAULT_FS
 from neuroseq.importers.patch_clamp_data_input_import_dialog import (
     PatchClampDataInputImportDialog,
@@ -2140,7 +2141,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
     def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
-        dialog = Suite2pImportDialog(self)
+        dialog = Suite2pImportDialog(
+            self,
+            stimulus_to_cellpose_mapping=resolve_stimulus_to_cellpose_mapping(
+                self.project.cellpose_data
+            ),
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(
