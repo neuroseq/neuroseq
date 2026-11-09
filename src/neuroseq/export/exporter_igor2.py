@@ -215,6 +215,24 @@ def _write_pxp_wave_record(ibw_bytes: bytes) -> bytes:
     return header + ibw_bytes
 
 
+def igor_export_values(
+    stim_array: StimArray, values: np.ndarray, scaling_factor: float = 1.0
+) -> np.ndarray:
+    """Sample values as written to Igor files (.ibw, .csv and .pxp alike).
+
+    Inhibition arrays store positive magnitudes; patch-clamp software expects
+    inhibitory current as negative values, so they are negated. The scaling
+    factor applies on top (an inhibitory array scaled by 2 exports as
+    ``-2 * values``).
+    """
+    out = np.asarray(values, dtype=np.float64)
+    if stim_array.stim_type == StimType.Inhibition:
+        out = -out
+    if scaling_factor != 1.0:
+        out = out * scaling_factor
+    return out
+
+
 def generate_igor2_csv_text(
     stim_array: StimArray,
     *,
@@ -240,9 +258,9 @@ def generate_igor2_csv_text(
             f"Neuron index {neuron_index} is out of range for {n_neurons} neurons."
         )
 
-    values = np.asarray(stim_array.values[:, neuron_index], dtype=float)
-    if scaling_factor != 1.0:
-        values = values * scaling_factor
+    values = igor_export_values(
+        stim_array, stim_array.values[:, neuron_index], scaling_factor
+    )
     csv_buffer = io.StringIO(newline="")
     writer = csv.writer(csv_buffer, lineterminator="\n")
     writer.writerow([normalized_experiment_name])
@@ -313,9 +331,9 @@ def export_igor2_ibw(
         raise ValueError(f"scaling_factor must be finite, got {scaling_factor!r}")
 
     sanitized_name = _sanitize_igor_wave_name(wave_name)
-    values = np.asarray(stim_array.values[:, neuron_index], dtype=np.float32)
-    if scaling_factor != 1.0:
-        values = (values * scaling_factor).astype(np.float32)
+    values = igor_export_values(
+        stim_array, stim_array.values[:, neuron_index], scaling_factor
+    ).astype(np.float32)
     write_values: np.ndarray = values
     n_sweeps_out = 1
     if as_sweeps:
@@ -378,11 +396,7 @@ def export_igor2_pxp(
                 "Input export expects a 2D input array with shape (time, neuron)."
             )
 
-        values = stim_array.values
-        if stim_array.stim_type == StimType.Inhibition:
-            values = -values
-        if scaling_factor != 1.0:
-            values = values * scaling_factor
+        values = igor_export_values(stim_array, stim_array.values, scaling_factor)
 
         wave_units = unit_override if unit_override else str(stim_array.units)
 

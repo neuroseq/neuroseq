@@ -151,3 +151,18 @@ def test_dialog_status_reports_no_period_for_non_periodic_data(qtbot: QtBot) -> 
     status = dialog.findChild(QtWidgets.QLabel, "sweep_detection_status")
     assert status is not None
     assert "No periodic block detected" in status.text()
+
+
+def test_dialog_notes_that_inhibitory_arrays_are_negated(qtbot: QtBot) -> None:
+    stim = _stim()
+    stim.stim_type = StimType.Inhibition
+    dialog = Igor2SingleWaveExportDialog("stim", stim)
+    qtbot.addWidget(dialog)
+
+    texts = [label.text() for label in dialog.findChildren(QtWidgets.QLabel)]
+    assert any("negated" in text for text in texts)
+    plain = Igor2SingleWaveExportDialog("stim", _stim())
+    qtbot.addWidget(plain)
+    assert not any(
+        "negated" in label.text() for label in plain.findChildren(QtWidgets.QLabel)
+    )
