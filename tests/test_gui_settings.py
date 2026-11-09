@@ -188,3 +188,29 @@ def test_gui_theme_setting_roundtrip_and_validation(tmp_config_dir) -> None:
     settings.theme = "rainbow"
     settings.load_config_settings()
     assert settings.theme == "retro"
+
+
+def test_llm_private_project_data_defaults_and_round_trip(tmp_config_dir) -> None:
+    settings = GuiSettings()
+    assert not settings.llm_project_data_private("ollama")
+    assert settings.llm_project_data_private("openai")
+    assert settings.llm_project_data_private("claude_code")
+
+    settings.set_llm_project_data_private("ollama", True)
+    settings.set_llm_project_data_private("openai", False)
+
+    reloaded = GuiSettings()
+    assert reloaded.llm_project_data_private("ollama")
+    assert not reloaded.llm_project_data_private("openai")
+    assert reloaded.llm_project_data_private("anthropic")
+
+
+def test_llm_private_project_data_ignores_invalid_config(tmp_config_dir) -> None:
+    config_file = Path(tmp_config_dir) / "config.json"
+    config_file.write_text(
+        json.dumps({"llm_private_project_data": {"openai": "no", "codex": False}}),
+        encoding="utf-8",
+    )
+    settings = GuiSettings()
+    assert settings.llm_private_project_data == {"codex": False}
+    assert settings.llm_project_data_private("openai")

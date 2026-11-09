@@ -177,6 +177,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._backend: LLMBackend | None = None
         self._backend_name = ""
         self._backend_model = ""
+        self._private_data = True
         self._current_assistant_buffer = ""
         self._transient_assistant_html: str | None = None
         self._static_prompt = build_static_prompt()
@@ -242,6 +243,7 @@ class ChatWidget(QtWidgets.QWidget):
         settings = GuiSettings()
         self._backend_name = settings.llm_provider
         self._backend_model = settings.llm_model
+        self._private_data = settings.llm_project_data_private(settings.llm_provider)
         try:
             self._backend = self._make_backend(settings)
             ok, reason = self._backend.is_available()
@@ -272,7 +274,8 @@ class ChatWidget(QtWidgets.QWidget):
         label = self._backend_name.capitalize() if self._backend_name else "LLM"
         if self._backend_name == "ollama":
             label = "Ollama"
-        self.badge_label.setText(f"{label} · {self._backend_model}")
+        suffix = " · data not shared" if self._private_data else ""
+        self.badge_label.setText(f"{label} · {self._backend_model}{suffix}")
 
     def _update_input_enabled(self) -> None:
         enabled = self._backend is not None and self._worker is None
@@ -304,7 +307,7 @@ class ChatWidget(QtWidgets.QWidget):
             + "\n"
             + READ_INSTRUCTIONS
             + "\n"
-            + build_context_snapshot(self._project)
+            + build_context_snapshot(self._project, private_data=self._private_data)
         )
         messages = [Message(Role.SYSTEM, system_content), *self._history]
         self._worker = _ChatWorker(
@@ -316,6 +319,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._project,
             confirm_write=self._confirm_plugin_write,
             is_busy=self._busy_check,
+            private_data=self._private_data,
         )
         self._worker.read_requested.connect(self._on_read_requested)
         self._worker.token.connect(self._on_token)

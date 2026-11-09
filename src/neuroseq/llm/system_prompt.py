@@ -68,13 +68,22 @@ def build_static_prompt(docs_dir: Traversable = DOCS_DIR) -> str:
     return "".join(parts)
 
 
-def build_context_snapshot(project: Project | None) -> str:
+def build_context_snapshot(
+    project: Project | None, *, private_data: bool = False
+) -> str:
     if project is None:
         return "## Current project\n(no project loaded)\n"
     lines = ["## Current project", ""]
     try:
         lines.append(f"- Neurons: {int(project.max_neurons)}")
         lines.append(f"- Simulation duration: {float(project.max_time_secs):.3f} s")
+        if private_data:
+            lines.append(
+                "- Stimuli, experiments and imaging data: not shared (the user "
+                "turned off sharing project data in Settings -> LLM Assistant). "
+                "Answer without them; do not request them."
+            )
+            return "\n".join(lines) + "\n"
         lines.append(f"- Stim arrays: {sorted(project.stim_arrays.keys())}")
         experiment_names = sorted(project.experiments.keys())
         lines.append(

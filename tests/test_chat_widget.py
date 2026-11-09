@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from dataclasses import field
 
 import brian2.numpy_ as np
 import pytest
@@ -51,6 +52,16 @@ class _FakeSettings:
     llm_model: str = "fake-model"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
+    llm_private_project_data: dict = field(default_factory=dict)
+
+    def llm_project_data_private(self, provider: str) -> bool:
+        return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
+
+    def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        self.llm_private_project_data = {
+            **self.llm_private_project_data,
+            provider: private,
+        }
 
 
 def _make_widget(
@@ -291,3 +302,37 @@ def test_stream_without_tokens_adds_no_empty_assistant_message(
 
     assert [message.role for message in widget._history] == [Role.USER]
     assert all(message.content for message in widget._history)
+
+
+def test_private_data_setting_controls_snapshot_and_badge(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    backend = FakeBackend(tokens=["ok"])
+    settings = _FakeSettings()
+    widget = _make_widget(
+        qtbot, monkeypatch, lambda self, current: backend, settings=settings
+    )
+    widget.set_project(_make_project())
+    assert "data not shared" in widget.badge_label.text()
+
+    def send() -> str:
+        count = len(backend.seen_messages)
+        widget.input_edit.setPlainText("hello")
+        widget.send_button.click()
+        qtbot.waitUntil(
+            lambda: len(backend.seen_messages) > count
+            and widget.status_label.text() == "Idle",
+            timeout=WAIT_TIMEOUT_MS,
+        )
+        return backend.seen_messages[-1][0].content
+
+    private_prompt = send()
+    assert "'stimulus'" not in private_prompt
+    assert widget._read_access is not None and widget._read_access.private_data
+
+    settings.set_llm_project_data_private("fake", False)
+    widget.reload_backend()
+    assert "data not shared" not in widget.badge_label.text()
+    shared_prompt = send()
+    assert "'stimulus'" in shared_prompt
+    assert not widget._read_access.private_data

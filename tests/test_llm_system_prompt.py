@@ -88,3 +88,23 @@ def test_build_context_snapshot_lists_project_state() -> None:
 
 def test_build_context_snapshot_no_project() -> None:
     assert "no project loaded" in build_context_snapshot(None)
+
+
+def test_build_context_snapshot_omits_data_names_when_private() -> None:
+    project = Project()
+    project.add_stim_array(
+        StimArray(
+            "secret_input",
+            StimType.Excitation,
+            np.zeros((1000, 5), dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    project.update_limits()
+
+    snapshot = build_context_snapshot(project, private_data=True)
+
+    assert "Neurons: 5" in snapshot
+    assert "secret_input" not in snapshot
+    assert "not shared" in snapshot

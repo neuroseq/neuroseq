@@ -10,6 +10,8 @@ import pytest
 from neuroseq.llm.backend import Message
 from neuroseq.llm.backend import Role
 from neuroseq.llm.chat_widget import _ChatWorker
+from neuroseq.llm.read_access import PRIVATE_DATA_NOTICE
+from neuroseq.llm.read_access import PRIVATE_PROJECT_SECTIONS
 from neuroseq.llm.read_access import ReadAccess
 from neuroseq.project import Project
 from neuroseq.stimulation.stim import StimArray
@@ -497,3 +499,28 @@ def test_chat_widget_passes_busy_check_to_read_access(qtbot, monkeypatch):
     widget._on_send_clicked()
     qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
     assert "background job" in widget._backend.calls[1][-1].content
+
+
+def test_private_data_hides_experimental_sections_but_keeps_model():
+    project = Project()
+    project.b2_model.parameters["voltage"] = 5 * b2.mV
+    project.stim_arrays["input"] = StimArray(
+        "input", StimType.Excitation, np.ones((4, 3), np.float32), "mV", 0.001
+    )
+    reader = ReadAccess(project, private_data=True)
+
+    def read(path):
+        return json.loads(reader.execute({"kind": "project", "path": path}))
+
+    for section in PRIVATE_PROJECT_SECTIONS:
+        assert read([section]) == {"error": PRIVATE_DATA_NOTICE}
+    assert read(["stim_arrays", "input", "values"]) == {"error": PRIVATE_DATA_NOTICE}
+    assert read(["model", "parameters", "voltage"])["values"] == [0.005]
+    listed = read([])
+    assert "experiments" in listed["keys"]
+
+    shared = ReadAccess(project)
+    shared_read = json.loads(
+        shared.execute({"kind": "project", "path": ["stim_arrays", "input", "values"]})
+    )
+    assert shared_read["shape"] == [4, 3]

@@ -69,6 +69,9 @@ class GuiSettings:
     llm_openai_base_url: str = ""
     llm_codex_executable: str = ""
     llm_claude_executable: str = ""
+    #: Per provider: True keeps experimental data from the LLM assistant.
+    #: Missing providers use ``llm_project_data_private``'s default.
+    llm_private_project_data: dict = field(default_factory=dict)
     fiji_executable_path: str = ""
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
@@ -87,6 +90,7 @@ class GuiSettings:
         self.__dict__["fiji_executable_path"] = _autodetect_fiji()
         self.__dict__["recent_projects"] = []
         self.__dict__["bss2_settings"] = {}
+        self.__dict__["llm_private_project_data"] = {}
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
 
@@ -96,6 +100,17 @@ class GuiSettings:
         normalized = str(pathlib.Path(path).resolve())
         updated = [normalized] + [p for p in self.recent_projects if p != normalized]
         self.recent_projects = updated[:MAX_RECENT_PROJECTS]
+
+    def llm_project_data_private(self, provider: str) -> bool:
+        """Whether the assistant hides experimental data from ``provider``.
+        Defaults to hidden for every provider except local Ollama."""
+        return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
+
+    def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        self.llm_private_project_data = {
+            **self.llm_private_project_data,
+            provider: bool(private),
+        }
 
     def __setattr__(self, prop, val):
         super().__setattr__(prop, val)
@@ -121,6 +136,7 @@ class GuiSettings:
                         "llm_openai_base_url": self.llm_openai_base_url,
                         "llm_codex_executable": self.llm_codex_executable,
                         "llm_claude_executable": self.llm_claude_executable,
+                        "llm_private_project_data": self.llm_private_project_data,
                         "fiji_executable_path": self.fiji_executable_path,
                         "scanimage_python_path": self.scanimage_python_path,
                         "scanimage_recording_directory": self.scanimage_recording_directory,
@@ -266,6 +282,12 @@ class GuiSettings:
                 str(llm_ollama_base_url).rstrip("/") or "http://localhost:11434"
             )
             self.__dict__["llm_openai_base_url"] = str(llm_openai_base_url).rstrip("/")
+            private_data = config.get("llm_private_project_data", {})
+            self.__dict__["llm_private_project_data"] = (
+                {str(k): v for k, v in private_data.items() if isinstance(v, bool)}
+                if isinstance(private_data, dict)
+                else {}
+            )
             if fiji_executable_path is None or not str(fiji_executable_path).strip():
                 self.__dict__["fiji_executable_path"] = _autodetect_fiji()
             else:

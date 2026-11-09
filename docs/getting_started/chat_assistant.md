@@ -38,8 +38,16 @@ The assistant can read model equations, parameters, initial conditions,
 synapses, monitors, runtime state, stimuli, experiments, imaging metadata
 (large arrays in pages) and Python files inside the installed `neuroseq`
 package. It cannot read other files, run code or run simulations. Anything it
-reads is sent to the provider, including experimental data with a hosted
-provider.
+reads is sent to the provider.
+
+### Keeping data private
+
+**Don't share project data with the provider** (Settings → LLM Assistant)
+hides input arrays, experiments, Cellpose and imaging data, and their names in
+the project summary. The model, its parameters and the source stay readable.
+It is remembered per provider: on by default for hosted providers, Codex and
+Claude Code, off for Ollama. With Ollama on a remote server, turn it on. The
+chat badge shows "data not shared" while it is on.
 
 ### Writing analysis plugins
 

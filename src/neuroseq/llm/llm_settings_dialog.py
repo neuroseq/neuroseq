@@ -98,6 +98,16 @@ class LLMSettingsDialog(SelfRaisingDialog):
         key_button_row.addWidget(self.clear_key_button)
         form.addRow("", key_button_row)
 
+        self.private_data_check = QtWidgets.QCheckBox(
+            "Don't share project data with the provider", self
+        )
+        self.private_data_check.setToolTip(
+            "Hides input arrays, experiments, Cellpose and imaging data from the "
+            "assistant. The model, its parameters and NeuroSeq's source stay "
+            "readable. Remembered per provider; off by default only for Ollama."
+        )
+        form.addRow("Privacy:", self.private_data_check)
+
         self.status_label = QtWidgets.QLabel("", self)
         form.addRow("Status:", self.status_label)
         layout.addLayout(form)
@@ -114,6 +124,7 @@ class LLMSettingsDialog(SelfRaisingDialog):
         self.endpoint_edit.editingFinished.connect(self._endpoint_changed)
         self.codex_executable_edit.editingFinished.connect(self._save_settings)
         self.claude_executable_edit.editingFinished.connect(self._save_settings)
+        self.private_data_check.toggled.connect(self._private_data_changed)
         self.refresh_button.clicked.connect(self._refresh_models)
         self.save_key_button.clicked.connect(self._save_key)
         self.clear_key_button.clicked.connect(self._clear_key)
@@ -135,6 +146,9 @@ class LLMSettingsDialog(SelfRaisingDialog):
         self._previous_provider = settings.llm_provider
         self._provider_models[settings.llm_provider] = settings.llm_model
         self.api_key_edit.clear()
+        self.private_data_check.setChecked(
+            settings.llm_project_data_private(settings.llm_provider)
+        )
         self._update_provider_visibility()
         self.status_label.setText("Idle")
         self._loading = False
@@ -207,7 +221,17 @@ class LLMSettingsDialog(SelfRaisingDialog):
             self.endpoint_edit.setText(settings.llm_openai_base_url)
         else:
             self.endpoint_edit.setText(settings.llm_ollama_base_url)
+        with QtCore.QSignalBlocker(self.private_data_check):
+            self.private_data_check.setChecked(
+                settings.llm_project_data_private(provider)
+            )
         self._save_settings()
+
+    def _private_data_changed(self, checked: bool) -> None:
+        if self._loading:
+            return
+        GuiSettings().set_llm_project_data_private(self._current_provider(), checked)
+        self.settings_changed.emit()
 
     def _model_changed(self) -> None:
         self._save_settings()
