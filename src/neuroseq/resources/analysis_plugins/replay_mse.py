@@ -78,6 +78,9 @@ def _inject_controls(widget, on_update) -> QtWidgets.QWidget:
 
 def _show_message(widget, message: str) -> None:
     ax = widget.subplot
+    for other_ax in list(ax.figure.axes):
+        if other_ax is not ax:
+            other_ax.remove()
     ax.clear()
     ax.text(
         0.5,
