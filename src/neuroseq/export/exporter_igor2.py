@@ -403,8 +403,10 @@ def export_igor2_pxp(
         base_wave_name = _sanitize_igor_wave_name(name)
         n_neurons = int(values.shape[1])
         for neuron_idx in range(n_neurons):
+            # Trim the base, not the name, so the _n<idx> suffix survives.
+            neuron_suffix = f"_n{neuron_idx}"
             neuron_wave_name = _deduplicate_igor_wave_name(
-                f"{base_wave_name}_n{neuron_idx}",
+                f"{base_wave_name[: 31 - len(neuron_suffix)]}{neuron_suffix}",
                 used_names,
             )
             exported_wave_names.append(neuron_wave_name)

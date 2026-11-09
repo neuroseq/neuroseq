@@ -486,6 +486,26 @@ def test_export_igor2_pxp_deduplicates_long_wave_names(tmp_path: Path) -> None:
     assert len(report.wave_names) == 2
 
 
+def test_export_igor2_pxp_keeps_the_neuron_suffix_of_long_array_names(
+    tmp_path: Path,
+) -> None:
+    stim = StimArray(
+        name="ChrimsonR_power_sweep_1140nm_cells",
+        stim_type=StimType.Excitation,
+        values=np.zeros((5, 3), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+
+    report = export_igor2_pxp(tmp_path / "long.pxp", {stim.name: stim})
+
+    assert report.wave_names == [
+        "ChrimsonR_power_sweep_1140nm_n0",
+        "ChrimsonR_power_sweep_1140nm_n1",
+        "ChrimsonR_power_sweep_1140nm_n2",
+    ]
+
+
 def test_export_igor2_pxp_unit_override_replaces_per_array_units(
     tmp_path: Path,
 ) -> None:
