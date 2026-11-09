@@ -1,19 +1,27 @@
-# In-App LLM Assistant (Experimental)
+# In-App LLM Assistance (Experimental feature)
 
-!!! warning "Experimental feature"
+NeuroSeq provides an optional chat panel that lets you talk to an LLM about
+the currently loaded project, and availible neuronal sequencer functionality. The assistant has an access to the source code and is given a snapshot of the project state (model, stimuli, experiments) as context and replies in a side
+panel next to the main window.
+
 The in-app chat assistant is experimental and under active development.
 Behaviour, UI, supported providers, and the project context it receives
 may change without notice.
 
-NeuroSeq ships with an optional chat panel that lets you talk to an LLM about
-the currently loaded project. The assistant is given a snapshot of the
-project state (model, stimuli, experiments) as context and replies in a side
-panel next to the main window.
-
 ## Installation
 
-The assistant lives behind the `chat` extra, which pulls in the provider
-SDKs and `keyring` for credential storage.
+The chat panel is included in the standard NeuroSeq installation. Additional
+requirements depend on your chosen provider:
+
+- **Codex / Claude Code:** no extra Python packages are needed. Install and sign
+  in to the corresponding CLI as described below.
+- **OpenAI / Anthropic API / Ollama:** the provider's Python dependencies must be
+  installed. If they are already available in your NeuroSeq environment, no
+  additional installation is needed.
+
+The optional `chat` extra installs the dependencies for all three API providers
+(`openai`, `anthropic`, and `httpx`), plus `keyring` for API key storage.
+Use one of the following commands if you need these packages.
 
 From the repository directly (requires SSH access to GitHub):
 
@@ -27,10 +35,6 @@ From a local checkout:
 pip install ".[chat]"
 ```
 
-The panel itself is available in the default install. API providers require
-their optional dependencies. Codex and Claude Code use their separately
-installed CLIs and do not require the `chat` extra.
-
 ## Configuring a provider
 
 Open **Settings → LLM assistant** to choose a provider and model. Five
@@ -38,11 +42,11 @@ backends are bundled:
 
 | Provider    | Notes                                                                       |
 | ----------- | --------------------------------------------------------------------------- |
+| Codex (currently preferred)       | Local Codex app-server using your existing Codex sign-in and configuration. |
+| Claude Code (currently preferred) | Local Claude Code CLI using your existing Claude sign-in.                   |
 | Ollama      | Local models served by a running [Ollama](https://ollama.com) daemon.       |
 | OpenAI      | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
 | Anthropic   | Anthropic Claude API.                                                       |
-| Codex       | Local Codex app-server using your existing Codex sign-in and configuration. |
-| Claude Code | Local Claude Code CLI using your existing Claude sign-in.                   |
 
 For OpenAI and Anthropic you can paste an API key into the settings dialog.
 Keys are stored in the OS keyring via the `keyring` package; if no keyring

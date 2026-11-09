@@ -1,6 +1,18 @@
-# Examples of brian2 models
+# Examples
+
+## Run a sequence on digital substrate
+
+
+## Run a sequence on biological substrate
+
+
+## Run a sequence on neuromorphic substrate
+
+
+# Examplary brian2 models
 
 The examples provide a list of brian2 models.
+
 The first set of models is tailored to the real neurobiological experiments,
 and the description of the models contains additional information on the relation of the model architecture and properties with real experiments.
 The parameters of the models in the examples and initial conditions can be defined and modified in "File -> Edit Model".

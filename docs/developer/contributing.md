@@ -11,6 +11,10 @@ The NeuroSeq is an open-source project. Everyone can suggest and implement impro
 5. Test new functionality.
 6. Run [pytests](testing.md) before opening a pull request.
 
+When using AI tools, follow the guidance on
+[responsible use of AI](responsible_ai.md), including human review and scientific
+validation of the resulting changes.
+
 ## Project workspaces
 
 `gui.py` contains the application shell. Each tab embeds a separate

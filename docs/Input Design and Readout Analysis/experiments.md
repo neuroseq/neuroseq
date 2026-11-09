@@ -68,5 +68,5 @@ segmentation) outside the GUI:
 neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif
 ```
 
-See [Multiphoton Holographic Stimulation → Generating test data](multiphoton_holographic_stimulation.md#generating-test-data-cli)
+See [Multiphoton Holographic Stimulation → Generating test data](../Neural%20Networks/multiphoton_holographic_stimulation.md#generating-test-data-cli)
 for the full set of options.

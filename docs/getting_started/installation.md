@@ -39,6 +39,11 @@ Then launch the GUI with:
 neuroseq
 ```
 
+The first launch can take longer while dependencies prepare local caches.
+A loading window appears during initialization, and the plotting workspace loads
+after you choose a project on the welcome screen. Reuse the same Python
+environment to retain its caches for later launches.
+
 To upgrade to the latest release, run `python -m pip install --upgrade neuroseq`.
 
 For GPU-accelerated cell segmentation, see
@@ -47,11 +52,8 @@ For GPU-accelerated cell segmentation, see
 To work on NeuroSeq itself from a repository checkout (with uv or Conda), see the
 [developer installation guide](../developer/developer_installation.md).
 
-## Windows desktop shortcut
-
-On Windows, NeuroSeq can instead be installed with a desktop shortcut that
-updates it from GitHub before each start. See
-[Windows desktop shortcut](windows_shortcut.md).
+For Windows desktop shortcuts, see
+[Windows desktop shortcut](../developer/miscellaneous.md#windows-desktop-shortcut).
 
 ## How to install Cython on Windows
 
