@@ -122,7 +122,11 @@ logging folder, filename stem/counter, frames per file, logging enable,
 external-trigger enable, and frames-per-slice settings once ScanImage is idle. If the terminal callback
 precedes the idle state, the next status poll retries restoration; idle
 Disconnect also restores pending settings, as do the next Preview and Record if
-ScanImage became idle without any terminal callback. Verify restoration on your rig,
+ScanImage became idle without any terminal callback. If ScanImage goes idle
+without a terminal callback, the recording is marked interrupted and its settings
+are restored at the next status poll. An acquisition you start yourself after
+such a missed callback is never taken for NeuroSeq's recording. A setting you
+change in ScanImage after NeuroSeq set it is kept, not restored. Verify restoration on your rig,
 including after abort, before starting another manual Grab. Acquisition metadata
 retains the settings used during the recording.
 

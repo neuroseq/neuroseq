@@ -1101,3 +1101,28 @@ def test_block_trace_extraction_shows_in_the_toolbar_progress_bar(qtbot):
     assert bar.is_shown() and bar.labelText() == "Simulating..."
     bar.reset()
     gui._close_confirmed = True
+
+
+@pytest.mark.parametrize("acq_state", ["idle", "grab"])
+def test_run_the_adapter_marks_interrupted_is_released(connection, mocker, acq_state):
+    """The adapter reports a run interrupted when its terminal event was missed,
+    even while ScanImage runs a later acquisition that is not the run's."""
+    connection.connected = True
+    connection.run_id = "run"
+    errors = mocker.Mock()
+    finished = mocker.Mock()
+    connection.error.connect(errors)
+    connection.run_finished.connect(finished)
+    connection._send("status")
+    connection._reply(
+        {
+            "id": connection._serial,
+            "result": {
+                "acq_state": acq_state,
+                "run": {"id": "run", "state": "interrupted"},
+            },
+        }
+    )
+    assert connection.run_id is None
+    finished.assert_called_once_with("run")
+    assert "without a completion event" in errors.call_args.args[0]
