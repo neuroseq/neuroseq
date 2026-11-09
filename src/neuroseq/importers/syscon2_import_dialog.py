@@ -456,7 +456,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                     staged_stim.dt,
                     label=f"Import SysCon2 sequence into {stim_array.name}",
                 )
-            self.project.syscon2_export_template_text = self._header_template
+            self.project.set_syscon2_export_template_text(self._header_template)
             self.project.update_limits()
             self.project.mark_dirty()
             info_lines = [

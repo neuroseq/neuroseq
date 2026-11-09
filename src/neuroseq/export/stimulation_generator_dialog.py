@@ -1286,8 +1286,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 f"Could not parse LUT file:\n{exc}",
             )
             return
-        self.project.power_luts[wavelength_nm] = lut
-        self.project.mark_dirty()
+        self.project.set_power_lut(wavelength_nm, lut)
         self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:

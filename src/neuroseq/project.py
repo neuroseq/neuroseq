@@ -379,6 +379,18 @@ class Project:
         self.syscon_export_settings = settings
         self.mark_dirty()
 
+    def set_power_lut(self, wavelength_nm: int, lut: PowerLut) -> None:
+        """Store the SysCon2 power LUT used for ``wavelength_nm`` exports."""
+        self.power_luts[int(wavelength_nm)] = lut
+        self.mark_dirty()
+
+    def set_syscon2_export_template_text(self, text: str | None) -> None:
+        """Store the .seq header template SysCon2 exports start from."""
+        if text == self.syscon2_export_template_text:
+            return
+        self.syscon2_export_template_text = text
+        self.mark_dirty()
+
     def set_device_folder(self, purpose: str, folder: str) -> None:
         """Remember the folder this project's ``purpose`` workflow used last."""
         if self.device_folders.get(purpose) == folder:
