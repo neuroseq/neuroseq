@@ -40,16 +40,22 @@ synapses, monitors, runtime state, stimuli, experiments, imaging metadata
 package. It cannot read other files, run code or run simulations. Anything it
 reads is sent to the provider.
 
-### Keeping data private
+## Data scope
 
-**Don't share project data with the provider** (Settings → LLM Assistant)
-hides input arrays, experiments, Cellpose and imaging data, and their names in
-the project summary. The model, its parameters and the source stay readable.
-It is remembered per provider: on by default for hosted providers, Codex and
-Claude Code, off for Ollama. With Ollama on a remote server, turn it on. The
-chat badge shows "data not shared" while it is on.
+The **Don't share project data with the provider** checkbox in Settings → LLM
+Assistant limits what the assistant can read:
 
-### Writing analysis plugins
+| Checkbox | Readable                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------- |
+| On       | Docs, source, model, parameters, runtime state, neuron count and duration                   |
+| Off      | All of the above, plus input arrays, experiments, Cellpose and imaging data and their names |
+
+Each provider keeps its own value. Default: on for OpenAI, Anthropic, Codex
+and Claude Code; off for Ollama, which runs locally. Turn it on for an Ollama
+server on another machine. The chat badge shows "data not shared" while it is
+on.
+
+## Writing analysis plugins
 
 Ask e.g. "Create an analysis plugin that plots the mean trace across selected
 neurons." NeuroSeq shows the target path and full code (or a diff) and saves

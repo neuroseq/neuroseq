@@ -8,7 +8,7 @@ Calcium imaging enters a project in two parts:
 - **Traces**: fluorescence per cell, extracted from raw TIFFs or imported from
   Suite2p output, added as trace (and spike) data.
 
-Patch-clamp recordings are covered in [Igor2 waves](igor2_waves.md).
+Patch-clamp recordings are covered in [Igor2 waves](patch_clamp_data.md).
 
 ## Cell segmentation
 
@@ -82,7 +82,7 @@ activity), save it, segment it with **Open Cellpose**, then load the
   started at** is the first frame's time on that array's axis (0 if both
   started together, positive if imaging started later).
 
-## Suite2p output
+## Precomputed traces
 
 **File → Import data → Output → Calcium Imaging (Suite2p outputs)**: choose
 the output folder (with `F.npy`, `Fneu.npy`, `spks.npy`, `stat.npy`), or pick

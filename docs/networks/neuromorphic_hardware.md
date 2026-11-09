@@ -1,4 +1,4 @@
-# Deliver stimuli to BrainScaleS-2
+# Neuromorphic hardware
 
 The **BrainScaleS-2** tab of the **Stimulation setup** pane (**View → Show
 Stimulation setup**) delivers the current input array to the BrainScaleS-2

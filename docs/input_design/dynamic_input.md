@@ -42,8 +42,8 @@ import each block, then click **Calcium data imported** (rheobase) or **Block
 done / data imported** (STDP window). **Use SysCon2 dt** sets the array
 timestep to the SysCon2 grid. Details:
 [Holographic stimulation](../networks/holographic_stimulation.md),
-[ScanImage acquisition](../networks/scanimage_acquisition.md),
-[BrainScaleS-2](../networks/brainscales2.md).
+[ScanImage acquisition](../networks/imaging_acquisition.md),
+[BrainScaleS-2](../networks/neuromorphic_hardware.md).
 
 ## Minimal input for spiking (rheobase)
 

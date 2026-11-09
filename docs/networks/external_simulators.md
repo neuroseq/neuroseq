@@ -8,7 +8,7 @@ project's input arrays, runs its own network and returns an `Experiment`.
 1. **Experiment → Connect External Input Function** and choose the Python file.
    Use **Connect Brian2 External Input Function** instead if your backend builds
    its own Brian2 network: NeuroSeq then passes it the project's Brian2 units
-   and [code-generation target](simulations.md#choosing-a-brian2-backend).
+   and [code-generation target](simulations.md#choosing-a-code-generation-backend).
 2. Edit the input arrays.
 3. **Experiment → Run External Input Function** (or **Simulate → Run
    Simulation**, which dispatches to the connected simulator), enter the

@@ -1,4 +1,4 @@
-# Igor2 waves and patch-clamp data
+# Patch-clamp data
 
 Patch-clamp waveforms come in through two menu entries:
 

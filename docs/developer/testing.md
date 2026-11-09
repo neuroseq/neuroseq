@@ -21,7 +21,7 @@ are skipped unless `--update-screenshot` is given, which runs only them. Brian2
 uses the `numpy` code generation target in tests. About 27 ELISE tests skip when
 the private `elise` package is not installed (see `CLAUDE.md`).
 
-## Writing Qt tests
+## Writing GUI tests
 
 - Wait for a condition (`qtbot.waitUntil`, `waitSignal`, ...) instead of
   `qtbot.wait(ms)`, and pass `timeout=WAIT_TIMEOUT_MS` from `tests/wait_timeout.py`
@@ -56,7 +56,7 @@ test. Examples:
 
 For Qt parity with CI, set `QT_API=pyqt6` and `PYTEST_QT_API=pyqt6`.
 
-## SysCon2 and hardware
+## Hardware integration
 
 SysCon2 tests use fake transports and need no rig:
 
@@ -100,7 +100,7 @@ Record the script, debug CSV, sequence, Runs, trigger, wavelength, power, frame
 rate, threshold and per-probe response. Still unconfirmed: the wire width of the
 Runs integer (sent as a 32-bit DWord).
 
-## Linux: segfault at exit with Conda
+## Segfault at exit
 
 If tests pass and then segfault on exit inside Conda's `libstdc++`, preload the
 system runtime (Debian/Ubuntu x86-64 path):

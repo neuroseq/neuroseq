@@ -23,7 +23,8 @@ Because each step is substrate independent, a protocol can be developed in simul
 | Learn the main window            | [GUI overview](getting_started/gui_overview.md)                                              |
 | See which networks are supported | [Networks](networks/overview.md)                                                             |
 | Design stimuli                   | [Input design](input_design/overview.md)                                                     |
-| Import and analyse recordings    | [Experiments](readout/experiments.md), [Analysis](readout/analysis.md)                       |
+| Import recordings                | [Readout](readout/overview.md)                                                               |
+| Analyse data                     | [Data analysis](data_analysis/analysis.md)                                                   |
 | Open a ready-made project        | [Examples](examples.md)                                                                      |
 | Extend NeuroSeq                  | [Developer guide](developer/developer_installation.md)                                       |
 | Fix a problem                    | [Troubleshooting](common_issues.md)                                                          |

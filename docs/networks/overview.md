@@ -13,13 +13,13 @@ links each row to a real cell through a Cellpose segmentation
 
 ## Supported substrates
 
-| Substrate    | Network                                               | Input                                                                                           | Readout                                                                                             |
-| ------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Digital      | [Brian2](simulations.md)                              | Input arrays drive the built-in model                                                           | Simulated traces, spikes, synapses                                                                  |
-| Digital      | [External simulators](external_simulators.md)         | Input arrays passed to your Python `simulate(...)`                                              | The `Experiment` your backend returns                                                               |
-| Biological   | [Holographic stimulation](holographic_stimulation.md) | Two-photon holographic optogenetics on HOLO4D: export `.seq`, upload and run through SysCon2    | [ScanImage](scanimage_acquisition.md) calcium imaging: ΔF/F and deconvolved spikes per Cellpose ROI |
-| Biological   | Patch clamp                                           | [Export protocols](../input_design/patch_clamp_export.md) for the acquisition software          | [Import Igor2 waves](../readout/igor2_waves.md) or CSV                                              |
-| Neuromorphic | [BrainScaleS-2](brainscales2.md)                      | Constant current per neuron, or spikes from a virtual source population; chip runs 1000x faster | Spikes of all driven neurons and the membrane voltage of one neuron                                 |
+| Substrate    | Network                                               | Input                                                                                           | Readout                                                                                           |
+| ------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Digital      | [Brian2](simulations.md)                              | Input arrays drive the built-in model                                                           | Simulated traces, spikes, synapses                                                                |
+| Digital      | [External simulators](external_simulators.md)         | Input arrays passed to your Python `simulate(...)`                                              | The `Experiment` your backend returns                                                             |
+| Biological   | [Holographic stimulation](holographic_stimulation.md) | Two-photon holographic optogenetics on HOLO4D: export `.seq`, upload and run through SysCon2    | [ScanImage](imaging_acquisition.md) calcium imaging: ΔF/F and deconvolved spikes per Cellpose ROI |
+| Biological   | Patch clamp                                           | [Export protocols](../input_design/patch_clamp_export.md) for the acquisition software          | [Import Igor2 waves](../readout/patch_clamp_data.md) or CSV                                       |
+| Neuromorphic | [BrainScaleS-2](neuromorphic_hardware.md)             | Constant current per neuron, or spikes from a virtual source population; chip runs 1000x faster | Spikes of all driven neurons and the membrane voltage of one neuron                               |
 
 ## Workflow
 

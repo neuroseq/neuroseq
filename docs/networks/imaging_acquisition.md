@@ -1,4 +1,4 @@
-# ScanImage acquisition on the same PC
+# Calcium imaging acquisition
 
 The **ScanImage (imaging)** tab of the **Stimulation setup** pane (toolbar
 button **Image acquisition**, or **View → Show Stimulation setup**) controls a

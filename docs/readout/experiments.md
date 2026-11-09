@@ -39,7 +39,7 @@ project**; **Data Preview** updates as you change parameters.
 Overlapping spike responses add up. Responses are computed at 0.1 ms and then
 sampled, so a sampled trace can miss the exact peak.
 
-## Cellpose test data
+## Segmentation test data
 
 To make a synthetic Cellpose image and matching segmentation from the command
 line:

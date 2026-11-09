@@ -32,7 +32,7 @@ at a time across all tabs.
 | Path                                                     | Purpose                                                                                                                             |
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Import data → Input → Optogenetics                       | SysCon2 `.seq` ([holographic stimulation](../networks/holographic_stimulation.md))                                                  |
-| Import data → Input → Patch Clamp                        | Igor2 `.ibw`/`.pxp` or `.csv`/`.txt` input waves ([Igor2 waves](../readout/igor2_waves.md))                                         |
+| Import data → Input → Patch Clamp                        | Igor2 `.ibw`/`.pxp` or `.csv`/`.txt` input waves ([Igor2 waves](../readout/patch_clamp_data.md))                                    |
 | Import data → Output → Calcium Imaging (raw .tif)        | raw 2-photon TIFF via Cellpose + Suite2p ([imaging data](../readout/imaging_data.md))                                               |
 | Import data → Output → Calcium Imaging (Suite2p outputs) | existing Suite2p results                                                                                                            |
 | Import data → Output → Patch Clamp                       | recorded traces                                                                                                                     |
@@ -124,8 +124,8 @@ The **Imaging** tab plays imported imaging movies.
 
 **View → Show Stimulation setup** has one tab per target:
 **SysCon2 (HOLO4D)** ([holographic stimulation](../networks/holographic_stimulation.md)),
-**BrainScaleS-2** ([BrainScaleS-2](../networks/brainscales2.md)) and
-**ScanImage (imaging)** ([ScanImage acquisition](../networks/scanimage_acquisition.md)).
+**BrainScaleS-2** ([BrainScaleS-2](../networks/neuromorphic_hardware.md)) and
+**ScanImage (imaging)** ([ScanImage acquisition](../networks/imaging_acquisition.md)).
 
 ## Synaptic data widget
 
@@ -137,7 +137,7 @@ Limit** it downsamples in time.
 
 Select a region in the traces, right-click and pick an analysis. Results appear
 in the **Custom Analysis** panel, or in a new window if **Open analysis in a new
-window** is checked. See [analysis and plugins](../readout/analysis.md).
+window** is checked. See [analysis and plugins](../data_analysis/analysis.md).
 
 ## Settings
 
@@ -145,7 +145,7 @@ window** is checked. See [analysis and plugins](../readout/analysis.md).
 | ------------------------- | ----------------------------------------------------------------------------- |
 | Brian2 Simulation Backend | `numpy` (default) or `cython` ([simulations](../networks/simulations.md))     |
 | Input Automatic Padding   | default duration (s) for new input arrays and the Pad dialog (default 0)      |
-| LLM Assistant             | provider, model and key for the [chat assistant](chat_assistant.md)           |
+| LLM Assistant             | provider, model, key and [data scope](chat_assistant.md#data-scope)           |
 | Synapse Matrix RAM Limit  | MB before the synapse heatmap downsamples (default 256, 0 = no limit)         |
 | Trace Plot RAM Limit      | same for trace plots (default 256)                                            |
 | Theme                     | Light, Dark or Retro light theme (beta) (default); remembered across launches |

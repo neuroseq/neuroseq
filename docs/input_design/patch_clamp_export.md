@@ -14,7 +14,7 @@ scaling factor accepts forms like `1e-12` or `2.5*10^(-12)`.
 
 `.csv` is the most portable format; `.ibw` imports directly into Igor Pro.
 
-## SutterPatch (Igor Pro)
+## Loading a template in the amplifier software
 
 SutterPatch runs Sutter amplifiers inside Igor Pro. Stimuli are built in the
 **Routine Editor**: one segment of type **Template** is enough.
@@ -25,4 +25,4 @@ SutterPatch runs Sutter amplifiers inside Igor Pro. Stimuli are built in the
 
 ![SutterPatch Template Editor](../images/SutterPatch_TemplateEditor.png)
 
-To bring recordings back, see [Igor2 waves](../readout/igor2_waves.md).
+To bring recordings back, see [Igor2 waves](../readout/patch_clamp_data.md).

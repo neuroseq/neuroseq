@@ -2,7 +2,7 @@
 
 An analysis plugin adds an entry to the right-click analysis menu of the trace
 and spike views without changing core code. Using plugins is described in
-[Analysis](../readout/analysis.md).
+[Analysis](../data_analysis/analysis.md).
 
 ## Writing a plugin
 

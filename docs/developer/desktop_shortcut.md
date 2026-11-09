@@ -1,6 +1,8 @@
-# Windows desktop shortcut
+# Desktop shortcut
 
-## Installed release (pip)
+These steps create a desktop shortcut on Windows.
+
+## Installed release
 
 Point a shortcut at the installed executable; no terminal or activation is needed.
 
@@ -26,7 +28,7 @@ Point a shortcut at the installed executable; no terminal or activation is neede
 Recreate the shortcut if you move the environment. Update with
 `python -m pip install --upgrade neuroseq` in that environment.
 
-## Development version (Git and uv)
+## Development version
 
 This shortcut updates a git clone from `main` and starts it with `uv run`, so
 lab machines always run the current code.

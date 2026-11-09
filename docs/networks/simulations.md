@@ -13,7 +13,7 @@ arrays and recorded monitors are saved together in the `.nseq` project.
 Design the input first with the [static input editor](../input_design/static_input.md)
 or a [dynamic input routine](../input_design/dynamic_input.md).
 
-## Choosing a Brian2 backend
+## Choosing a code generation backend
 
 **Settings → Brian2 Simulation Backend**:
 

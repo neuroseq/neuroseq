@@ -2,7 +2,7 @@
 
 Use either uv (recommended) or Conda. You need only one of them.
 
-## With uv
+## Recommended setup
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/#standalone-installer)
 and [prek](https://prek.j178.dev/) (a fast [pre-commit](https://pre-commit.com/)), then:
@@ -19,7 +19,7 @@ prek install
 without activation. Run `uv sync` again after pulling. To upgrade dependencies,
 run `uv lock --upgrade`, then `uv sync`, and test (this changes `uv.lock`).
 
-## With Conda
+## Alternative setup
 
 ```bash
 git clone git@github.com:neuroseq/neuroseq.git

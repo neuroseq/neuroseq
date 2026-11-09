@@ -6,11 +6,11 @@ Edit their parameters and initial conditions in **File → Edit Model**
 
 ## One input protocol, three substrates
 
-| Substrate    | Run the input array                                                                                                                                      | Read out                                                                                                             |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Digital      | **Simulate → Run Simulation** (Brian2) or an [external simulator](networks/external_simulators.md)                                                       | traces, spikes and synapses appear in the panels                                                                     |
-| Biological   | **Export → Optogenetic Input** or the **SysCon2 (HOLO4D)** tab of the Stimulation setup ([holographic stimulation](networks/holographic_stimulation.md)) | [ScanImage acquisition](networks/scanimage_acquisition.md), [imaging import](readout/imaging_data.md) or patch clamp |
-| Neuromorphic | **BrainScaleS-2** tab of the Stimulation setup ([BrainScaleS-2](networks/brainscales2.md))                                                               | spikes and membrane traces read back                                                                                 |
+| Substrate    | Run the input array                                                                                                                                      | Read out                                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Digital      | **Simulate → Run Simulation** (Brian2) or an [external simulator](networks/external_simulators.md)                                                       | traces, spikes and synapses appear in the panels                                                                   |
+| Biological   | **Export → Optogenetic Input** or the **SysCon2 (HOLO4D)** tab of the Stimulation setup ([holographic stimulation](networks/holographic_stimulation.md)) | [ScanImage acquisition](networks/imaging_acquisition.md), [imaging import](readout/imaging_data.md) or patch clamp |
+| Neuromorphic | **BrainScaleS-2** tab of the Stimulation setup ([BrainScaleS-2](networks/neuromorphic_hardware.md))                                                      | spikes and membrane traces read back                                                                               |
 
 For biological targets, map input rows to real cells with Cellpose
 segmentation (**File → Cell segmentation**) first.

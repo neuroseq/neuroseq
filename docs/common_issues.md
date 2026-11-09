@@ -2,7 +2,7 @@
 
 ## Installation
 
-### Windows: long path error
+### Long path error during install
 
 `pip install` fails with `OSError: [Errno 2] No such file or directory` on a
 very long path and the hint _"this system does not have Windows Long Path
@@ -12,7 +12,7 @@ support enabled"_. Fix: in the Registry Editor set `LongPathsEnabled` under
 
 ## Imaging and segmentation
 
-### Cellpose "use GPU" is greyed out
+### GPU option greyed out in cell segmentation
 
 Cellpose and Suite2p use the GPU only if PyTorch has CUDA (NVIDIA) or MPS
 (Apple Silicon). PyPI's default `torch` on Windows is CPU-only. Check:
