@@ -58,6 +58,13 @@ def _validate_common(
         raise ValueError("dt_seconds must be positive")
     pulse_n = int(round(pulse_ms / 1000.0 / dt_seconds))
     ipi_n = int(round(ipi_ms / 1000.0 / dt_seconds))
+    if pulse_n < 1:
+        # An all-zero block would overwrite existing stimuli with nothing.
+        raise ValueError(
+            f"Pulse duration {pulse_ms:g} ms is shorter than one sample of the "
+            f"input array (dt {dt_seconds * 1000.0:g} ms); use at least "
+            f"{dt_seconds * 500.0:g} ms."
+        )
     return pulse_n, ipi_n
 
 

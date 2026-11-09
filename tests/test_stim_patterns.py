@@ -453,3 +453,19 @@ def test_elise_model_reuses_stim_pattern_note_sequence() -> None:
     from neuroseq.stimulation.static_input import stim_patterns
 
     assert elise_model._FUER_ELISE_INTRO is stim_patterns.FUER_ELISE_INTRO
+
+
+@pytest.mark.parametrize(
+    "generate",
+    [
+        lambda: generate_simultaneous(2, 5.0, 10.0, 1.0, 1, 0.0166),
+        lambda: generate_ramp(2, 5.0, 0.0, 0.0, 1.0, 1, 0.0166),
+        lambda: generate_sequential(2, 5.0, 10.0, 1.0, 0.0166),
+    ],
+)
+def test_pulse_shorter_than_one_sample_is_rejected(generate) -> None:
+    """A pulse that rounds to 0 samples would write an all-zero block over
+    existing stimuli (or an empty ramp): refuse it with a message the pattern
+    dialog shows."""
+    with pytest.raises(ValueError, match="shorter than one sample"):
+        generate()
