@@ -262,13 +262,6 @@ def clone_cellpose_result(
     )
 
 
-def is_identity_mapping(mapping: dict[int, int] | None) -> bool:
-    """Return True if all stimulus IDs map to the same cellpose IDs (identity)."""
-    if not mapping:
-        return False
-    return all(stim_id == cellpose_id for stim_id, cellpose_id in mapping.items())
-
-
 def generate_linear_stimulus_mapping(
     original_ids: np.ndarray | None, offset: int
 ) -> dict[int, int]:
@@ -305,52 +298,6 @@ def resolve_stimulus_to_cellpose_mapping(
     return generate_linear_stimulus_mapping(
         cellpose_data.original_cellpose_ids,
         int(cellpose_data.linear_offset or 0),
-    )
-
-
-def prepare_cellpose_traces(
-    traces: np.ndarray,
-    *,
-    name: str,
-    dt: float,
-    units: str,
-) -> TraceData:
-    if traces.ndim != 2:
-        raise ValueError(
-            "Cellpose traces must be a 2D array of shape (neurons, timepoints)"
-        )
-    if traces.shape[0] == 0 or traces.shape[1] == 0:
-        raise ValueError(
-            "Cellpose traces must contain at least one neuron and one timepoint"
-        )
-    if dt <= 0:
-        raise ValueError("Cellpose trace dt must be positive")
-
-    indices = np.arange(traces.shape[0], dtype=np.uint32)
-    return TraceData(name, traces.astype(np.float32), indices, units, dt)
-
-
-def prepare_cellpose_spikes(
-    spike_indices: np.ndarray,
-    spike_times: np.ndarray,
-    *,
-    name: str,
-) -> SpikeData:
-    if spike_indices.ndim != 1 or spike_times.ndim != 1:
-        raise ValueError("Spike indices and times must be 1D arrays")
-    if spike_indices.shape[0] != spike_times.shape[0]:
-        raise ValueError("Spike indices and times must have matching lengths")
-    if spike_indices.shape[0] == 0:
-        raise ValueError("Spike data must contain at least one event")
-    if np.any(spike_indices < 0):
-        raise ValueError("Spike indices must be non-negative")
-    if np.any(spike_times < 0):
-        raise ValueError("Spike times must be non-negative")
-
-    return SpikeData(
-        name,
-        spike_indices.astype(np.int32),
-        spike_times.astype(np.float32),
     )
 
 

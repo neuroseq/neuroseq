@@ -16,14 +16,17 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_syscon2 import _BLOCK_START_RE
+from neuroseq.importers.importer_syscon2 import _HEADER_HASH_RE
+from neuroseq.importers.importer_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_US
+from neuroseq.importers.importer_syscon2 import _SYSCON2_WINDOW_TICKS
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
+from neuroseq.importers.importer_syscon2 import _extract_lightsource_ids
+from neuroseq.importers.importer_syscon2 import _strip_comment
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_timing import ceil_sample_position
 from neuroseq.stimulation.stim_timing import round_sample_position
-
-_BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
-_HEADER_HASH_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){15}$")
 
 _REQUIRED_HEADER_DEFAULTS: dict[str, str] = {
     "version": "3",
@@ -44,7 +47,6 @@ _DEFAULT_TTL_OUT_2_PORT = "Holo4D TTL Out 2"
 
 _SLM_LEAD_IN_US = 16_660  # used only for PNG visualization; one window = 16_666 µs
 _TTL_OUT_1_START_PULSE_US = 10_000
-_SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_TTL_PULSE_QUANTUM_S = (
     0.0005208125  # exact literal; avoids float rounding from * 1e-6
 )
@@ -67,7 +69,6 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
     1100: "dummy_2_0",
 }
 
-_SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
 #: One SLM window (16.67 ms): a hologram's load time and one spiral's period.
 SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
@@ -1542,22 +1543,6 @@ def _sanitize_stim_array_for_export(
     )
 
 
-def _window_values_to_sample_values(
-    window_values: np.ndarray,
-    *,
-    n_timepoints: int,
-) -> np.ndarray:
-    n_windows, n_neurons = window_values.shape
-    result = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
-    for window_idx in range(n_windows):
-        start_idx = window_idx * _SYSCON2_WINDOW_TICKS
-        if start_idx >= n_timepoints:
-            break
-        end_idx = min(n_timepoints, start_idx + _SYSCON2_WINDOW_TICKS)
-        result[start_idx:end_idx, :] = window_values[window_idx, :]
-    return result
-
-
 def _adjusted_raw_segments_to_sample_values(
     adjusted_raw_segments: list[_RawSegment],
     *,
@@ -1566,7 +1551,7 @@ def _adjusted_raw_segments_to_sample_values(
 ) -> np.ndarray:
     """Reconstruct a stim-array values matrix from preblank-shifted raw segments.
 
-    Unlike ``_window_values_to_sample_values``, this preserves the original
+    Unlike rebuilding from the window grid, this preserves the original
     pulse duration exactly (no window-boundary rounding).  Only the tick
     positions are shifted to account for preblank window insertions.
     """
@@ -3276,19 +3261,6 @@ def _merge_tick_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, i
     return merged
 
 
-def _max_simultaneous_segments(segments: list[_MappedSegment]) -> int:
-    timeline_events: dict[int, int] = defaultdict(int)
-    for segment in segments:
-        timeline_events[segment.start_tick] += 1
-        timeline_events[segment.end_tick] -= 1
-    concurrent = 0
-    max_concurrent = 0
-    for tick in sorted(timeline_events.keys()):
-        concurrent += timeline_events[tick]
-        max_concurrent = max(max_concurrent, concurrent)
-    return max(1, max_concurrent)
-
-
 def _build_entity_windows(
     mapped_segments: list[_MappedSegment],
     *,
@@ -3420,88 +3392,6 @@ def _find_new_target_appearance_ticks(
             active_counts[neuron_idx] = active_counts.get(neuron_idx, 0) + 1
 
     return sorted(set(boundaries))
-
-
-def _validate_no_off_on_overlap(
-    windows: list[_EntityWindow],
-    *,
-    lead_ticks: int,
-    pulse_guard_ticks: int = 0,
-) -> None:
-    if lead_ticks <= 0:
-        raise ValueError("lead_ticks must be positive")
-    if pulse_guard_ticks < 0:
-        raise ValueError("pulse_guard_ticks must be non-negative")
-    if len(windows) <= 1:
-        return
-
-    for off_window in windows:
-        off_start = off_window.start_tick
-        off_end = min(
-            off_window.end_tick,
-            off_window.start_tick + lead_ticks + pulse_guard_ticks,
-        )
-        if off_end <= off_start:
-            continue
-
-        for on_window in windows:
-            if off_window is on_window:
-                continue
-            if off_window.neuron_index == on_window.neuron_index:
-                continue
-            on_start = max(
-                on_window.start_tick + lead_ticks + pulse_guard_ticks,
-                on_window.start_tick,
-            )
-            on_end = on_window.end_tick
-            if on_end <= on_start:
-                continue
-            if off_end <= on_start or on_end <= off_start:
-                continue
-
-            overlap_start = max(off_start, on_start)
-            overlap_end = min(off_end, on_end)
-            raise ValueError(
-                "Invalid input for SysCon2 export: an SLM off-state interval "
-                "overlaps with another neuron's ON interval "
-                f"(off neuron={off_window.neuron_index}, "
-                f"on neuron={on_window.neuron_index}, "
-                f"overlap_ticks=[{overlap_start}, {overlap_end}))."
-            )
-
-
-def _validate_pulse_bounds_within_entity_windows(
-    windows: list[_EntityWindow],
-    *,
-    lead_ticks: int,
-    pulse_guard_ticks: int = 0,
-) -> None:
-    if lead_ticks <= 0:
-        raise ValueError("lead_ticks must be positive")
-    if pulse_guard_ticks < 0:
-        raise ValueError("pulse_guard_ticks must be non-negative")
-    if len(windows) == 0:
-        return
-
-    for window in windows:
-        expected_stimulation_start = window.start_tick + lead_ticks + pulse_guard_ticks
-        if window.stimulation_start_tick != expected_stimulation_start:
-            raise ValueError(
-                "Invalid input for SysCon2 export: first associated laser pulse "
-                "must start exactly after lead-in + guard interval "
-                f"(neuron={window.neuron_index}, "
-                f"stimulation_start_tick={window.stimulation_start_tick}, "
-                f"expected_start_tick={expected_stimulation_start})."
-            )
-        max_stimulation_end = window.end_tick - pulse_guard_ticks
-        if window.stimulation_end_tick > max_stimulation_end:
-            raise ValueError(
-                "Invalid input for SysCon2 export: laser pulse end is too "
-                "close to the end of the associated shape object "
-                f"(neuron={window.neuron_index}, "
-                f"stimulation_end_tick={window.stimulation_end_tick}, "
-                f"maximum_allowed_tick={max_stimulation_end})."
-            )
 
 
 def _find_pulse_overrun_violations(
@@ -3644,12 +3534,6 @@ def _assign_entity_lanes(
             )
         )
     return scheduled
-
-
-def _strip_comment(line: str) -> str:
-    if "//" not in line:
-        return line
-    return line.split("//", 1)[0]
 
 
 def _build_header_lines(template_text: str) -> list[str]:
@@ -3999,17 +3883,6 @@ def _preview_object_color(object_type: str) -> str:
     return "#636363"
 
 
-def _extract_lightsource_ids_from_object(obj: SysconSequenceObject) -> set[str]:
-    ids: set[str] = set()
-    for key, value in obj.properties.items():
-        if "_lightsourceid_" not in key.lower():
-            continue
-        stripped = value.strip()
-        if stripped:
-            ids.add(stripped)
-    return ids
-
-
 def _build_timeline_axis_labels(
     timeline_indices: list[int],
     *,
@@ -4054,7 +3927,7 @@ def _build_timeline_axis_labels(
                 {
                     lightsource_id
                     for obj in ttl_objects
-                    for lightsource_id in _extract_lightsource_ids_from_object(obj)
+                    for lightsource_id in _extract_lightsource_ids(obj)
                 }
             )
             if lightsource_ids:
