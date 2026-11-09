@@ -207,14 +207,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def _record(self, run_id: str) -> dict | None:
         """The project's record of ``run_id``; ``None`` if the project was replaced."""
-        return next(
-            (
-                record
-                for record in self._project().imaging_acquisitions
-                if record.get("run_id") == run_id
-            ),
-            None,
-        )
+        return self._project().imaging_acquisition(run_id)
 
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
@@ -330,8 +323,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             if samples_path is not None:
                 samples_path.unlink(missing_ok=True)
             return False
-        project.imaging_acquisitions.append(record)
-        project.mark_dirty()
+        project.add_imaging_acquisition(record)
         # The project records the folder its recordings went to.
         self._remember_directory(str(arguments["directory"]))
         self.run_ids.add(arguments["run_id"])
@@ -377,16 +369,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     or self._abort_messages.get(run_id)
                     or self._block_failure_message(run_id, state, previous_state),
                 )
-        record = self._record(run_id)
-        if record is None:
-            logger.warning("No project record for ScanImage run %s", run_id)
-            return
-        previous = record.get("status")
-        record["status"] = state
+        changes: dict = {"status": state}
+        remove: tuple[str, ...] = ()
         if "error" in run:
-            record["error"] = run["error"]
-        elif record["status"] in {"recording", "completed", "aborted"}:
-            record.pop("error", None)
+            changes["error"] = run["error"]
+        elif state in {"recording", "completed", "aborted"}:
+            remove = ("error",)
         for source, target in (
             ("matlab_version", "matlab_version"),
             ("scanimage_version", "scanimage_version"),
@@ -394,9 +382,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             ("files", "files"),
         ):
             if source in status:
-                record[target] = status[source]
-        if record["status"] != previous:
-            self._project().mark_dirty()
+                changes[target] = status[source]
+        if not self._project().update_imaging_acquisition(run_id, changes, remove):
+            logger.warning("No project record for ScanImage run %s", run_id)
 
     def set_scanimage_channel(self, channel: int) -> None:
         index = self._project().calcium_scanimage_index
@@ -434,22 +422,24 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 )
             self._fail_block(run_id, "The project changed during the recording.")
             return
-        record.update(
-            status=result["status"],
-            recording=result,
-            finished_at=datetime.now(UTC).isoformat(),
+        project.update_imaging_acquisition(
+            run_id,
+            {
+                "status": result["status"],
+                "recording": result,
+                "finished_at": datetime.now(UTC).isoformat(),
+            },
+            remove=("error",),
         )
-        record.pop("error", None)
         if run_id in self._fov_runs:
             channel = self._fov_runs.pop(run_id)
-            self._save_fov_image(run_id, result, record, channel)
-            project.mark_dirty()
+            self._save_fov_image(run_id, result, channel)
             return
         name = record["name"]
         block = self._blocks.get(run_id)
         if block is not None and block.group is not None:
             # Its traces join the routine run's data group (see _extract_block).
-            record["experiment_name"] = block.group
+            project.update_imaging_acquisition(run_id, {"experiment_name": block.group})
         else:
             if name in project.experiments:
                 name = f"{name} ({run_id[:8]})"
@@ -458,7 +448,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     name=name, duration=result["duration_s"], timepoints=[], data=[]
                 )
             )
-            record["experiment_name"] = name
+            project.update_imaging_acquisition(run_id, {"experiment_name": name})
         project.add_calcium_video(
             [pathlib.Path(p) for p in result["paths"]],
             result["fps"],
@@ -486,9 +476,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         )
         self._extract_block(run_id, block, result, name)
 
-    def _save_fov_image(
-        self, run_id: str, result: dict, record: dict, channel: int
-    ) -> None:
+    def _save_fov_image(self, run_id: str, result: dict, channel: int) -> None:
         """Average ``channel`` and save it beside the recording, in the background
         like a block's trace extraction."""
         paths = [pathlib.Path(p) for p in result["paths"]]
@@ -503,8 +491,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return str(target)
 
         def finished(_path: object) -> None:
-            record["fov_image"] = str(target)
-            self._project().mark_dirty()
+            self._project().update_imaging_acquisition(
+                run_id, {"fov_image": str(target)}
+            )
             recorded = ", ".join(path.name for path in paths)
             self.controls.show_message(
                 f"FOV recording saved: {recorded}. Its mean of channel {channel}: "
