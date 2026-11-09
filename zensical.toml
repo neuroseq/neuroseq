@@ -44,7 +44,7 @@ nav = [
         { "Analysis Plugins" = "developer/analysis_plugins.md" },
         { "Project History" = "developer/project_history.md" },
         { Releases = "developer/releases.md" },
-        { Miscellaneous = "developer/miscellaneous.md" },
+        { "Windows Shortcut" = "developer/windows_shortcut.md" },
         { "Responsible Use of AI" = "developer/responsible_ai.md" },
     ] },
     { Troubleshooting = "common_issues.md" },
@@ -72,3 +72,21 @@ generic = true
 [project.markdown_extensions.pymdownx.superfences]
 [project.markdown_extensions.attr_list]
 [project.markdown_extensions.md_in_html]
+
+# old URLs from before the docs/ folder reorganization
+[project.plugins.redirects.redirect_maps]
+"Neural Networks/overview.md" = "networks/overview.md"
+"Neural Networks/simulations.md" = "networks/simulations.md"
+"Neural Networks/run_external_simulators.md" = "networks/external_simulators.md"
+"Neural Networks/multiphoton_holographic_stimulation.md" = "networks/holographic_stimulation.md"
+"Neural Networks/scanimage_acquisition.md" = "networks/scanimage_acquisition.md"
+"Neural Networks/brainscales2_delivery.md" = "networks/brainscales2.md"
+"Input Design and Readout Analysis/overview.md" = "input_design/overview.md"
+"Input Design and Readout Analysis/static_input_design.md" = "input_design/static_input.md"
+"Input Design and Readout Analysis/stdp_synaptic_tuning.md" = "input_design/dynamic_input.md"
+"Input Design and Readout Analysis/export_patch_clamp_stimuli.md" = "input_design/patch_clamp_export.md"
+"Input Design and Readout Analysis/experiments.md" = "readout/experiments.md"
+"Input Design and Readout Analysis/importing_imaging_data.md" = "readout/imaging_data.md"
+"Input Design and Readout Analysis/importing_igor2_waves.md" = "readout/igor2_waves.md"
+"Input Design and Readout Analysis/analysis_and_plugins.md" = "readout/analysis.md"
+"Input Design and Readout Analysis/simulations_and_experiments.md" = "readout/simulations_and_experiments.md"
