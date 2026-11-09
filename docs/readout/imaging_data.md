@@ -48,7 +48,7 @@ segmentation tab opens the same dialog and segments the image right away.
 
 After import, the cell footprints are available in the cell overlay widget
 and are bundled into the project file. They are required for the
-[SysCon2 holographic export](../Neural%20Networks/multiphoton_holographic_stimulation.md).
+[SysCon2 holographic export](../networks/holographic_stimulation.md).
 
 ### Cell overlay widget
 
@@ -113,7 +113,7 @@ neuroseq --generate-cellpose-test-data ./cellpose_test_grid.tif \
   --cellpose-gap 30
 ```
 
-See [Multiphoton Holographic Stimulation → Generating test data](../Neural%20Networks/multiphoton_holographic_stimulation.md#generating-test-data-cli)
+See [Multiphoton Holographic Stimulation → Generating test data](../networks/holographic_stimulation.md#generating-test-data-cli)
 for the full set of options.
 
 ## GPU acceleration (Cellpose & Suite2p)
@@ -228,10 +228,10 @@ in current clamp, current in voltage clamp):
 - **Import Target** — create new trace data or add to existing trace data.
   If the existing data uses a different sample interval, NeuroSeq offers to
   resample the wave (default) or remap the target, as described in
-  [Importing Igor2 Waves](importing_igor2_waves.md#import-targets).
+  [Importing Igor2 Waves](igor2_waves.md#import-targets).
 - **Spike detection** — optional peak detection to derive a `SpikeData`
   alongside the trace.
 
 For patch-clamp input (command) waveforms use
 **File → Import data → Input → Patch Clamp**; see
-[Importing Igor2 Waves](importing_igor2_waves.md).
+[Importing Igor2 Waves](igor2_waves.md).

@@ -10,7 +10,7 @@ together in the `.nseq` archive.
   duration. The run picks up from the last simulated time, so consecutive
   invocations extend the same trial.
 - If the project has an external simulator connected (see
-  [Run External Simulators](run_external_simulators.md)), the action dispatches
+  [Run External Simulators](external_simulators.md)), the action dispatches
   to that backend instead of the built-in Brian2 model.
 
 ### Checkpointing
@@ -40,9 +40,9 @@ Brian2 code-generation target:
 ## Designing stimulation
 
 Prepare the input before running the model with the
-[stimulation editor and static input guide](../Input%20Design%20and%20Readout%20Analysis/static_input_design.md).
+[stimulation editor and static input guide](../input_design/static_input.md).
 For response-guided stimulation, see
-[Design dynamic input](../Input%20Design%20and%20Readout%20Analysis/stdp_synaptic_tuning.md).
+[Design dynamic input](../input_design/dynamic_input.md).
 
 ## Settings that affect simulations
 

@@ -45,5 +45,5 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 If the machine has **only Intel integrated graphics**, Cellpose cannot use it
 (CUDA/MPS only) — run segmentation on a GPU machine and import its `_seg.npy`
 instead. See
-[Importing imaging data → GPU acceleration](Input%20Design%20and%20Readout%20Analysis/importing_imaging_data.md#gpu-acceleration-cellpose-suite2p)
+[Importing imaging data → GPU acceleration](readout/imaging_data.md#gpu-acceleration-cellpose-suite2p)
 for details.

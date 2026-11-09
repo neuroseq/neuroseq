@@ -54,15 +54,15 @@ together:
 
 1. Run a simulation, or load a previously simulated experiment.
 2. Import experimental traces via
-   [Importing imaging data](importing_imaging_data.md) or
-   [Importing Igor2 waves](importing_igor2_waves.md).
+   [Importing imaging data](imaging_data.md) or
+   [Importing Igor2 waves](igor2_waves.md).
 3. In the **Neuron data** dropdown, switch between the simulated and the
    imported `TraceData` — they share the same time axis whenever both
    were aligned to the same stim array.
 4. Use the **All data** ("Data") widget to display two `TraceData`
    objects in the same view for direct comparison.
 
-The [Analysis Tools and Custom Plugins](analysis_and_plugins.md) page
+The [Analysis Tools and Custom Plugins](analysis.md) page
 covers the right-click analyses that operate on a selected region of any
 widget — these work identically on simulated and recorded data, which is
 the point of keeping both in one container.
