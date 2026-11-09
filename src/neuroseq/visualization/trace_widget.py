@@ -412,6 +412,15 @@ class TraceWidget(TimeseriesWidget):
             return self._row_centers[display_row]
         return float(display_row)
 
+    def _display_rows_y_extent(self, first: int, last: int) -> tuple[float, float]:
+        """The y range covering display rows ``first`` to ``last``."""
+        if self.auto_extend_vertical_space and last < len(self._row_centers):
+            return (
+                self._row_centers[first] - self._row_half_heights[first],
+                self._row_centers[last] + self._row_half_heights[last],
+            )
+        return (first - 0.5, last + 0.5)
+
     def _refit_view_to_visible_neurons(self) -> None:
         if not self.auto_extend_vertical_space or not self._row_half_heights:
             super()._refit_view_to_visible_neurons()
@@ -462,6 +471,8 @@ class TraceWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.figure import Figure
 
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
+
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setWindowTitle(f"Trace preview: {self.data.name}")
@@ -504,8 +515,14 @@ class TraceWidget(TimeseriesWidget):
                 and (selection.stop is None or neuron_id < selection.stop)
             ]
             if rows:
-                ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
+                ax.set_ylim(*self._display_rows_y_extent(rows[0], rows[-1]))
         ax.set_xlabel("Time (ms)")
+        auto_extended = self.auto_extend_vertical_space and self._row_centers
+        set_neuron_id_ticks(
+            ax.yaxis,
+            self._visible_neuron_ids,
+            self._row_centers if auto_extended else None,
+        )
         ax.set_ylabel("Neuron index (normalized traces)")
         ax.set_title(self.data.name)
 

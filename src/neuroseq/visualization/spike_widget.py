@@ -57,7 +57,8 @@ class SpikeWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.figure import Figure
-        from matplotlib.ticker import MaxNLocator
+
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
 
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -91,7 +92,7 @@ class SpikeWidget(TimeseriesWidget):
             start, stop, _ = self.selected_neuron_slice.indices(self.n_neurons)
             if stop > start:
                 ax.set_ylim(start - 0.5, stop - 0.5)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        set_neuron_id_ticks(ax.yaxis, self._visible_neuron_ids)
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Neuron index")
         ax.set_title(self.data.name)

@@ -2056,3 +2056,41 @@ def test_stim_overlay_follows_auto_extended_rows(qtbot: QtBot) -> None:
     assert (
         marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
     ).tolist() == (pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0]))
+
+
+def test_trace_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    data = _make_scaled_trace_data(5)
+    data.indices = np.array([10, 11, 12, 13, 14], dtype=np.uint32)
+    widget.set_data(data)
+    widget.set_neuron_greyed(11, True)
+
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(y, 0) for y in (0.0, 1.0, 3.0)] == ["10", "12", "14"]
+    assert formatter(4.0, 0) == ""
+    dialog.close()
+
+    widget.trace_norm_percent = 500
+    widget.auto_extend_vertical_space = True
+    widget.replot_traces()
+    centers = widget._row_centers
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    ax.set_ylim(-0.5, widget._row_boundaries[-1])
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(c, 0) for c in centers] == ["10", "12", "13", "14"]
+    ticks = ax.yaxis.get_major_locator()()
+    assert set(ticks) <= set(centers)
+    assert ticks
+    dialog.close()

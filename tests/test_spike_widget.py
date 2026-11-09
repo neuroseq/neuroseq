@@ -288,3 +288,26 @@ def test_empty_spike_widget_drag_selects_without_error(qtbot: QtBot) -> None:
     widget.pointer_move(event)  # previously ZeroDivisionError (dt_ms == 0)
 
     assert widget.selected_time_slice == slice(1, 5)
+
+
+def test_spike_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    widget = SpikeWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    widget.set_data(
+        SpikeData(
+            name="s",
+            spike_indices=np.array([0, 1, 2]),
+            spike_times=np.array([0.001, 0.002, 0.003]),
+        )
+    )
+    widget.set_neuron_greyed(1, True)
+
+    dialog = widget.preview_spikes()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(y, 0) for y in (0.0, 1.0, 2.0)] == ["0", "2", ""]
+    dialog.close()

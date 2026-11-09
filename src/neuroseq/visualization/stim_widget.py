@@ -392,8 +392,8 @@ class StimWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.collections import PolyCollection
         from matplotlib.figure import Figure
-        from matplotlib.ticker import FuncFormatter
-        from matplotlib.ticker import MaxNLocator
+
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
 
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -470,17 +470,7 @@ class StimWidget(TimeseriesWidget):
             if rows:
                 ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
         ax.set_xlabel("Time (ms)")
-        visible_ids = list(self._visible_neuron_ids)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.yaxis.set_major_formatter(
-            FuncFormatter(
-                lambda y, _pos: (
-                    str(visible_ids[round(y)])
-                    if 0 <= round(y) < len(visible_ids)
-                    else ""
-                )
-            )
-        )
+        set_neuron_id_ticks(ax.yaxis, self._visible_neuron_ids)
         ax.set_ylabel("Neuron index")
         ax.set_title(self._stim_name)
         dialog.show()
