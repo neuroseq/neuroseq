@@ -46,7 +46,7 @@ MATLAB keeps running.
 | **Frames**                                | 300 (routines set their own)                                                                 |
 | **Save channels**                         | Channel 1; tick several to save them together                                                |
 | **Wait for external acquisition trigger** | Off: software start. On: waits for ScanImage's configured trigger input.                     |
-| **First-frame timeout**                   | 60 s, then abort                                                                             |
+| **First-frame timeout**                   | 60 s, then abort (routine blocks use their own deadline instead)                             |
 
 - **Focus** starts unsaved continuous imaging. Abort it before recording.
 - **Record / Arm** starts or arms the recording. "Waiting for first frame" does

@@ -157,7 +157,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._disposed = False
         #: Shown as the "ScanImage (imaging)" tab of the Stimulation setup pane.
         self.controls = ScanImageControls(
-            connection, settings, owns_run=self.run_ids.__contains__
+            connection, settings, owns_run=self._tab_times_out_run
         )
         self.controls.channel_changed.connect(self.set_scanimage_channel)
         self.controls.record_requested.connect(self.start_scanimage_recording)
@@ -795,6 +795,15 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _frame_rate(self) -> float | None:
         fps = self.connection.last_status.get("fps")
         return float(fps) if isinstance(fps, (int, float)) and fps > 0 else None
+
+    def _tab_times_out_run(self, run_id: str | None) -> bool:
+        """Whether the tab's first-frame timeout may abort ``run_id``.
+
+        Only runs this workspace started, and not block recordings: those wait
+        for SysCon2's trigger, possibly after a second upload, and have their
+        own deadline (RUN_START_ALLOWANCE_S), which the tab's must not undercut.
+        """
+        return run_id in self.run_ids and run_id not in self._blocks
 
     def arm_block(self, recording: BlockRecording) -> str:
         reason = self.block_recording_unavailable()
