@@ -367,3 +367,15 @@ def test_safe_concat_all_empty_returns_empty_array() -> None:
     mixed = safe_concat([np.empty((0, 3)), np.empty(0)], axis=1)
     assert mixed.size == 0
     assert safe_concat([]).size == 0
+
+
+def test_append_data_trace_offset_rounds_to_nearest_sample() -> None:
+    # 31 * (1/30) / (1/30) is 30.999..., which truncation put one sample early.
+    dt = 1 / 30
+    n = 31
+    existing = TraceData("t", np.ones((1, n), np.float32), np.array([0]), "", dt)
+    new = TraceData("t", 2 * np.ones((1, 10), np.float32), np.array([0]), "", dt)
+    append_data(existing, new, 10 * dt, n * dt)
+    assert existing.traces.shape == (1, n + 10)
+    np.testing.assert_array_equal(existing.traces[0, :n], 1)
+    np.testing.assert_array_equal(existing.traces[0, n:], 2)

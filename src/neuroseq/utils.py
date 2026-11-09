@@ -21,6 +21,7 @@ from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.stimulation.stim import StimType
+from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 
 save_store_name = "___current-simulation-state-at-save-time___"
 
@@ -351,7 +352,7 @@ def append_data(
             )
             return
 
-        idx0 = int(time_offset_seconds / existing_data.dt)
+        idx0 = seconds_to_samples_nearest(time_offset_seconds, existing_data.dt)
         n_existing_samples = existing_data.traces.shape[1]
         if idx0 > n_existing_samples:
             # Keep the time gap between the existing data and the new block.
