@@ -1259,16 +1259,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             )
             self.project.cellpose_data = self.last_cellpose_import
 
+        # A replaced project must not inherit the previous run's Design dynamic
+        # input state (plots, log, EPSP history) or static pattern designer;
+        # drop the cached dialogs (before the editor switches project) so they
+        # are rebuilt fresh on next open.
+        self.dynamic_input_controller.update_project(self.project)
         self.stim_editor.set_project(
             self.project, keep_undo_history=preserve_dynamic_input
         )
-        # A replaced project must not inherit the previous run's Design dynamic
-        # input state (plots, log, EPSP history) or static pattern designer;
-        # drop the cached dialogs so they are rebuilt fresh on next open.
-        if preserve_dynamic_input:
-            self.dynamic_input_controller.refresh()
-        else:
-            self.dynamic_input_controller.discard_dynamic_input_dialogs()
+        self.dynamic_input_controller.refresh()
+        if not preserve_dynamic_input:
             self.static_input_controller.discard_dialog()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)

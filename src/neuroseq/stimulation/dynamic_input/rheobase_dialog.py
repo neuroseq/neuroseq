@@ -550,6 +550,8 @@ class RheobaseDialog(SelfRaisingDialog):
     """Closed-loop search for the smallest direct stimulus that evokes a spike."""
 
     simulation_requested = QtCore.Signal(float)
+    #: Emitted when a run starts or ends (the controller locks the editor).
+    running_changed = QtCore.Signal(bool)
     AMPLITUDE_AND_DURATION_STRATEGY = "Amplitude and duration"
     FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY = "Fixed amplitude, varying duration"
     FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY = "Fixed duration, varying amplitude"
@@ -585,6 +587,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.editor = editor
         self.project = editor.project
         self._backend = RheobaseBackend(self)
+        self._backend.on_running_changed = self.running_changed.emit
         self._backend.on_advance = self._advance_domain
         self._backend.on_summarize = self._final_summary
         self._backend.on_summarize_fixed_amplitude = self._final_fixed_amplitude_summary
@@ -1120,6 +1123,12 @@ class RheobaseDialog(SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
+        # Checked before anything changes the array (clear, a new array, the
+        # minimized dialog): a refused start leaves everything as it was.
+        problem = self._settings_problem()
+        if problem is not None:
+            self._append_log(problem)
+            return
         hardware = self._target_is_syscon2() or self._target_is_bss2()
         choice = confirm_start_routine(self, self.editor, offer_new=hardware)
         if choice == "cancel":
@@ -1376,12 +1385,6 @@ class RheobaseDialog(SelfRaisingDialog):
             if reason is not None:
                 self._append_log(reason)
                 return
-        # Checked before "Start in new arrays" adds an array the run never uses.
-        problem = self._settings_problem()
-        if problem is not None:
-            # Nothing has started: only say why (finishing would trim the array).
-            self._append_log(problem)
-            return
         self._run_name = routine_run_name("rheobase")
         self._append_start_sample = self._hardware_start_sample(choice, self._run_name)
         # Nothing delivered yet: ending now keeps the array up to here.
@@ -1427,11 +1430,6 @@ class RheobaseDialog(SelfRaisingDialog):
         reason = host.unavailable()
         if reason is not None:
             self._append_log(reason)
-            return
-        problem = self._settings_problem()
-        if problem is not None:
-            # Nothing has started: only say why (finishing would trim the array).
-            self._append_log(problem)
             return
         self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
         self._append_start_sample = self._hardware_start_sample(

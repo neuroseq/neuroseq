@@ -300,6 +300,8 @@ class StdpWindowDialog(SelfRaisingDialog):
     """Sweep spike timing to measure the functional STDP timing window."""
 
     simulation_requested = QtCore.Signal(float)
+    #: Emitted when a run starts or ends (the controller locks the editor).
+    running_changed = QtCore.Signal(bool)
     PROBE_PULSES = 5
     PROBE_PERIOD_MS = 100.0
     # Readout modes. EPSP is functional (needs a clean postsynaptic EPSP);
@@ -334,6 +336,7 @@ class StdpWindowDialog(SelfRaisingDialog):
         self.editor = editor
         self.project = editor.project
         self._backend = StdpWindowBackend(self)
+        self._backend.on_running_changed = self.running_changed.emit
         self._backend.on_advance = self._advance_domain
         self._backend.on_measurement = self._update_plot
         self._backend.on_restore_baseline = self._restore_baseline
@@ -889,6 +892,12 @@ class StdpWindowDialog(SelfRaisingDialog):
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
+        # Checked before anything changes the array (clear, minimize): a
+        # refused start leaves everything as it was.
+        problem = self._settings_problem()
+        if problem is not None:
+            self._append_log(problem)
+            return
         choice = confirm_start_routine(self, self.editor)
         if choice == "cancel":
             self._append_log("Routine cancelled.")
@@ -948,15 +957,6 @@ class StdpWindowDialog(SelfRaisingDialog):
         if main_window is not None:
             main_window.raise_()
             main_window.activateWindow()
-        if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
-            self._finish("Pre- and postsynaptic neuron IDs must differ.")
-            return
-        if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
-            self._finish("Δt maximum must be greater than Δt minimum.")
-            return
-        if not self._current_delta_t_values():
-            self._finish("No Δt points to sweep.")
-            return
         if self._weight_mode():
             needs_init = self._read_synapse_weight() is None
         else:
@@ -987,6 +987,16 @@ class StdpWindowDialog(SelfRaisingDialog):
             return
         self._begin_sweep(clear_log=True)
 
+    def _settings_problem(self) -> str | None:
+        """Why the sweep settings cannot start a routine, or None."""
+        if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
+            return "Pre- and postsynaptic neuron IDs must differ."
+        if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
+            return "Δt maximum must be greater than Δt minimum."
+        if not self._current_delta_t_values():
+            return "No Δt points to sweep."
+        return None
+
     def _fix_syscon_dt(self) -> bool:
         if self._running:
             return False
@@ -1013,12 +1023,6 @@ class StdpWindowDialog(SelfRaisingDialog):
                 "For SysCon2 the pulse amplitude must lie within 0-1 "
                 "(fraction of the export target power)."
             )
-            return
-        if self.spn_presynaptic.value() == self.spn_postsynaptic.value():
-            self._append_log("Pre- and postsynaptic neuron IDs must differ.")
-            return
-        if self.spn_dt_max_ms.value() <= self.spn_dt_min_ms.value():
-            self._append_log("Δt maximum must be greater than Δt minimum.")
             return
         self._append_start_sample = hardware_start_sample(self.editor, choice)
         # Nothing delivered yet: ending now keeps the array up to here.

@@ -1619,3 +1619,34 @@ def test_syscon2_block_notes_go_to_the_running_routines_log(qtbot) -> None:
     log = dialog.log.toPlainText()
     assert "Suite2p is slow" in log
     assert "before start" not in log and "another routine" not in log
+
+
+@pytest.mark.parametrize("choice", ["continue", "clear"])
+def test_rheobase_invalid_settings_leave_input_untouched(
+    qtbot, monkeypatch, choice
+) -> None:
+    """Settings that cannot start a search are refused before the array is
+    cleared, trimmed or the dialog minimized - nothing ran, so nothing changes."""
+    _project, editor, dialog = _make_dialog(qtbot)
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    confirmations: list[str] = []
+
+    def confirm(*args, **kwargs) -> str:
+        confirmations.append(choice)
+        return choice
+
+    monkeypatch.setattr(
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
+        confirm,
+    )
+    dialog.spn_max_amplitude.setValue(dialog.spn_min_amplitude.value())
+
+    dialog.start()
+
+    assert not dialog._running
+    assert confirmations == []
+    assert editor.cleared == 0
+    assert getattr(editor, "reset_count", 0) == 0
+    assert editor.current_stim_modifier.stim_array.values[5, 0] == 1.0
+    assert not dialog.isMinimized()
+    assert "Maximum amplitude must be greater" in dialog.log.toPlainText()

@@ -247,6 +247,8 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
+    #: Emitted when a run starts or ends (the controller locks the editor).
+    running_changed = QtCore.Signal(bool)
     PROBE_PULSES = 5
     PROBE_PERIOD_MS = 100.0
     PULSE_MS = 5.0
@@ -269,6 +271,7 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
         self.editor = editor
         self.project = editor.project
         self._backend = StdpSynapticTuningBackend(self)
+        self._backend.on_running_changed = self.running_changed.emit
         self._backend.on_advance = self._advance_domain
         self._backend.on_measurement = self._update_plots
         self._backend.on_finished = self._on_backend_finished

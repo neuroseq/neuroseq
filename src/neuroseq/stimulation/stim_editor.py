@@ -80,6 +80,11 @@ class StimEditor(QtWidgets.QWidget):
         self.project: Project | None = None
         self._unsubscribe_history: Callable[[], None] | None = None
         self.history_enabled = True
+        #: True while a dynamic input routine runs: the array selection and
+        #: undo/redo are locked, and the array it writes into stays selected.
+        self.routine_running = False
+        #: Name of the input array the running routine writes into.
+        self.routine_stim_name: str | None = None
         self.cmb_stim = cmb_stim
         self.current_stim_modifier: StimArrayModifier | None = None
         #: Data groups of hardware routine runs started in new arrays: the
@@ -183,9 +188,32 @@ class StimEditor(QtWidgets.QWidget):
             self.select_stim(self.cmb_stim.currentText())
         self._stim_values_updated()
 
+    def set_routine_running(self, running: bool) -> None:
+        """Lock the input-array selection and undo/redo while a routine runs.
+
+        A running dynamic input routine writes each block into the selected
+        array, so switching arrays would redirect its next block and undo
+        would remove a block it already delivered. The array selected when
+        the routine started stays selected (by name) until it ends.
+        """
+        running = bool(running)
+        if running and not self.routine_running:
+            self.routine_stim_name = self.cmb_stim.currentText() or None
+        elif not running:
+            self.routine_stim_name = None
+        self.routine_running = running
+        self.cmb_stim.setEnabled(not running and len(self.stims_dict) > 0)
+        self._stim_values_updated()
+
+    def _history_allowed(self) -> bool:
+        return self.history_enabled and not self.routine_running
+
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
+        if self.routine_running and self.routine_stim_name is not None:
+            # A running routine keeps writing into the array it started with.
+            stim_to_select = self.routine_stim_name
         # History belongs to the project; rebuilding views must not reset it.
         keep_undo_history = (
             keep_undo_history
@@ -217,7 +245,7 @@ class StimEditor(QtWidgets.QWidget):
         self.cmb_stim.clear()
         self.stim_widget.clear_data()
         self.stim_widget.setEnabled(have_stims)
-        self.cmb_stim.setEnabled(have_stims)
+        self.cmb_stim.setEnabled(have_stims and not self.routine_running)
         self.controller.set_limits(
             float(self.project.max_time_secs),
             max(1, int(self.project.max_neurons)),
@@ -234,17 +262,6 @@ class StimEditor(QtWidgets.QWidget):
         else:
             self.cmb_stim.setCurrentIndex(0)
         self.select_stim(self.cmb_stim.currentText())
-
-    def update_stim_values_dict(self, stims_values_dict: dict[str, np.ndarray]) -> None:
-        if self.project is None or self.project.stim_arrays is None:
-            return
-        self.project.history.clear()
-        for name, array_values in stims_values_dict.items():
-            if name not in self.project.stim_arrays:
-                self.logger.warning(f"Stimuli '{name}' not found in project: ignoring")
-            else:
-                self.project.stim_arrays[name].values = array_values
-        self.set_project(self.project)
 
     def replace_stim_values_with_undo(
         self,
@@ -627,10 +644,10 @@ class StimEditor(QtWidgets.QWidget):
         self._update_amplitude_action()
         history = self.project.history if self.project is not None else None
         self.action_undo.setEnabled(
-            self.history_enabled and history is not None and history.can_undo()
+            self._history_allowed() and history is not None and history.can_undo()
         )
         self.action_redo.setEnabled(
-            self.history_enabled and history is not None and history.can_redo()
+            self._history_allowed() and history is not None and history.can_redo()
         )
         self.action_undo.setToolTip(f"Undo {history.undo_label}" if history else "Undo")
         self.action_redo.setToolTip(f"Redo {history.redo_label}" if history else "Redo")
@@ -992,7 +1009,7 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_data_modified()
 
     def undo(self) -> None:
-        if self.project is None or not self.history_enabled:
+        if self.project is None or not self._history_allowed():
             return
         self.project.history.undo()
         if self.project is not None:
@@ -1004,7 +1021,7 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_values_updated()
 
     def redo(self) -> None:
-        if self.project is None or not self.history_enabled:
+        if self.project is None or not self._history_allowed():
             return
         self.project.history.redo()
         if self.project is not None:
