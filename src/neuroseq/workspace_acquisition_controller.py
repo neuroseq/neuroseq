@@ -34,6 +34,8 @@ from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.scanimage_files import STIMULUS_SUFFIX
 from neuroseq.device_control.scanimage_files import stimulus_file_name
+from neuroseq.device_control.syscon2_stimulation_host import REUPLOAD_SETTLE_S
+from neuroseq.device_control.syscon2_stimulation_host import UPLOAD_TIMEOUT_S
 from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 from neuroseq.importers.importer_scanimage_traces import extract_recording_dff
 from neuroseq.importers.importer_scanimage_traces import functional_channel_mean
@@ -56,6 +58,10 @@ _FAILED_STATES = {"failed", "aborted", "interrupted", "finalization_failed", "un
 #: Slack beyond a block's length before an armed recording that has not finished
 #: is aborted (e.g. ScanImage never received the trigger).
 BLOCK_DEADLINE_MARGIN_S = 15.0
+#: The recording is armed before SysCon2 runs the block, and the run may first
+#: upload the sequence again (up to UPLOAD_TIMEOUT_S after REUPLOAD_SETTLE_S):
+#: allow for that, so a slow upload fails with its own message, not a TTL one.
+RUN_START_ALLOWANCE_S = UPLOAD_TIMEOUT_S + REUPLOAD_SETTLE_S
 
 
 def registration_note(registration: dict) -> str:
@@ -534,7 +540,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _start_deadline(self, run_id: str, recording: BlockRecording) -> None:
         """Abort the block if its recording has not finished well after its length:
         a recording that started without the trigger would otherwise wait forever."""
-        limit_s = recording.duration_s + recording.tail_s + BLOCK_DEADLINE_MARGIN_S
+        limit_s = (
+            recording.duration_s
+            + recording.tail_s
+            + BLOCK_DEADLINE_MARGIN_S
+            + RUN_START_ALLOWANCE_S
+        )
         timer = QtCore.QTimer(self)
         timer.setSingleShot(True)
         timer.timeout.connect(lambda: self._deadline_passed(run_id, limit_s))
