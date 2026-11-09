@@ -789,13 +789,20 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if not active:
             self.time_slider.timer.stop()
 
+    def _plot_limits(self) -> tuple[float, int]:
+        return float(self.project.max_time_secs), int(self.project.max_neurons)
+
     def update_limits(self) -> None:
-        max_time_secs = float(self.project.max_time_secs)
-        max_neurons = int(self.project.max_neurons)
+        max_time_secs, max_neurons = self._plot_limits()
         self.controller.set_limits(max_time_secs, max_neurons)
         self.trace_controller.set_limits(max_time_secs, max_neurons)
         self.spike_controller.set_limits(max_time_secs, max_neurons)
         self.data_widget.set_limits(max_time_secs, max_neurons)
+        for window in self._detached_panel_windows:
+            # Detached Trace/Spike/Data panels own their controllers.
+            set_limits = getattr(window._widget, "set_limits", None)
+            if callable(set_limits):
+                set_limits(max_time_secs, max_neurons)
         self.time_slider.set_max_time_secs(max_time_secs)
 
     def _custom_analysis(
@@ -3419,6 +3426,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             show_axis_link_controls=True,
             state=self._trace_state,
         )
+        widget.set_limits(*self._plot_limits())
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         return widget
@@ -3430,12 +3438,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             default_controller=self.controller,
             show_axis_link_controls=True,
         )
+        # Before set_data(): the row count includes silent neurons up to the limit.
+        widget.set_limits(*self._plot_limits())
         widget.set_data(self.project.get_data(self.cmb_spike.currentText(), SpikeData))
         widget.custom_analysis_requested.connect(self._custom_analysis)
         return widget
 
     def _build_fresh_data_widget(self) -> DataWidget:
-        widget = DataWidget(ConstrainedPanZoomController(), parent=None)
+        widget = DataWidget(self.controller, parent=None)
+        widget.set_limits(*self._plot_limits())
         widget.set_data(self._current_data_selection())
         widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
