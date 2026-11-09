@@ -1030,9 +1030,12 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
     assert _timeline_index(entities[0]) == 0
 
 
-def test_export_seq_accepts_one_based_mapping_keys() -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
+def test_export_seq_reads_mapping_keys_zero_based_like_the_readout() -> None:
+    """Key 1 is stimulus row 1, never row 0: the readout labels cell 0 as id 1
+    for {1: 0, 2: 1}, so an export that aimed row 0 at cell 0 (reading the
+    keys 1-based because they span 1..n_neurons) would mislabel it."""
+    values = np.zeros((40, 2), dtype=np.float32)
+    values[20:22, :] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -1041,18 +1044,14 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
         dt=_DT_S,
     )
 
-    seq_text, report = generate_syscon2_sequence_text(
+    _seq_text, report = generate_syscon2_sequence_text(
         stim_array,
-        _cellpose_result(mapping={1: 0}),
+        _cellpose_result(mapping={1: 0, 2: 1}),
         template_text=_template_header(),
         spiralling=False,
     )
-    sequence = parse_syscon2_seq_text(seq_text)
 
-    entities = [obj for obj in sequence.objects if obj.object_type == "Shape"]
-    assert len(entities) == 1
-    assert report.exported_segments == 1
-    assert report.unmapped_active_neurons == []
+    assert report.unmapped_active_neurons == [0]
 
 
 def test_sparse_custom_mapping_never_targets_one_cell_twice() -> None:
@@ -1077,13 +1076,15 @@ def test_sparse_custom_mapping_never_targets_one_cell_twice() -> None:
 @pytest.mark.parametrize(
     ("mapping", "n_neurons", "expected"),
     [
-        ({1: 5, 2: 6, 3: 7}, 3, {0: 5, 1: 6, 2: 7}),  # whole key set 1-based
-        ({0: 5, 1: 6, 3: 7}, 3, {0: 5, 1: 6}),  # 0 key: 0-based, key 3 ignored
-        ({2: 6, 3: 7}, 3, {1: 6, 2: 7}),  # key n_neurons, all keys in 1..n
-        ({1: 6}, 3, {1: 6}),  # sparse 0-based
+        # Never 1-based, whatever the key set or the array's neuron count.
+        ({1: 5, 2: 6, 3: 7}, 3, {1: 5, 2: 6}),
+        ({1: 5, 2: 6, 3: 7}, 4, {1: 5, 2: 6, 3: 7}),
+        ({0: 5, 1: 6, 3: 7}, 3, {0: 5, 1: 6}),
+        ({2: 6, 3: 7}, 3, {2: 6}),
+        ({1: 6}, 3, {1: 6}),
     ],
 )
-def test_one_based_mapping_detection_uses_whole_key_set(
+def test_mapping_keys_are_always_zero_based(
     mapping: dict[int, int], n_neurons: int, expected: dict[int, int]
 ) -> None:
     cellpose = CellposeImportResult(

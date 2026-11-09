@@ -38,6 +38,10 @@ launch the external tools.
 | Custom                        | Type pairs `input:cellpose` (e.g. `1:12,2:3`), or tick **Assign by clicking cells** and click cells in order (unclicked cells get the remaining IDs in Cellpose order).               |
 | Custom with areas of interest | A square and/or circle, each **preferential** or **exclusion**. Cells in preferential areas get the lowest IDs, cells in exclusion areas the highest, each tier in Cellpose-ID order. |
 
+Input IDs are 0-based: `0` is the first input row. The SysCon2 export and the
+readout use the same IDs, so `1:12` always stimulates and records cell 12 as
+input row 1.
+
 Area shapes can be set in pixels or percent, and dragged and resized in the
 viewer; the mapping updates as they move. Under **Linear** the shapes are shown
 and kept but do not change the mapping.

@@ -3191,21 +3191,6 @@ def _compute_cell_stimulation_spots(
     return result
 
 
-def _mapping_keys_are_one_based(mapping: dict[int, int], n_neurons: int) -> bool:
-    """Whether a whole explicit mapping uses 1-based stimulus keys.
-
-    Mapping keys are 0-based input IDs. Older mappings were written 1-based;
-    they are recognised only when the key set as a whole can only be read that
-    way: no key 0, every key within 1..n_neurons, and key n_neurons (out of
-    range for 0-based keys) present. A sparse 0-based mapping such as
-    ``{1: 12, 2: 3}`` therefore stays 0-based.
-    """
-    keys = {int(key) for key in mapping}
-    if not keys or 0 in keys:
-        return False
-    return n_neurons in keys and all(1 <= key <= n_neurons for key in keys)
-
-
 def _resolve_neuron_to_cellpose_mapping(
     cellpose_data: CellposeImportResult,
     n_neurons: int,
@@ -3217,17 +3202,15 @@ def _resolve_neuron_to_cellpose_mapping(
     resolved: dict[int, int] = {}
 
     if explicit_mapping:
-        key_offset = (
-            1 if _mapping_keys_are_one_based(explicit_mapping, n_neurons) else 0
-        )
+        # Keys are 0-based stimulus indices, read exactly like the readout
+        # (remap_raw_cellpose_ids): key i always targets neuron i.
         for neuron_idx in range(n_neurons):
-            key = neuron_idx + key_offset
-            if key not in explicit_mapping:
+            if neuron_idx not in explicit_mapping:
                 # Unmapped neurons stay unmapped so the export warns about them;
                 # never borrow a neighbouring key (that would aim two neurons
                 # at the same cell).
                 continue
-            raw_cellpose_id = int(explicit_mapping[key])
+            raw_cellpose_id = int(explicit_mapping[neuron_idx])
             if raw_cellpose_id in available_cellpose_ids:
                 resolved[neuron_idx] = raw_cellpose_id
         return resolved
