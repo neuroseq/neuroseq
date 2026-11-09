@@ -9,6 +9,7 @@ import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.elise_support.plugin_keys import CURVES_ATTR
 from neuroseq.elise_support.replay_metrics import save_learning_curves_csv
 from neuroseq.example_models.elise import _build_fuer_elise_opsin_stims
 from neuroseq.project_workspace import ProjectWorkspace
@@ -17,9 +18,7 @@ from neuroseq.stimulation.stim import StimType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
-# Mirrors elise_learning_curves.CURVES_ATTR (the plugin loads via a file spec,
-# not as an importable module, so we reference the attribute name directly).
-_CURVES_ATTR = "_elise_protocol_curves"
+_CURVES_ATTR = CURVES_ATTR
 
 _HAS_ELISE = importlib.util.find_spec("elise") is not None
 _needs_elise = pytest.mark.skipif(
@@ -342,6 +341,36 @@ def test_on_protocol_finished_opens_window_and_imports_experiment(
         assert sa is not None
         assert sa.values.shape[0] == 3 * 40
         assert sa.dt == pytest.approx(1e-3)
+    finally:
+        gui.close()
+
+
+@pytest.mark.parametrize("missing", ["final_replay_rate", "plugin"])
+def test_on_protocol_finished_without_curves_opens_no_window(
+    qtbot: QtBot, monkeypatch, mocker, qmessagebox_calls, missing: str
+) -> None:
+    monkeypatch.setattr(
+        "neuroseq.elise_support.workflows.getsavefilename",
+        lambda *a, **k: ("", ""),
+    )
+    result = _synthetic_result(experiment=object())
+    if missing == "final_replay_rate":
+        # No replay epoch ran (previously crashed on np.asarray(None).shape[0]).
+        result["final_replay_rate"] = None
+    else:
+        monkeypatch.setattr(
+            "neuroseq.elise_support.workflows.discover_analysis_plugins", lambda: []
+        )
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    try:
+        append = mocker.patch.object(gui, "_append_experimental_data")
+        gui._on_elise_protocol_finished(result)
+        append.assert_called_once()
+        # No empty analysis window is left behind.
+        assert gui.findChildren(CustomAnalysisWindow) == []
+        warned = [call for call in qmessagebox_calls if call["name"] == "warning"]
+        assert bool(warned) == (missing == "plugin")
     finally:
         gui.close()
 

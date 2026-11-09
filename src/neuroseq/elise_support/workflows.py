@@ -15,6 +15,11 @@ from qtpy.compat import getsavefilename
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.data import TraceData
+from neuroseq.elise_support.plugin_keys import CURVES_ATTR
+from neuroseq.elise_support.plugin_keys import LEARNING_CURVES_PLUGIN_ID
+from neuroseq.elise_support.plugin_keys import TARGET_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_DT_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_MSE_PLUGIN_ID
 from neuroseq.project import Project
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
 
@@ -42,7 +47,6 @@ def replay_inputs(
 
 
 def analyse_replay(window: ProjectWorkspace) -> None:
-    import neuroseq.resources.analysis_plugins.elise_target_mse as plugin_mod
     from neuroseq.elise_support.replay_metrics import compute_performance_against_target
     from neuroseq.elise_support.replay_metrics import save_replay_metrics_csv
     from neuroseq.example_models.elise import build_target_rate_pattern
@@ -155,13 +159,8 @@ def analyse_replay(window: ProjectWorkspace) -> None:
         )
         return
 
-    analysis_window = CustomAnalysisWindow(parent=window)
-    analysis_widget = analysis_window.analysis_widget
-    setattr(analysis_widget, plugin_mod.TARGET_ATTR, target_rate_resampled)
-    setattr(analysis_widget, plugin_mod.TARGET_DT_ATTR, trace_dt_s)
-
     plugin = next(
-        (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
+        (p for p in discover_analysis_plugins() if p.id == TARGET_MSE_PLUGIN_ID),
         None,
     )
     if plugin is None:
@@ -171,6 +170,10 @@ def analyse_replay(window: ProjectWorkspace) -> None:
             "Could not find the ELiSe target MSE analysis plugin.",
         )
         return
+    analysis_window = CustomAnalysisWindow(parent=window)
+    analysis_widget = analysis_window.analysis_widget
+    setattr(analysis_widget, TARGET_ATTR, target_rate_resampled)
+    setattr(analysis_widget, TARGET_DT_ATTR, trace_dt_s)
 
     n_samples = int(np.asarray(trace.traces).shape[1])
     analysis_widget.set_data(
@@ -240,7 +243,6 @@ def update_stim_arrays(window: ProjectWorkspace, result: dict) -> None:
 
 
 def finish_protocol(window: ProjectWorkspace, result: dict) -> None:
-    import neuroseq.resources.analysis_plugins.elise_learning_curves as plugin_mod
     from neuroseq.elise_support.replay_metrics import save_learning_curves_csv
 
     # Rebuild the opsin stim arrays to the full protocol timeline (teaching
@@ -284,11 +286,12 @@ def finish_protocol(window: ProjectWorkspace, result: dict) -> None:
 
     num_vis = int(result["num_vis"])
     final_rate = result.get("final_replay_rate")
-    analysis_window = CustomAnalysisWindow(parent=window)
-    analysis_widget = analysis_window.analysis_widget
-    setattr(analysis_widget, plugin_mod.CURVES_ATTR, result)
+    if final_rate is None:
+        # Nothing to plot the curves against (e.g. the protocol stopped
+        # before its final replay); the data and CSV are already saved.
+        return
     plugin = next(
-        (p for p in discover_analysis_plugins() if p.id == plugin_mod.PLUGIN_ID),
+        (p for p in discover_analysis_plugins() if p.id == LEARNING_CURVES_PLUGIN_ID),
         None,
     )
     if plugin is None:
@@ -298,6 +301,9 @@ def finish_protocol(window: ProjectWorkspace, result: dict) -> None:
             "Could not find the ELiSe learning-curves analysis plugin.",
         )
         return
+    analysis_window = CustomAnalysisWindow(parent=window)
+    analysis_widget = analysis_window.analysis_widget
+    setattr(analysis_widget, CURVES_ATTR, result)
     # The plugin reads the curves off the widget; set_data still needs a
     # data object, so hand it the final replay trace.
     final_arr = np.asarray(final_rate, dtype=np.float64)

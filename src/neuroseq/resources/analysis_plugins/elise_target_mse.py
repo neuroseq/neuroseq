@@ -17,15 +17,14 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
+from neuroseq.elise_support.plugin_keys import TARGET_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_DT_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_MSE_PLUGIN_ID
 from neuroseq.elise_support.replay_metrics import compute_performance_against_target
 
-PLUGIN_ID = "elise_target_mse"
+PLUGIN_ID = TARGET_MSE_PLUGIN_ID
 PLUGIN_NAME = "ELiSe target MSE (vs teaching pattern)"
 PLUGIN_ICON = "mdi6.chart-bell-curve-cumulative"
-
-# Attribute names used by the toolbar action to attach inputs to the widget.
-TARGET_ATTR = "_elise_target_rate"
-TARGET_DT_ATTR = "_elise_target_dt_s"
 
 _CONTROLS_ATTR = "_elise_target_mse_controls"
 
