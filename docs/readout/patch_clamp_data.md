@@ -1,5 +1,10 @@
 # Patch-clamp data
 
+Igor Pro (WaveMetrics) is the default supported software: its `.ibw` and
+`.pxp` files are read directly, with units, sample interval and wave notes.
+This covers SutterPatch, which runs inside Igor Pro. Data from other
+acquisition software can be imported as `.csv` or `.txt`.
+
 Patch-clamp waveforms come in through two menu entries:
 
 | Menu                                          | Imports                                                         | Into                        |

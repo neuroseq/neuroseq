@@ -32,7 +32,7 @@ at a time across all tabs.
 | Path                                                     | Purpose                                                                                                                             |
 | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
 | Import data → Input → Optogenetics                       | SysCon2 `.seq` ([holographic stimulation](../networks/holographic_stimulation.md))                                                  |
-| Import data → Input → Patch Clamp                        | Igor2 `.ibw`/`.pxp` or `.csv`/`.txt` input waves ([Igor2 waves](../readout/patch_clamp_data.md))                                    |
+| Import data → Input → Patch Clamp                        | Igor2 `.ibw`/`.pxp` or `.csv`/`.txt` input waves ([patch-clamp data](../readout/patch_clamp_data.md))                               |
 | Import data → Output → Calcium Imaging (raw .tif)        | raw 2-photon TIFF via Cellpose + Suite2p ([imaging data](../readout/imaging_data.md))                                               |
 | Import data → Output → Calcium Imaging (Suite2p outputs) | existing Suite2p results                                                                                                            |
 | Import data → Output → Patch Clamp                       | recorded traces                                                                                                                     |

@@ -8,7 +8,7 @@ Calcium imaging enters a project in two parts:
 - **Traces**: fluorescence per cell, extracted from raw TIFFs or imported from
   Suite2p output, added as trace (and spike) data.
 
-Patch-clamp recordings are covered in [Igor2 waves](patch_clamp_data.md).
+Patch-clamp recordings are covered in [Patch-clamp data](patch_clamp_data.md).
 
 ## Cell segmentation
 

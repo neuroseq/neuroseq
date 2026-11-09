@@ -25,4 +25,4 @@ SutterPatch runs Sutter amplifiers inside Igor Pro. Stimuli are built in the
 
 ![SutterPatch Template Editor](../images/SutterPatch_TemplateEditor.png)
 
-To bring recordings back, see [Igor2 waves](../readout/patch_clamp_data.md).
+To bring recordings back, see [Patch-clamp data](../readout/patch_clamp_data.md).

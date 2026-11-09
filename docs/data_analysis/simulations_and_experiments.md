@@ -27,7 +27,7 @@ is cleared. The Cellpose segmentation is not imported.
 
 1. Run a simulation.
 2. Import recordings: [imaging data](../readout/imaging_data.md) or
-   [Igor2 waves](../readout/patch_clamp_data.md). Map recorded cells to the model's neuron IDs
+   [patch-clamp data](../readout/patch_clamp_data.md). Map recorded cells to the model's neuron IDs
    with the Cellpose [ID mapping](../readout/imaging_data.md#neuron-id-mapping).
 3. Show one dataset in **Neuron data** (Traces panel) and the other in **All
    data** (Data panel, **View → Show Data**). Both share the time axis of the
