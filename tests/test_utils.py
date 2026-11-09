@@ -5,12 +5,15 @@ from typing import Any
 import pytest
 from brian2 import numpy_ as np
 
+from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
+from neuroseq.data import TraceData
 from neuroseq.utils import append_data
 from neuroseq.utils import detect_period
 from neuroseq.utils import get_downsample_factor
 from neuroseq.utils import neuron_indices_to_colors
 from neuroseq.utils import parse_number
+from neuroseq.utils import safe_concat
 from neuroseq.utils import update_nested_dict
 
 
@@ -252,3 +255,115 @@ def test_wait_cursor_is_restored_after_an_error(qtbot) -> None:
     with pytest.raises(KeyError):
         _fails()
     assert QtWidgets.QApplication.overrideCursor() is None
+
+
+def test_append_trace_data_past_end_keeps_time_gap() -> None:
+    existing = TraceData("t", np.ones((2, 10)), np.array([0, 1]), "mV", 0.1)  # 0-1 s
+    new = TraceData("t", 2 * np.ones((2, 10)), np.array([0, 1]), "mV", 0.1)
+
+    append_data(existing, new, 1.0, 2.0)  # place at 2-3 s
+
+    assert existing.traces.shape == (2, 30)
+    np.testing.assert_array_equal(existing.traces[:, :10], 1.0)
+    np.testing.assert_array_equal(existing.traces[:, 10:20], 0.0)
+    np.testing.assert_array_equal(existing.traces[:, 20:], 2.0)
+
+
+def test_append_spike_data_keeps_raw_cellpose_ids_aligned() -> None:
+    existing = SpikeData(
+        "s", np.array([0, 1]), np.array([0.5, 0.2]), raw_cellpose_ids=np.array([5, 6])
+    )
+    new = SpikeData("s", np.array([2]), np.array([0.3]), raw_cellpose_ids=np.array([7]))
+
+    append_data(existing, new, 1.0, 0.0)
+
+    np.testing.assert_array_equal(existing.spike_indices, [1, 2, 0])
+    np.testing.assert_array_equal(existing.raw_cellpose_ids, [6, 7, 5])
+
+
+def test_append_spike_data_overlap_keeps_raw_cellpose_ids_aligned() -> None:
+    existing = SpikeData(
+        "s",
+        np.array([0, 0, 1]),
+        np.array([0.1, 1.5, 0.2]),
+        raw_cellpose_ids=np.array([5, 5, 6]),
+    )
+    new = SpikeData("s", np.array([0]), np.array([0.4]), raw_cellpose_ids=np.array([9]))
+
+    append_data(existing, new, 1.0, 1.0)  # replaces neuron 0 within 1-2 s
+
+    np.testing.assert_array_equal(existing.spike_indices, [0, 1, 0])
+    np.testing.assert_array_equal(existing.raw_cellpose_ids, [5, 6, 9])
+
+
+def test_append_spike_data_drops_raw_cellpose_ids_when_one_side_lacks_them() -> None:
+    existing = SpikeData(
+        "s", np.array([0]), np.array([0.1]), raw_cellpose_ids=np.array([5])
+    )
+    new = SpikeData("s", np.array([1]), np.array([0.3]))
+
+    append_data(existing, new, 1.0, 0.0)
+
+    assert existing.spike_indices.size == 2
+    assert existing.raw_cellpose_ids is None
+
+
+def test_append_trace_data_extends_raw_cellpose_ids_for_new_rows() -> None:
+    existing = TraceData(
+        "t", np.ones((1, 10)), np.array([0]), "mV", 0.1, raw_cellpose_ids=np.array([4])
+    )
+    new = TraceData(
+        "t",
+        np.ones((2, 10)),
+        np.array([0, 3]),
+        "mV",
+        0.1,
+        raw_cellpose_ids=np.array([4, 8]),
+    )
+
+    append_data(existing, new, 1.0, 1.0)
+
+    np.testing.assert_array_equal(existing.indices, [0, 3])
+    np.testing.assert_array_equal(existing.raw_cellpose_ids, [4, 8])
+
+
+def test_append_trace_data_disjoint_keeps_raw_cellpose_ids_aligned() -> None:
+    existing = TraceData(
+        "t", np.ones((1, 10)), np.array([0]), "mV", 0.1, raw_cellpose_ids=np.array([4])
+    )
+    new = TraceData(
+        "t", np.ones((1, 10)), np.array([1]), "mV", 0.1, raw_cellpose_ids=np.array([9])
+    )
+    append_data(existing, new, 1.0, 0.0)
+    np.testing.assert_array_equal(existing.raw_cellpose_ids, [4, 9])
+
+    # rows without raw ids cannot be aligned any more
+    append_data(
+        existing, TraceData("t", np.ones((1, 10)), np.array([2]), "mV", 0.1), 1.0, 0.0
+    )
+    assert existing.traces.shape == (3, 10)
+    assert existing.raw_cellpose_ids is None
+
+
+def test_append_empty_spike_data() -> None:
+    existing = SpikeData(
+        "s", np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+    )
+    append_data(
+        existing,
+        SpikeData("s", np.array([], dtype=np.float64), np.array([], dtype=np.float64)),
+        1.0,
+        1.0,
+    )
+
+    assert existing.spike_indices.size == 0
+    assert existing.spike_times.size == 0
+
+
+def test_safe_concat_all_empty_returns_empty_array() -> None:
+    result = safe_concat([np.empty(0, dtype=np.float32), np.empty(0, dtype=np.float32)])
+    assert result.size == 0
+    assert result.dtype == np.float32
+    mixed = safe_concat([np.empty((0, 3)), np.empty(0)], axis=1)
+    assert mixed.size == 0
+    assert safe_concat([]).size == 0

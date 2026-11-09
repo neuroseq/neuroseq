@@ -30,14 +30,6 @@ class InteractMode(Enum):
     SELECT = 2
 
 
-def timed_array_with_new_data(
-    timed_array: b2.TimedArray, new_data: np.ndarray
-) -> b2.TimedArray:
-    return b2.TimedArray(
-        b2.Quantity(new_data, timed_array.dim), timed_array.dt * b2.second
-    )
-
-
 def get_downsample_factor(
     n_floats: int, max_ram_mb: int, bits_per_float: int = 64
 ) -> int:
@@ -248,8 +240,46 @@ def update_nested_dict(original: dict[Any, Any], updates: Any) -> None:
 def safe_concat(arrays: list[np.ndarray], axis=0) -> np.ndarray:
     """
     Concatenate a list of NumPy arrays along the given axis, ignoring any arrays that are empty (size == 0).
+
+    If every array is empty, an empty array of the inputs' common dtype is returned.
     """
-    return np.concatenate([a for a in arrays if a.size > 0], axis=axis)
+    non_empty = [a for a in arrays if a.size > 0]
+    if non_empty:
+        return np.concatenate(non_empty, axis=axis)
+    if not arrays:
+        return np.empty(0)
+    try:
+        return np.concatenate(arrays, axis=axis)
+    except ValueError:
+        return np.empty(0, dtype=np.result_type(*arrays))
+
+
+def _aligned_raw_ids(raw_ids: np.ndarray | None, n_items: int) -> np.ndarray | None:
+    """Raw Cellpose ids for ``n_items`` rows/events, or None if unknown.
+
+    Data with no rows/events is compatible with any id state, so it yields an
+    empty id array instead of None.
+    """
+    if raw_ids is not None:
+        return np.asarray(raw_ids, dtype=np.uint32)
+    if n_items == 0:
+        return np.empty(0, dtype=np.uint32)
+    return None
+
+
+def _concat_raw_ids(parts: list[np.ndarray | None]) -> np.ndarray | None:
+    if any(part is None for part in parts):
+        return None
+    return safe_concat([p for p in parts if p is not None]).astype(np.uint32)
+
+
+def _sort_spikes_by_time(data: SpikeData) -> None:
+    if data.spike_times.size > 1:
+        order = np.argsort(data.spike_times)
+        data.spike_times = data.spike_times[order]
+        data.spike_indices = data.spike_indices[order]
+        if data.raw_cellpose_ids is not None:
+            data.raw_cellpose_ids = data.raw_cellpose_ids[order]
 
 
 def append_data(
@@ -303,6 +333,16 @@ def append_data(
                 raise ValueError(
                     "Cannot merge TraceData with non-overlapping neuron IDs unless the timelines fully overlap (offset 0, equal duration)."
                 )
+            existing_data.raw_cellpose_ids = _concat_raw_ids(
+                [
+                    _aligned_raw_ids(
+                        existing_data.raw_cellpose_ids, existing_data.traces.shape[0]
+                    ),
+                    _aligned_raw_ids(
+                        new_data.raw_cellpose_ids, new_data.traces.shape[0]
+                    ),
+                ]
+            )
             existing_data.traces = safe_concat(
                 [existing_data.traces, new_data.traces], axis=0
             )
@@ -312,6 +352,12 @@ def append_data(
             return
 
         idx0 = int(time_offset_seconds / existing_data.dt)
+        n_existing_samples = existing_data.traces.shape[1]
+        if idx0 > n_existing_samples:
+            # Keep the time gap between the existing data and the new block.
+            existing_data.traces = np.pad(
+                existing_data.traces, ((0, 0), (0, idx0 - n_existing_samples))
+            )
         idx1 = idx0 + new_data.traces.shape[1]
         segment = existing_data.traces[:, idx0:idx1]
         new_traces = np.zeros(
@@ -346,6 +392,19 @@ def append_data(
                 new_rows[row_i, idx0:idx1] = new_data.traces[
                     new_index_map[neuron_id], :
                 ]
+            new_raw_ids = _aligned_raw_ids(
+                new_data.raw_cellpose_ids, new_data.traces.shape[0]
+            )
+            existing_data.raw_cellpose_ids = _concat_raw_ids(
+                [
+                    _aligned_raw_ids(
+                        existing_data.raw_cellpose_ids, existing_data.traces.shape[0]
+                    ),
+                    None
+                    if new_raw_ids is None
+                    else new_raw_ids[[new_index_map[i] for i in new_only_ids]],
+                ]
+            )
             existing_data.traces = safe_concat([existing_data.traces, new_rows], axis=0)
             existing_data.indices = safe_concat(
                 [
@@ -359,6 +418,13 @@ def append_data(
         new_ids = set(map(int, new_data.spike_indices))
         overlap_ids = existing_ids.intersection(new_ids)
 
+        existing_raw_ids = _aligned_raw_ids(
+            existing_data.raw_cellpose_ids, existing_data.spike_indices.size
+        )
+        new_raw_ids = _aligned_raw_ids(
+            new_data.raw_cellpose_ids, new_data.spike_indices.size
+        )
+
         if not overlap_ids:
             existing_data.spike_indices = safe_concat(
                 [existing_data.spike_indices, new_data.spike_indices], axis=0
@@ -370,10 +436,10 @@ def append_data(
                 ],
                 axis=0,
             )
-            if existing_data.spike_times.size > 1:
-                order = np.argsort(existing_data.spike_times)
-                existing_data.spike_times = existing_data.spike_times[order]
-                existing_data.spike_indices = existing_data.spike_indices[order]
+            existing_data.raw_cellpose_ids = _concat_raw_ids(
+                [existing_raw_ids, new_raw_ids]
+            )
+            _sort_spikes_by_time(existing_data)
             return
 
         overlap_id_mask = np.isin(
@@ -396,10 +462,15 @@ def append_data(
             ],
             axis=0,
         )
-        if existing_data.spike_times.size > 1:
-            order = np.argsort(existing_data.spike_times)
-            existing_data.spike_times = existing_data.spike_times[order]
-            existing_data.spike_indices = existing_data.spike_indices[order]
+        existing_data.raw_cellpose_ids = _concat_raw_ids(
+            [
+                None
+                if existing_raw_ids is None
+                else existing_raw_ids[keep_existing_mask],
+                new_raw_ids,
+            ]
+        )
+        _sort_spikes_by_time(existing_data)
     elif isinstance(existing_data, SynapseData) and isinstance(new_data, SynapseData):
         # find the index of the last timestamp in the existing data before the time offset
         idx0 = np.searchsorted(
@@ -427,51 +498,6 @@ def append_data(
             ],
             axis=0,
         )
-
-
-def remove_neurons_from_data(
-    data: TraceData | SpikeData, neuron_indices_to_remove: set[int]
-) -> None:
-    """Remove specific neurons from TraceData or SpikeData in-place.
-
-    Parameters
-    ----------
-    data : TraceData | SpikeData
-        Data to remove neurons from
-    neuron_indices_to_remove : set[int]
-        Set of neuron indices to remove
-    """
-    if isinstance(data, TraceData):
-        # Find which positions in the arrays correspond to neurons we want to keep
-        indices_to_keep = []
-        for i, neuron_idx in enumerate(data.indices):
-            if neuron_idx not in neuron_indices_to_remove:
-                indices_to_keep.append(i)
-
-        if indices_to_keep:
-            # Keep only the specified neuron traces and indices
-            data.traces = data.traces[indices_to_keep, :]
-            data.indices = data.indices[indices_to_keep]
-        else:
-            # All neurons removed - create empty arrays with correct shape
-            data.traces = np.zeros((0, data.traces.shape[1]), dtype=data.traces.dtype)
-            data.indices = np.array([], dtype=data.indices.dtype)
-
-    elif isinstance(data, SpikeData):
-        # Find which spike events belong to neurons we want to keep
-        spikes_to_keep = []
-        for i, neuron_idx in enumerate(data.spike_indices):
-            if neuron_idx not in neuron_indices_to_remove:
-                spikes_to_keep.append(i)
-
-        if spikes_to_keep:
-            # Keep only spikes from specified neurons
-            data.spike_indices = data.spike_indices[spikes_to_keep]
-            data.spike_times = data.spike_times[spikes_to_keep]
-        else:
-            # All spikes removed - create empty arrays
-            data.spike_indices = np.array([], dtype=data.spike_indices.dtype)
-            data.spike_times = np.array([], dtype=data.spike_times.dtype)
 
 
 _POWER_OF_TEN_RE = re.compile(
