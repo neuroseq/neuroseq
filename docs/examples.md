@@ -2,12 +2,9 @@
 
 ## Run a sequence on digital substrate
 
-
 ## Run a sequence on biological substrate
 
-
 ## Run a sequence on neuromorphic substrate
-
 
 # Examplary brian2 models
 
