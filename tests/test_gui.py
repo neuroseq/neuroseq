@@ -3888,11 +3888,10 @@ def test_gui_apply_cellpose_import_result_warns_on_remap_conflict(
     project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
     fake_gui = _RemapFakeGui(project)
 
-    # Cellpose id 0 maps explicitly to stim 1, cellpose id 1 falls back to
-    # identity (stim 1 too) - a collision that cannot be resolved.
+    # Two stimulus IDs target Cellpose id 0 - a mapping that cannot be resolved.
     ProjectWorkspace._apply_cellpose_import_result(
         fake_gui,  # type: ignore[arg-type]
-        _cellpose_result_with_mapping({1: 0}),
+        _cellpose_result_with_mapping({0: 0, 1: 0}),
     )
 
     np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
