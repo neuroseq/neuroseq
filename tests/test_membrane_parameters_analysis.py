@@ -90,3 +90,38 @@ def test_voltage_unit_is_not_supported_as_current() -> None:
     from neuroseq.resources.analysis_plugins.membrane_parameters import is_current_unit
 
     assert not is_current_unit("mV")
+
+
+def test_membrane_dialog_fits_the_trace_row_of_the_selected_neuron_id(qtbot) -> None:
+    from neuroseq.data import TraceData
+    from neuroseq.resources.analysis_plugins.membrane_parameters import (
+        MembraneParametersDialog,
+    )
+
+    dt = 0.001
+    r_m, v_rest, tau_m = 250e6, -0.065, 0.02
+    current = np.tile(np.sin(np.linspace(0.0, 20.0, 300))[:, None], (1, 2)) * 40
+    current[:, 0] = 0.0  # neuron 0 gets no input
+    voltage = np.empty(300)
+    voltage[0] = -0.060
+    for sample in range(299):
+        voltage[sample + 1] = (
+            voltage[sample]
+            + dt
+            * (-(voltage[sample] - v_rest) + r_m * current[sample, 1] * 1e-12)
+            / tau_m
+        )
+    # Row 0 holds neuron 1 (the driven one), row 1 holds neuron 0.
+    data = TraceData(
+        "v", np.stack([voltage, np.full(300, v_rest)]), np.array([1, 0]), "mV", dt
+    )
+    stimulus = StimArray("current", StimType.External, current, "pA", dt)
+
+    dialog = MembraneParametersDialog(
+        data, [stimulus], slice(1, 2), slice(0, 250), None
+    )
+    qtbot.addWidget(dialog)
+
+    text = dialog.results.toPlainText()
+    assert text.startswith("Neuron 1\n")
+    assert "250 MΩ" in text

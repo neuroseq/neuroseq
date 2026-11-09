@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
@@ -143,8 +144,12 @@ def estimate_parameters(
     *,
     first_neuron: int = 0,
     first_sample: int = 0,
+    neuron_ids: Sequence[int] | None = None,
 ) -> list[MembraneParameterEstimate]:
-    """Estimate parameters per trace row, aligning stimulus samples by time."""
+    """Estimate parameters per trace row, aligning stimulus samples by time.
+
+    Row ``i`` is neuron ``neuron_ids[i]`` when given, else ``first_neuron + i``.
+    """
     # TraceData stores voltage samples in SI volts. Its unit string specifies
     # the preferred display unit, as it does in TraceWidget.
     voltage_factor(voltage_units)  # validate that this is a voltage trace
@@ -162,7 +167,7 @@ def estimate_parameters(
         raise ValueError("The selected trace extends beyond the input array.")
     estimates: list[MembraneParameterEstimate] = []
     for row, trace in enumerate(voltage):
-        neuron = first_neuron + row
+        neuron = neuron_ids[row] if neuron_ids is not None else first_neuron + row
         if neuron >= stimulus.values.shape[1]:
             raise ValueError(f"Input array has no column for neuron {neuron}.")
         dv_dt = np.diff(trace) / trace_dt
@@ -218,17 +223,18 @@ class MembraneParametersDialog(QtWidgets.QDialog):
 
     def _update_results(self) -> None:
         stimulus = self._arrays[self.input_array_combo.currentText()]
-        first_neuron = self._neuron_slice.start or 0
         first_sample = self._time_slice.start or 0
-        traces = np.asarray(self._data.traces)[self._neuron_slice, self._time_slice]
+        # The selection holds neuron ids; trace rows follow data.indices.
+        rows = self._data.rows_for_neurons(self._neuron_slice)
+        traces = np.asarray(self._data.traces)[rows][:, self._time_slice]
         try:
             estimates = estimate_parameters(
                 traces,
                 self._data.dt,
                 stimulus,
                 self._data.units,
-                first_neuron=first_neuron,
                 first_sample=first_sample,
+                neuron_ids=[int(self._data.indices[row]) for row in rows],
             )
         except ValueError as exc:
             self.results.setPlainText(f"Could not estimate parameters:\n\n{exc}")

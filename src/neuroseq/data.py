@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import brian2.numpy_ as np
@@ -33,6 +34,32 @@ class TraceData:
         self.indices = np.asarray(self.indices, dtype=np.uint32)
         if self.raw_cellpose_ids is not None:
             self.raw_cellpose_ids = np.asarray(self.raw_cellpose_ids, dtype=np.uint32)
+
+    def rows_for_neurons(
+        self, neurons: slice | Iterable[int] | None
+    ) -> NDArray[np.intp]:
+        """Rows of ``traces`` holding the given neuron ids, ordered by id.
+
+        ``neurons`` is a slice of neuron ids (as a plot selection produces), an
+        explicit collection of ids, or None for every neuron. Rows follow
+        ``indices``, which need not be ``arange(n)``; ids without a row are
+        skipped.
+        """
+        ids = self.indices.astype(np.int64)
+        if neurons is None:
+            neurons = slice(None)
+        if isinstance(neurons, slice):
+            mask = np.ones(ids.shape[0], dtype=bool)
+            if neurons.start is not None:
+                mask &= ids >= neurons.start
+            if neurons.stop is not None:
+                mask &= ids < neurons.stop
+            rows = np.flatnonzero(mask)
+            return rows[np.argsort(ids[rows], kind="stable")]
+        row_by_id = {int(neuron_id): row for row, neuron_id in enumerate(ids)}
+        return np.asarray(
+            [row_by_id[int(n)] for n in neurons if int(n) in row_by_id], dtype=np.intp
+        )
 
 
 @dataclass

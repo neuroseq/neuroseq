@@ -368,10 +368,12 @@ def test_stim_widget_set_neuron_greyed_adds_and_removes_overlay(
     assert not stim_widget.is_neuron_greyed(2)
 
 
-def test_stim_widget_clear_data_clears_greyed_neurons(
+def test_stim_widget_set_data_keeps_greyed_neurons(
     qtbot: QtBot,
     positive_stims: StimArray,
 ) -> None:
+    """Hidden neurons follow the cell selection: switching arrays or undo
+    (both call set_data) must not bring them back, as the traces keep them."""
     controller = ConstrainedPanZoomController()
     stim_widget = StimWidget(controller)
     qtbot.addWidget(stim_widget)
@@ -380,7 +382,12 @@ def test_stim_widget_clear_data_clears_greyed_neurons(
 
     stim_widget.set_data(positive_stims)
 
-    assert not stim_widget.is_neuron_greyed(1)
+    assert stim_widget.is_neuron_greyed(1)
+    assert stim_widget.n_neurons == positive_stims.values.shape[1] - 1
+    assert stim_widget.graphic is not None
+    rendered = np.asarray(stim_widget.graphic.data.value)
+    assert rendered.shape[0] == positive_stims.values.shape[1] - 1
+    np.testing.assert_allclose(rendered[1], positive_stims.values[:, 2])
 
 
 def test_stim_widget_greying_hides_and_compacts_rows(qtbot: QtBot) -> None:
@@ -1070,3 +1077,130 @@ def test_stim_widget_hover_shows_start_and_end_of_stimulus(
     world["pos"] = np.array([1.0, 1.0, 0.0])
     stim_widget.pointer_move(SimpleNamespace(x=0.0))
     assert captured["t"] == "Neuron 1\n0 pA"
+
+
+def test_stim_widget_set_data_with_every_neuron_hidden(qtbot: QtBot) -> None:
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    stim_array = StimArray("", StimType.Excitation, np.ones((5, 2)), "mV", dt=0.001)
+    stim_widget.set_data(stim_array)
+    stim_widget.set_neurons_greyed([0, 1], [])
+
+    stim_widget.set_data(stim_array)
+
+    assert stim_widget.graphic is not None
+    assert not stim_widget.graphic.visible
+    stim_widget.set_neurons_greyed([], [0])
+    assert stim_widget.graphic.visible
+    assert np.asarray(stim_widget.graphic.data.value).shape[0] == 1
+
+
+def test_stim_widget_background_arrays_follow_hidden_neurons(qtbot: QtBot) -> None:
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    foreground = np.zeros((4, 3))
+    background = np.zeros((4, 3))
+    background[:, 0] = 1.0
+    background[:, 2] = 3.0
+    stim_widget.set_data(StimArray("fg", StimType.Excitation, foreground, "1", 0.001))
+    stim_widget.set_background_data(
+        StimArray("bg", StimType.Excitation, background, "1", 0.001)
+    )
+
+    stim_widget.set_neuron_greyed(1, True)
+
+    assert len(stim_widget.background_graphics) == 1
+    rendered = np.asarray(stim_widget.background_graphics[0].data.value)
+    assert rendered.shape[0] == 2  # neuron 1's row is gone
+    np.testing.assert_allclose(rendered[0], 1.0)
+    np.testing.assert_allclose(rendered[1], 3.0)  # neuron 2 on display row 1
+
+    # A background array added while neurons are hidden is compacted too.
+    stim_widget.set_background_data(
+        StimArray("bg2", StimType.Excitation, background, "1", 0.001)
+    )
+    assert np.asarray(stim_widget.background_graphics[1].data.value).shape[0] == 2
+
+
+def test_stim_widget_hover_ignores_background_without_hovered_neuron(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(
+        StimArray("fg", StimType.Excitation, np.zeros((4, 3)), "1", 0.001)
+    )
+    # One neuron only: hovering neuron 2 must not show neuron 0's value.
+    stim_widget.set_background_data(
+        StimArray("bg", StimType.Excitation, np.full((4, 1), 5.0), "1", 0.001)
+    )
+    captured: list[str] = []
+    monkeypatch.setattr(
+        stim_widget.text, "set_pos", lambda pos, text: captured.append(text)
+    )
+    monkeypatch.setattr(
+        stim_widget.subplot, "map_screen_to_world", lambda ev: np.array([1.0, 2.0, 0])
+    )
+
+    stim_widget.pointer_move(SimpleNamespace(x=0.0))
+
+    assert captured[-1].startswith("Neuron 2\n0 ")
+
+
+def test_stim_preview_draws_visible_neurons_at_display_rows(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    stim_widget = StimWidget(controller)
+    qtbot.addWidget(stim_widget)
+    values = np.zeros((4, 3))
+    values[1:3, 2] = 1.0
+    stim_widget.set_data(StimArray("s", StimType.Excitation, values, "1", 0.001))
+    stim_widget.set_neuron_greyed(1, True)
+    stim_widget.select_neurons(slice(1, 2), None)  # display row 1 = neuron 2
+
+    dialog = stim_widget.preview_stimuli()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+
+    # Neuron 2's pulse sits on display row 1, inside the selected y range.
+    np.testing.assert_allclose(
+        ax.collections[-1].get_paths()[0].vertices[:4],
+        [[1, 0.5], [3, 0.5], [3, 1.5], [1, 1.5]],
+    )
+    assert ax.get_ylim() == pytest.approx((0.5, 1.5))
+    assert ax.yaxis.get_major_formatter()(1.0, 0) == "2"
+    dialog.close()
+
+
+def test_stim_widget_draw_click_on_empty_row_emits_nothing(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stim_widget = StimWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(stim_widget)
+    stim_widget.set_data(
+        StimArray("s", StimType.Excitation, np.zeros((100, 4)), "1", 0.001)
+    )
+    stim_widget.set_mode(InteractMode.DRAW)
+    clicks: list[tuple] = []
+    drags: list[tuple] = []
+    stim_widget.mouse_clicked.connect(lambda *args: clicks.append(args))
+    stim_widget.mouse_dragged.connect(lambda *args: drags.append(args))
+    event = SimpleNamespace(button=1, x=0.0, y=0.0)
+
+    def click_at(position) -> None:
+        monkeypatch.setattr(
+            stim_widget.subplot, "map_screen_to_world", lambda ev: position
+        )
+        stim_widget.pointer_down(event)
+        stim_widget.pointer_move(event)
+        stim_widget.pointer_up(event)
+
+    click_at(np.array([5.0, -3.0, 0.0]))  # below row 0: was int(None) error
+    click_at(np.array([10.0, 2.0, 0.0]))
+    click_at(np.array([50.0, 7.0, 0.0]))  # no row 7: re-emitted the last click
+    click_at(None)  # outside the plot
+
+    assert clicks == [(2, 10, 1)]
+    assert drags == [(2, 2, 10, 10, 1)]

@@ -552,3 +552,32 @@ def test_custom_analysis_widget_trace_pearson_correlation_short_selection(
         and "need at least one neuron and two time samples" in child.get_text().lower()
     ]
     assert len(text_children) > 0
+
+
+@pytest.mark.parametrize(
+    ("neurons", "expected_ids", "expected_values"),
+    [
+        (slice(0, 1), [0], [[2.0, 2.0]]),
+        (slice(5, 6), [5], [[3.0, 3.0]]),
+        (None, [0, 1, 5], [[2.0, 2.0], [1.0, 1.0], [3.0, 3.0]]),
+        ([5, 1], [5, 1], [[3.0, 3.0], [1.0, 1.0]]),
+    ],
+)
+def test_custom_analysis_widget_selects_trace_rows_by_neuron_id(
+    qtbot: QtBot, neurons, expected_ids, expected_values
+) -> None:
+    """TraceData rows follow ``indices``, not the neuron ids themselves."""
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    data = TraceData(
+        "t",
+        np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]),
+        np.array([1, 0, 5]),
+        "a.u.",
+        0.001,
+    )
+
+    widget.set_data(data, CustomAnalysisType.Histogram, neurons, None)
+
+    assert widget.neuron_ids == expected_ids
+    np.testing.assert_allclose(widget.traces, expected_values)

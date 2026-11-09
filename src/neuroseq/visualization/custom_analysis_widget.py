@@ -169,18 +169,10 @@ class CustomAnalysisWidget(MatplotlibWidget):
             f"{data.name} {analysis_label}: {neuron_str}, {time_str}"
         )
         if isinstance(data, TraceData):
-            traces_array = np.asarray(data.traces)
-            self.traces = traces_array[neuron_slice, time_slice]
-            if isinstance(neuron_slice, slice):
-                start = neuron_slice.start if neuron_slice.start is not None else 0
-                stop = (
-                    neuron_slice.stop
-                    if neuron_slice.stop is not None
-                    else traces_array.shape[0]
-                )
-                self.neuron_ids = list(range(start, stop))
-            else:
-                self.neuron_ids = list(neuron_slice)
+            # The selection holds neuron ids; trace rows follow data.indices.
+            rows = data.rows_for_neurons(neuron_slice)
+            self.traces = np.asarray(data.traces)[rows][:, time_slice]
+            self.neuron_ids = [int(data.indices[row]) for row in rows]
         elif isinstance(data, SpikeData):
             assert isinstance(neuron_slice, slice)
             all_spike_indices = np.asarray(data.spike_indices)

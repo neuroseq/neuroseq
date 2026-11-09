@@ -1962,3 +1962,58 @@ def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) 
     gc.collect()
     assert widget_ref() is None
     assert figure_ref() is None
+
+
+@pytest.mark.parametrize(
+    ("indices", "expected"),
+    [
+        # A single trace whose neuron id is not 0 (previously IndexError).
+        ([5], "Neuron 5\n1 a.u."),
+        # Rows in non-id order: row 0 holds neuron 1, row 1 neuron 0.
+        ([1, 0], "Neuron 0\n2 a.u."),
+    ],
+)
+def test_trace_widget_hover_reads_the_row_of_the_hovered_neuron_id(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    indices: list[int],
+    expected: str,
+) -> None:
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        widget.subplot, "map_screen_to_world", lambda ev: np.array([3.0, 0.0, 0.0])
+    )
+    traces = np.stack([np.full(10, 1.0), np.full(10, 2.0)])[: len(indices)]
+    widget.set_data(TraceData("t", traces, np.array(indices), "a.u.", 0.001))
+
+    widget.pointer_move(SimpleNamespace(x=0.0))
+
+    assert captured["t"] == expected
+
+
+@pytest.mark.parametrize("offset_by_median", [False, True])
+@pytest.mark.parametrize("clip", [False, True])
+def test_trace_norm_dialog_checkboxes_reflect_widget_settings(
+    qtbot: QtBot, offset_by_median: bool, clip: bool
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.offset_by_median = offset_by_median
+    trace_widget.clip = clip
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+
+    assert dialog.chk_offset.isChecked() == offset_by_median
+    assert dialog.chk_clip.isChecked() == clip
+
+    dialog.chk_offset.setChecked(False)
+    dialog.chk_clip.setChecked(False)
+    dialog.reset_defaults()
+
+    assert dialog.chk_offset.isChecked()
+    assert dialog.chk_clip.isChecked()

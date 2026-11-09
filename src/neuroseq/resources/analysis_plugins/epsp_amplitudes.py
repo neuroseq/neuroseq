@@ -52,7 +52,12 @@ def _replot(
             reference = float(np.mean(values[:count]))
             if reference > 0:
                 values = values / reference * 100.0
-        source_row = row + (widget.neuron_slice.start or 0)
+        neuron_ids = getattr(widget, "neuron_ids", None)
+        source_row = (
+            neuron_ids[row]
+            if neuron_ids is not None and row < len(neuron_ids)
+            else row + (widget.neuron_slice.start or 0)
+        )
         label = None
         if traces.shape[0] > 1:
             label = f"Neuron {source_row}"

@@ -176,6 +176,10 @@ class TimeseriesWidget(FPLWidget):
         self.logger = logging.getLogger(__name__)
         self.data: TraceData | SpikeData | SynapseData | None = None
         self.data_values: np.ndarray | None = None
+        # Column of data_values holding each neuron id's values; None means
+        # the column *is* the neuron id (stim arrays). Trace data rows follow
+        # TraceData.indices, which need not be arange(n).
+        self._data_column_by_neuron_id: dict[int, int] | None = None
         # multiplier applied to data_values when shown as a hover value
         self.data_values_scale: float = 1.0
         self.units = ""
@@ -382,6 +386,13 @@ class TimeseriesWidget(FPLWidget):
         self.default_y_scroll_bar.rangeChanged.connect(
             self._on_default_y_scroll_changed
         )
+        self._sync_from_default_axes()
+
+    def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        """Set this panel's own controller limits (a detached panel does not
+        share the main window's controllers), then follow the linked axes."""
+        if self.controller is not None:
+            self.controller.set_limits(max_time_secs, max_neurons)
         self._sync_from_default_axes()
 
     def _on_lock_x_toggled(self, checked: bool) -> None:
@@ -725,16 +736,19 @@ class TimeseriesWidget(FPLWidget):
         self.background_graphics = []
         self.data = None
         self.data_values = None
+        self._data_column_by_neuron_id = None
         self.data_values_scale = 1.0
         self.units = ""
         self.grid_lines = None
         self._all_neuron_ids = []
-        self.n_neurons = 0
-        self.n_neurons_total = 0
         self.n_timestamps = 0
-        self.dt_ms = 0.0
+        # Not 0: an empty widget still turns pointer drags into time slices.
+        self.dt_ms = 1.0
         self.unselect_neurons()
-        self.clear_greyed_neurons()
+        # Hidden neurons follow the cell selection, not the data shown: keep
+        # them across a data refresh (array switch, undo) so the next
+        # set_data() lays out only the still-visible rows.
+        self._rebuild_visible_neuron_mapping()
 
     def closeEvent(self, event) -> None:
         self._set_hovered_neuron_id(None)
@@ -863,6 +877,12 @@ class TimeseriesWidget(FPLWidget):
         self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
         self.mouse_pos = self.mouse_press_pos
         self.mouse_press_button = ev.button
+        # A press that lands on no row must not reuse the previous click's
+        # neuron/time on release.
+        self.mouse_drag_time_index = None
+        self.mouse_drag_neuron_index = None
+        if self.mouse_pos is None:
+            return
         self.logger.debug(
             f"pointer_down button {self.mouse_press_button} at {self.mouse_press_pos} in mode {self.mode}"
         )
@@ -937,10 +957,17 @@ class TimeseriesWidget(FPLWidget):
             display_row = self._display_row_for_mouse_y(self.mouse_pos[1])
             neuron_id = self._visible_neuron_ids[display_row]
             hovered_neuron_id = neuron_id
-            hover_value = (
-                self.data_values[time_index, neuron_id] * self.data_values_scale
+            column = (
+                neuron_id
+                if self._data_column_by_neuron_id is None
+                else self._data_column_by_neuron_id.get(neuron_id)
             )
-            hover_value_text = f"Neuron {neuron_id}\n{hover_value:.3g} {self.units}"
+            hover_value_text = f"Neuron {neuron_id}"
+            if column is not None and column < self.data_values.shape[1]:
+                hover_value = (
+                    self.data_values[time_index, column] * self.data_values_scale
+                )
+                hover_value_text += f"\n{hover_value:.3g} {self.units}"
         self._set_hovered_neuron_id(hovered_neuron_id)
         self.text.set_pos(self.mouse_pos, hover_value_text)
         if self.hover_slice_graphic is not None:
@@ -959,7 +986,9 @@ class TimeseriesWidget(FPLWidget):
             )
             self.select_neurons(neuron_slice, time_slice)
             return
-        elif self.mode == InteractMode.DRAW:
+        elif (
+            self.mode == InteractMode.DRAW and self.mouse_drag_neuron_index is not None
+        ):
             drag_time_index = math.floor(self.mouse_pos[0] / self.dt_ms)
             drag_display_row = math.floor(self.mouse_pos[1] + 0.5)
             drag_neuron_index = self._display_row_to_neuron_id(drag_display_row)
@@ -999,7 +1028,11 @@ class TimeseriesWidget(FPLWidget):
             ):
                 self.unselect_neurons()
                 self.roi.visible = False
-        elif self.mode == InteractMode.DRAW:
+        elif (
+            self.mode == InteractMode.DRAW
+            and self.mouse_drag_neuron_index is not None
+            and self.mouse_drag_time_index is not None
+        ):
             self.mouse_clicked.emit(
                 self.mouse_drag_neuron_index,
                 self.mouse_drag_time_index,

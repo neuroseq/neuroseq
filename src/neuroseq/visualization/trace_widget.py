@@ -65,7 +65,7 @@ class TraceNormDialog(SelfRaisingDialog):
         self.content_layout.addLayout(norm_input_layout)
 
         self.chk_offset = QtWidgets.QCheckBox("Center median")
-        self.chk_offset.setChecked(self.clip)
+        self.chk_offset.setChecked(self.offset_by_median)
         self.chk_offset.clicked.connect(self.chk_offset_clicked)
         self.content_layout.addWidget(self.chk_offset)
 
@@ -100,7 +100,7 @@ class TraceNormDialog(SelfRaisingDialog):
         self.clip = True
         self.auto_extend_vertical_space = False
         self.chk_offset.setChecked(self.offset_by_median)
-        self.chk_offset.setChecked(self.clip)
+        self.chk_clip.setChecked(self.clip)
         self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
         self.update_norm_input(self.slider_norm.value())
 
@@ -640,6 +640,9 @@ class TraceWidget(TimeseriesWidget):
         )
         self.data = data
         self.data_values = data.traces.T
+        self._data_column_by_neuron_id = {
+            int(neuron_id): row for row, neuron_id in enumerate(data.indices)
+        }
         self.units = data.units if data.units else "mV"
         # Voltage traces use the existing volts-to-millivolts convention.
         # Fluorescence and other trace types already contain display values.
