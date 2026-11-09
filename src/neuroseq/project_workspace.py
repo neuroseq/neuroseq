@@ -1242,12 +1242,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.controller.reset()
             self.trace_controller.reset()
             self.spike_controller.reset()
-        self.console_widget.set_project(self.project)
-        self.chat_widget.set_project(self.project)
-        self.syscon2_panel.set_project(self.project)
-        self.bss2_panel.set_project(self.project)
-        self.acquisition_controller.project_changed()
-        self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1303,23 +1297,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
 
-    def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
-        if imported is None:
-            return 0
-        if imported.original_cellpose_ids is not None:
-            return int(len(imported.original_cellpose_ids))
-        if imported.segmentation_array is None:
-            return 0
-        unique_ids = np.unique(imported.segmentation_array)
-        return int(np.sum(unique_ids >= 0))
-
     def _warn_if_cellpose_model_mismatch(self) -> None:
         """Warn when Cellpose data is present but its cell count differs from the
         model's neuron count (the two must agree for neuron-to-cell mapping,
         e.g. holographic stimulation export)."""
         if self.project is None or self.project.cellpose_data is None:
             return
-        cellpose_count = self._cellpose_neuron_count(self.project.cellpose_data)
+        cellpose_count = self.project.cellpose_neuron_count()
         model_count = self.project.b2_model.get_defined_neuron_count()
         if cellpose_count > 0 and model_count > 0 and cellpose_count != model_count:
             QtWidgets.QMessageBox.warning(
@@ -1361,7 +1345,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self.project is None:
             return []
 
-        self.project.cellpose_data = imported_copy
+        self.project.set_cellpose_data(imported_copy)
         failed_remaps = self.project.remap_cellpose_indices()
         if failed_remaps:
             QtWidgets.QMessageBox.warning(
@@ -1374,7 +1358,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 "duplicate or out-of-range IDs); their displayed indices were left "
                 "unchanged.",
             )
-        detected_neurons = self._cellpose_neuron_count(imported_copy)
+        detected_neurons = self.project.cellpose_neuron_count()
         resized_names: list[str] = []
         if detected_neurons > 0 and self.project.stim_arrays:
             current_max_neurons = max(
@@ -2428,9 +2412,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 self._auto_show_widget(self.spatial_footprint_widget)
             message = "Cell spatial footprints loaded."
             if resized_names:
-                detected_neurons = self._cellpose_neuron_count(
-                    self.last_cellpose_import
-                )
+                detected_neurons = self.project.cellpose_neuron_count()
                 message += (
                     "\n\nExpanded "
                     f"{len(resized_names)} input array(s) to {detected_neurons} neurons."
@@ -2507,7 +2489,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
         if self.project is not None:
-            self.project.cellpose_data = None
+            self.project.set_cellpose_data(None)
+            self.update_limits()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
             self.calcium_video_widget.set_cellpose_data(None)

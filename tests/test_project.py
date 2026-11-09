@@ -1696,3 +1696,180 @@ def test_relocate_calcium_video_accepts_a_renamed_single_file(tmp_path):
     project.add_calcium_video([Path("/old/a.tif"), Path("/old/b.tif")], 30.0)
     with pytest.raises(ValueError, match="not one of"):
         project.relocate_calcium_video(None, renamed)
+
+
+def test_failed_save_keeps_existing_project_file(tmp_path: Path) -> None:
+    path = tmp_path / "p.nseq"
+    project = Project()
+    project.add_stim_array(
+        StimArray("s", StimType.Excitation, np.ones((10, 2)), "nA", 0.01)
+    )
+    options = SaveLoadOptions(True, True, True, True)
+    project.save(path, options)
+    good_bytes = path.read_bytes()
+
+    project.external_simulate_params = {"n": {"value": object()}}
+    with pytest.raises(TypeError):
+        project.save(path, options)
+
+    assert path.read_bytes() == good_bytes
+    assert list(tmp_path.iterdir()) == [path]
+    assert "s" in Project(path).stim_arrays
+
+
+def test_save_accepts_numpy_values_in_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "p.nseq"
+    project = Project()
+    project.external_simulate_params = {
+        "n": {"value": np.int64(3)},
+        "w": {"value": np.array([1.5, 2.5])},
+    }
+    project.save(path, SaveLoadOptions(True, True, True, True))
+
+    loaded = Project(path)
+    assert loaded.external_simulate_params == {
+        "n": {"value": 3},
+        "w": {"value": [1.5, 2.5]},
+    }
+
+
+def test_save_does_not_leave_save_checkpoint_in_live_network(tmp_path: Path) -> None:
+    from neuroseq.b2_model import B2Model
+    from neuroseq.example_projects.neurons.single_lif_neuron import single_lif_neuron
+    from neuroseq.utils import save_store_name
+
+    project = single_lif_neuron()
+    project.run_simulation(0.01)
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, True, True))
+    project.run_simulation(0.01)
+    model = project.b2_model
+
+    assert save_store_name not in model.network._stored_state
+    # What the model editor does: the copy must not rewind to save time.
+    copy_model = B2Model.from_dict(model.to_dict(), dict(model.network._stored_state))
+    assert copy_model.get_sim_time_secs() != pytest.approx(0.01)
+
+
+def test_import_project_without_simulation_data_drops_checkpoints(
+    tmp_path: Path,
+) -> None:
+    from neuroseq.example_projects.neurons.single_lif_neuron import single_lif_neuron
+
+    path = tmp_path / "sim.nseq"
+    source = single_lif_neuron()
+    source.run_simulation(0.01)
+    assert source.b2_model.checkpoints
+    source.save(path, SaveLoadOptions(True, True, True, True))
+
+    project = Project()
+    project.import_project(path, SaveLoadOptions(True, True, False, True))
+    model = project.b2_model
+
+    assert model.checkpoints == []
+    assert not model.has_simulation_data()
+    project.run_simulation(0.01)
+    assert model.checkpoints == ["Initial state"]
+    model.restore("Initial state")
+
+
+def _trimmed_project_with_history() -> tuple[Project, StimArray]:
+    from neuroseq.project_history import ProjectCommand
+    from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
+
+    project = Project()
+    values = np.zeros((100, 2))
+    values[50:, 0] = 1.0
+    project.add_stim_array(StimArray("s", StimType.Excitation, values, "nA", 0.01))
+    stim = project.stim_arrays["s"]
+    action = TrimReversibleAction(project, 0.5, None, "s")
+    action(stim, None)
+    project.history.record_applied(
+        ProjectCommand(
+            "trim", lambda: action(stim, None), lambda: action.undo(stim, None)
+        )
+    )
+    assert project.history.can_undo()
+    return project, stim
+
+
+def test_run_simulation_padding_clears_stale_history() -> None:
+    project, stim = _trimmed_project_with_history()
+
+    project.run_simulation(0.8)  # longer than the trimmed 0.5 s array
+
+    assert stim.values.shape[0] >= 80
+    assert not project.history.can_undo()
+
+
+def test_run_simulation_without_padding_keeps_history() -> None:
+    project, stim = _trimmed_project_with_history()
+    project.b2_model.get_defined_neuron_count = lambda: 0  # type: ignore[method-assign]
+    project.b2_model.run_simulation = lambda *a, **k: None  # type: ignore[method-assign]
+
+    project.run_simulation(0.1)
+
+    assert stim.values.shape[0] == 50
+    assert project.history.can_undo()
+
+
+def test_tile_stim_arrays_to_length_clears_stale_history() -> None:
+    project, stim = _trimmed_project_with_history()
+
+    project.tile_stim_arrays_to_length(0.4)
+    assert project.history.can_undo()  # nothing changed
+
+    project.tile_stim_arrays_to_length(2.0)
+    assert stim.values.shape[0] == 200
+    assert not project.history.can_undo()
+
+
+def test_set_cellpose_data_updates_limits_and_marks_dirty() -> None:
+    project = Project()
+    project.dirty = False
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(30, dtype=np.int32),
+        stimulus_to_cellpose_mapping={i: i for i in range(12)},
+    )
+
+    project.set_cellpose_data(cellpose)
+    assert project.dirty
+    assert project.cellpose_neuron_count() == 12
+    assert project.max_neurons >= 12
+
+    project.dirty = False
+    project.set_cellpose_data(None)
+    assert project.dirty
+    assert project.cellpose_neuron_count() == 0
+    assert project.max_neurons < 12
+
+
+def test_imaging_acquisition_records_go_through_project_methods() -> None:
+    project = Project()
+    project.dirty = False
+    project.add_imaging_acquisition({"run_id": "r1", "status": "armed"})
+    assert project.dirty
+    project.dirty = False
+
+    assert project.update_imaging_acquisition("r1", {"status": "armed"}) is True
+    assert not project.dirty  # nothing changed
+    assert project.update_imaging_acquisition(
+        "r1", {"status": "failed", "error": "no trigger"}
+    )
+    assert project.dirty
+    project.dirty = False
+    assert project.update_imaging_acquisition(
+        "r1", {"status": "completed"}, remove=("error",)
+    )
+    assert project.imaging_acquisition("r1") == {"run_id": "r1", "status": "completed"}
+    # A copy: editing it leaves the project's record alone.
+    copy = project.imaging_acquisition("r1")
+    assert copy is not None
+    copy["status"] = "edited"
+    assert project.imaging_acquisitions[0]["status"] == "completed"
+    assert project.update_imaging_acquisition("missing", {"status": "x"}) is False
+    assert project.imaging_acquisition("missing") is None

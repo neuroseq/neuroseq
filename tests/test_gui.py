@@ -1637,9 +1637,14 @@ def test_deleting_cellpose_data_clears_spatial_footprint_panel(qtbot: QtBot) -> 
     gui.project.cellpose_data = _make_gui_cellpose_result()
     gui.spatial_footprint_widget.set_data(gui.project.cellpose_data)
 
+    gui.project.update_limits()
+    gui.project.dirty = False
+
     gui._delete_cellpose_data()
 
     assert gui.project.cellpose_data is None
+    # Removing the data is an unsaved project change.
+    assert gui.project.dirty
     assert gui.spatial_footprint_widget.overlay_widget.overlay_image is None
     assert gui.spatial_footprint_widget.overlay_widget.segmentation is None
     assert not gui.spatial_footprint_widget.empty_state_widget.isHidden()
@@ -3786,12 +3791,6 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
         def update_limits(self) -> None:
             self.update_limits_calls += 1
 
-        def _cellpose_neuron_count(
-            self,
-            imported: CellposeImportResult | None,
-        ) -> int:
-            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
-
         def _expand_stim_arrays_to_neuron_count(
             self,
             target_neuron_count: int,
@@ -3833,12 +3832,6 @@ class _RemapFakeGui:
 
     def update_limits(self) -> None:
         pass
-
-    def _cellpose_neuron_count(
-        self,
-        imported: CellposeImportResult | None,
-    ) -> int:
-        return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
 
 
 def _cellpose_result_with_mapping(
@@ -4281,9 +4274,6 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
         def __init__(self, project: Project) -> None:
             self.project = project
 
-        def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
-            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
-
     fake = _FakeGui(project)
 
     def _cellpose_with(n_cells: int) -> CellposeImportResult:
@@ -4315,6 +4305,14 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "mismatch" in qmessagebox_calls[0]["title"].lower()
     assert "10" in qmessagebox_calls[0]["text"]
     assert "25" in qmessagebox_calls[0]["text"]
+
+    # 25 segmented ROIs but a mapping that picks 10 of them as neurons -> the
+    # neuron count is the mapping's size, so no warning
+    mapped = _cellpose_with(25)
+    mapped.stimulus_to_cellpose_mapping = {i: i for i in range(10)}
+    project.cellpose_data = mapped
+    ProjectWorkspace._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 1
 
 
 def test_brian2_busy_notifies_dynamic_input(

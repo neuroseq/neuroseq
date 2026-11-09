@@ -4,9 +4,12 @@ import importlib
 import json
 import logging
 import math
+import os
 import pathlib
 import pickle
 import runpy
+import shutil
+import tempfile
 import uuid
 import zipfile
 from collections.abc import Callable
@@ -34,6 +37,7 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.io import _to_seconds
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.project_history import ProjectCommand
@@ -67,8 +71,13 @@ class ExternalSimulateFn(Protocol):
 _TIMELINE_CLIP_EPS_SECONDS = 1e-9
 
 
-def _to_seconds(value: float | int) -> float:
-    return float(value)
+def _metadata_json_default(obj: object) -> object:
+    """Convert numpy scalars/arrays in project metadata to plain JSON values."""
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _trace_data_neuron_count(data: TraceData) -> int:
@@ -439,6 +448,46 @@ class Project:
         if "index" in video:
             return video["index"]
         return self.scanimage_recording(video.get("run_id"))
+
+    def imaging_acquisition(self, run_id: str) -> dict | None:
+        """The record of ScanImage run ``run_id`` (a copy), or None."""
+        record = self._imaging_acquisition(run_id)
+        return None if record is None else dict(record)
+
+    def _imaging_acquisition(self, run_id: str) -> dict | None:
+        return next(
+            (
+                record
+                for record in self.imaging_acquisitions
+                if record.get("run_id") == run_id
+            ),
+            None,
+        )
+
+    def add_imaging_acquisition(self, record: dict) -> None:
+        """Record a ScanImage acquisition (keyed by its ``run_id``)."""
+        self.imaging_acquisitions.append(record)
+        self.mark_dirty()
+
+    def update_imaging_acquisition(
+        self, run_id: str, changes: dict, remove: tuple[str, ...] = ()
+    ) -> bool:
+        """Set ``changes`` on, and drop the ``remove`` keys from, the record of
+        ``run_id``; marks the project dirty if that changed anything. Returns
+        False when there is no such record (e.g. the project was replaced)."""
+        record = self._imaging_acquisition(run_id)
+        if record is None:
+            return False
+        changed = any(
+            record.get(key, object()) != value for key, value in changes.items()
+        )
+        changed |= any(key in record for key in remove)
+        record.update(changes)
+        for key in remove:
+            record.pop(key, None)
+        if changed:
+            self.mark_dirty()
+        return True
 
     def scanimage_recording(self, run_id: str | None) -> dict | None:
         if run_id is None:
@@ -1031,6 +1080,16 @@ class Project:
             self.update_limits()
             self.mark_dirty()
 
+    def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
+        """Replace (or with ``None`` remove) the project's Cellpose data."""
+        self.cellpose_data = cellpose_data
+        self.update_limits()
+        self.mark_dirty()
+
+    def cellpose_neuron_count(self) -> int:
+        """Neuron/stimulus-index-space count implied by the Cellpose data."""
+        return _cellpose_neuron_count(self.cellpose_data)
+
     def remap_cellpose_indices(self) -> list[str]:
         """
         Re-resolve ``TraceData.indices``/``SpikeData.spike_indices`` for every
@@ -1502,10 +1561,17 @@ class Project:
             return 1.0
         return max(candidates)
 
+    def _stim_array_lengths(self) -> dict[str, int]:
+        return {
+            name: int(stim_array.values.shape[0])
+            for name, stim_array in self.stim_arrays.items()
+        }
+
     def tile_stim_arrays_to_length(self, target_seconds: float) -> None:
         """Extend every stim array via tiling so each covers `target_seconds`."""
         if target_seconds < 0:
             raise ValueError(f"target_seconds must be >= 0, got {target_seconds}")
+        lengths_before = self._stim_array_lengths()
         for stim_array in self.stim_arrays.values():
             current_n = int(stim_array.values.shape[0])
             if current_n == 0:
@@ -1516,6 +1582,9 @@ class Project:
             full_tiles = (n_target + current_n - 1) // current_n
             tiled = np.tile(stim_array.values, (full_tiles, 1))
             stim_array.values = tiled[:n_target]
+        if self._stim_array_lengths() != lengths_before:
+            # Not undoable; earlier length-changing commands would go stale.
+            self.history.clear()
         self.update_limits()
         self.mark_dirty()
 
@@ -1588,11 +1657,16 @@ class Project:
         report: Callable | None = None,
         stim_array_padding_seconds: float = 0.0,
     ) -> None:
+        lengths_before = self._stim_array_lengths()
         self.pad_stim_arrays(
             self.b2_model.get_sim_time_secs()
             + time_seconds
             + stim_array_padding_seconds
         )
+        if self._stim_array_lengths() != lengths_before:
+            # Padding outside the history would make undoing an earlier
+            # length change (Trim/Resize/Pad) slice the wrong rows.
+            self.history.clear()
         # Stim arrays index the neuron axis (e.g. ``stimulus(t, i)``), so they
         # must be at least as wide as the model's neuron count. Widen with
         # trailing zero columns (= no stimulation) so increasing the neuron
@@ -1627,6 +1701,34 @@ class Project:
             options for what to include in the saved project
         """
 
+        filepath = pathlib.Path(filepath)
+        # Serialise into a temporary file next to the target and only replace
+        # the target once everything succeeded, so a serialisation error can
+        # never truncate an existing project file.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{filepath.name}.", suffix=".tmp", dir=filepath.parent
+        )
+        os.close(fd)
+        tmp_path = pathlib.Path(tmp_name)
+        try:
+            self._write_project_zip(tmp_path, options)
+            if filepath.exists():
+                shutil.copymode(filepath, tmp_path)
+            else:
+                # mkstemp creates 0600 files; use the usual umask-based mode.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(tmp_path, 0o666 & ~umask)
+            os.replace(tmp_path, filepath)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        self.filepath = filepath
+        self.dirty = False
+
+    def _write_project_zip(
+        self, filepath: pathlib.Path, options: SaveLoadOptions
+    ) -> None:
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
             metadata: dict = {"schema_version": 2}
             if self.external_simulate_path is not None:
@@ -1655,7 +1757,10 @@ class Project:
                 )
             if self.device_folders:
                 metadata["device_folders"] = self.device_folders
-            zf.writestr("project_metadata.json", json.dumps(metadata))
+            zf.writestr(
+                "project_metadata.json",
+                json.dumps(metadata, default=_metadata_json_default),
+            )
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()
             )
@@ -1668,10 +1773,17 @@ class Project:
             if include_simulation_data:
                 # store the current simulation data state to a temporary checkpoint to be able to restore it on load
                 self.b2_model.network.store(save_store_name)
-                zf.writestr(
-                    "b2_stored_state.pkl",
-                    pickle.dumps(self.b2_model.network._stored_state, protocol=4),
-                )
+                stored_state = self.b2_model.network._stored_state
+                try:
+                    zf.writestr(
+                        "b2_stored_state.pkl",
+                        pickle.dumps(stored_state, protocol=4),
+                    )
+                finally:
+                    # The save checkpoint only belongs in the file; keeping it
+                    # in the live network would let a later copy (e.g. the
+                    # model editor) restore this stale state.
+                    stored_state.pop(save_store_name, None)
             elif options.include_simulation_data:
                 self.logger.info("Skipping simulation data save: no simulation data")
             # Todo: We could consider another option for cellpose data. I originally leaned towards that, but after merging  #388 and #390 this cellpose data may be in experimental data anyway, and seems inextricably related to it.
@@ -1681,8 +1793,6 @@ class Project:
                     append_to_zip(
                         {"cellpose_import": self.cellpose_data}, "cellpose_data_v2", zf
                     )
-        self.filepath = pathlib.Path(filepath)
-        self.dirty = False
 
 
 def _place_block_spikes(
