@@ -30,6 +30,7 @@ from neuroseq.data import Data
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import read_segmentation_file
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
 from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
@@ -44,17 +45,6 @@ from neuroseq.importers.importer_tif import cellpose_result_to_masks
 from neuroseq.importers.roi_traces import NEUROPIL_INNER_RADIUS_PX
 from neuroseq.importers.roi_traces import NEUROPIL_MIN_PIXELS
 from neuroseq.stimulation.stim import StimArray
-
-
-def _load_masks_from_seg_file(path: Path) -> npt.NDArray[Any]:
-    """Load a Cellpose `_seg.npy` (or plain mask npy) into a Suite2p label image."""
-    loaded = np.load(path, allow_pickle=True)
-    if isinstance(loaded, np.ndarray) and loaded.dtype == object and loaded.ndim == 0:
-        data = loaded.item()
-        if isinstance(data, dict) and "masks" in data:
-            return np.asarray(data["masks"], dtype=np.int32)
-        raise ValueError(f"Could not find 'masks' key in {path}")
-    return np.asarray(loaded, dtype=np.int32)
 
 
 def _load_seg_file_background_image(path: Path) -> npt.NDArray[Any] | None:
@@ -835,7 +825,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._seg_file_background_image = _load_seg_file_background_image(
             self._seg_file_path
         )
-        return _load_masks_from_seg_file(self._seg_file_path)
+        return read_segmentation_file(self._seg_file_path)
 
     def _selected_mapping(self) -> dict[int, int] | None:
         """Return the experiment mapping only for its stored Cellpose masks."""

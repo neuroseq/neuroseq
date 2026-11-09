@@ -15,6 +15,8 @@ from neuroseq.data import TraceData
 from neuroseq.image_scaling import scale_to_uint8
 from neuroseq.utils import neuron_indices_to_colors
 
+logger = logging.getLogger(__name__)
+
 
 class AOIRole(str, Enum):  # noqa: UP042
     PREFERENTIAL = "preferential"
@@ -301,6 +303,96 @@ def resolve_stimulus_to_cellpose_mapping(
     )
 
 
+def _load_suite2p_segmentation(stat_data: np.ndarray, stat_path: Path) -> np.ndarray:
+    # experimental support - not rigourously tested or tested in our tests.
+    """Load suite2p stat.npy format and convert to segmentation mask."""
+    # Check if this looks like suite2p stat.npy format
+    if not (stat_data.dtype == object and len(stat_data) > 0):
+        raise ValueError(
+            "Array of dict format not supported for segmentation (not suite2p)"
+        )
+
+    first_roi = stat_data[0]
+    if not isinstance(first_roi, dict) or "ypix" not in first_roi:
+        raise ValueError(
+            "Array of dict format not supported for segmentation (not suite2p)"
+        )
+
+    # Look for corresponding iscell.npy file
+    iscell_path = stat_path.parent / "iscell.npy"
+    if not iscell_path.exists():
+        raise ValueError(
+            "Suite2p stat.npy detected but iscell.npy not found in same directory"
+        )
+
+    iscell_data = np.load(iscell_path)
+    if iscell_data.shape[0] != len(stat_data):
+        raise ValueError("Mismatch between stat.npy and iscell.npy lengths")
+
+    # Determine image dimensions from ROI coordinates
+    all_ypix = []
+    all_xpix = []
+    for roi in stat_data:
+        all_ypix.extend(roi["ypix"])
+        all_xpix.extend(roi["xpix"])
+
+    image_height = max(all_ypix) + 1
+    image_width = max(all_xpix) + 1
+
+    # Create segmentation mask
+    seg_mask = np.zeros((image_height, image_width), dtype=np.int32)
+    cell_id = 1  # Start with 1-based IDs; background stays 0
+
+    for i, roi in enumerate(stat_data):
+        # Only include cells that are marked as real (iscell == 1)
+        if iscell_data[i, 0] == 1:
+            ypix = roi["ypix"]
+            xpix = roi["xpix"]
+            seg_mask[ypix, xpix] = cell_id
+            cell_id += 1
+
+    n_cells = cell_id
+    n_total_rois = len(stat_data)
+    n_real_cells = np.sum(iscell_data[:, 0] == 1)
+
+    logger.info(
+        "Loaded suite2p segmentation: %s, %d cells from %d ROIs (%d real)",
+        seg_mask.shape,
+        n_cells,
+        n_total_rois,
+        n_real_cells,
+    )
+
+    return seg_mask
+
+
+def read_segmentation_file(path: Path) -> np.ndarray:
+    """Load a raw label image from CSV or NPY.
+
+    Accepts a Cellpose ``_seg.npy`` dict (its ``masks``), a Suite2p
+    ``stat.npy`` (with ``iscell.npy`` beside it) or a plain numeric array.
+    Labels are returned as stored (0 background, cells from 1); no shift.
+    """
+    if path.suffix.lower() != ".npy":
+        return np.loadtxt(path, delimiter=",", dtype=np.int32)
+
+    loaded = np.load(path, allow_pickle=True)
+
+    # cellpose dict format
+    if isinstance(loaded, np.ndarray) and loaded.dtype == object:
+        if loaded.ndim == 0:
+            dict_data = loaded.item()
+            if isinstance(dict_data, dict) and "masks" in dict_data:
+                return np.asarray(dict_data["masks"], dtype=np.int32)
+            raise ValueError(f"Could not find 'masks' key in {path}")
+
+        # suite2p stat.npy format
+        return _load_suite2p_segmentation(loaded, path)
+
+    # plain numeric array
+    return np.asarray(loaded, dtype=np.int32)
+
+
 class CellPoseImporter:
     """Handles loading and processing of Cellpose segmentation data."""
 
@@ -411,7 +503,7 @@ class CellPoseImporter:
                     self.segmentation_data.shape,
                 )
             else:
-                segmentation = self._read_segmentation_file(path)
+                segmentation = read_segmentation_file(path)
                 segmentation = self._validate_segmentation(segmentation)
                 self.segmentation_data = self._shift_to_zero_based(segmentation)
                 self._csv_background_zero = False
@@ -680,91 +772,6 @@ class CellPoseImporter:
             raise ValueError("Spike indices must be non-negative")
         if np.any(spike_data.spike_times < 0):
             raise ValueError("Spike times must be non-negative")
-
-    def _load_suite2p_segmentation(
-        self, stat_data: np.ndarray, stat_path: Path
-    ) -> np.ndarray:
-        # experimental support - not rigourously tested or tested in our tests.
-        """Load suite2p stat.npy format and convert to segmentation mask."""
-        # Check if this looks like suite2p stat.npy format
-        if not (stat_data.dtype == object and len(stat_data) > 0):
-            raise ValueError(
-                "Array of dict format not supported for segmentation (not suite2p)"
-            )
-
-        first_roi = stat_data[0]
-        if not isinstance(first_roi, dict) or "ypix" not in first_roi:
-            raise ValueError(
-                "Array of dict format not supported for segmentation (not suite2p)"
-            )
-
-        # Look for corresponding iscell.npy file
-        iscell_path = stat_path.parent / "iscell.npy"
-        if not iscell_path.exists():
-            raise ValueError(
-                "Suite2p stat.npy detected but iscell.npy not found in same directory"
-            )
-
-        iscell_data = np.load(iscell_path)
-        if iscell_data.shape[0] != len(stat_data):
-            raise ValueError("Mismatch between stat.npy and iscell.npy lengths")
-
-        # Determine image dimensions from ROI coordinates
-        all_ypix = []
-        all_xpix = []
-        for roi in stat_data:
-            all_ypix.extend(roi["ypix"])
-            all_xpix.extend(roi["xpix"])
-
-        image_height = max(all_ypix) + 1
-        image_width = max(all_xpix) + 1
-
-        # Create segmentation mask
-        seg_mask = np.zeros((image_height, image_width), dtype=np.int32)
-        cell_id = 1  # Start with 1-based IDs; background stays 0
-
-        for i, roi in enumerate(stat_data):
-            # Only include cells that are marked as real (iscell == 1)
-            if iscell_data[i, 0] == 1:
-                ypix = roi["ypix"]
-                xpix = roi["xpix"]
-                seg_mask[ypix, xpix] = cell_id
-                cell_id += 1
-
-        n_cells = cell_id
-        n_total_rois = len(stat_data)
-        n_real_cells = np.sum(iscell_data[:, 0] == 1)
-
-        self.logger.info(
-            "Loaded suite2p segmentation: %s, %d cells from %d ROIs (%d real)",
-            seg_mask.shape,
-            n_cells,
-            n_total_rois,
-            n_real_cells,
-        )
-
-        return seg_mask
-
-    def _read_segmentation_file(self, path: Path) -> np.ndarray:
-        """Load segmentation data from CSV or NPY (cellpose or suite2p)."""
-        if path.suffix.lower() != ".npy":
-            return np.loadtxt(path, delimiter=",", dtype=np.int32)
-
-        loaded = np.load(path, allow_pickle=True)
-
-        # cellpose dict format
-        if isinstance(loaded, np.ndarray) and loaded.dtype == object:
-            if loaded.ndim == 0:
-                dict_data = loaded.item()
-                if isinstance(dict_data, dict) and "masks" in dict_data:
-                    return np.asarray(dict_data["masks"], dtype=np.int32)
-                raise ValueError("Dict format but no 'masks' key found")
-
-            # suite2p stat.npy format
-            return self._load_suite2p_segmentation(loaded, path)
-
-        # plain numeric array
-        return np.asarray(loaded, dtype=np.int32)
 
     @staticmethod
     def _validate_segmentation(segmentation: np.ndarray) -> np.ndarray:
