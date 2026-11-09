@@ -97,6 +97,13 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.slider.setMaximum(self.t_max_ms)
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
+        if self.timer.isActive():
+            # Bank the time played so far at the old speed, so only the time
+            # from now on plays at the new one (no jump).
+            self.t_playback_start_ms += int(
+                self.elapsed_timer.elapsed() * self.relative_playback_speed
+            )
+            self.elapsed_timer.restart()
         self.relative_playback_speed = relative_playback_speed
 
     def stop(self) -> None:

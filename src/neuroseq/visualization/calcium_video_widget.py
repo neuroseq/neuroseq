@@ -17,6 +17,7 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.save_imaging_dialog import SaveImagingDialog
 from neuroseq.stimulation.stim import StimArray
+from neuroseq.visualization.cell_overlay_widget import _pixel_at
 from neuroseq.visualization.fpl_widget import FPLWidget
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
 from neuroseq.visualization_support.cellpose_ids import compute_cell_centroids
@@ -639,7 +640,7 @@ class CalciumVideoWidget(FPLWidget):
             return
         hovered: int | None = None
         if point is not None:
-            x, y = int(point[0]), int(point[1])
+            x, y = _pixel_at(float(point[0]), float(point[1]))
             segmentation = self._cellpose_data.segmentation_array
             if 0 <= y < segmentation.shape[0] and 0 <= x < segmentation.shape[1]:
                 cell_id = int(segmentation[y, x])
