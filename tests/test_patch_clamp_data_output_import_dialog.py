@@ -911,6 +911,56 @@ def test_spike_detection_converts_time_defaults_with_the_wave_dt(
     assert calls[0]["peak_width"] == 50  # 1 ms
 
 
+def test_spike_detection_skips_samples_cut_off_by_the_import(
+    tmp_path: Path, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With extend off a longer wave is truncated to the trace; spikes in the
+    dropped tail must not be detected."""
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    seen_lengths: list[int] = []
+
+    def detect(values, **kwargs):
+        seen_lengths.append(len(values))
+        return SpikeData("s", np.array([], dtype=np.uint32), np.array([]))
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        detect,
+    )
+    project = Project()
+    project.add_experiment(
+        Experiment(
+            name="Experiment A",
+            duration=0.002,
+            timepoints=[],
+            data=[
+                TraceData(
+                    name="Existing Trace",
+                    traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                    indices=np.array([0], dtype=np.uint32),
+                    units="mV",
+                    dt=0.001,
+                )
+            ],
+        )
+    )
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.import_existing_radio.setChecked(True)
+    dialog.existing_experiment_combo.setCurrentText("Experiment A")
+    dialog.existing_trace_combo.setCurrentText("Existing Trace")
+    dialog.existing_neuron_id_spin.setValue(5)
+    dialog.existing_extend_checkbox.setChecked(False)
+    dialog.spike_detect_checkbox.setChecked(True)
+    dialog._import_file()
+
+    trace = _find_trace_data(project, "Experiment A", "Existing Trace")
+    assert trace.traces.shape[1] == 2
+    assert seen_lengths == [2]
+
+
 def test_seconds_to_peak_samples() -> None:
     from neuroseq.spike_detection import seconds_to_peak_samples
 

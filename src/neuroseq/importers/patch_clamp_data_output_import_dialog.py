@@ -839,10 +839,16 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         *,
         experiment_name: str,
         neuron_id: int,
+        imported_samples: int | None = None,
     ) -> int:
+        """Detect spikes on the imported part of ``prepared_wave`` only.
+
+        ``imported_samples`` is how much of the wave reached the trace; a wave
+        truncated to an existing trace must not yield spikes past its end.
+        """
         dt = float(prepared_wave.target_dt)
         spike_data = detect_spikes_voltage_trace(
-            prepared_wave.values,
+            prepared_wave.values[:imported_samples],
             neuron_id=neuron_id,
             dt=dt,
             detection_method="peak",
@@ -942,6 +948,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                         f"{prepared_wave.samples_per_sweep} samples, concatenated on import."
                     )
                 spike_neuron_id = neuron_id
+                spike_samples = None
             else:
                 experiment_name = self.existing_experiment_combo.currentText()
                 trace_name = self.existing_trace_combo.currentText()
@@ -1002,6 +1009,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                         f"{report.samples_per_sweep} samples, concatenated on import."
                     )
                 spike_neuron_id = int(self.existing_neuron_id_spin.value())
+                spike_samples = report.imported_samples
 
             spikes_detected: int | None = None
             if self.spike_detect_checkbox.isChecked():
@@ -1009,6 +1017,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                     prepared_wave,
                     experiment_name=self.selected_experiment_name,
                     neuron_id=spike_neuron_id,
+                    imported_samples=spike_samples,
                 )
 
             is_pxp_session = bool(self.loaded_pxp_waves)
