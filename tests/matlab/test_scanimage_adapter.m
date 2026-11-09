@@ -223,3 +223,73 @@ rig.acqState = 'idle';
 neuroseq_scanimage('preview','{}');
 verifyEqual(testCase,settings(rig),old);
 end
+
+function testStatusEndsRunIdleWithoutEventKeepingUserChanges(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle';  % acqModeDone never arrived
+rig.hStackManager.framesPerSlice = 500;
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'interrupted');
+expected = old; expected{5} = 500;
+verifyEqual(testCase,settings(rig),expected);
+end
+
+function testUserAcquisitionAfterMissedEventIsNotTheRun(testCase)
+% NeuroSeq stopped polling (crashed) after a missed acqModeDone; the user then
+% changes settings and acquires: neither is taken for the run, and the user's
+% changes survive the restore when that acquisition ends.
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle';  % the run's acqModeDone is missed
+rig.hStackManager.framesPerSlice = 500; rig.hScan2D.logFilePath = 'user-path';
+rig.startGrab();
+rig.complete(false);
+expected = old; expected{5} = 500; expected{1} = 'user-path';
+verifyEqual(testCase,settings(rig),expected);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'interrupted');
+end
+
+function testSecondAcquisitionStartIsNotTheRun(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));  % acqStart: recording
+rig.acqState = 'idle';  % acqModeDone missed
+rig.startGrab();
+verifyEqual(testCase,rig.acqState,'grab');
+rig.complete(false);
+verifyEqual(testCase,settings(rig),old);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'interrupted');
+end
+
+function testCounterAdvancedByScanImageIsStillRestored(testCase)
+rig = testCase.TestData.rig; old = settings(rig);
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.hScan2D.logFileCounter = rig.hScan2D.logFileCounter + 1;
+rig.complete(false);
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testFirstStartWithChangedSettingsIsNotTheRun(testCase)
+% The run was armed but never started; ScanImage went idle unseen and the
+% user then changed settings and acquired.
+rig = testCase.TestData.rig; old = settings(rig); rig.startEvent = false;
+neuroseq_scanimage('record',jsonencode(request(testCase)));
+rig.acqState = 'idle'; rig.startEvent = true;
+rig.extTrigEnable = false;
+rig.startGrab();
+rig.complete(false);
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'interrupted');
+verifyEqual(testCase,settings(rig),old);
+end
+
+function testFirstStartWithNeuroSeqSettingsIsTheRun(testCase)
+rig = testCase.TestData.rig; rig.startEvent = false;
+status = jsondecode(neuroseq_scanimage('record',jsonencode(request(testCase))));
+verifyEqual(testCase,status.run.state,'waiting_for_first_frame');
+neuroseq_scanimage('event',jsonencode(struct('name','acqStart')));  % the trigger
+status = jsondecode(neuroseq_scanimage('status','{}'));
+verifyEqual(testCase,status.run.state,'recording');
+end

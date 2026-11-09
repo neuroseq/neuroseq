@@ -11,6 +11,8 @@ classdef ScanImageTestRig < handle
         acqsPerLoop = 2
         extTrigEnable = false
         failStart = false
+        % false: startGrab arms (e.g. waits for a trigger) without acqStart.
+        startEvent = true
     end
     methods
         function obj = ScanImageTestRig()
@@ -20,7 +22,9 @@ classdef ScanImageTestRig < handle
         function startGrab(obj)
             if obj.failStart, error('Test:StartFailed','Simulated failure'); end
             obj.acqState = 'grab';
-            neuroseq_scanimage('event', jsonencode(struct('name','acqStart')));
+            if obj.startEvent
+                neuroseq_scanimage('event', jsonencode(struct('name','acqStart')));
+            end
         end
         function startFocus(obj)
             obj.acqState = 'focus';

@@ -10,7 +10,9 @@ if TYPE_CHECKING:
     from neuroseq.stimulation.stim_editor import StimEditor
 
 
-def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:
+def confirm_start_routine(
+    dialog: QtWidgets.QWidget, editor: StimEditor, *, offer_new: bool = False
+) -> str:
     """Ask how to start a dynamic-input routine, shared by all three routine
     dialogs' Start handlers.
 
@@ -21,7 +23,9 @@ def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:
     which keeps a previous run's progress. "Continue" only trims any
     unsimulated tail first (a manually drawn pattern, or a routine stopped
     mid-run), same as reset_stim_array() - it never touches simulated
-    content. Returns "clear", "continue", or "cancel".
+    content. With ``offer_new``, a third choice starts the run in new input
+    and data arrays, keeping the previous run's. Returns "clear", "continue",
+    "new" (only with ``offer_new``) or "cancel".
     """
     if editor.current_stim_modifier is None:
         return "continue"
@@ -43,14 +47,27 @@ def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:
     box.setText(f"'{name}' already contains stimuli.")
     box.setInformativeText(
         "Clear the array and start from the beginning, continue after the "
-        "last existing stimulus (keeping progress from a previous run), or "
-        "cancel."
+        "last existing stimulus (keeping progress from a previous run), "
+        + (
+            "start in a new input array with new trace and spike data (keeping "
+            "the previous run's), "
+            if offer_new
+            else ""
+        )
+        + "or cancel."
     )
     clear_button = box.addButton(
         "Clear and start over", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
     )
     continue_button = box.addButton(
         "Continue after last stimulus", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+    )
+    new_button = (
+        box.addButton(
+            "Start in new arrays", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+        if offer_new
+        else None
     )
     cancel_button = box.addButton(QtWidgets.QMessageBox.StandardButton.Cancel)
     box.setDefaultButton(cancel_button)
@@ -63,4 +80,6 @@ def confirm_start_routine(dialog: QtWidgets.QWidget, editor: StimEditor) -> str:
         return "clear"
     if clicked is continue_button:
         return "continue"
+    if new_button is not None and clicked is new_button:
+        return "new"
     return "cancel"

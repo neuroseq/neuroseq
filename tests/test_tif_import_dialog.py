@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -1059,3 +1060,96 @@ def test_running_pipeline_reports_progress_to_progress_dialog(qtbot, mocker, tmp
         release.set()
     qtbot.waitUntil(lambda: not dialog._job.busy, timeout=WAIT_TIMEOUT_MS)
     assert dialog._run_button.isEnabled()
+
+
+def test_roi_average_options_show_only_what_they_use(qtbot):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+
+    stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
+    dialog = TifImportDialog(stim_arrays={"laser": stim})
+    qtbot.addWidget(dialog)
+    dialog.show()
+    visible = lambda widget: widget.isVisibleTo(dialog)  # noqa: E731
+
+    assert visible(dialog._neuropil_checkbox) and visible(dialog._dff_checkbox)
+    assert not visible(dialog._neucoeff_spin) and not visible(dialog._tau_spin)
+    assert not visible(dialog._dff_spike_threshold_spin)
+    assert visible(dialog._imaging_start_spin)  # with artefact suppression
+
+    dialog._neuropil_checkbox.setChecked(True)
+    dialog._dff_checkbox.setChecked(True)
+    assert visible(dialog._neucoeff_spin) and visible(dialog._tau_spin)
+    assert visible(dialog._dff_spike_threshold_spin)
+    assert not visible(dialog._spike_threshold_spin)  # Suite2p's own threshold
+
+    dialog._suppress_stimulation_artefact_checkbox.setChecked(False)
+    assert not visible(dialog._imaging_start_spin)
+
+    dialog._pipeline_combo.setCurrentIndex(dialog._pipeline_combo.findData("suite2p"))
+    assert not visible(dialog._neuropil_checkbox)
+    assert not visible(dialog._dff_spike_threshold_spin)
+    assert visible(dialog._spike_threshold_spin)
+
+
+def test_pipeline_worker_passes_neuropil_and_imaging_start(qtbot, mocker):
+    from neuroseq.importers.importer_tif import TifPipelineParams
+    from neuroseq.importers.tif_import_dialog import _PipelineWorker
+
+    run = mocker.patch(
+        "neuroseq.importers.importer_tif.run_roi_average_pipeline",
+        return_value=_make_pipeline_result(),
+    )
+    worker = _PipelineWorker(
+        [],
+        np.ones((2, 2), dtype=np.int32),
+        TifPipelineParams(),
+        "roi_average",
+        neuropil=True,
+        imaging_start_s=1.5,
+    )
+    worker.run()
+    assert run.call_args.kwargs["neuropil"] is True
+    assert run.call_args.kwargs["imaging_start_s"] == 1.5
+
+
+def test_finalize_roi_average_with_neuropil_and_dff(qtbot, mocker):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    information = mocker.patch(
+        "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.information"
+    )
+    mocker.patch.object(dialog, "accept")
+    result = _make_pipeline_result()
+    result.extra.update(pipeline="roi_average", neuropil=True)
+    result.F = np.full((2, 300), 200.0, dtype=np.float32)
+    result.F[1, 150:160] = 400.0  # one transient
+    result.Fneu = np.full((2, 300), 100.0, dtype=np.float32)
+
+    # Neuropil-corrected fluorescence.
+    dialog._finalize_import(result)
+    (traces,) = dialog.imported_data
+    assert traces.name == "Neuropil-corrected ROI traces"
+    np.testing.assert_allclose(traces.traces[0], 200.0 - 0.7 * 100.0)
+
+    # ΔF/F relative to the raw baseline, and its spikes.
+    dialog._dff_checkbox.setChecked(True)
+    if importlib.util.find_spec("suite2p") is not None:
+        dialog._finalize_import(result)
+        _traces, spikes = dialog.imported_data
+        assert set(spikes.spike_indices) == {1}
+    # Without Suite2p (OASIS) the ΔF/F is still imported, without spikes.
+    mocker.patch(
+        "neuroseq.importers.tif_import_dialog.importlib.util.find_spec",
+        return_value=None,
+    )
+    information.reset_mock()
+    dialog._finalize_import(result)
+    (traces,) = dialog.imported_data
+    assert "not installed" in information.call_args.args[2]
+    assert traces.units == "dF/F"
+    assert traces.traces[1].max() == pytest.approx(1.0, abs=0.01)  # 200 / 200
+    np.testing.assert_allclose(traces.traces[0], 0.0, atol=1e-5)

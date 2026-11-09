@@ -71,6 +71,13 @@ class BlockRecording:
     tail_s: float
     #: OASIS event size (ΔF/F) counted as a deconvolved spike.
     spike_threshold: float = 0.1
+    #: Interpolate the imaging frames lit by the stimulation laser.
+    remove_artefact: bool = True
+    #: How the block's fluorescence is extracted ("suite2p" or "roi_average").
+    extraction: str = "suite2p"
+    #: Suite2p extraction taking longer than this is noted in the routine's log
+    #: (the routine still waits for it).
+    extraction_slow_s: float = 120.0
     #: The delivered ``.seq`` file and its SysCon2 sequence-manager entry (set by the
     #: host before arming), so the recording names the exact script it captured.
     seq_path: str = ""
@@ -94,12 +101,15 @@ class BlockAcquisition(Protocol):
     (emitted after :meth:`arm_block` has returned that run id, never from inside it),
     ``block_recorded(str run_id, object payload)`` once its traces are in the project
     (``payload["trace"]`` is the ΔF/F dataset name, ``payload["spikes"]`` that of its
-    deconvolved spikes), ``block_recording_failed(str run_id, str message)``.
+    deconvolved spikes), ``block_recording_failed(str run_id, str message)``, and
+    ``block_recording_note(str run_id, str message)`` for something the routine's log
+    should mention while the block is still being processed.
     """
 
     block_armed: QtCore.SignalInstance
     block_recorded: QtCore.SignalInstance
     block_recording_failed: QtCore.SignalInstance
+    block_recording_note: QtCore.SignalInstance
 
     def block_recording_unavailable(self) -> str | None:
         """Why a block cannot be recorded now, or ``None`` when it can."""
@@ -232,6 +242,8 @@ class SysCon2StimulationHost(QtCore.QObject):
     block_sent = QtCore.Signal(object, object)
     block_failed = QtCore.Signal(object, str)
     block_completed = QtCore.Signal(object, object)
+    #: (owner, message): a note for the log of the routine whose block it concerns.
+    block_note = QtCore.Signal(object, str)
     progress = QtCore.Signal(str)
     #: The export options returned by :meth:`export_settings` changed.
     export_settings_changed = QtCore.Signal()
@@ -302,11 +314,15 @@ class SysCon2StimulationHost(QtCore.QObject):
             self._acquisition.block_recording_failed.disconnect(
                 self._on_block_recording_failed
             )
+            self._acquisition.block_recording_note.disconnect(
+                self._on_block_recording_note
+            )
         self._acquisition = acquisition
         if acquisition is not None:
             acquisition.block_armed.connect(self._on_block_armed)
             acquisition.block_recorded.connect(self._on_block_recorded)
             acquisition.block_recording_failed.connect(self._on_block_recording_failed)
+            acquisition.block_recording_note.connect(self._on_block_recording_note)
 
     def export_settings(self) -> SysconExportSettings | None:
         """The export options blocks are delivered with."""
@@ -441,7 +457,7 @@ class SysCon2StimulationHost(QtCore.QObject):
             return remote
 
         self.phase = "preparing"
-        self.progress.emit(f"Importing and uploading {name}…")
+        self._step(block, f"Importing and uploading {name} in SysCon2…")
         self._submit(block.command("prepare"), prepare_task)
         return True
 
@@ -541,7 +557,7 @@ class SysCon2StimulationHost(QtCore.QObject):
         if block is None:
             return
         self._clear()
-        self.progress.emit(f"Block {block.result.seq_path.name} done.")
+        self._step(block, f"Block {block.result.seq_path.name} done.")
         self.block_completed.emit(block.owner, payload)
 
     def _run(self, block: _Block) -> None:
@@ -606,9 +622,10 @@ class SysCon2StimulationHost(QtCore.QObject):
 
         block.run_submitted = True
         self.phase = "running"
-        self.progress.emit(
+        self._step(
+            block,
             f"Running {block.result.seq_path.name}"
-            + (" while ScanImage records…" if block.recording is not None else "…")
+            + (" while ScanImage records…" if block.recording is not None else "…"),
         )
         self._submit(block.command("run"), run_task)
 
@@ -633,6 +650,16 @@ class SysCon2StimulationHost(QtCore.QObject):
             return
         block.run_id = None  # already ended; nothing to abort
         self._fail(f"Recording failed: {message}")
+
+    def _step(self, block: _Block, message: str) -> None:
+        """Report a step of ``block``: in the host's status and its routine's log."""
+        self.progress.emit(message)
+        self.block_note.emit(block.owner, message)
+
+    def _on_block_recording_note(self, run_id: str, message: str) -> None:
+        block = self._block
+        if block is not None and block.run_id == run_id:
+            self.block_note.emit(block.owner, message)
 
     # ---- manager signal handlers (wired by the owner) ----
 
@@ -674,7 +701,11 @@ class SysCon2StimulationHost(QtCore.QObject):
             except ValueError as exc:
                 self._fail(f"Could not start the recording: {exc}")
                 return
-            self.progress.emit("Waiting for ScanImage to arm the triggered recording…")
+            self._step(
+                block,
+                f"{block.remote_path} uploaded; waiting for ScanImage to arm the "
+                "triggered recording…",
+            )
         elif step == "run" and self.phase == "running" and block.recording is None:
             self._complete({})
 

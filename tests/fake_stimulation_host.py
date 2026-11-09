@@ -17,6 +17,7 @@ class FakeStimulationHost(QtCore.QObject):
     block_sent = QtCore.Signal(object, object)
     block_failed = QtCore.Signal(object, str)
     block_completed = QtCore.Signal(object, object)
+    block_note = QtCore.Signal(object, str)
     progress = QtCore.Signal(str)
     export_settings_changed = QtCore.Signal()
 

@@ -299,6 +299,15 @@ post-pulse window still counts: the frames lit by a short pulse are imputed, so
 its response first shows in full in the next frame. Simulations finishing or
 failing meanwhile do not affect a hardware run.
 
+If the selected input array already holds stimuli, for example from an earlier
+run that finished or was stopped, **Start** asks how to continue. **Clear and
+start over** empties the array, and **Continue after last stimulus** appends to it.
+On the SysCon2 and BrainScaleS-2 targets, **Start in new arrays** keeps the old
+array and its data unchanged and switches to a new, empty input array named after
+the run (e.g. `Exc_stimulation rheobase_2026-10-22_143012`). The probes then start
+at 0, and the run's trace and spikes go to a new data group of the same run name,
+which the trace and spike views switch to once its first block is recorded.
+
 Each routine run keeps its block scripts in its own folder inside the project's
 export folder (the one **Export with settings…** used last), for example
 `SysCon exports\rheobase_2026-10-22_143012\`. Every block is saved there as

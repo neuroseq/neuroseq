@@ -971,3 +971,14 @@ def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
             None, QtCore.QEvent.Type.DeferredDelete
         )
     assert destroyed
+
+
+def test_syscon2_block_notes_go_to_the_running_routines_log(qtbot) -> None:
+    _project, _editor, dialog, host = _syscon2_dialog(qtbot)
+    host.block_note.emit(dialog, "before start")
+    dialog.start()
+    host.block_note.emit(object(), "another routine's block")
+    host.block_note.emit(dialog, "Suite2p is slow")
+    log = dialog.log.toPlainText()
+    assert "Suite2p is slow" in log
+    assert "before start" not in log and "another routine" not in log

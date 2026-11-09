@@ -61,6 +61,7 @@ class _FakeEditor:
         self.project = project
         self.stimulation_host = None
         self.bss2_host = None
+        self.followed_run_groups: set[str] = set()
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,
@@ -118,6 +119,13 @@ class _FakeEditor:
         if nonzero_rows.size == 0:
             return 0
         return int(nonzero_rows[-1]) + 1
+
+    def add_empty_stim_array_like_current(self, name: str) -> str:
+        stim = self.current_stim_modifier.stim_array
+        new = dataclasses.replace(stim, name=name, values=np.zeros_like(stim.values))
+        self.project.stim_arrays[name] = new
+        self.current_stim_modifier = SimpleNamespace(stim_array=new)
+        return name
 
     def window(self) -> SimpleNamespace:
         return SimpleNamespace(raise_=lambda: None, activateWindow=lambda: None)
@@ -1496,3 +1504,118 @@ def test_plot_window_is_deleted_with_the_dialog(qtbot) -> None:
             None, QtCore.QEvent.Type.DeferredDelete
         )
     assert destroyed
+
+
+def _previous_run(editor, monkeypatch, choice: str):
+    """The selected array holds a finished run's probes; Start answers ``choice``."""
+    previous = editor.current_stim_modifier.stim_array
+    previous.values[2:6, 0] = 0.5
+    monkeypatch.setattr(
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
+        lambda *args, **kwargs: choice if kwargs.get("offer_new") else "continue",
+    )
+    return previous, previous.values.copy()
+
+
+def test_syscon2_new_arrays_start_a_run_in_its_own_input_and_data_group(
+    qtbot, monkeypatch
+) -> None:
+    project, editor, dialog, host = _automatic_dialog(qtbot)
+    previous, kept = _previous_run(editor, monkeypatch, "new")
+
+    dialog.start()
+
+    run_name = host.run_names[0]
+    stim = editor.current_stim_modifier.stim_array
+    assert stim is not previous
+    assert stim.name == f"Exc_stimulation {run_name}"
+    assert project.stim_arrays[stim.name] is stim
+    assert (stim.dt, stim.units, stim.stim_type) == (
+        previous.dt,
+        previous.units,
+        previous.stim_type,
+    )
+    np.testing.assert_array_equal(previous.values, kept)  # old run untouched
+    assert dialog._block_range[0] == 0
+    recording = host.recordings[0]
+    assert (recording.group, recording.offset_s) == (run_name, 0.0)
+    assert f"new data group '{run_name}'" in dialog.log.toPlainText()
+    assert run_name in editor.followed_run_groups
+
+    # A run started from that array is named after the base name, not stacked.
+    dialog.stop()
+    stim.values[1, 0] = 0.5
+    dialog.start()
+    assert editor.current_stim_modifier.stim_array.name == (
+        f"Exc_stimulation {host.run_names[-1]}"
+    )
+
+
+def test_syscon2_new_arrays_are_not_made_for_settings_that_cannot_start(
+    qtbot, monkeypatch
+) -> None:
+    project, editor, dialog, host = _automatic_dialog(qtbot)
+    previous, _kept = _previous_run(editor, monkeypatch, "new")
+    arrays = set(project.stim_arrays)
+    dialog.spn_max_amplitude.setValue(dialog.spn_min_amplitude.value())
+    dialog.spn_fixed_amplitude.setValue(0.0)
+
+    dialog.start()
+
+    assert set(project.stim_arrays) == arrays
+    assert editor.current_stim_modifier.stim_array is previous
+    assert host.run_names == []
+    assert "uses the new input array" not in dialog.log.toPlainText()
+
+
+def test_syscon2_continue_still_appends_to_the_same_array(qtbot, monkeypatch) -> None:
+    _project, editor, dialog, _host = _automatic_dialog(qtbot)
+    previous, _kept = _previous_run(editor, monkeypatch, "continue")
+
+    dialog.start()
+
+    assert editor.current_stim_modifier.stim_array is previous
+    assert dialog._block_range[0] >= 6
+    assert editor.followed_run_groups == set()
+
+
+def test_bss2_new_arrays_use_the_runs_data_group_name(qtbot, monkeypatch) -> None:
+    _project, editor, dialog, host = _bss2_dialog(qtbot)
+    previous, kept = _previous_run(editor, monkeypatch, "new")
+
+    dialog.start()
+
+    stim = editor.current_stim_modifier.stim_array
+    assert stim.name == f"Exc_stimulation {dialog._bss2_group}"
+    np.testing.assert_array_equal(previous.values, kept)
+    assert host.sent[0][0] == 0
+    assert host.groups[0] == dialog._bss2_group
+
+
+def test_simulation_target_does_not_offer_new_arrays(qtbot, monkeypatch) -> None:
+    _project, editor, dialog = _make_dialog(qtbot)
+    _use_fixed_duration_strategy(dialog)
+    editor.current_stim_modifier.stim_array.values[5, 0] = 1.0
+    offered = []
+
+    def confirm(*_args, offer_new=False):
+        offered.append(offer_new)
+        return "cancel"
+
+    monkeypatch.setattr(
+        "neuroseq.stimulation.dynamic_input.rheobase_dialog.confirm_start_routine",
+        confirm,
+    )
+    dialog.start()
+    assert offered == [False]
+
+
+def test_syscon2_block_notes_go_to_the_running_routines_log(qtbot) -> None:
+    _project, _editor, dialog, host = _automatic_dialog(qtbot)
+    host.block_note.emit(dialog, "before start")
+    dialog.start()
+    host.block_note.emit(object(), "another routine's block")
+    host.block_note.emit(dialog, "Suite2p is slow")
+    log = dialog.log.toPlainText()
+    assert "Suite2p is slow" in log
+    assert "before start" not in log and "another routine" not in log

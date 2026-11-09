@@ -842,6 +842,7 @@ class StdpWindowDialog(SelfRaisingDialog):
                     (host.block_sent, self._on_block_sent),
                     (host.block_failed, self._on_block_failed),
                     (host.block_completed, self._on_block_completed),
+                    (host.block_note, self._on_block_note),
                 ],
             )
 
@@ -1279,6 +1280,10 @@ class StdpWindowDialog(SelfRaisingDialog):
                 "data, select the new trace, then click 'Block done / data imported'."
             )
         self.btn_data_imported.setEnabled(True)
+
+    def _on_block_note(self, owner: object, message: str) -> None:
+        if owner is self and self._running:
+            self._append_log(message)
 
     def _on_block_failed(self, owner: object, message: str) -> None:
         if owner is self and self._running:

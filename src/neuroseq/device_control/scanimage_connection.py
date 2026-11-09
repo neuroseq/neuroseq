@@ -239,11 +239,19 @@ class ScanImageConnection(QtCore.QObject):
         if (
             self.run_id
             and run.get("id") == self.run_id
-            and result.get("acq_state") == "idle"
-            and run.get("state") in {"starting", "waiting_for_first_frame", "recording"}
+            and (
+                # The adapter's own verdict: the run ended without its event and
+                # a later acquisition was not taken for it.
+                run.get("state") == "interrupted"
+                or (
+                    result.get("acq_state") == "idle"
+                    and run.get("state")
+                    in {"starting", "waiting_for_first_frame", "recording"}
+                )
+            )
         ):
             self.error.emit(
-                "ScanImage is idle without a completion event. Recording outcome is unknown."
+                "ScanImage ended the recording without a completion event. Recording outcome is unknown."
             )
             self.status_changed.emit(
                 {

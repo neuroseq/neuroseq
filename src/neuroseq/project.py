@@ -483,6 +483,46 @@ class Project:
         self.mark_dirty()
         return video
 
+    def relocate_calcium_video(
+        self, video_id: str | None, chosen: pathlib.Path
+    ) -> list[pathlib.Path]:
+        """Point a video (the selected one by default) at its files' new place.
+
+        ``chosen`` is the new location of one of the video's files; the other
+        files are looked for by name in its folder, and a file found in neither
+        place keeps its old path. Returns the paths still missing. Raises
+        ``ValueError`` if ``chosen`` is not named like any file of a video made
+        of several files (a single-file video takes any name).
+        """
+        video_id = video_id or self.selected_calcium_video_id
+        video = next((v for v in self.calcium_videos if v["id"] == video_id), None)
+        if video is None:
+            raise ValueError("No imaging data to relocate")
+        chosen = pathlib.Path(chosen)
+        old_paths = [pathlib.Path(p) for p in video["paths"]]
+        if len(old_paths) == 1:
+            new_paths = [chosen]
+        else:
+            if chosen.name not in {path.name for path in old_paths}:
+                raise ValueError(
+                    f"{chosen.name} is not one of this imaging data's files: "
+                    + ", ".join(path.name for path in old_paths)
+                )
+            new_paths = []
+            for old in old_paths:
+                candidate = chosen.parent / old.name
+                keep_old = not candidate.is_file() and old.is_file()
+                new_paths.append(old if keep_old else candidate)
+        if new_paths != old_paths:
+            video["paths"] = [str(path) for path in new_paths]
+            index = video.get("index")
+            if isinstance(index, dict) and len(index.get("paths", [])) == len(
+                new_paths
+            ):
+                index["paths"] = list(video["paths"])
+            self.mark_dirty()
+        return [path for path in new_paths if not path.is_file()]
+
     def select_calcium_video(self, video_id: str | None) -> None:
         if video_id != self.selected_calcium_video_id:
             self.selected_calcium_video_id = video_id
@@ -652,6 +692,23 @@ class Project:
                 return data
         self.logger.info(f"  - data '{data_name}' not found")
         return None
+
+    def get_full_resolution_trace(self, name: str) -> TraceData | None:
+        """Like ``get_data(name, TraceData)``, but a simulated trace is not
+        downsampled to the plotting RAM limit (for exporting it)."""
+        if name.split(" :: ", 1)[0] == "Simulation":
+            return self._clip_trace_to_timeline(
+                self.b2_model.get_simulation_trace_data(name)
+            )
+        return self.get_data(name, TraceData)
+
+    def data_duration_seconds(self, name: str) -> float:
+        """Duration of the data group (or simulation) holding the data ``name``."""
+        group = name.split(" :: ", 1)[0]
+        if group == "Simulation":
+            return float(self.b2_model.get_sim_time_secs())
+        experiment = self.experiments.get(group)
+        return float(experiment.duration) if experiment is not None else 0.0
 
     def simulation_timeline_seconds(self) -> float:
         """Duration of the authoritative stim timeline in seconds.
