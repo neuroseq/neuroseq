@@ -179,7 +179,7 @@ application:
 
 | Setting                   | What it does                                                                                                                                                |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../Neural%20Networks/simulations.md#choosing-a-brian2-backend)).                                                           |
+| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../Neural%20Networks/simulations.md#choosing-a-brian2-backend)).                                      |
 | Input automatic padding   | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
 | LLM assistant             | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
 | Synapse matrix RAM limit  | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |

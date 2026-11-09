@@ -40,13 +40,13 @@ pip install ".[chat]"
 Open **Settings → LLM assistant** to choose a provider and model. Five
 backends are bundled:
 
-| Provider    | Notes                                                                       |
-| ----------- | --------------------------------------------------------------------------- |
+| Provider                          | Notes                                                                       |
+| --------------------------------- | --------------------------------------------------------------------------- |
 | Codex (currently preferred)       | Local Codex app-server using your existing Codex sign-in and configuration. |
 | Claude Code (currently preferred) | Local Claude Code CLI using your existing Claude sign-in.                   |
-| Ollama      | Local models served by a running [Ollama](https://ollama.com) daemon.       |
-| OpenAI      | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
-| Anthropic   | Anthropic Claude API.                                                       |
+| Ollama                            | Local models served by a running [Ollama](https://ollama.com) daemon.       |
+| OpenAI                            | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
+| Anthropic                         | Anthropic Claude API.                                                       |
 
 For OpenAI and Anthropic you can paste an API key into the settings dialog.
 Keys are stored in the OS keyring via the `keyring` package; if no keyring
