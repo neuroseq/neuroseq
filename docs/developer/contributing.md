@@ -1,45 +1,60 @@
 # Contributing
 
-The NeuroSeq is an open-source project. Everyone can suggest and implement improvements as well as improve overall reliability and stability of its operation.
+NeuroSeq is a neuronal sequencer: one input and readout interface for digital,
+biological and neuromorphic networks. Contributions are welcome.
 
-## Development pipeline
+## Plugins first, core by discussion
 
-1. Fork and clone repository.
+Extend NeuroSeq without touching the core whenever possible:
+
+| Extension                    | Mechanism                                                   |
+| ---------------------------- | ----------------------------------------------------------- |
+| Network backend or substrate | [Custom simulator](custom_simulators.md) file               |
+| Analysis pipeline            | [Analysis plugin](analysis_plugins.md) file                 |
+| Stimulation protocol         | Script in the embedded console that writes a stimulus array |
+
+There is no plugin interface for closed-loop routines yet; they live in
+`stimulation/dynamic_input/`. Changes to core code (anything under
+`src/neuroseq/`) need prior discussion with the core developers, in an issue or
+draft pull request.
+
+## Workflow
+
+1. Fork, clone and [install](developer_installation.md) in editable mode.
 2. Create a feature branch.
-3. [Install](developer_installation.md) in editable mode.
-4. Modify the code.
-5. Test new functionality.
-6. Run [pytests](testing.md) before opening a pull request.
+3. Make the change and add tests, including a
+   [scientific validation test](testing.md#scientific-validation-tests) when it
+   affects results.
+4. Run `uv run pytest` and `prek run -a`.
+5. Open a pull request that explains the user-visible change, links the issue,
+   lists the commands you ran and includes screenshots for UI changes.
 
-When using AI tools, follow the guidance on
-[responsible use of AI](responsible_ai.md), including human review and scientific
-validation of the resulting changes.
+Use short, imperative commit subjects. Do not commit generated files
+(`.coverage`, `coverage.xml`, caches, `.venv/`). If you use AI tools, follow
+[Responsible use of AI](responsible_ai.md).
+
+## Code organisation
+
+`CLAUDE.md` and `AGENTS.md` at the repository root are the authoritative
+description of the architecture and grouping rules. In short:
+
+- Group code by workflow (`importers/`, `export/`, `device_control/`,
+  `stimulation/`, `visualization/`), not by kind of file.
+- Keep Qt-free logic in its own module; put widget/project coordination in a controller.
+- Change project data only through `Project` methods so
+  [undo history](project_history.md) stays consistent.
+- Run long tasks through `background_jobs.BackgroundJob`.
+- Use `qtpy`, not `PyQt6`/`PySide6`, directly.
 
 ## Project workspaces
 
-`gui.py` contains the application shell. Each tab embeds a separate
-`ProjectWorkspace` from `project_workspace.py`, which owns its project's widgets,
-controllers, console namespace, undo history, input designers, detached windows,
-and background jobs. The workspace uses a child `QMainWindow` to lay out its own
-menus and toolbars. `Gui.active_workspace` is the explicit access point for the
-current tab; `Gui.project` and forwarded attribute reads remain available for
-integrations.
+`gui.py` is the tab shell. Each tab holds a `ProjectWorkspace`
+(`project_workspace.py`) that owns its widgets, controllers, console namespace,
+undo history and background jobs; `Gui.active_workspace` is the current tab.
+Switching tabs does not copy state; playback pauses but jobs keep running and
+report to their own workspace. GUI state is not saved in `.nseq` files.
 
-Switching tabs changes the visible workspace without calling `update_project()`
-or copying widget state into `Project`. Playback pauses when leaving a tab;
-background jobs continue and deliver their results to their owning workspace.
-`update_project()` refreshes data within a workspace, for example after imports
-or model edits. GUI state remains in memory and is not serialized to `.nseq`.
-
-Settings and physical connections are application resources. `workspace_devices.py`
-shares the ScanImage connection and SysCon2 transport. Each SysCon2 panel receives
-a session that routes command replies to the requesting workspace; connection
-status is shared. Only the active workspace receives live ScanImage frames.
-Acquisition results are matched by run ID to the workspace that requested them.
-Closing a tab stops its jobs and releases its resources without disconnecting
-other tabs. Application shutdown checks unsaved projects individually and stops
-all workspaces before shutting down the shared connections.
-
-Run `uv run pytest tests/test_project_workspaces.py` for tab isolation, background
-result routing, device sessions, and workspace lifecycle tests. Existing widget
-and workflow tests exercise `ProjectWorkspace` directly.
+Device connections are shared application resources (`workspace_devices.py`).
+SysCon2 replies and ScanImage acquisition results are routed to the requesting
+workspace; only the active one gets live ScanImage frames. Closing a tab stops
+its jobs without disconnecting other tabs. Tests: `tests/test_project_workspaces.py`.

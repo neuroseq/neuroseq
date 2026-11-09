@@ -90,3 +90,4 @@ generic = true
 "Input Design and Readout Analysis/importing_igor2_waves.md" = "readout/igor2_waves.md"
 "Input Design and Readout Analysis/analysis_and_plugins.md" = "readout/analysis.md"
 "Input Design and Readout Analysis/simulations_and_experiments.md" = "readout/simulations_and_experiments.md"
+"developer/miscellaneous.md" = "developer/windows_shortcut.md"

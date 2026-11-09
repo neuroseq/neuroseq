@@ -1,168 +1,110 @@
 # Testing
 
-A proper development of the code implies the use of tests with the `pytest` framework. Tests are located in the `tests/` folder.
+Tests use pytest and pytest-qt and live flat in `tests/` as `test_<module>.py`,
+with fixtures in `tests/conftest.py` and inputs in `tests/sampledata/`. Every
+behaviour change needs a test. With a Conda install, replace `uv run pytest`
+with `python -m pytest` in the activated environment.
 
-Use the same environment that runs the application. For a uv checkout, install
-the development dependencies with `uv sync --group dev` and use `uv run` below.
-An activated Conda environment does not make these commands use Conda's Python;
-uv uses the project's `.venv` by default.
+## Running tests
 
-For an installation directly into Conda, replace `uv run pytest` with
-`conda run -n neuroseq python -m pytest` (or `python -m pytest` after activation).
-See [environment selection](developer_installation.md#using-uv-from-a-conda-shell).
+| Task                             | Command                                            |
+| -------------------------------- | -------------------------------------------------- |
+| Full suite (parallel)            | `uv run pytest`                                    |
+| One module                       | `uv run pytest tests/test_gui.py`                  |
+| Serial (`-s`, `--pdb`, one test) | `uv run pytest -n 0 ...`                           |
+| Coverage report                  | `uv run pytest --cov --cov-report=xml`             |
+| Diff coverage gate (75%)         | `uv run diff-cover coverage.xml -c pyproject.toml` |
+| Update reference screenshots     | `uv run pytest --update-screenshot`                |
 
-## To run all tests
+`-n auto` (pytest-xdist) is the default. Tests marked `@pytest.mark.screenshot`
+are skipped unless `--update-screenshot` is given, which runs only them. Brian2
+uses the `numpy` code generation target in tests. About 27 ELISE tests skip when
+the private `elise` package is not installed (see `CLAUDE.md`).
 
-```bash
-uv run pytest
-```
+## Writing Qt tests
 
-Tests run in parallel by default (`-n auto`, using pytest-xdist). Add `-n 0` to run
-them serially, which starts faster for a single test and is needed to see `-s`
-output or use `--pdb`.
+- Wait for a condition (`qtbot.waitUntil`, `waitSignal`, ...) instead of
+  `qtbot.wait(ms)`, and pass `timeout=WAIT_TIMEOUT_MS` from `tests/wait_timeout.py`
+  (5 s by default; CI passes `--wait-timeout=30`).
+- Use `waitExposed`/`waitActive` as context managers: `with qtbot.waitExposed(w): w.show()`.
+- Autouse fixtures silence `QMessageBox` and replace dialog `.exec()` with
+  `.show()`. Use the `qmessagebox_calls` fixture to assert on message boxes.
+- `tests/test_import_layering.py` enforces the package import rules.
 
-Tests wait for a condition (`qtbot.waitUntil`, `waitSignal`, `waitExposed`, ...)
-instead of sleeping for a fixed time, and pass `timeout=WAIT_TIMEOUT_MS` (from
-`tests/wait_timeout.py`). It is 5 s by default, so a hanging test fails quickly;
-CI uses `--wait-timeout=30` (seconds) for its slower runners.
+## Scientific validation tests
 
-## To run a specific subset of tests
+Passing unit tests do not show that a result is scientifically right. When a
+change affects simulation, analysis or export output, add a test that compares
+the scientific outcome with an independent reference: an analytic solution, a
+published value, or a trusted dataset. State the reference and tolerance in the
+test. Examples:
 
-```bash
-uv run pytest tests/test_gui.py
-```
+- `tests/test_elise_opsin_kinetics.py`: integrated opsin state matches the
+  analytic formula.
+- `tests/test_membrane_parameters_analysis.py`: the fit recovers the parameters
+  of a synthetic membrane.
 
-## SysCon2 control
+## CI
 
-The protocol, connection manager, panel, and routine tests use fake transports and
-recordings. On Windows, `tests/test_syscon2_client.py` also opens a real local named
-pipe to check timeouts when a server never replies or drains a write. These tests
-do not require SysCon2 or a connected stimulation device.
+`.github/workflows/ci.yml` runs on pull requests and pushes to `main`:
+
+| Job         | Setup                                                                                          |
+| ----------- | ---------------------------------------------------------------------------------------------- |
+| conda-forge | `environment.yml` on Linux, macOS, Windows; `pytest --wait-timeout=30 --reruns 1`              |
+| pypi        | uv, Python 3.12 and 3.14 on all three OSes; same pytest flags with coverage, then `diff-cover` |
+| pre-commit  | `uvx prek run -a` (ruff, mypy, prettier, nbstripout, workflow checks)                          |
+
+For Qt parity with CI, set `QT_API=pyqt6` and `PYTEST_QT_API=pyqt6`.
+
+## SysCon2 and hardware
+
+SysCon2 tests use fake transports and need no rig:
 
 ```bash
 uv run pytest tests/test_syscon2_client.py tests/test_syscon2_connection_manager.py tests/test_syscon2_panel.py tests/test_rheobase_dialog.py tests/test_stdp_window_dialog.py
 ```
 
-Real-rig checks are still needed for command execution and acquisition alignment.
-The SCI v1.2 manual confirms the `Sequence Manager` instance name for the Holo4D
-profile and that Runs = 0 means endless repetition, but does not specify the wire
-width of the Runs integer. The client currently uses a 32-bit DWord.
-
-Pipe commands have a 30-second deadline, configurable through
-`NamedPipeTransport(timeout=...)`. Disconnect and shutdown cancel pending I/O.
-A timeout closes the connection and requires an explicit reconnect; it does not
-confirm that a queued Stop command reached the device.
+On Windows, `test_syscon2_client.py` also opens a real named pipe to test
+timeouts. Pipe commands time out after 30 s (`NamedPipeTransport(timeout=...)`);
+a timeout closes the connection and does not confirm that a queued Stop arrived.
 
 ### Real-rig checklist
 
-This updates the [export/control test](https://github.com/neuroseq/neuroseq/pull/573#issuecomment-6046355724)
-and [rheobase test](https://github.com/neuroseq/neuroseq/pull/573#issuecomment-6046356049)
-in the PR. Those comments describe the overall workflow correctly, but the
-following details matter when testing the current implementation.
+Run NeuroSeq and SysCon2 on the same Windows PC with the Holo4D profile
+(its `.seq` folder is `C:\ProgramData\ROE\SysCon 2\2.7.2\profiles\Holo4D\Sequence Manager\Experiments\NeuroSeq`)
+and a verified Cellpose to stim ID mapping. Check:
 
-1. Run NeuroSeq and SysCon2 on the same Windows PC, with the Holo4D profile and a
-   verified Cellpose-to-stim-ID mapping. Connect opens the pipe; it does not prove
-   the laser is connected or ready. Click **Get Status** to discover lightsources and retrieve status; the selector
-   prefers 940 nm. Check the mode and hardware state in SysCon2. Direct laser
-   mutation controls are hidden.
-2. Prepare a short pattern and use **Export with settings…**. Select the intended input
-   array, wavelength, target power, LUT, and output directory. The export target
-   power is in mW. LUT percentages are divided by 100 in `.seq` files; verify
-   this scaling on the rig. Live status uses the unit configured in SysCon2,
-   which SCI does not identify.
-3. Run **Check Input Sanity** and resolve every reported violation. The exact
-   required timestep is **520.8125 µs** (`0.0005208125` seconds), not exactly
-   520.8 µs. Let the dialog resample it. Around 20 ms is a starting pulse duration,
-   but it does not by itself guarantee valid SLM timing; inspect the generated
-   overview and debug CSV after the sanity fixes.
-4. Generate the script. Filenames use the dialog's **Script name**, whose initial
-   value follows `export_seq_<date>_<n>`, rather than the array name.
-   The PNG is a generated preview. The panel shows whether import is pending,
-   confirmed, failed, or not attempted (offline). Red target crosses appear only
-   after acknowledgement of that preview's import and exclude skipped neurons.
-   They do not show remote selection, upload, or live illumination. Confirm the
-   sequence also appears in SysCon2 itself before proceeding.
-5. Select the imported sequence, set **Runs = 1**, choose the start condition and
-   trigger edge, then click **Upload**, wait for "Press Run", then click **Run** and confirm. Verify the
-   progress label moves through uploading, hardware readiness, starting, and running. A triggered
-   run must wait for its trigger. Stop during upload must not send Run afterward.
-   SCI reports phases rather than percentage completion. Validate actual timing,
-   pattern, and delivered power using the rig's controlled bench-test procedure.
-   Configure emission, shutter, and laser intensity in SysCon2 itself.
-6. Edit the array and test **Export current array to stimulation setup**. It reuses the last
-   dialog export's settings but writes `export_seq_<date>_<n>.seq` and its diagnostic
-   files to a temporary directory, not the dialog's chosen output folder. The
-   **Target power** box beside it overrides only the power. It
-   opens the full export dialog if settings are unavailable. As above, verify
-   the import, then select and use Upload then Run for the changed sequence.
-7. For rheobase, select the SysCon2 target and use amplitudes within 0–1. Set
-   power, laser and spots under **Hardware settings**; they are the project's
-   export settings, so no prior **Export with settings…** is needed. Choose
-   the post-pulse window from the actual acquisition frame rate: at 30 Hz,
-   100–300 ms spans several frames; neither 30 Hz nor a particular useful
-   response window is guaranteed by the SCI protocol.
-8. **Automatic blocks** (default): connect ScanImage in the **ScanImage
-   (imaging)** tab, set its recording folder, and load a Cellpose segmentation
-   of the field of view. Wire the sequence's TTL output (the configuration's
-   `TargetConnectorPort`) to ScanImage's acquisition trigger. Start the routine:
-   for every block NeuroSeq imports, selects and uploads it, arms a triggered
-   recording (block plus **Record after block**), runs it and extracts ΔF/F.
-   The routine log names the run's folder; check that every block's `.seq`,
-   overview and sidecar are kept there and that each recording's `.json`
-   names the right `.seq`. Verify the recording starts with the block (sequence
-   start to first frame),
-   that each `<date>_<number>.tif` holds the requested frames, and that the
-   logged ΔF/F rise (ΔF/F readout) or deconvolved spike count (spike readout)
-   matches the cell's visible response. Tune the spike threshold on a few probes
-   first: OASIS event sizes are in ΔF/F, so it depends on expression level.
-9. **Manual blocks** (automatic unticked): for **every** block, refresh the
-   sequence list, select the newly imported block, set **Runs = 1**, then
-   **Upload**, **Run** and acquire. The host only imports. Import each probe into a
-   **new experiment with a unique name**, starting at time zero for that block,
-   and return to the routine to click **Calcium data imported**. Fresh-data
-   selection is resolved when that button is clicked, and existing recordings
-   are rejected, including on the first probe. For raw TIFF import, use the
-   Suite2p option if you measure deconvolved spikes.
-10. Check pause, stale-data rejection, and stopping. **Routine Stop** ends the
-    software search and cancels only its own block: a running sequence gets a
-    Stop command and an armed recording is aborted, but a block whose import is
-    already queued still completes on the hardware. Use **Holo4D Stop** and
-    verify the hardware state on the rig. If communication stalls, a queued Stop
-    cannot be assumed delivered; Disconnect cancels communication, not
-    stimulation.
+1. **Connect** opens the pipe only; **Get Status** finds the light sources (940 nm preferred).
+2. **Export with settings…**: target power is in mW; LUT percentages are divided
+   by 100 in `.seq` files (verify on the rig).
+3. **Check Input Sanity** resolves every violation; the timestep is exactly
+   520.8125 µs. Inspect the overview PNG and debug CSV.
+4. After import, the sequence appears in SysCon2 and red target crosses appear
+   (they mark the acknowledged preview, not live illumination).
+5. **Runs = 1**, trigger settings, **Upload**, **Run**: progress passes through
+   uploading, ready, starting, running; Stop during upload sends no Run. Measure
+   timing, pattern and delivered power with the bench-test procedure.
+6. **Export current array to stimulation setup** reuses the last dialog settings
+   and writes to a temporary directory.
+7. Rheobase/STDP, automatic blocks: ScanImage connected, TTL output
+   (`TargetConnectorPort`) wired to the acquisition trigger. Each block's `.seq`,
+   overview and sidecar are kept in the run folder, each recording `.json` names
+   the right `.seq`, recordings start with the block, and the logged ΔF/F or spike
+   count matches the visible response.
+8. Manual blocks: each block imported into a new, uniquely named experiment
+   before clicking **Calcium data imported**; stale recordings are rejected.
+9. **Routine Stop** cancels only its own block; **Holo4D Stop** stops the
+   hardware. Disconnect cancels communication, not stimulation.
 
-Record the script/debug CSV, selected sequence, Runs, trigger settings, wavelength,
-power settings, actual frame rate, import threshold, and per-probe response.
-Confirm the Runs wire representation on the real system; the Sequence Manager
-instance name is documented in the manual and is no longer an unresolved naming
-assumption. The same per-block rules apply to the STDP target; pairing blocks
-need no recording (automatic pairings are run without one; manual ones need
-acknowledgement after execution).
+Record the script, debug CSV, sequence, Runs, trigger, wavelength, power, frame
+rate, threshold and per-probe response. Still unconfirmed: the wire width of the
+Runs integer (sent as a 32-bit DWord).
 
-## Linux teardown crash with Conda
+## Linux: segfault at exit with Conda
 
-If tests report success and then segfault during process exit, inspect the native
-backtrace. On the development host, this occurred in Conda's `libstdc++` exit
-handlers after graphics libraries unloaded. Running with the system C++ runtime
-resolved the crash without changing application code:
+If tests pass and then segfault on exit inside Conda's `libstdc++`, preload the
+system runtime (Debian/Ubuntu x86-64 path):
 
 ```bash
 conda run --no-capture-output -n neuroseq env LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6 QT_QPA_PLATFORM=offscreen QT_API=pyqt6 PYTEST_QT_API=pyqt6 .venv/bin/python -m pytest
 ```
-
-The library path is specific to Debian/Ubuntu x86-64; check the system library
-location before using this workaround elsewhere.
-
-## Pre-commit
-
-pre-commit run --all-files
-
-Export validation is shared by the dialog, quick export, and routine host. Timing
-fixes must first be reviewed and applied with **Check Input Sanity**. Other
-warnings (including skipped neurons, missing power calibration, and power clamping) require confirmation
-before a dialog or quick export can proceed; unattended routine exports reject
-these warnings. Existing dialog export files require overwrite confirmation.
-An import uses a private snapshot, so regenerating the same filename cannot
-change an already queued request. Disconnecting or changing projects clears
-preview import confirmation and target markers. Importing an arbitrary file
-clears the generated preview association because its targets are unknown.

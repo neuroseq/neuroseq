@@ -1,43 +1,59 @@
-# Analysis Plugins (Developer)
+# Analysis plugins
 
-This page describes how the custom analysis plugin system works internally and how to implement new analysis plugins.
+An analysis plugin adds an entry to the right-click analysis menu of the trace
+and spike views without changing core code. Using plugins is described in
+[Analysis](../readout/analysis.md).
 
-## Architecture Overview
+## Writing a plugin
 
-Plugin support is split across three core modules:
+A plugin is one `.py` file (names starting with `_` are ignored) that defines
+`render_analysis`:
 
-- `src/neuroseq/analysis_plugins.py`
-  - Discovers plugin modules from `src/neuroseq/resources/analysis_plugins`
-    and from the per-user folder returned by `user_plugins_directory()`
-    (user plugins never shadow built-in filenames or `PLUGIN_ID`s)
-  - Loads each plugin file dynamically
-  - Builds `AnalysisPlugin` objects (`id`, `label`, `icon`, `render`)
-- `src/neuroseq/visualization/timeseries_widget.py`
-  - Rebuilds right-click analysis menu on demand
-  - Adds built-in analysis actions and plugin actions
-  - Emits `custom_analysis_requested` with either a built-in `CustomAnalysisType` or an `AnalysisPlugin`
-- `src/neuroseq/visualization/custom_analysis_widget.py`
-  - Executes built-in analysis logic
-  - Executes plugin `render` callback for plugin analyses
-  - Catches plugin exceptions, logs the plugin id, and shows a failure message in the plot
+```python
+from neuroseq.data import TraceData
 
-## Plugin Discovery
+PLUGIN_ID = "mean_activity"  # stable, machine-oriented; default: file name
+PLUGIN_NAME = "Mean activity"  # menu label; default: file name
+PLUGIN_ICON = "mdi6.chart-timeline-variant"  # qtawesome name; default: mdi6.puzzle
 
-A plugin is a Python file in: `src/neuroseq/resources/analysis_plugins`. It must have `*.py` extention (files starting with `_` will be ignored) and define callable `render_analysis`. Each pluging has ID, NAME and ICON. The default value for ID and NAME is a filename without extention but user can also define them as `PLUGIN_ID`, `PLUGIN_NAME`, and `PLUGIN_ICON` (e.g. `mdi6.puzzle`). `PLUGIN_ID` should be stable over time. Use a machine-oriented id (for example, `mean_activity`) and keep display text in `PLUGIN_NAME`. At the present momement dropdown menu does not distinguish the type of the data that is being analysed and shows all improrted plugins regardless of datatype.
 
-See [`src/neuroseq/resources/analysis_plugins/mean_activity.py`](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/resources/analysis_plugins/mean_activity.py) for a working example plugin.
+def render_analysis(widget, data, neuron_slice, time_slice) -> None:
+    ax = widget.subplot  # Matplotlib axes
+    if isinstance(data, TraceData):
+        ax.plot(widget.traces.mean(axis=0))  # selection already sliced
+```
 
-## Advanced Interactive Example
+`widget` is the `CustomAnalysisWidget`; useful attributes are `subplot`,
+`traces` or `spike_times_ms` (the selected region), `dt_ms`, `neuron_slice`
+and `time_slice`. The menu lists every plugin for every data type, so check
+`data` (`TraceData`, `SpikeData`, `SynapseData`) and show a message for
+unsupported types. Exceptions are caught, logged with the plugin id and shown
+in the plot.
 
-The ELiSe plugins are thin wrappers; their supporting code is a regular
-package, `src/neuroseq/elise_support/`: `replay_metrics.py` provides replay
-metrics and CSV export, `workflows.py` connects project data to the analysis
-windows, and `protocol_dialog.py` provides protocol settings. Keep core code
-out of the plugin folder: it is scanned and executed on every right-click
-menu and is excluded from coverage.
+Examples in `src/neuroseq/resources/analysis_plugins/`: `mean_activity.py`
+(basic) and `advanced_mean_activity.py` (adds a control bar to the analysis
+window; guard against adding duplicate controls when the plugin runs again in
+the same window).
 
-For an advanced plugin example with UI controls, see [`src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py`](https://github.com/neuroseq/neuroseq/blob/main/src/neuroseq/resources/analysis_plugins/advanced_mean_activity.py).
+## Where plugins are found
 
-This plugin extends the basic mean-activity analysis by adding an interactive control bar in the same analysis window.
+| Folder                                     | Use                                                                                            |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `src/neuroseq/resources/analysis_plugins/` | Built-in plugins                                                                               |
+| `user_plugins_directory()`                 | Per-user plugins, e.g. written by the chat assistant; override with `NEUROSEQ_USER_PLUGIN_DIR` |
 
-important: for the analysis widgets opened in the same window as it is the case for "show custom analysis" pad it is important to prevent duplicating of controls when the same plugin is run repeatedly in one open analysis widget.
+User plugins never shadow a built-in file name or `PLUGIN_ID`. The folders are
+rescanned each time the menu opens.
+
+## Internals
+
+- `analysis_plugins.py`: `discover_analysis_plugins()` loads files into
+  `AnalysisPlugin(id, label, icon, render)` objects.
+- `visualization/timeseries_widget.py`: builds the menu and emits
+  `custom_analysis_requested` with a `CustomAnalysisType` or an `AnalysisPlugin`.
+- `visualization/custom_analysis_widget.py`: runs built-in analyses and plugin
+  `render` callbacks.
+
+Keep plugins thin. Supporting code belongs in a regular package (for ELiSe,
+`src/neuroseq/elise_support/`); core code must never import from the plugin
+folder, which is excluded from coverage.

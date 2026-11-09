@@ -1,73 +1,53 @@
 # Examples
 
-## Run a sequence on digital substrate
+Open examples with **File → Open example project** (each opens in a new tab).
+Edit their parameters and initial conditions in **File → Edit Model**
+(`Ctrl+E`).
 
-## Run a sequence on biological substrate
+## One input protocol, three substrates
 
-## Run a sequence on neuromorphic substrate
+| Substrate    | Run the input array                                                                                                                                      | Read out                                                                                                             |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Digital      | **Simulate → Run Simulation** (Brian2) or an [external simulator](networks/external_simulators.md)                                                       | traces, spikes and synapses appear in the panels                                                                     |
+| Biological   | **Export → Optogenetic Input** or the **SysCon2 (HOLO4D)** tab of the Stimulation setup ([holographic stimulation](networks/holographic_stimulation.md)) | [ScanImage acquisition](networks/scanimage_acquisition.md), [imaging import](readout/imaging_data.md) or patch clamp |
+| Neuromorphic | **BrainScaleS-2** tab of the Stimulation setup ([BrainScaleS-2](networks/brainscales2.md))                                                               | spikes and membrane traces read back                                                                                 |
 
-# Examplary brian2 models
+For biological targets, map input rows to real cells with Cellpose
+segmentation (**File → Cell segmentation**) first.
 
-The examples provide a list of brian2 models.
+## Example projects
 
-The first set of models is tailored to the real neurobiological experiments,
-and the description of the models contains additional information on the relation of the model architecture and properties with real experiments.
-The parameters of the models in the examples and initial conditions can be defined and modified in "File -> Edit Model".
+| Menu section  | Example                                                    | Contents                                                                                                                      |
+| ------------- | ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Basics        | Getting Started Project                                    | 10 HH neurons (8 exc, 2 inh) with a 2-photon FOV and mapped Cellpose cells ([Quickstart](getting_started/quickstart.md))      |
+| Basics        | non_linear                                                 | two input neurons driving one neuron through non-linear synapses                                                              |
+| Single Neuron | Hodgkin-Huxley Neuron                                      | patch clamp and optogenetics protocol (below)                                                                                 |
+| Single Neuron | Adaptive Exponential Integrate-and-Fire Neuron             | regular-spiking AdEx (Brette and Gerstner 2005) with a current step                                                           |
+| Single Neuron | Leaky-Integrate-and-Fire Neuron                            | LIF with `I_external` (pA) and opsin inputs in mW/mm²                                                                         |
+| Network       | Network of Hodgkin-Huxley Neurons                          | Brian2 [COBAHH](https://brian2.readthedocs.io/en/stable/examples/COBAHH.html): 4000 neurons (80% exc), random 2% connectivity |
+| Network       | Network of Hodgkin-Huxley Neurons with Predefined Synapses | same network, sparse (0.01%) fixed-weight connectivity                                                                        |
+| Network       | Network of Hodgkin-Huxley Neurons with STDP                | two neurons (exc → inh) with a plastic synapse potentiated by pre-before-post pairing                                         |
+| Network       | Two Hodgkin-Huxley Neurons with STDP                       | two excitatory neurons with an STDP pairing protocol                                                                          |
+| Network       | Locally Connected Network                                  | 60-neuron 1-D network with Gaussian local excitation and surround inhibition                                                  |
+| Network       | ELISE Sequence Learning Network                            | ELiSe sequence learning; needs the separate `elise` package                                                                   |
+| Network       | Sinus Offset External Simulator                            | five sine-wave units through the external simulator interface                                                                 |
+| Network       | PyNN AdEx Neuromorphic Network                             | AdEx network via PyNN (needs `pip install pyNN`); can target BrainScaleS-2                                                    |
+| Optogenetics  | ChR2 in HEK293                                             | 10 cells with the PyRho 6-state ChR2 model                                                                                    |
 
 ## Hodgkin-Huxley Neuron
 
 ![Hodgkin-Huxley Neuron](images/hodgkin_huxley_neuron.png)
 
-### Stimulation protocol
+Models a whole-cell patch clamp recording of one neuron without synaptic input
+(e.g. under synaptic blockers). Input arrays:
 
-In this example, a experimental protocol of electrophysiological and optogenetic interrogation of single neuron is presented.
-The protocol consists of a current injections, ramps and steps, of varying amplitude and duration:
+- `I_external` (pA, positive or negative): 100 ms ramps to ~300 and ~600 pA,
+  then 100 ms steps of 200, 400 and 600 pA.
+- `Exc_stimulation`, `Inh_stimulation` (fraction of the maximum opsin
+  conductance): two 100 ms ramps (to ~50% and ~100%) and steps of 25, 50 and
+  100%.
 
-- two positive current 100 ms ramps with 300 pA and 600 pA maximum amplitude
-- three 100 ms steps of 200, 400 and 600 pA
-- two ramps (100 ms, 50% and 100% of light power, respectively)
-- three optogenetic stimulation steps for excitatory and inhibitory opsins (25%, 50% and 100% of light power).
-
-### Computational model
-
-A single Hodgkin-Huxley neuron is simulated.
-The model supports direct current injection into the neuron (virtual current clamp) and optogenetic control via a pair of opsins (for excitation and inhibition).
-The injected current into the neuron can be controlled via _I_external_ stimulation array that supports both positive and negative current values with units expressed in _pA_.
-The neuron is complemented by two additional conductances that can be modulated by light that represent optogenetic tools (opsins).
-As no intrinsic kinetics of opsins is taken into account, the opsins are considered to be ideal and have an immediate activation and deactivation.
-_Exc_stimulation_ and _Inh_stimulation_ are corresponding arrays with units being a fraction of predefined maximum conductances of opsin.
-
-The number of neurons in the model can be increased and stim array will be updated accordingly . As there is no synaptic connections between them, they will operate independently.
-
-**Reversal potentials and conductances defined in the model:**
-
-$$E_{rev}^{exc} = 0   mV$$
-
-$$E_{rev}^{inh} = - 80   mV$$
-
-$$g_{exc} = 0.1 \ mS \ cm^{-2}$$
-
-$$g_{inh} = 0.1 \ mS \ cm^{-2}$$
-
-No other external inputs (e.g. gausian noise) was implemented in the model.
-The model can be configured for non-neuronal cell by setting up conductances for $Na$ and $K$ voltage gated channels to zero.
-
-### Corresponding experiment
-
-This example is a simplified version of the experiment when a whole-cell patch clamp recording of a single neuron is conducted,
-and any synaptic transmission is absent (e.g. when synaptic blocks are added).
-
-## Leaky-Integrate-and-Fire Neuron
-
-A simplified, Leaky-Integrate-and-Fire instead of Hodgkin-Huxley is used.
-The units for stimulation arrays are $mW / \mu m^2$.
-
-## Network of Hodgkin-Huxley Neurons
-
-The example is an implementation of the COBAHH model from [brian2](https://brian2.readthedocs.io/en/stable/examples/COBAHH.html) package with modifications.
-This example simulates a network of 4000 neurons (80 % of excitatory and 20 % of inhibitory neurons) with fixed exponential synaptic conductances.
-The neurons are interconnected in all-to-all manner with 2% probability.
-
-## Network of Hodgkin-Huxley Neurons with STDP
-
-Network of Hodgkin-Huxley Neurons example with spike-timing dependent plasticity.
+Opsins are ideal conductances with instant on/off: $E_{exc} = 0$ mV,
+$E_{inh} = -80$ mV, $g_{exc} = g_{inh} = 0.1\ mS\,cm^{-2}$. There is no noise
+input. Raising the neuron count adds independent copies. Setting the Na and K
+conductances to zero models a non-neuronal cell.
