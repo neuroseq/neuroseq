@@ -21,7 +21,9 @@ offers to save the current project first, then asks what to take:
 | Experimental Data | Replaces the current data groups.                       |
 
 Chosen parts replace, not merge with, the current ones, and the undo history
-is cleared. The Cellpose segmentation is not imported.
+is cleared. Experimental Data brings the other project's Cellpose segmentation
+with it, so the data's cell IDs keep matching; if that project has none, the
+current segmentation stays.
 
 ## Compare simulated and recorded data
 

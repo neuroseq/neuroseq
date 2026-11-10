@@ -1524,6 +1524,39 @@ def test_save_keeps_dirty_when_project_changes_during_the_write(
     assert project.dirty is False
 
 
+def test_import_experimental_data_brings_its_cellpose_data(tmp_path: Path) -> None:
+    source = Project()
+    source.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    source.add_experiment(
+        Experiment(
+            "exp",
+            1.0,
+            [],
+            [TraceData("t", np.zeros((2, 10)), np.array([0, 1]), "", 0.1)],
+        )
+    )
+    path = tmp_path / "source.nseq"
+    source.save(path, SaveLoadOptions(True, True, False, True))
+
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    project.import_project(path, SaveLoadOptions(False, False, False, True))
+    assert set(project.experiments) == {"exp"}
+    assert project.cellpose_data is not None
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {4: 0, 7: 1}
+
+    # Importing without experimental data keeps the project's Cellpose data.
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    project.import_project(path, SaveLoadOptions(True, False, False, False))
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {1: 0}
+
+    # So does importing data saved without Cellpose data.
+    source.cellpose_data = None
+    source.save(path, SaveLoadOptions(True, True, False, True))
+    project.import_project(path, SaveLoadOptions(False, False, False, True))
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {1: 0}
+
+
 def test_device_settings_are_saved_with_the_project(tmp_path):
     project = Project()
     project.syscon_export_settings = SysconExportSettings(

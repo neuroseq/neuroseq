@@ -141,6 +141,7 @@ class ImportedComponents:
 
     b2_model: B2Model | None = None
     experiments: dict[str, Experiment] | None = None
+    cellpose_data: CellposeImportResult | None = None
     stim_arrays: dict[str, StimArray] | None = None
 
 
@@ -678,6 +679,12 @@ class Project:
             if options.include_experimental_data:
                 self.logger.info("  - importing experimental data")
                 components.experiments = load_from_zip("experimental_data", zf)
+                # The data's Cellpose ids refer to the Cellpose data saved with it
+                # (see __init__ for the two archive names).
+                components.cellpose_data = (
+                    load_from_zip("cellpose_data_v2", zf)
+                    or load_from_zip("cellpose_data", zf)
+                ).get("cellpose_import")
             if options.include_stim_arrays:
                 self.logger.info("  - importing stim arrays")
                 components.stim_arrays = load_from_zip("stim_arrays", zf)
@@ -691,6 +698,9 @@ class Project:
             self.b2_model = components.b2_model
         if components.experiments is not None:
             self.experiments = components.experiments
+            # Data saved without Cellpose data has no ids to match; keep ours.
+            if components.cellpose_data is not None:
+                self.set_cellpose_data(components.cellpose_data)
         if components.stim_arrays is not None:
             self.stim_arrays = components.stim_arrays
         self.update_limits()
