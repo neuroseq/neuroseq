@@ -32,6 +32,4 @@ Check results against independently established expectations:
 - Compare simulation and analysis output with known cases or reference data;
   software tests alone do not establish biological validity.
 
-Record the assumptions and validation evidence needed to reproduce the result.
-If you cannot explain how you would detect an error, obtain expert review before
-relying on the output for a scientific conclusion.
+Record the assumptions and validation evidence needed to reproduce the result. If you cannot explain how the result was obtained and verify its correctness, seek for expert review before relying on the output for a scientific conclusion.
