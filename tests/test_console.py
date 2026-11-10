@@ -11,6 +11,7 @@ from qtpy import QtWidgets
 
 from neuroseq import console_art
 from neuroseq import theme
+from neuroseq.console_widget import _BRAIN_RESOURCE_URL
 from neuroseq.console_widget import SAMPLE_CODE
 from neuroseq.console_widget import ConsoleWidget
 from neuroseq.project import Project
@@ -76,6 +77,33 @@ def test_console_scrolls_back_to_welcome_splash_on_startup(qtbot: QtBot) -> None
     qtbot.waitUntil(
         lambda: console.output.verticalScrollBar().value() == 0, timeout=WAIT_TIMEOUT_MS
     )
+
+
+def test_console_brain_is_small_and_keeps_its_transparent_background(
+    qtbot: QtBot,
+) -> None:
+    console = ConsoleWidget()
+    qtbot.addWidget(console)
+
+    def check_image() -> None:
+        image = console.output.document().resource(
+            QtGui.QTextDocument.ResourceType.ImageResource, _BRAIN_RESOURCE_URL
+        )
+        assert isinstance(image, QtGui.QImage)
+        assert not image.isNull()
+        assert max(image.width(), image.height()) == 240
+        original = QtGui.QImage(str(console_art.brain_image_path()))
+        assert image.width() / image.height() == pytest.approx(
+            original.width() / original.height(), abs=0.01
+        )
+        assert image.hasAlphaChannel()
+        assert image.pixelColor(0, 0).alpha() == 0
+        assert image.pixelColor(image.width() - 1, image.height() - 1).alpha() == 0
+
+    check_image()
+    console.show()
+    qtbot.waitUntil(lambda: console.isVisible(), timeout=WAIT_TIMEOUT_MS)
+    check_image()
 
 
 def test_console_retints_the_brain_image_on_construction_and_every_show(
