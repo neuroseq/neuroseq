@@ -2053,6 +2053,7 @@ def test_stim_overlay_follows_auto_extended_rows(qtbot: QtBot) -> None:
     assert trace_widget._stim_overlay_row_graphics == []
     assert trace_widget._stim_overlay_graphic is not None
     marks = trace_widget._stim_onset_graphic
+    assert marks is not None
     assert (
         marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
     ).tolist() == (pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0]))

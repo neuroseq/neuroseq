@@ -10,8 +10,8 @@ from qtpy.QtCore import Qt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -247,6 +247,8 @@ class TestSuite2pImportDialog:
         traces, spikes = dialog.imported_data
         assert isinstance(traces, TraceData)
         assert isinstance(spikes, SpikeData)
+        assert traces.raw_cellpose_ids is not None
+        assert spikes.raw_cellpose_ids is not None
         assert list(traces.raw_cellpose_ids) == [0, 1, 2, 3, 4]
         assert list(traces.indices) == [4, 3, 2, 1, 0]
         assert np.array_equal(spikes.spike_indices, 4 - spikes.raw_cellpose_ids)

@@ -16,7 +16,7 @@ class _RowCenterLocator(Locator):
     """Tick at the centers of a subset of rows, picked like MaxNLocator
     picks integers, for rows of differing heights."""
 
-    def __init__(self, row_centers: Sequence[float]) -> None:
+    def __init__(self, row_centers: Sequence[float] | np.ndarray) -> None:
         self._centers = np.asarray(row_centers, dtype=float)
         self._rows = MaxNLocator(integer=True)
 
