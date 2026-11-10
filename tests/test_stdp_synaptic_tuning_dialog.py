@@ -46,6 +46,8 @@ class _FakeProject:
 class _FakeEditor:
     def __init__(self, project: _FakeProject) -> None:
         self.project = project
+        self.routine_running = False
+        self.routine_stim_name: str | None = None
         stim = StimArray(
             "Exc_stimulation",
             StimType.Excitation,

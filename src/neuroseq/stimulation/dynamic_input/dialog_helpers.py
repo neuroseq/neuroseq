@@ -10,6 +10,22 @@ if TYPE_CHECKING:
     from neuroseq.stimulation.stim_editor import StimEditor
 
 
+def routine_start_blocked(editor: StimEditor) -> str | None:
+    """Why a routine cannot start now, or None.
+
+    Only one routine may run at a time: each writes its blocks into the
+    locked input array, so two would overwrite each other's blocks and share
+    one simulation's finished/failed notifications.
+    """
+    if not editor.routine_running:
+        return None
+    name = editor.routine_stim_name or "the input array"
+    return (
+        f"Another dynamic input routine is running on '{name}'. Stop it "
+        "before starting this one."
+    )
+
+
 def confirm_start_routine(
     dialog: QtWidgets.QWidget, editor: StimEditor, *, offer_new: bool = False
 ) -> str:

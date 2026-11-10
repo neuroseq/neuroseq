@@ -11,6 +11,10 @@ from neuroseq.stimulation.dynamic_input.dynamic_input_controller import (
     DynamicInputController,
 )
 from neuroseq.stimulation.dynamic_input.rheobase_dialog import RheobaseDialog
+from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
+    StdpSynapticTuningDialog,
+)
+from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_editor import StimEditor
@@ -157,3 +161,67 @@ def test_workspace_refresh_keeps_running_routine_and_spares_new_project(
     assert gui.stim_editor.cmb_stim.isEnabled()
     gui._close_confirmed = True
     gui.close()
+
+
+def test_second_routine_refuses_to_start_while_one_runs(
+    qtbot, monkeypatch, qmessagebox_calls
+) -> None:
+    """Two routines on one locked array would overwrite each other's blocks and
+    share one simulation's finished/failed notifications: only one may run."""
+    project = _two_array_project()
+    editor = _editor(qtbot, project)
+    controller = DynamicInputController(editor)
+    controller._show_routine_dialog("_rheobase_dialog", RheobaseDialog)
+    controller._show_routine_dialog("_stdp_window_dialog", StdpWindowDialog)
+    controller._show_routine_dialog(
+        "_stdp_synaptic_tuning_dialog", StdpSynapticTuningDialog
+    )
+    rheobase = controller._rheobase_dialog
+    window = controller._stdp_window_dialog
+    tuning = controller._stdp_synaptic_tuning_dialog
+    assert rheobase is not None and window is not None and tuning is not None
+    for dialog in (rheobase, window, tuning):
+        qtbot.addWidget(dialog)
+    prompts = []
+
+    def _exec(box) -> int:
+        prompts.append(box)
+        return 0
+
+    monkeypatch.setattr(
+        "neuroseq.stimulation.dynamic_input.dialog_helpers.QtWidgets.QMessageBox.exec",
+        _exec,
+    )
+
+    rheobase._running = True
+    for dialog in (window, tuning):
+        dialog.log.clear()
+        dialog.start()
+        assert "Another dynamic input routine is running on 'b'" in (
+            dialog.log.toPlainText()
+        )
+        assert not dialog._running
+    assert prompts == []
+    assert rheobase._running
+
+    # The editor refuses manual edits to the routine's array meanwhile.
+    values_before = project.stim_arrays["b"].values.copy()
+    editor.draw_stim_region(slice(0, 1), slice(0, 5))
+    editor.clear_stim_array()
+    np.testing.assert_array_equal(project.stim_arrays["b"].values, values_before)
+    assert [call["title"] for call in qmessagebox_calls] == ["Clear input array"]
+    assert "Stop it before editing" in qmessagebox_calls[0]["text"]
+
+    # Any routine blocks the others, rheobase included.
+    rheobase._running = False
+    window._running = True
+    rheobase.log.clear()
+    rheobase.start()
+    assert "Another dynamic input routine is running" in rheobase.log.toPlainText()
+    assert not rheobase._running
+    assert prompts == []
+
+    window._running = False
+    assert not editor.routine_running
+    editor.draw_stim_region(slice(0, 1), slice(0, 5))
+    assert project.stim_arrays["b"].values[0, 0] != 0.0

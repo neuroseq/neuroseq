@@ -17,6 +17,10 @@ If the array already holds input, choose **Clear and start over** or
 arrays**). Blocks are appended after the simulated time, never into the past,
 and stay in the array afterwards (undo, edit, save as usual).
 
+One routine runs at a time: **Start** in another routine is refused until the
+running one stops. While it runs, its array stays selected and cannot be drawn
+on, cleared or given a pattern, and undo/redo are off.
+
 **Pause** and **Stop** act before the next block (a running Brian2 run is not
 cancelled). **Clear input array** zeroes the array; **Reset input array**
 trims it back to the simulated time. The log records every probe and decision;

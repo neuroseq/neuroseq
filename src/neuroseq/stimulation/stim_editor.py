@@ -208,6 +208,20 @@ class StimEditor(QtWidgets.QWidget):
     def _history_allowed(self) -> bool:
         return self.history_enabled and not self.routine_running
 
+    def routine_edit_blocked_message(self) -> str | None:
+        """Why manual edits are refused now, or None.
+
+        A running routine writes each block into the locked array; a manual
+        draw, clear or pattern there would overwrite or shift its blocks.
+        """
+        if not self.routine_running:
+            return None
+        name = self.routine_stim_name or "the input array"
+        return (
+            f"A dynamic input routine is writing into '{name}'. Stop it "
+            "before editing the array."
+        )
+
     def set_project(
         self, project: Project, keep_undo_history=False, stim_to_select=""
     ) -> None:
@@ -820,6 +834,10 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         if self.current_stim_modifier is None:
             return
+        blocked = self.routine_edit_blocked_message()
+        if blocked is not None:
+            self.logger.warning(blocked)
+            return
         time_slice = slice(time_slice.start, time_slice.stop)
         if not self._is_valid_slice(neuron_slice, time_slice) and (
             erase or not self._ensure_time_capacity_for_slice(time_slice)
@@ -1363,6 +1381,14 @@ class StimEditor(QtWidgets.QWidget):
 
     def clear_stim_array(self) -> None:
         if self.current_stim_modifier is None:
+            return
+        blocked = self.routine_edit_blocked_message()
+        if blocked is not None:
+            QtWidgets.QMessageBox.information(
+                QtWidgets.QApplication.activeWindow() or self,
+                "Clear input array",
+                blocked,
+            )
             return
         name = self.current_stim_modifier.stim_array.name
         # Parented to whichever top-level window is actually active, not to

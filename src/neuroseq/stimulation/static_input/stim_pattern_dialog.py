@@ -334,6 +334,10 @@ class StimPatternDialog(SelfRaisingDialog):
     def apply_pattern(self) -> None:
         if self._context is None or not self._validate_inputs():
             return
+        blocked = self.editor.routine_edit_blocked_message()
+        if blocked is not None:
+            QtWidgets.QMessageBox.warning(self, "Input array in use", blocked)
+            return
         pulse_ms = float(self.spin_pulse_ms.value())
         ipi_ms = float(self.spin_ipi_ms.value())
         repeats = int(self.spin_repeats.value())

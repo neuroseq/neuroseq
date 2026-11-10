@@ -93,6 +93,24 @@ def test_dialog_apply_sequential_writes_pattern_and_advances_cursor(
     assert dialog.spin_start_time_ms.value() == 1180.0
 
 
+def test_dialog_apply_refused_while_routine_runs(
+    qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    """A running dynamic routine owns the locked array; a pattern applied
+    there would overwrite or shift the blocks it writes."""
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    editor.set_routine_running(True)
+
+    dialog.radio_scope_all.setChecked(True)
+    dialog.radio_sequential.setChecked(True)
+    dialog.btn_apply.click()
+
+    assert np.allclose(project.stim_arrays["a"].values, 0.0)
+    assert [call["title"] for call in qmessagebox_calls] == ["Input array in use"]
+    assert dialog.spin_start_time_ms.value() == 0.0
+
+
 def test_dialog_apply_twice_stacks_two_patterns(qtbot: QtBot) -> None:
     editor, project, static_input = _make_editor(qtbot, length_samples=2000)
     dialog = _open_dialog(static_input)

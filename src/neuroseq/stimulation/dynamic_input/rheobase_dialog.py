@@ -26,6 +26,7 @@ from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
 from neuroseq.qt_helpers import wrap_in_scroll_area
 from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
+from neuroseq.stimulation.dynamic_input.dialog_helpers import routine_start_blocked
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
@@ -1120,6 +1121,10 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def start(self) -> None:
         self.refresh()
+        blocked = routine_start_blocked(self.editor)
+        if blocked is not None:
+            self._append_log(blocked)
+            return
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return
