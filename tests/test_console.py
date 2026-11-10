@@ -91,7 +91,8 @@ def test_console_brain_is_small_and_keeps_its_transparent_background(
         )
         assert isinstance(image, QtGui.QImage)
         assert not image.isNull()
-        assert max(image.width(), image.height()) == 240
+        # As wide as one line of the welcome banner it sits under.
+        assert image.width() == console._banner_width()
         original = QtGui.QImage(str(console_art.brain_image_path()))
         assert image.width() / image.height() == pytest.approx(
             original.width() / original.height(), abs=0.01

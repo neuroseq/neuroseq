@@ -22,6 +22,7 @@ from qtpy.compat import getsavefilename
 
 import neuroseq.elise_support.workflows as elise_workflows
 from neuroseq import __version__
+from neuroseq import console_art
 from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
@@ -502,7 +503,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.scanimage_connection = self.acquisition_controller.connection
         self.scanimage_controls = self.acquisition_controller.controls
         self._create_menus_and_toolbars()
-        self.setWindowIcon(qta.icon("fa6s.brain"))
+        self.setWindowIcon(QtGui.QIcon(str(console_art.app_icon_path())))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
