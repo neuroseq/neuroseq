@@ -2153,15 +2153,23 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     )
 
     def make_fake_gui() -> Any:
+        project = Project()
+        project.dirty = True
+
         def fake_save(on_success: Any = None) -> bool:
             save_events.append("save")
+            project.dirty = False
             if on_success is not None:
                 on_success(None)
             return True
 
-        project = Project()
-        project.dirty = True
-        return SimpleNamespace(_save_project=fake_save, project=project)
+        fake: Any = SimpleNamespace(_save_project=fake_save, project=project)
+        fake._prompt_save_before_action = (
+            lambda title, message, proceed: ProjectWorkspace._prompt_save_before_action(
+                fake, title, message, proceed
+            )
+        )
+        return fake
 
     def proceed() -> None:
         proceeded[0] += 1
@@ -2182,6 +2190,50 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     ProjectWorkspace._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert save_events == ["save"]
     assert proceeded[0] == 2
+
+
+def test_prompt_save_before_action_asks_again_after_edits_during_save(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An edit made while the save ran keeps the project dirty: ask again
+    instead of proceeding and dropping it."""
+    answers = [
+        QtWidgets.QMessageBox.StandardButton.Save,
+        QtWidgets.QMessageBox.StandardButton.Cancel,
+    ]
+    prompts: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        prompts.append(a)
+        return answers.pop(0)
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    project = Project()
+    project.mark_dirty()
+
+    def save_while_editing(on_success: Any = None) -> bool:
+        change_count = project._change_count
+        project.mark_dirty()  # edit lands while the save is writing
+        if project._change_count == change_count:
+            project.dirty = False
+        on_success(None)
+        return True
+
+    fake: Any = SimpleNamespace(project=project, _save_project=save_while_editing)
+    fake._prompt_save_before_action = (
+        lambda title, message, proceed: ProjectWorkspace._prompt_save_before_action(
+            fake, title, message, proceed
+        )
+    )
+    proceeded = [0]
+
+    ProjectWorkspace._prompt_save_before_action(
+        fake, "T", "M", lambda: proceeded.__setitem__(0, 1)
+    )
+
+    assert len(prompts) == 2
+    assert proceeded == [0]
+    assert project.dirty
 
 
 def test_prompt_save_before_action_skips_prompt_when_not_dirty(
@@ -2251,8 +2303,10 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     assert len(save_callbacks) == 1
     assert closed == [0]
 
+    # The callback closes again through the prompt instead of confirming
+    # outright, so edits made during the save are asked about.
     save_callbacks[0](None)
-    assert fake_gui._close_confirmed
+    assert not fake_gui._close_confirmed
     assert closed == [1]
 
 

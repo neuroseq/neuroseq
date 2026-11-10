@@ -243,6 +243,7 @@ def test_close_tab_waits_for_save_and_tracks_workspace_after_reordering(
     window._close_tab(1)
     assert not second._disposed
     window.project_tabs.tabBar().moveTab(1, 0)
+    second.project.dirty = False  # what the real save does on success
     callbacks[0](None)
     assert second._disposed and not first._disposed
 

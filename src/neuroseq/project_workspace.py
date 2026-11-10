@@ -908,7 +908,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
         Shows a Save / Discard / Cancel prompt. Cancel aborts. Discard runs
         ``proceed`` immediately. Save persists the current project first and
-        runs ``proceed`` only after the save completes; if the user backs out
+        runs ``proceed`` only after the save completes (asking again if the
+        project was edited while it ran); if the user backs out
         of the save dialog, ``proceed`` never runs and the current project is
         left untouched.
 
@@ -930,7 +931,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
             return
         if answer == QtWidgets.QMessageBox.StandardButton.Save:
-            self._save_project(on_success=lambda _result: proceed())
+            # Ask again rather than proceed: edits made while the save ran
+            # leave the project dirty and must not be dropped silently.
+            self._save_project(
+                on_success=lambda _result: self._prompt_save_before_action(
+                    title, message, proceed
+                )
+            )
             return
         proceed()
 
@@ -967,7 +974,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if answer == QtWidgets.QMessageBox.StandardButton.Save:
 
             def _close_after_save(_result: object) -> None:
-                self._close_confirmed = True
+                # Close again through the prompt: it only asks again if the
+                # project was edited while the save ran.
                 self.close()
 
             self._save_project(on_success=_close_after_save)
