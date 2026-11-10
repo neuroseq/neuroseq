@@ -35,5 +35,6 @@ Check against independent expectations:
 - simulation and analysis output against known cases, ideally as a
   [scientific validation test](testing.md#scientific-validation-tests).
 
-Record the assumptions and validation evidence. If you cannot say how you would
-detect an error, get expert review before drawing a scientific conclusion.
+Record the assumptions and validation evidence. If you cannot explain how the
+result was obtained and verify that it is correct, get expert review before
+drawing a scientific conclusion.

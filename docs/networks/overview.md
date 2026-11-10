@@ -13,13 +13,16 @@ links each row to a real cell through a Cellpose segmentation
 
 ## Supported substrates
 
-| Substrate    | Network                                               | Input                                                                                           | Readout                                                                                           |
-| ------------ | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Digital      | [Brian2](simulations.md)                              | Input arrays drive the built-in model                                                           | Simulated traces, spikes, synapses                                                                |
-| Digital      | [External simulators](external_simulators.md)         | Input arrays passed to your Python `simulate(...)`                                              | The `Experiment` your backend returns                                                             |
-| Biological   | [Holographic stimulation](holographic_stimulation.md) | Two-photon holographic optogenetics on HOLO4D: export `.seq`, upload and run through SysCon2    | [ScanImage](imaging_acquisition.md) calcium imaging: ΔF/F and deconvolved spikes per Cellpose ROI |
-| Biological   | Patch clamp                                           | [Export protocols](../input_design/patch_clamp_export.md) for the acquisition software          | [Import patch-clamp data](../readout/patch_clamp_data.md)                                         |
-| Neuromorphic | [BrainScaleS-2](neuromorphic_hardware.md)             | Constant current per neuron, or spikes from a virtual source population; chip runs 1000x faster | Spikes of all driven neurons and the membrane voltage of one neuron                               |
+These are the integrations in use today. They are starting points for new
+substrates, third-party software and APIs rather than a fixed list.
+
+| Substrate    | Network                                               | Input                                                                                                                                                    | Readout                                                                                                                                    |
+| ------------ | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Digital      | [Brian2](simulations.md)                              | Input arrays drive the built-in model                                                                                                                    | Simulated traces, spikes, synapses                                                                                                         |
+| Digital      | [External simulators](external_simulators.md)         | Input arrays passed to your Python `simulate(...)`                                                                                                       | The `Experiment` your backend returns                                                                                                      |
+| Biological   | [Holographic stimulation](holographic_stimulation.md) | Two-photon holographic optogenetics on HOLO4D: export `.seq`, upload and run through SysCon2                                                             | [ScanImage](imaging_acquisition.md) calcium imaging, started or armed through its MATLAB API: ΔF/F and deconvolved spikes per Cellpose ROI |
+| Biological   | Patch clamp                                           | [Export protocols](../input_design/patch_clamp_export.md) for the acquisition software                                                                   | [Import patch-clamp data](../readout/patch_clamp_data.md)                                                                                  |
+| Neuromorphic | [BrainScaleS-2](neuromorphic_hardware.md)             | PyNN runs on the remote chip through a container helper: constant current per neuron, or spikes from a virtual source population; chip runs 1000x faster | Spikes of all driven neurons and the membrane voltage of one neuron                                                                        |
 
 ## Workflow
 
@@ -32,6 +35,19 @@ links each row to a real cell through a Cellpose segmentation
 4. **Analyse and adapt**. Dynamic input routines close this loop automatically on
    Brian2 and SysCon2 + ScanImage (rheobase also on BrainScaleS-2).
 
-Integrations use file export/import, a direct API, or both (for example, SysCon2
-export plus automatic upload, run and ScanImage recording). New backends can be
-added through the [custom simulator interface](../developer/custom_simulators.md).
+## Interaction mechanisms
+
+How NeuroSeq talks to a network depends on what its software and hardware offer:
+
+- **File export and import**: export a protocol, run it in the other
+  application, then import the readout. Existing protocols can be imported where
+  the format is supported.
+- **Direct API**: configure and run a simulator or device through its API and
+  get the response back.
+- **Combined**: generate protocol files, upload and run them through a control
+  API, and import the recordings automatically, as with SysCon2 holographic
+  stimulation plus ScanImage acquisition.
+
+A file-based connection is useful on its own or as one step of an automated
+experiment. New backends can be added through the
+[custom simulator interface](../developer/custom_simulators.md).

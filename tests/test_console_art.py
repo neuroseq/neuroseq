@@ -25,6 +25,29 @@ def test_brain_image_path_points_at_a_real_bundled_file() -> None:
     assert path.suffix == ".png"
 
 
+def test_console_brain_has_a_transparent_background() -> None:
+    with Image.open(console_art.brain_image_path()) as image:
+        assert image.mode == "RGBA"
+        alpha = image.getchannel("A")
+        assert alpha.getextrema() == (0, 255)
+        for corner in (
+            (0, 0),
+            (image.width - 1, 0),
+            (0, image.height - 1),
+            (image.width - 1, image.height - 1),
+        ):
+            # Allow negligible alpha left by background extraction.
+            assert alpha.getpixel(corner) <= 1
+
+
+def test_console_brain_right_half_is_transparent_between_details() -> None:
+    with Image.open(console_art.brain_image_path()) as image:
+        alpha = image.getchannel("A")
+        # Gaps between binary digits and circuit traces must show the console.
+        for x, y in ((0.6, 0.6), (0.65, 0.7), (0.7, 0.3), (0.75, 0.7), (0.8, 0.6)):
+            assert alpha.getpixel((int(image.width * x), int(image.height * y))) == 0
+
+
 def test_startup_brain_image_path_points_at_a_different_real_bundled_file() -> None:
     path = console_art.startup_brain_image_path()
     assert path.exists()

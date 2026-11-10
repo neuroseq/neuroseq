@@ -209,6 +209,12 @@ class ConsoleWidget(ReplWidget):
         """
         image = QtGui.QImage()
         image.loadFromData(console_art.tinted_brain_image_bytes(random.Random()))
+        image = image.scaled(
+            240,
+            240,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation,
+        )
         self.output.document().addResource(
             QtGui.QTextDocument.ResourceType.ImageResource,
             _BRAIN_RESOURCE_URL,
