@@ -64,6 +64,7 @@ from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.project import ImportedComponents
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
@@ -1029,11 +1030,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         options = options_dialog.options
         filename_path = pathlib.Path(filename)
 
-        def _import_task(report: Callable[[int], None]) -> None:
-            project.import_project(filename_path, options, report=report)
-            return None
+        def _import_task(report: Callable[[int], None]) -> ImportedComponents:
+            return project.read_import(filename_path, options, report=report)
 
-        def _on_imported(_: object) -> None:
+        def _on_imported(components: object) -> None:
+            # Applied here: it clears the undo history, whose listeners are widgets.
+            assert isinstance(components, ImportedComponents)
+            project.apply_import(components)
             self.update_project(self.project)
 
         self._dispatch_io_task(
@@ -1952,6 +1955,18 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
         project = self.project
         padding_secs = self.settings.stim_padding_secs
+        try:
+            # On this thread: padding may clear the undo history, which
+            # notifies widgets.
+            project.prepare_simulation(simulation_time, padding_secs)
+        except Exception as exc:
+            SimulationGuard.release(self)
+            self.logger.exception("Could not prepare the Brian2 simulation")
+            QtWidgets.QMessageBox.critical(
+                self, "Simulation error", f"Could not run simulation: {exc}"
+            )
+            self.dynamic_input_controller.dynamic_input_simulation_failed(str(exc))
+            return
 
         def _request_brian2_cancel() -> None:
             self.logger.info("Brian2 simulation cancellation requested by user.")

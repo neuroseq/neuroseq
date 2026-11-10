@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import copy
+from dataclasses import dataclass
 from typing import Protocol
 from typing import overload
 
@@ -132,6 +133,15 @@ def _cellpose_neuron_count(cellpose_data: CellposeImportResult | None) -> int:
         return 0
     unique_ids = np.unique(cellpose_data.segmentation_array)
     return int(np.sum(unique_ids >= 0))
+
+
+@dataclass
+class ImportedComponents:
+    """Parts read from another project file; ``None`` means not imported."""
+
+    b2_model: B2Model | None = None
+    experiments: dict[str, Experiment] | None = None
+    stim_arrays: dict[str, StimArray] | None = None
 
 
 class Project:
@@ -628,16 +638,27 @@ class Project:
         options: SaveLoadOptions,
         report: Callable[[int], None] | None = None,
     ) -> None:
+        self.apply_import(self.read_import(filepath, options, report))
+
+    def read_import(
+        self,
+        filepath: str | pathlib.Path,
+        options: SaveLoadOptions,
+        report: Callable[[int], None] | None = None,
+    ) -> ImportedComponents:
+        """Read the chosen parts of another project file without changing this one.
+
+        Safe to run on a worker thread; pass the result to :meth:`apply_import`
+        on the GUI thread, since that clears the undo history.
+        """
         filepath = pathlib.Path(filepath)
         self.logger.info(
             f"Importing components from '{filepath}' into existing project"
         )
+        components = ImportedComponents()
         with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
-            # Replacing model/components is a new baseline, not a data command.
-            self.history.clear()
             if options.include_model:
                 self.logger.info("  - importing b2_model")
-                self.b2_model = B2Model()
                 b2_model_data = load_from_zip("b2_model", zf)
                 if (
                     options.include_simulation_data
@@ -647,15 +668,27 @@ class Project:
                     b2_stored_state = pickle.loads(zf.read("b2_stored_state.pkl"))
                 else:
                     b2_stored_state = {}
-                self.b2_model = B2Model.from_dict(
+                components.b2_model = B2Model.from_dict(
                     b2_model_data, b2_stored_state, report
                 )
             if options.include_experimental_data:
                 self.logger.info("  - importing experimental data")
-                self.experiments = load_from_zip("experimental_data", zf)
+                components.experiments = load_from_zip("experimental_data", zf)
             if options.include_stim_arrays:
                 self.logger.info("  - importing stim arrays")
-                self.stim_arrays = load_from_zip("stim_arrays", zf)
+                components.stim_arrays = load_from_zip("stim_arrays", zf)
+        return components
+
+    def apply_import(self, components: ImportedComponents) -> None:
+        """Replace this project's parts with those from :meth:`read_import`."""
+        # Replacing model/components is a new baseline, not a data command.
+        self.history.clear()
+        if components.b2_model is not None:
+            self.b2_model = components.b2_model
+        if components.experiments is not None:
+            self.experiments = components.experiments
+        if components.stim_arrays is not None:
+            self.stim_arrays = components.stim_arrays
         self.update_limits()
         self.mark_dirty()
 
@@ -1299,7 +1332,8 @@ class Project:
             n_timestamps = stim_array.values.shape[0]
             array_time_secs = stim_array.dt * n_timestamps
             padding_required_secs = total_time_seconds - array_time_secs
-            if padding_required_secs > 0:
+            # Ignore float error in n * dt, or padding twice adds a sample.
+            if padding_required_secs / stim_array.dt > 1e-6:
                 n_pad = (
                     max(
                         0,
@@ -1635,12 +1669,15 @@ class Project:
         """Flatten `external_simulate_params` to `{name: value}` for the call site."""
         return {k: v["value"] for k, v in self.external_simulate_params.items()}
 
-    def run_simulation(
-        self,
-        time_seconds: float,
-        report: Callable | None = None,
-        stim_array_padding_seconds: float = 0.0,
+    def prepare_simulation(
+        self, time_seconds: float, stim_array_padding_seconds: float = 0.0
     ) -> None:
+        """Size the stim arrays for a run of ``time_seconds``.
+
+        :meth:`run_simulation` does this too, but it may clear the undo history,
+        whose listeners update widgets: call it on the GUI thread before running
+        the simulation on a worker, where it then changes nothing.
+        """
         lengths_before = self._stim_array_lengths()
         self.pad_stim_arrays(
             self.b2_model.get_sim_time_secs()
@@ -1656,6 +1693,14 @@ class Project:
         # trailing zero columns (= no stimulation) so increasing the neuron
         # count in the model editor doesn't crash with an out-of-bounds index.
         self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
+
+    def run_simulation(
+        self,
+        time_seconds: float,
+        report: Callable | None = None,
+        stim_array_padding_seconds: float = 0.0,
+    ) -> None:
+        self.prepare_simulation(time_seconds, stim_array_padding_seconds)
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
         self.mark_dirty()
