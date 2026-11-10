@@ -9,7 +9,7 @@ with `python -m pytest` in the activated environment.
 
 | Task                             | Command                                            |
 | -------------------------------- | -------------------------------------------------- |
-| Full suite (parallel)            | `uv run pytest`                                    |
+| Full suite (up to 8 workers)     | `uv run pytest`                                    |
 | One module                       | `uv run pytest tests/test_gui.py`                  |
 | Serial (`-s`, `--pdb`, one test) | `uv run pytest -n 0 ...`                           |
 | Coverage report                  | `uv run pytest --cov --cov-report=xml`             |
