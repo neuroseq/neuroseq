@@ -54,8 +54,10 @@ def render_analysis(widget, data, neuron_slice, time_slice) -> None:
             )
             return
 
-        bins = int(np.ceil(np.max(spike_times_ms)))
-        ax.hist(spike_times_ms, bins=bins)
+        # 1 ms bins over the data range (at least one, e.g. for a lone spike).
+        t_min = float(np.min(spike_times_ms))
+        bins = max(1, int(np.ceil(np.max(spike_times_ms) - t_min)))
+        ax.hist(spike_times_ms, bins=bins, range=(t_min, t_min + bins))
         return
 
     if isinstance(data, SynapseData):
