@@ -56,7 +56,12 @@ def load_annotation_image(image_path: str | Path) -> np.ndarray:
 
     frame_indices = range(0, min(frame_count, MAX_SOURCE_FRAMES), FRAME_STEP)
     frames = tifffile.imread(path, key=frame_indices)
-    return np.mean(frames, axis=0)
+    mean = np.mean(frames, axis=0)
+    if frames.dtype == np.uint8:
+        # Stays 8-bit, so brightness_contrast.to_8bit keeps it on its own scale
+        # as the Cellpose importer does.
+        return np.rint(mean).astype(np.uint8)
+    return mean
 
 
 def adjusted_annotation_image(

@@ -575,3 +575,204 @@ def test_brightness_dialog_previews_the_window(qtbot: QtBot) -> None:
     dialog.controls.set_display_range(DisplayRange(100, 150))
     assert dialog.display_range == DisplayRange(100, 150)
     assert dialog.preview.pixmap().toImage() != before
+
+
+@pytest.mark.parametrize("also_adjust", [False, True])
+def test_auto_brightness_is_applied_before_segmentation(
+    tmp_path, qtbot: QtBot, mocker, also_adjust: bool
+) -> None:
+    """Grab FOV's "Auto brightness": Fiji's Auto window is passed on to the
+    segmentation, and "Adjust brightness first" starts from it."""
+    from neuroseq.visualization_support.brightness_contrast import (
+        enhanced_display_range,
+    )
+    from neuroseq.visualization_support.brightness_contrast import luminance_histogram
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
+
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    rng = np.random.default_rng(0)
+    pixels = np.clip(rng.normal(80, 20, (200, 200)), 0, 255).astype(np.uint8)
+    pixels[0, :4] = (0, 0, 255, 255)  # full 0-255 span, so to_8bit is identity
+    image_path = tmp_path / "fov_mean.png"
+    Image.fromarray(pixels).save(image_path)
+    segmentation_path = tmp_path / "fov_mean_cpsam_seg.npy"
+    np.save(segmentation_path, np.zeros((200, 200), dtype=np.int32))
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    annotate = mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(segmentation_path, tmp_path / "masks.png"),
+    )
+    expected = enhanced_display_range(luminance_histogram(pixels))
+    assert not expected.is_identity
+    shown = []
+
+    def _exec(brightness: SegmentationBrightnessDialog) -> int:
+        shown.append(brightness.display_range)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    mocker.patch.object(SegmentationBrightnessDialog, "exec", _exec)
+    dialog.adjust_brightness_checkbox.setChecked(also_adjust)
+    dialog.segment_file(str(image_path), auto_brightness=True)
+
+    annotate.assert_called_once_with(
+        str(image_path), model_name="cpsam", display_range=expected
+    )
+    assert shown == ([expected] if also_adjust else [])
+
+
+def test_segmenting_a_new_fov_replaces_an_existing_segmentation(
+    tmp_path, qtbot: QtBot, mocker, qmessagebox_calls: list
+) -> None:
+    """Grab FOV in a project that already has a segmentation of another size
+    (e.g. an example project's): the new image and its segmentation are loaded
+    together, not checked against the old masks or mapping."""
+    old = _make_cellpose_dialog(tmp_path, qtbot)
+    assert old.image_path is not None
+    existing = old.importer.create_result(
+        old.image_path, {0: 4, 1: 1}, mapping_strategy="Custom"
+    )
+    dialog = CellposeImportDialog(existing_data=existing)
+    qtbot.addWidget(dialog)
+    assert dialog._get_mapping_strategy() == "Custom"
+
+    fov = tmp_path / "2026-11-06_00001_mean.png"
+    Image.fromarray(np.arange(120, dtype=np.uint8).reshape(10, 12)).save(fov)
+    segmentation = np.zeros((10, 12), dtype=np.int32)
+    segmentation[2:5, 2:5] = 1
+    segmentation[6:9, 7:10] = 2
+    seg_path = tmp_path / "2026-11-06_00001_mean_cpsam_seg.npy"
+    np.save(seg_path, segmentation)
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(seg_path, tmp_path / "masks.png"),
+    )
+
+    dialog.segment_file(str(fov))
+
+    errors = [call for call in qmessagebox_calls if call["name"] == "critical"]
+    assert errors == []
+    assert dialog.image_path == fov
+    assert dialog.importer.image_data is not None
+    assert dialog.importer.image_data.shape[:2] == (10, 12)
+    assert dialog.importer.segmentation_data is not None
+    assert dialog.importer.segmentation_data.shape == (10, 12)
+    assert dialog.import_button.isEnabled()
+    # The old custom mapping does not carry over to the new cells.
+    assert dialog._get_mapping_strategy() != "Custom"
+
+
+def _fov_with_segmentation(tmp_path, mocker):
+    """A dim 200x200 FOV, its two-cell segmentation, and Cellpose mocked to return it."""
+    rng = np.random.default_rng(1)
+    pixels = np.clip(rng.normal(60, 6, (200, 200)), 0, 255).astype(np.uint8)
+    pixels[0, :2] = (0, 255)  # full range: the dialog shows it as stored
+    fov = tmp_path / "fov_mean.png"
+    Image.fromarray(pixels).save(fov)
+    segmentation = np.zeros((200, 200), dtype=np.int32)
+    segmentation[5:10, 5:10] = 1
+    segmentation[100:130, 100:130] = 2
+    seg_path = tmp_path / "fov_mean_cpsam_seg.npy"
+    np.save(seg_path, segmentation)
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(seg_path, tmp_path / "masks.png"),
+    )
+    return fov, pixels
+
+
+def test_auto_brightness_is_shown_and_kept_with_the_import(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """The window Cellpose segmented with is what the preview shows, and it is
+    stored with the import for the Spatial Footprints view."""
+    from neuroseq.visualization_support.brightness_contrast import DisplayRange
+    from neuroseq.visualization_support.brightness_contrast import (
+        enhanced_display_range,
+    )
+    from neuroseq.visualization_support.brightness_contrast import luminance_histogram
+
+    fov, pixels = _fov_with_segmentation(tmp_path, mocker)
+    expected = enhanced_display_range(luminance_histogram(pixels))
+    assert not expected.is_identity
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    shown = mocker.spy(dialog.overlay_widget, "set_overlay")
+
+    dialog.segment_file(str(fov), auto_brightness=True)
+
+    base = shown.call_args.kwargs["base_image"]
+    assert base is not None
+    stored = dialog.importer.image_data
+    assert stored is not None
+    # More contrasted than the stored FOV.
+    assert base.std() > stored.std() * 2
+    dialog._import_data()
+    imported = dialog.get_imported_data()
+    assert imported is not None
+    assert imported.display_range == (expected.minimum, expected.maximum)
+
+    # Reopened, the window is shown and kept on a re-import.
+    reopened = CellposeImportDialog(existing_data=imported)
+    qtbot.addWidget(reopened)
+    assert reopened._display_range == DisplayRange(expected.minimum, expected.maximum)
+    reopened._import_data()
+    again = reopened.get_imported_data()
+    assert again is not None and again.display_range == imported.display_range
+
+
+def test_without_auto_brightness_the_fov_is_shown_as_stored(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    fov, _pixels = _fov_with_segmentation(tmp_path, mocker)
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    shown = mocker.spy(dialog.overlay_widget, "set_overlay")
+    dialog.segment_file(str(fov))
+    np.testing.assert_array_equal(
+        shown.call_args.kwargs["base_image"], dialog.importer.image_data
+    )
+    dialog._import_data()
+    imported = dialog.get_imported_data()
+    assert imported is not None and imported.display_range is None
+
+
+def test_segmenting_a_new_fov_keeps_a_linear_mapping_and_its_offset(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """A Linear mapping names no cells, so the user's choice survives Grab FOV."""
+    dialog = _make_cellpose_dialog(tmp_path, qtbot)
+    dialog._apply_existing_mapping({}, "Linear", 5)
+    fov = tmp_path / "2026-11-06_00002_mean.png"
+    Image.fromarray(np.arange(120, dtype=np.uint8).reshape(10, 12)).save(fov)
+    segmentation = np.zeros((10, 12), dtype=np.int32)
+    segmentation[2:5, 2:5] = 1
+    seg_path = tmp_path / "2026-11-06_00002_mean_cpsam_seg.npy"
+    np.save(seg_path, segmentation)
+    mocker.patch(
+        "neuroseq.importers.cellpose_import_dialog.importlib.util.find_spec",
+        return_value=object(),
+    )
+    mocker.patch(
+        "neuroseq.cellpose_annotation.annotate_mean_fluorescence_tiff",
+        return_value=(seg_path, tmp_path / "masks.png"),
+    )
+
+    dialog.segment_file(str(fov))
+
+    assert dialog.image_path == fov
+    assert dialog._get_mapping_strategy() == "Linear"
+    assert dialog._get_linear_offset() == 5

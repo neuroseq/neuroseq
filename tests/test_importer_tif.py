@@ -172,24 +172,25 @@ def test_run_roi_average_pipeline_validates_inputs(tmp_path):
         )
 
 
-def test_run_roi_average_pipeline_validates_tiff_layout(monkeypatch, tmp_path):
+def test_run_roi_average_pipeline_validates_tiff_layout(tmp_path):
     import tifffile
 
     from neuroseq.importers.importer_tif import run_roi_average_pipeline
 
     path = tmp_path / "stack.tif"
-    path.touch()
     masks = np.ones((2, 2), dtype=np.int32)
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 1, 1, 2, 2)))
+    tifffile.imwrite(
+        path, np.ones((1, 1, 1, 2, 2), np.uint16), photometric="minisblack"
+    )
     with pytest.raises(ValueError, match="must have shape"):
         run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2, 2)))
+    tifffile.imwrite(path, np.ones((1, 2, 2, 2), np.uint16), photometric="minisblack")
     with pytest.raises(ValueError, match="contains 2 channel"):
         run_roi_average_pipeline([path], masks, TifPipelineParams(nchannels=1))
 
-    monkeypatch.setattr(tifffile, "imread", lambda _path: np.ones((1, 2, 2)))
+    tifffile.imwrite(path, np.ones((1, 2, 2), np.uint16), photometric="minisblack")
     with pytest.raises(ValueError, match="not divisible by nchannels"):
         run_roi_average_pipeline(
             [path], masks, TifPipelineParams(nchannels=2, functional_chan=2)
@@ -367,11 +368,18 @@ def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
     np.testing.assert_array_equal(loaded, masks)
 
 
-def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("variant", ["full", "traces_only", "gpu_fails"])
+@pytest.mark.parametrize("reference", [None, "matching", "mismatched"])
+@pytest.mark.parametrize("register", [False, True])
+def test_run_suite2p_pipeline_orchestration(
+    monkeypatch, tmp_path: Path, register: bool, reference: str | None, variant: str
+):
     """Exercise run_suite2p_pipeline with fully-mocked Suite2p modules.
 
     Validates the orchestration: db assembly, channel handling, stat building,
     extraction/preprocess/oasis call sequence, and cleanup of the tempdir.
+    ``traces_only`` stops after extraction; with ``gpu_fails`` the GPU registration
+    fails partway, and the binary is rewritten before registering on the CPU.
     """
     import sys
     import types
@@ -389,7 +397,24 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     def default_settings():
         return {
             "extraction": {"neuropil_coefficient": 0.7, "batch_size": 200},
+            "registration": {"nonrigid": True},
         }
+
+    registered: list[dict] = []
+
+    conversions: list[int] = []
+    closed: list[object] = []
+
+    def registration_wrapper(f_reg, f_reg_chan2, refImg, settings, device):
+        if getattr(device, "type", None) == "cuda":
+            f_reg.data += 1.0  # shifted some frames in place before failing
+            raise RuntimeError("CUDA out of memory")
+        # Registered from a freshly converted binary, never a half-shifted one.
+        assert not f_reg.data.any()
+        registered.append(
+            {"f_reg": f_reg, "chan2": f_reg_chan2, "ref": refImg, "settings": settings}
+        )
+        return {"yoff": np.array([0.0, 3.0]), "xoff": np.array([0.0, 4.0])}
 
     def get_file_list(db):
         return ["/tmp/x.tif"], np.array([1], dtype=np.int64)
@@ -406,13 +431,18 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
         ]
 
     def tiff_to_binary(dbs, settings, files, files_chan2):
+        conversions.append(1)
         return dbs
 
     class FakeBinaryFile:
-        def __init__(self, Ly, Lx, filename):
+        def __init__(self, Ly, Lx, filename, n_frames=None, write=False):
             self.Ly = Ly
             self.Lx = Lx
+            self.write = write
             self.data = np.zeros((nframes, Ly, Lx), dtype=np.float32)
+
+        def close(self):
+            closed.append(self)
 
     def assign_overlaps(stat, Ly_, Lx_):
         return stat
@@ -421,11 +451,14 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
         return stat
 
     def extraction_wrapper(stat, f_bin, f_reg_chan2, settings, device):
+        # Writable only when it is motion-corrected in place.
+        assert f_bin.write is register
         F = np.full((n_neurons, nframes), 5.0, dtype=np.float32)
         Fneu = np.full((n_neurons, nframes), 1.0, dtype=np.float32)
         return F, Fneu, None, None
 
     def preprocess(F, fs, batch_size, device, **kwargs):
+        assert variant != "traces_only"
         return F
 
     def oasis(F, batch_size, tau, fs):
@@ -491,18 +524,58 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     monkeypatch.setitem(sys.modules, "suite2p.extraction", s2extraction_mod)
     monkeypatch.setitem(sys.modules, "suite2p.classification", s2classification_mod)
     monkeypatch.setitem(sys.modules, "torch", torch_mod)
+    monkeypatch.setitem(
+        sys.modules,
+        "suite2p.registration",
+        _module("suite2p.registration", registration_wrapper=registration_wrapper),
+    )
+
+    if variant == "gpu_fails":
+        monkeypatch.setattr(
+            "neuroseq.importers.importer_tif.select_torch_device",
+            lambda: (types.SimpleNamespace(type="cuda"), "CUDA"),
+        )
 
     tif = tmp_path / "data" / "stack.tif"
     tif.parent.mkdir()
     tif.write_bytes(b"")
 
     progress_calls: list[tuple[str, float]] = []
+    reference_image = {
+        None: None,
+        "matching": np.full((Ly, Lx), 7.6),
+        "mismatched": np.zeros((Ly + 1, Lx)),
+    }[reference]
     result = run_suite2p_pipeline(
         [tif],
         masks,
         TifPipelineParams(nchannels=2),
         progress=lambda msg, frac: progress_calls.append((msg, frac)),
+        register=register,
+        reference_image=reference_image,
+        traces_only=variant == "traces_only",
     )
+    retried = register and variant == "gpu_fails"
+    assert len(conversions) == (2 if retried else 1)
+    assert len(closed) == (2 if retried else 0)  # both channels' binaries
+    if retried:
+        assert result.extra["compute_device"] == "CPU (GPU fallback)"
+    if not register:
+        assert registered == [] and "registration" not in result.extra
+    else:
+        assert len(registered) == 1
+        assert registered[0]["chan2"] is not None  # channel 2 follows the shifts
+        # A 16 px frame is smaller than one non-rigid block: registered rigidly.
+        assert registered[0]["settings"] == {"nonrigid": False}
+        if reference == "matching":
+            assert registered[0]["ref"].dtype == np.int16
+            assert np.all(registered[0]["ref"] == 8)
+        else:
+            assert registered[0]["ref"] is None
+        assert result.extra["registration"] == {
+            "reference": "provided" if reference == "matching" else "movie",
+            "max_shift_px": 5.0,
+        }
 
     assert result.F.shape == (n_neurons, nframes)
     assert result.Fneu.shape == (n_neurons, nframes)
@@ -510,9 +583,12 @@ def test_run_suite2p_pipeline_orchestration(monkeypatch, tmp_path: Path):
     assert result.mean_image.shape == (Ly, Lx)
     # All Cellpose ROIs were marked as cells.
     assert np.all(result.iscell[:, 0] == 1)
-    # Stat entries got snr/skew/std appended.
-    for entry in result.stat:
-        assert {"snr", "skew", "std"} <= set(entry.keys())
+    if variant == "traces_only":
+        assert not result.spks.any()
+    else:
+        # Stat entries got snr/skew/std appended.
+        for entry in result.stat:
+            assert {"snr", "skew", "std"} <= set(entry.keys())
     # Progress callback was invoked for the pipeline phases.
     assert progress_calls
     assert progress_calls[-1] == ("Done", 1.0)

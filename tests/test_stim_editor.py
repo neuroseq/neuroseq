@@ -2071,3 +2071,26 @@ def test_pad_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", get_text)
     getattr(editor, action)()
     assert "0.125 s (125 ms)" in labels[0]
+
+
+def test_add_empty_stim_array_like_current_selects_a_fresh_copy(qtbot: QtBot) -> None:
+    stim_editor, project = _make_ramp_editor(qtbot)
+    project.stim_arrays["a"].values[3, 1] = 2.0
+    project.stim_arrays["a (run)"] = StimArray(
+        "a (run)",
+        neuroseq.stimulation.stim.StimType.Excitation,
+        np.zeros((1, 4)),
+        "mV",
+        0.001,
+    )
+
+    assert stim_editor.add_empty_stim_array_like_current("a (run)") == "a (run) (2)"
+
+    fresh = project.stim_arrays["a (run) (2)"]
+    modifier = stim_editor.current_stim_modifier
+    assert modifier is not None and modifier.stim_array is fresh
+    assert stim_editor.cmb_stim.currentText() == "a (run) (2)"
+    assert fresh.values.shape == (200, 4)
+    assert not np.any(fresh.values)
+    assert (fresh.units, fresh.dt) == ("mV", 0.001)
+    assert project.stim_arrays["a"].values[3, 1] == 2.0

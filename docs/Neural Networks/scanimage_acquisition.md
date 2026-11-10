@@ -96,6 +96,18 @@ Cellpose on it. Because the image comes from the same scan, the masks share the
 recordings' pixel grid, as the dynamic input routines need. The snapshot is
 listed in the acquisition history but adds no data group or imaging entry.
 
+**Auto brightness** is ticked by default. Before Cellpose segments the mean
+image, it stretches the contrast so that 0.35% of pixels saturate, as Fiji's
+**Enhance Contrast** does, which helps with dim fields of view. The segmentation
+dialog's preview and the Spatial Footprints panel show the image with the same
+adjustment, which is saved with the project. You can refine it there with
+**Brightness/Contrast**. The choice is remembered across sessions. If **Adjust
+brightness first** is also ticked in the segmentation dialog, its controls start
+from the automatic window.
+
+Mean images are shown on a 0–255 scale that ignores the brightest and darkest
+0.02% of pixels, so a few hot pixels do not turn the field of view black.
+
 NeuroSeq reports state from ScanImage, waits for completed/aborted acquisition
 events and readable, stable files, then indexes the saved channels and frame
 timestamps. A successful complete acquisition must contain the requested frame
@@ -110,7 +122,11 @@ logging folder, filename stem/counter, frames per file, logging enable,
 external-trigger enable, and frames-per-slice settings once ScanImage is idle. If the terminal callback
 precedes the idle state, the next status poll retries restoration; idle
 Disconnect also restores pending settings, as do the next Preview and Record if
-ScanImage became idle without any terminal callback. Verify restoration on your rig,
+ScanImage became idle without any terminal callback. If ScanImage goes idle
+without a terminal callback, the recording is marked interrupted and its settings
+are restored at the next status poll. An acquisition you start yourself after
+such a missed callback is never taken for NeuroSeq's recording. A setting you
+change in ScanImage after NeuroSeq set it is kept, not restored. Verify restoration on your rig,
 including after abort, before starting another manual Grab. Acquisition metadata
 retains the settings used during the recording.
 
@@ -175,11 +191,37 @@ routines run each block without manual steps:
 3. Run the sequence (start condition _auto_); its TTL output must trigger
    ScanImage, so the recording starts with the block.
 4. When the recording is complete, extract the ΔF/F trace of every cell with the
-   project's Cellpose masks (frames lit by the stimulation laser are
-   interpolated; F0 is the mean before the block's first stimulus), deconvolve
+   project's Cellpose masks (with **Remove stimulation artefact** ticked, the
+   default, frames lit by the stimulation laser are interpolated from the
+   nearest clean frames; F0 is the mean before the block's first stimulus), deconvolve
    it into spikes with OASIS (as Suite2p does, with jGCaMP8m's 0.5 s decay; an
    event of at least the **Spike threshold**, in ΔF/F, is a spike), and measure
-   the response on this block's trace.
+   the response on this block's trace. **Trace extraction** selects how each
+   cell's fluorescence is measured:
+   - **Suite2p (motion-corrected, neuropil-corrected)**, the default: Suite2p
+     motion-corrects the recording (rigid and non-rigid registration), then
+     extracts each ROI with the same masks and uses F − 0.7 × neuropil. ΔF/F is
+     measured relative to the baseline of the raw F, so a dim cell whose
+     neuropil-corrected baseline is close to zero does not get a huge ΔF/F. The
+     reference is the image the Cellpose masks were drawn on (e.g. the
+     **Grab FOV** mean TIFF), so drift since the FOV was grabbed is corrected
+     too. If that image is not a TIFF of the recording's size, each recording is
+     aligned to its own mean instead, and the log says so. The log reports each
+     block's largest shift in pixels.
+   - **ROI average (fast)**: the mean of each ROI's pixels as recorded, without
+     motion or neuropil correction.
+
+   Suite2p is slower. If one block takes longer than **Warn if Suite2p takes
+   over** (120 s by default), the routine's log gets a warning, and the routine
+   keeps waiting for that block and then carries on.
+
+   While traces are extracted, the progress bar in the main window's toolbar
+   shows the current stage, unless a simulation is already using it. The
+   routine's activity log records every step of each block: the SysCon2 import
+   and upload, ScanImage arming and the recording, each extraction stage with
+   its elapsed time, the number of cells, frames and spikes extracted, the
+   motion-correction shift, and the measured response.
+
 5. Place both in the run's data group, named after the run folder (e.g.
    `rheobase_2026-10-27_153313`), at the block's time in the stim array. The
    run thus has one continuous ΔF/F trace and one spike dataset; a block

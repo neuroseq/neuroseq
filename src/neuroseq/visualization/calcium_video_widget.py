@@ -35,6 +35,8 @@ class CalciumVideoWidget(FPLWidget):
 
     import_requested = QtCore.Signal()
     remove_requested = QtCore.Signal()
+    # The movie's files were not found; the user wants to pick their new place.
+    locate_requested = QtCore.Signal()
     # Interleaved channels in the movie and the one shown (0 = all).
     channels_changed = QtCore.Signal(int, int)
 
@@ -45,6 +47,7 @@ class CalciumVideoWidget(FPLWidget):
         self._frame_refs: list[tuple[str, int, int]] = []
         super().__init__(parent=parent)
         self._paths: list[Path] = []
+        self.missing_paths: list[Path] = []
         self._fps: float | None = None
         # Frame rate of each channel and every page of the movie, before a
         # channel is picked; _fps and _frame_refs are what is played.
@@ -141,6 +144,38 @@ class CalciumVideoWidget(FPLWidget):
         )
         empty_layout.addStretch(1)
         layout.insertWidget(0, self.empty_state_widget)
+        # Shown instead of the video when its files are not where the project
+        # says (e.g. a project opened on another machine).
+        self.missing_state_widget = QtWidgets.QWidget(self)
+        missing_layout = QtWidgets.QVBoxLayout(self.missing_state_widget)
+        missing_layout.addStretch(1)
+        self.missing_label = QtWidgets.QLabel(self.missing_state_widget)
+        self.missing_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.missing_label.setWordWrap(True)
+        self.missing_label.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        missing_layout.addWidget(self.missing_label)
+        self.locate_button = QtWidgets.QPushButton(
+            "Locate file…", self.missing_state_widget
+        )
+        self.locate_button.setToolTip(
+            "Choose where the original imaging file is on this computer"
+        )
+        self.locate_button.clicked.connect(self.locate_requested.emit)
+        self.missing_remove_button = QtWidgets.QPushButton(
+            "Remove imaging data", self.missing_state_widget
+        )
+        self.missing_remove_button.clicked.connect(self.remove_requested.emit)
+        missing_buttons = QtWidgets.QHBoxLayout()
+        missing_buttons.addStretch(1)
+        missing_buttons.addWidget(self.locate_button)
+        missing_buttons.addWidget(self.missing_remove_button)
+        missing_buttons.addStretch(1)
+        missing_layout.addLayout(missing_buttons)
+        missing_layout.addStretch(1)
+        layout.insertWidget(1, self.missing_state_widget)
+        self.missing_state_widget.setVisible(False)
         layout.addWidget(self.video_actions_widget)
         self.save_button.setEnabled(False)
         self.remove_button.setEnabled(False)
@@ -189,6 +224,8 @@ class CalciumVideoWidget(FPLWidget):
         self._scanimage_index = None
         self._frame_times = None
         self._paths = list(paths)
+        self.missing_paths = [path for path in self._paths if not path.is_file()]
+        self.missing_state_widget.setVisible(False)
         self._fps = float(fps) if fps is not None and fps > 0 else None
         self._channel_fps = self._fps
         self._channels = max(1, int(channels))
@@ -204,6 +241,9 @@ class CalciumVideoWidget(FPLWidget):
             self._video_warning_shown = False
             self._set_canvas_visible(False)
             self.empty_state_widget.setVisible(True)
+            return
+        if self.missing_paths:
+            self._show_missing_files()
             return
         try:
             pages: list[tuple[tifffile.TiffFile, int, int]] = []
@@ -283,6 +323,18 @@ class CalciumVideoWidget(FPLWidget):
         if scanimage_index is not None:
             self.set_scanimage_index(scanimage_index, channel)
         self.set_time_ms(0)
+
+    def _show_missing_files(self) -> None:
+        heading = (
+            "The imaging file of this project was not found:"
+            if len(self.missing_paths) == 1
+            else "These imaging files of this project were not found:"
+        )
+        names = "\n".join(str(path) for path in self.missing_paths)
+        self.missing_label.setText(f"{heading}\n{names}")
+        self._set_canvas_visible(False)
+        self.empty_state_widget.setVisible(False)
+        self.missing_state_widget.setVisible(True)
 
     def _apply_channels(self) -> None:
         if self._channels > 1 and self._shown_channel > 0:

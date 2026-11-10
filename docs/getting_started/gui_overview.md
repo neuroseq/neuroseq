@@ -22,6 +22,7 @@ All data import and export actions are grouped under two sub-menus:
 - `File → Export`
   - `Patch Clamp Input` — Igor2 stimulus CSV/`.ibw`/`.pxp` export for SutterPatch (see [Export stimuli for patch clamp recordings](../Input%20Design%20and%20Readout%20Analysis/export_patch_clamp_stimuli.md))
   - `Optogenetic Input` — SysCon2 `.seq` (or Igor2) export for holographic hardware (see [Multiphoton Holographic Stimulation](../Neural%20Networks/multiphoton_holographic_stimulation.md)). This only writes files; to also import the sequence into a connected SysCon2, use **Export with settings…** in the Stimulation setup panel.
+  - `Traces as NumPy Array…` / `Spikes as NumPy Array…` — save simulated or imported traces or spikes as a NumPy array with rows = neurons (by id) and columns = time points. Traces keep their own samples, at full resolution even for simulated traces, which plots downsample. Spikes are counted per time bin. The bin size defaults to the frame period of a trace in the same data group, else 1 ms, and the bins cover the data group's duration. A `.npy` file holds only the array; a `.npz` archive also holds `neuron_ids`, `times` (s) and `units`, with the array as `values`.
 
 `File → Cell segmentation` imports or runs Cellpose segmentation, and
 `File → Manage Data` lists the imported and simulated data groups so they can
@@ -179,7 +180,7 @@ application:
 
 | Setting                   | What it does                                                                                                                                                |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../Neural%20Networks/simulations.md#choosing-a-brian2-backend)).                                                           |
+| Brian2 simulation backend | Pick `cython` (default) or `numpy` (see [Simulations](../Neural%20Networks/simulations.md#choosing-a-brian2-backend)).                                      |
 | Input automatic padding   | Default duration (seconds) used when creating new stim arrays and as a prefill for the _Pad stim array_ dialog.                                             |
 | LLM assistant             | Configure provider, model, and API key for the [in-app chat assistant](chat_assistant.md) (experimental).                                                   |
 | Synapse matrix RAM limit  | Memory budget for rendering the full synaptic weight matrix; controls when the synapse and heatmap widgets switch to downsampled mode.                      |

@@ -11,7 +11,15 @@ if strcmp(operation, 'event')
     if strcmp(args.name, 'focusDone'), ownedFocus = false; end
     if ~isempty(run.id) && any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'}))
         switch args.name
-            case 'acqStart', run.state = 'recording';
+            case 'acqStart'
+                if strcmp(run.state, 'recording') || ~all(untouched(hSI, run))
+                    % A second acquisition, or one with settings changed since
+                    % NeuroSeq set them: the run ended unseen (a missed
+                    % terminal event) and this acquisition is the user's.
+                    run.state = 'interrupted';
+                else
+                    run.state = 'recording';
+                end
             case 'acqModeDone', run.state = 'completed';
             case 'acqAbort', run.state = 'aborted';
         end
@@ -19,6 +27,7 @@ if strcmp(operation, 'event')
     run = restore_settings(hSI, run);
     reply = '{}'; return
 end
+run = settle(hSI, run);
 run = restore_settings(hSI, run);
 switch operation
     case 'probe'
@@ -100,10 +109,7 @@ switch operation
             [ok, msg] = mkdir(args.directory); assert(ok, msg);
         end
         % Retain settings until completion/abort and restore only once idle.
-        old = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
-            hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
-            optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop'), ...
-            hSI.hChannels.channelSave, optional_prop(hSI.hScan2D, 'logFramesPerFile')};
+        old = setting_values(hSI);
         run = struct('id',args.run_id, 'state','starting', 'directory',args.directory, ...
             'stem',args.stem, 'counter',args.counter, 'old',{old});
         try
@@ -120,6 +126,9 @@ switch operation
             if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = 1; end
             if ~isempty(old{8}), hSI.acqsPerLoop = 1; end
             run.settings = recording_settings(hSI);
+            % As ScanImage stores them: a restore leaves alone any setting
+            % changed since (by the user, after a missed terminal event).
+            run.applied = setting_values(hSI);
             hSI.startGrab();
             if strcmp(run.state,'starting')
                 % Start returned, but this is NOT confirmation of hardware readiness.
@@ -150,7 +159,7 @@ switch operation
 end
 run = restore_settings(hSI, run);
 publicRun = run;
-if isfield(publicRun,'old'), publicRun = rmfield(publicRun,'old'); end
+publicRun = rmfield(publicRun, intersect({'old','applied'}, fieldnames(publicRun)));
 out = struct('acq_state',hSI.acqState, 'run',publicRun, 'fps',hSI.hRoiManager.scanFrameRate, ...
     'matlab_version',version, 'channels',hSI.hChannels.channelDisplay, 'files',{{}});
 % For the ScanImage tab's channel choice.
@@ -182,21 +191,53 @@ value = [];
 if isprop(obj, name), value = obj.(name); end
 end
 
+function run = settle(hSI, run)
+% ScanImage idle while the run is still active: its terminal event was missed.
+% The run is over; its settings are restored like an abort's.
+if any(strcmp(run.state, {'starting','waiting_for_first_frame','recording'})) && ...
+        strcmp(hSI.acqState, 'idle')
+    run.state = 'interrupted';
+end
+end
+
+function values = setting_values(hSI)
+% The settings NeuroSeq changes for a recording; [] for a property this
+% ScanImage release lacks (7, 8 and 10).
+values = {hSI.hScan2D.logFilePath, hSI.hScan2D.logFileStem, hSI.hScan2D.logFileCounter, ...
+    hSI.extTrigEnable, hSI.hStackManager.framesPerSlice, hSI.hChannels.loggingEnable, ...
+    optional_prop(hSI.hScan2D, 'logAverageFactor'), optional_prop(hSI, 'acqsPerLoop'), ...
+    hSI.hChannels.channelSave, optional_prop(hSI.hScan2D, 'logFramesPerFile')};
+end
+
+function same = untouched(hSI, run)
+% Which settings still hold the values NeuroSeq set for the run (all of them
+% when it has not set any yet).
+if ~isfield(run, 'applied'), same = true(1, 10); return, end
+current = setting_values(hSI);
+same = cellfun(@isequaln, current, run.applied);
+% ScanImage advances the file counter after each logged acquisition.
+same(3) = same(3) || isequal(current{3}, run.applied{3} + 1);
+end
+
 function run = restore_settings(hSI, run, force)
 if nargin < 3, force = false; end
 % Some releases dispatch the terminal callback before acqState becomes idle.
 % In that case the next status/command retries, retaining the saved settings.
 if isfield(run,'old') && strcmp(hSI.acqState,'idle') && ...
-        (force || any(strcmp(run.state, {'completed','aborted','failed'})))
+        (force || any(strcmp(run.state, {'completed','aborted','failed','interrupted'})))
     old = run.old;
-    hSI.hScan2D.logFilePath = old{1}; hSI.hScan2D.logFileStem = old{2};
-    hSI.hScan2D.logFileCounter = old{3}; hSI.extTrigEnable = old{4};
-    hSI.hStackManager.framesPerSlice = old{5}; hSI.hChannels.loggingEnable = old{6};
-    if ~isempty(old{7}), hSI.hScan2D.logAverageFactor = old{7}; end
-    if ~isempty(old{8}), hSI.acqsPerLoop = old{8}; end
-    if numel(old) >= 9, hSI.hChannels.channelSave = old{9}; end
-    if numel(old) >= 10 && ~isempty(old{10}), hSI.hScan2D.logFramesPerFile = old{10}; end
-    run = rmfield(run,'old');
+    % Settings changed since NeuroSeq set them are the user's: keep them.
+    restore = untouched(hSI, run) & ~(cellfun(@isempty, old) & ismember(1:10, [7 8 10]));
+    % Owner and name of each setting, in setting_values order (handle objects).
+    targets = {hSI.hScan2D,'logFilePath'; hSI.hScan2D,'logFileStem'; ...
+        hSI.hScan2D,'logFileCounter'; hSI,'extTrigEnable'; ...
+        hSI.hStackManager,'framesPerSlice'; hSI.hChannels,'loggingEnable'; ...
+        hSI.hScan2D,'logAverageFactor'; hSI,'acqsPerLoop'; ...
+        hSI.hChannels,'channelSave'; hSI.hScan2D,'logFramesPerFile'};
+    for k = find(restore)
+        owner = targets{k,1}; owner.(targets{k,2}) = old{k};
+    end
+    run = rmfield(run, intersect({'old','applied'}, fieldnames(run)));
 end
 end
 

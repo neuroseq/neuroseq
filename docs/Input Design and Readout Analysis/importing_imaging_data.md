@@ -75,6 +75,17 @@ start with its channel count and functional channel. The choice is saved per
 imaging data entry. ScanImage recordings use **Functional channel** in the
 **ScanImage (imaging)** tab of the Stimulation setup pane instead.
 
+### Moved or missing imaging files
+
+A `.nseq` project does not contain the movie itself, only the path to the
+original imaging file(s); the traces, spikes and segmentation computed from it
+are saved in the project. When the file is not at that path — for example after
+opening the project on another computer — the Imaging tab lists the missing
+file(s) with a **Locate file…** button instead of the video. Choose the file's
+new location and the video plays again; for a movie split across several files,
+pick any one of them and the others are found by name in the same folder. Save
+the project to keep the new path.
+
 ### Saving imaging data
 
 **Save imaging data…** in the Imaging tab first asks which frames to save.
@@ -167,6 +178,25 @@ directly from one or more 2-photon TIFF stacks. Choose the Cellpose masks
 auto-detection), the pipeline (Suite2p, or a simple ROI average) and the
 acquisition parameters, then **Run pipeline**. The pipeline runs in the
 background; the resulting traces are imported like Suite2p outputs.
+
+The **Simply average from ROI** pipeline reads the stacks a few frames at a time,
+so a long recording (e.g. 15 minutes of 512×512 frames, about 14 GB) does not
+have to fit in memory. Its options:
+
+- **Neuropil correction** also averages an annulus around each ROI, as Suite2p
+  does: the 350 nearest pixels that are more than 2 px from every cell. The
+  annulus times the **Neuropil coefficient** is subtracted from the ROI's trace.
+- **Compute ΔF/F and deconvolve spikes** imports ΔF/F instead of raw
+  fluorescence. The baseline is Suite2p's sliding maximin (30 s window). ΔF/F is
+  relative to the raw fluorescence baseline, so a dim cell whose
+  neuropil-corrected baseline is near zero does not get a huge ΔF/F. Spikes are
+  deconvolved with OASIS (**Indicator tau**). An event counts as a spike when it
+  reaches **Spike threshold (ΔF/F)**.
+- **Input artefact suppression** replaces the frames lit by an input array's
+  stimulation with the mean of the clean frames around them. **Imaging started
+  at** is when the first frame was recorded on that input array's time axis: 0
+  if imaging and the input started together, positive if imaging started later,
+  negative if it started first.
 
 ## Suite2p calcium imaging
 

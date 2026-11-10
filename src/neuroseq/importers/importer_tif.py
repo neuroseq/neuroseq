@@ -104,13 +104,25 @@ def run_roi_average_pipeline(
     *,
     progress: ProgressCallback | None = None,
     stim_array: StimArray | None = None,
+    neuropil: bool = False,
+    imaging_start_s: float = 0.0,
+    chunk_frames: int | None = None,
 ) -> TifPipelineResult:
     """Average ROI pixels from the selected channel across ordered TIFFs.
 
     Both ``(time, channel, y, x)`` stacks and ``(frame, y, x)`` stacks with
     interleaved channels are supported. Channel numbering is 1-based, matching
     the Suite2p acquisition convention used by the dialog.
+
+    Frames are streamed in chunks (see :mod:`neuroseq.importers.roi_traces`), so
+    a recording need not fit in memory. With ``neuropil``, ``Fneu`` holds the mean
+    of a Suite2p-style annulus around each ROI (otherwise zeros). With
+    ``stim_array``, frames lit by its stimulation are interpolated;
+    ``imaging_start_s`` is when the first frame was taken on that array's time
+    axis (positive if imaging started after the input array's t = 0).
     """
+    from neuroseq.importers import roi_traces
+
     if not tif_paths:
         raise ValueError("tif_paths must contain at least one TIFF file")
     masks = np.asarray(masks)
@@ -121,97 +133,113 @@ def run_roi_average_pipeline(
     if not 1 <= params.functional_chan <= params.nchannels:
         raise ValueError("functional_chan must be between 1 and nchannels (inclusive)")
 
-    import tifffile
-
     progress = progress or _noop_progress
     labels = np.unique(masks)
     labels = labels[labels != 0]
     if labels.size == 0:
         raise ValueError("masks must contain at least one labelled ROI")
 
-    trace_parts: list[npt.NDArray[Any]] = []
-    first_stack: npt.NDArray[Any] | None = None
-    for index, path in enumerate(tif_paths):
-        progress(f"Reading {path.name}", index / len(tif_paths))
-        stack = np.asarray(tifffile.imread(path))
-        if stack.ndim == 2:
-            stack = stack[np.newaxis, ...]
-        if stack.ndim not in (3, 4):
-            raise ValueError(
-                f"TIFF {path} must have shape (frame, y, x) or "
-                f"(time, channel, y, x), got {stack.shape}"
-            )
-        if stack.shape[-2:] != masks.shape:
+    progress("Preparing ROI masks", 0.0)
+    pixel_sets = roi_traces.roi_pixels(masks, labels)
+    if neuropil:
+        pixel_sets += roi_traces.neuropil_pixels(masks, labels)
+    weights = roi_traces.averaging_matrix(pixel_sets, masks.size)
+    # Only the pixels some ROI or annulus uses are read out of each frame.
+    columns = np.unique(weights.indices)
+    weights = weights[:, columns].tocsr()
+    n_rois = len(labels)
+
+    def check_layout(layout: roi_traces.TiffLayout) -> None:
+        if layout.frame_shape != masks.shape:
             raise ValueError(
                 f"masks shape {masks.shape} does not match TIFF frame shape "
-                f"{stack.shape[-2:]}"
+                f"{layout.frame_shape}"
             )
-        if stack.ndim == 4:
-            file_channels = stack.shape[1]
-            if file_channels != params.nchannels:
-                raise ValueError(
-                    f"TIFF {path} contains {file_channels} channel(s), but the "
-                    f"pipeline is configured for {params.nchannels}"
-                )
-            stack = stack[:, params.functional_chan - 1, :, :]
-        else:
-            if stack.shape[0] % params.nchannels != 0:
-                raise ValueError(
-                    f"TIFF {path} has {stack.shape[0]} frame(s), which is not divisible by "
-                    f"nchannels={params.nchannels} for interleaved acquisition"
-                )
-            stack = stack[params.functional_chan - 1 :: params.nchannels]
-        if stack.shape[0] == 0:
+        if layout.n_frames == 0:
             raise ValueError(
                 f"TIFF {path} contains no frames for functional channel "
                 f"{params.functional_chan}"
             )
-        if first_stack is None:
-            first_stack = stack
-        rows = []
-        for label_index, label in enumerate(labels):
-            # Reported per ROI so a cancel request is honoured promptly even
+        layouts.append(layout)
+
+    trace_parts: list[npt.NDArray[Any]] = []
+    mean_sum: npt.NDArray[np.float64] | None = None
+    mean_count = 0
+    for index, path in enumerate(tif_paths):
+        progress(f"Reading {path.name}", index / len(tif_paths))
+        layouts: list[roi_traces.TiffLayout] = []
+        done = 0
+        for chunk in roi_traces.iter_functional_chunks(
+            path,
+            params.nchannels,
+            params.functional_chan,
+            chunk_frames=chunk_frames or roi_traces.DEFAULT_CHUNK_FRAMES,
+            on_layout=check_layout,
+        ):
+            flat = chunk.reshape(chunk.shape[0], -1)
+            used = np.ascontiguousarray(flat[:, columns].T, dtype=np.float32)
+            trace_parts.append(np.asarray(weights @ used, dtype=np.float32))
+            if index == 0:
+                total = flat.sum(axis=0, dtype=np.float64)
+                mean_sum = total if mean_sum is None else mean_sum + total
+                mean_count += chunk.shape[0]
+            done += chunk.shape[0]
+            # Reported per chunk so a cancel request is honoured promptly even
             # for large stacks.
             progress(
                 f"Averaging ROIs in {path.name}",
-                (index + label_index / len(labels)) / len(tif_paths),
+                (index + done / layouts[0].n_frames) / len(tif_paths),
             )
-            rows.append(stack[:, masks == label].mean(axis=1))
-        trace_parts.append(np.vstack(rows).astype(np.float32))
 
-    F = np.concatenate(trace_parts, axis=1)
+    traces = np.concatenate(trace_parts, axis=1)
+    F = np.ascontiguousarray(traces[:n_rois])
+    Fneu = np.ascontiguousarray(traces[n_rois:]) if neuropil else np.zeros_like(F)
     contaminated_frames = np.array([], dtype=np.int64)
     if stim_array is not None:
-        contaminated_frames = _stimulation_contaminated_frames(
-            stim_array, params.fs, F.shape[1]
+        contaminated_frames = stimulation_contaminated_frames(
+            stim_array, params.fs, F.shape[1], imaging_start_s=imaging_start_s
         )
-        _impute_contaminated_frames(F, contaminated_frames)
-    assert first_stack is not None
+        impute_contaminated_frames(F, contaminated_frames)
+        if neuropil:
+            impute_contaminated_frames(Fneu, contaminated_frames)
+    assert mean_sum is not None
     progress("Done", 1.0)
     return TifPipelineResult(
         F=F,
-        Fneu=np.zeros_like(F),
+        Fneu=Fneu,
         spks=np.zeros_like(F),
         stat=np.array([], dtype=object),
         iscell=np.ones((len(labels), 2), dtype=np.float32),
         ops={},
-        mean_image=first_stack.mean(axis=0).astype(np.float32),
+        mean_image=(mean_sum / max(mean_count, 1))
+        .reshape(masks.shape)
+        .astype(np.float32),
         masks=masks,
         extra={
             "pipeline": "roi_average",
             "roi_labels": np.asarray(labels),
             "nchannels": params.nchannels,
             "functional_chan": params.functional_chan,
+            "neuropil": neuropil,
             "stimulation_artefact_suppression": stim_array is not None,
+            "imaging_start_s": float(imaging_start_s),
             "contaminated_frames": contaminated_frames,
         },
     )
 
 
-def _stimulation_contaminated_frames(
-    stim_array: StimArray, fs: float, n_frames: int
+def stimulation_contaminated_frames(
+    stim_array: StimArray,
+    fs: float,
+    n_frames: int,
+    *,
+    imaging_start_s: float = 0.0,
 ) -> npt.NDArray[np.int64]:
-    """Return camera frames whose exposure overlaps non-zero stimulation."""
+    """Return camera frames whose exposure overlaps non-zero stimulation.
+
+    ``imaging_start_s`` is when frame 0 was taken on the input array's time axis:
+    0 when the recording and the input start together, positive when imaging
+    started later, negative when it started first."""
     if fs <= 0:
         raise ValueError("fs must be greater than zero")
     if stim_array.dt <= 0:
@@ -222,8 +250,10 @@ def _stimulation_contaminated_frames(
     active_samples = np.flatnonzero(np.any(values != 0, axis=1))
     contaminated = np.zeros(n_frames, dtype=bool)
     for sample in active_samples:
-        start = float(sample) * float(stim_array.dt)
-        end = float(sample + 1) * float(stim_array.dt)
+        start = float(sample) * float(stim_array.dt) - float(imaging_start_s)
+        end = float(sample + 1) * float(stim_array.dt) - float(imaging_start_s)
+        if end <= 0:
+            continue  # before the first frame
         first_frame = max(0, int(np.floor(start * fs)))
         # nextafter prevents an interval ending exactly on a frame boundary
         # from contaminating the following frame.
@@ -233,7 +263,7 @@ def _stimulation_contaminated_frames(
     return np.flatnonzero(contaminated).astype(np.int64)
 
 
-def _impute_contaminated_frames(
+def impute_contaminated_frames(
     traces: npt.NDArray[Any], contaminated_frames: npt.NDArray[np.int64]
 ) -> None:
     """Replace each contaminated run with its neighboring clean-value mean.
@@ -348,8 +378,21 @@ def run_suite2p_pipeline(
     *,
     work_dir: Path | None = None,
     progress: ProgressCallback | None = None,
+    register: bool = False,
+    reference_image: npt.NDArray[Any] | None = None,
+    traces_only: bool = False,
 ) -> TifPipelineResult:
     """Run TIFF → Suite2p binary → trace extraction → OASIS deconvolution.
+
+    With ``traces_only`` the pipeline stops after extracting F and Fneu: no
+    SNR/skew, baseline correction, OASIS or ROI classification (``spks`` is all
+    zeros and every ROI is a cell), for callers that deconvolve themselves.
+
+    With ``register``, the binary is first motion-corrected in place by Suite2p's
+    rigid + non-rigid registration, aligned to ``reference_image`` (e.g. the image
+    the masks were drawn on) when it has the movie's shape, else to a reference
+    Suite2p computes from the movie. ``extra["registration"]`` then reports which
+    reference was used and the largest rigid shift, in pixels.
 
     `masks` is an optional 2D integer label image (Cellpose output,
     0 = background). If `masks` is None, ROIs are detected automatically using
@@ -445,21 +488,21 @@ def run_suite2p_pipeline(
             _, gpu_msg = torch_gpu_status()
             logger.warning("Suite2p on CPU. %s", gpu_msg.replace("\n", " "))
 
-        progress("Initialising Suite2p output dirs", 0.05)
-        dbs = s2io.init_dbs(db)
-        plane_db = dbs[0]
+        def convert_to_binary() -> dict[str, Any]:
+            dbs = s2io.init_dbs(db)
+            plane_db = dbs[0]
+            with contextlib.ExitStack() as stack:
+                files = [stack.enter_context(open(plane_db["reg_file"], "wb"))]
+                files_chan2 = []
+                if params.nchannels >= 2:
+                    files_chan2 = [
+                        stack.enter_context(open(plane_db["reg_file_chan2"], "wb"))
+                    ]
+                dbs = s2io.tiff_to_binary(dbs, settings, files, files_chan2)
+            return dbs[0]
 
         progress("Converting TIFF to binary", 0.1)
-        with contextlib.ExitStack() as stack:
-            files = [stack.enter_context(open(plane_db["reg_file"], "wb"))]
-            files_chan2 = []
-            if params.nchannels >= 2:
-                files_chan2 = [
-                    stack.enter_context(open(plane_db["reg_file_chan2"], "wb"))
-                ]
-            dbs = s2io.tiff_to_binary(dbs, settings, files, files_chan2)
-
-        plane_db = dbs[0]
+        plane_db = convert_to_binary()
         Ly, Lx, nframes = (
             int(plane_db["Ly"]),
             int(plane_db["Lx"]),
@@ -467,19 +510,102 @@ def run_suite2p_pipeline(
         )
         logger.info("Suite2p binary written: %d frames %dx%d", nframes, Ly, Lx)
 
-        progress("Computing mean projection", 0.3)
         if masks is not None and masks.shape != (Ly, Lx):
             raise ValueError(
                 f"masks shape {masks.shape} does not match TIFF shape ({Ly}, {Lx})"
             )
 
-        f_bin = s2io.BinaryFile(Ly=Ly, Lx=Lx, filename=plane_db["reg_file"])
-        f_bin_chan2 = None
-        if params.nchannels >= 2:
-            f_bin_chan2 = s2io.BinaryFile(
-                Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"]
-            )
+        # Registration motion-corrects the binary in place, so it must be writable.
+        writable: dict[str, Any] = (
+            {"n_frames": nframes, "write": True} if register else {}
+        )
 
+        def open_binaries() -> tuple[Any, Any]:
+            f_bin = s2io.BinaryFile(
+                Ly=Ly, Lx=Lx, filename=plane_db["reg_file"], **writable
+            )
+            f_bin_chan2 = None
+            if params.nchannels >= 2:
+                f_bin_chan2 = s2io.BinaryFile(
+                    Ly=Ly, Lx=Lx, filename=plane_db["reg_file_chan2"], **writable
+                )
+            return f_bin, f_bin_chan2
+
+        f_bin, f_bin_chan2 = open_binaries()
+
+        registration: dict[str, Any] | None = None
+        if register:
+            import suite2p.registration as s2reg
+
+            ref = None
+            if reference_image is not None:
+                if np.shape(reference_image) == (Ly, Lx):
+                    ref = np.clip(
+                        np.rint(np.asarray(reference_image, dtype=np.float64)),
+                        np.iinfo(np.int16).min,
+                        np.iinfo(np.int16).max,
+                    ).astype(np.int16)
+                else:
+                    logger.warning(
+                        "Reference image %s does not match the movie (%d, %d); "
+                        "registering to the movie's own reference",
+                        np.shape(reference_image),
+                        Ly,
+                        Lx,
+                    )
+            reg_settings = dict(settings["registration"])
+            # Non-rigid registration needs more than one block across the frame
+            # (Suite2p fails on a single one); small frames are registered rigidly.
+            if min(Ly, Lx) <= max(reg_settings.get("block_size", (128, 128))):
+                reg_settings["nonrigid"] = False
+            progress(f"Motion-correcting with Suite2p ({device_label})", 0.2)
+            try:
+                reg_outputs = s2reg.registration_wrapper(
+                    f_bin,
+                    f_reg_chan2=f_bin_chan2,
+                    refImg=ref,
+                    settings=reg_settings,
+                    device=device,
+                )
+            except Exception as exc:
+                if getattr(device, "type", None) == "cpu":
+                    raise
+                # Registration shifts the binary in place, so frames a failed GPU
+                # run already shifted must not be shifted again: rewrite the
+                # binary from the TIFFs before retrying on the CPU.
+                import torch
+
+                logger.warning(
+                    "Suite2p registration on %s failed (%s: %s); re-reading the "
+                    "movie and registering on CPU.",
+                    device_label,
+                    type(exc).__name__,
+                    exc,
+                )
+                for binary in (f_bin, f_bin_chan2):
+                    if binary is not None:
+                        binary.close()
+                plane_db = convert_to_binary()
+                f_bin, f_bin_chan2 = open_binaries()
+                device, device_label = torch.device("cpu"), "CPU (GPU fallback)"
+                progress(f"Motion-correcting with Suite2p ({device_label})", 0.2)
+                reg_outputs = s2reg.registration_wrapper(
+                    f_bin,
+                    f_reg_chan2=f_bin_chan2,
+                    refImg=ref,
+                    settings=reg_settings,
+                    device=device,
+                )
+            shifts = np.hypot(
+                np.asarray(reg_outputs["yoff"], dtype=np.float64),
+                np.asarray(reg_outputs["xoff"], dtype=np.float64),
+            )
+            registration = {
+                "reference": "provided" if ref is not None else "movie",
+                "max_shift_px": float(shifts.max()) if shifts.size else 0.0,
+            }
+
+        progress("Computing mean projection", 0.3)
         mean_image = f_bin.data.mean(axis=0).astype(np.float32)
 
         if masks is not None:
@@ -513,6 +639,29 @@ def run_suite2p_pipeline(
             device,
             device_label,
         )
+
+        extra: dict[str, Any] = {"compute_device": device_label}
+        if registration is not None:
+            extra["registration"] = registration
+        if masks is None:
+            extra["diameter"] = params.diameter
+        if params.nchannels >= 2:
+            extra["F_chan2"] = F_chan2
+            extra["Fneu_chan2"] = Fneu_chan2
+
+        if traces_only:
+            progress("Done", 1.0)
+            return TifPipelineResult(
+                F=np.asarray(F),
+                Fneu=np.asarray(Fneu),
+                spks=np.zeros(np.shape(F), dtype=np.float32),
+                stat=stat,
+                iscell=np.column_stack([np.ones(len(stat)), np.ones(len(stat))]),
+                ops={**settings, **plane_db},
+                mean_image=mean_image,
+                masks=masks_out,
+                extra=extra,
+            )
 
         progress("Computing per-cell SNR/skew/std", 0.7)
         try:
@@ -557,13 +706,7 @@ def run_suite2p_pipeline(
             # All ROIs come from Cellpose — accept them all.
             iscell[:, 0] = 1
 
-        extra: dict[str, Any] = {"compute_device": device_label}
-        if masks is None:
-            extra["diameter"] = params.diameter
-        if params.nchannels >= 2:
-            extra["F_chan2"] = F_chan2
-            extra["Fneu_chan2"] = Fneu_chan2
-
+        extra["compute_device"] = device_label
         progress("Done", 1.0)
 
         return TifPipelineResult(

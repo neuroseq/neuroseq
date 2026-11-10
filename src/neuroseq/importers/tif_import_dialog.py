@@ -27,17 +27,22 @@ from neuroseq.background_jobs import BackgroundJob
 from neuroseq.background_jobs import CancellableWorker
 from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.data import Data
+from neuroseq.data import TraceData
 from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
 from neuroseq.importers.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importers.importer_suite2p import prepare_suite2p_traces
 from neuroseq.importers.importer_tif import DEFAULT_FS
+from neuroseq.importers.importer_tif import DEFAULT_WIN_BASELINE
 from neuroseq.importers.importer_tif import PipelineCancelled
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import TifPipelineResult
 from neuroseq.importers.importer_tif import cellpose_result_to_masks
+from neuroseq.importers.roi_traces import NEUROPIL_INNER_RADIUS_PX
+from neuroseq.importers.roi_traces import NEUROPIL_MIN_PIXELS
 from neuroseq.stimulation.stim import StimArray
 
 
@@ -164,6 +169,9 @@ class _PipelineWorker(CancellableWorker):
         params: TifPipelineParams,
         pipeline: str = "suite2p",
         stim_array: StimArray | None = None,
+        *,
+        neuropil: bool = False,
+        imaging_start_s: float = 0.0,
     ) -> None:
         super().__init__()
         self._tif_paths = tif_paths
@@ -171,6 +179,8 @@ class _PipelineWorker(CancellableWorker):
         self._params = params
         self._pipeline = pipeline
         self._stim_array = stim_array
+        self._neuropil = neuropil
+        self._imaging_start_s = imaging_start_s
 
     @QtCore.Slot()
     @returns_to_main_thread
@@ -203,6 +213,8 @@ class _PipelineWorker(CancellableWorker):
                     self._params,
                     progress=callback,
                     stim_array=self._stim_array,
+                    neuropil=self._neuropil,
+                    imaging_start_s=self._imaging_start_s,
                 )
             else:
                 from neuroseq.importers.importer_tif import run_suite2p_pipeline
@@ -508,6 +520,35 @@ class TifImportDialog(QtWidgets.QDialog):
         self._spike_threshold_spin.setValue(0.02)
         params_layout.addRow("Spike threshold:", self._spike_threshold_spin)
 
+        self._neuropil_checkbox = QtWidgets.QCheckBox(
+            "Neuropil correction (subtract a surrounding annulus)"
+        )
+        self._neuropil_checkbox.setToolTip(
+            "Also average an annulus around each ROI (Suite2p-style: at least "
+            f"{NEUROPIL_MIN_PIXELS} pixels, {NEUROPIL_INNER_RADIUS_PX:g} px away from "
+            "every cell) and subtract neuropil coefficient × that annulus."
+        )
+        params_layout.addRow(self._neuropil_checkbox)
+
+        self._dff_checkbox = QtWidgets.QCheckBox("Compute ΔF/F and deconvolve spikes")
+        self._dff_checkbox.setToolTip(
+            "Import ΔF/F instead of raw fluorescence: the baseline is Suite2p's "
+            f"sliding maximin ({DEFAULT_WIN_BASELINE:g} s window), ΔF/F is relative to "
+            "the raw fluorescence baseline, and spikes are deconvolved with OASIS "
+            "(indicator tau) and kept where an event reaches the spike threshold."
+        )
+        params_layout.addRow(self._dff_checkbox)
+
+        self._dff_spike_threshold_spin = QtWidgets.QDoubleSpinBox()
+        self._dff_spike_threshold_spin.setRange(0.0, 100.0)
+        self._dff_spike_threshold_spin.setSingleStep(0.05)
+        self._dff_spike_threshold_spin.setDecimals(3)
+        self._dff_spike_threshold_spin.setValue(DEFAULT_SPIKE_THRESHOLD)
+        self._dff_spike_threshold_spin.setToolTip(
+            "Smallest deconvolved event, in ΔF/F, counted as a spike."
+        )
+        params_layout.addRow("Spike threshold (ΔF/F):", self._dff_spike_threshold_spin)
+
         self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
             "Input artefact suppression"
         )
@@ -522,6 +563,16 @@ class TifImportDialog(QtWidgets.QDialog):
         for name, stim_array in self._stim_arrays.items():
             self._stim_array_combo.addItem(name, stim_array)
         params_layout.addRow("Input array:", self._stim_array_combo)
+        self._imaging_start_spin = QtWidgets.QDoubleSpinBox()
+        self._imaging_start_spin.setRange(-86400.0, 86400.0)
+        self._imaging_start_spin.setDecimals(3)
+        self._imaging_start_spin.setSuffix(" s")
+        self._imaging_start_spin.setToolTip(
+            "When the first frame was recorded, on the input array's time axis: 0 if "
+            "imaging and the input started together, positive if imaging started "
+            "later, negative if it started first."
+        )
+        params_layout.addRow("Imaging started at:", self._imaging_start_spin)
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
         if not has_stim_arrays:
@@ -533,9 +584,12 @@ class TifImportDialog(QtWidgets.QDialog):
             self._suppress_stimulation_artefact_checkbox.setToolTip(
                 "No input arrays are available in the current project."
             )
-        self._suppress_stimulation_artefact_checkbox.toggled.connect(
-            self._update_pipeline_fields
-        )
+        for checkbox in (
+            self._suppress_stimulation_artefact_checkbox,
+            self._neuropil_checkbox,
+            self._dff_checkbox,
+        ):
+            checkbox.toggled.connect(self._update_pipeline_fields)
 
         self._params_layout = params_layout
         self._suite2p_parameter_widgets = [
@@ -617,11 +671,20 @@ class TifImportDialog(QtWidgets.QDialog):
                 self._pipeline_combo.setCurrentIndex(index)
 
         suite2p = self._pipeline_combo.currentData() == "suite2p"
+        roi_average = not suite2p
+        roi_dff = roi_average and self._dff_checkbox.isChecked()
+        roi_neuropil = roi_average and self._neuropil_checkbox.isChecked()
         for widget in self._suite2p_parameter_widgets:
-            widget.setVisible(suite2p)
-            label = self._params_layout.labelForField(widget)
-            if label is not None:
-                label.setVisible(suite2p)
+            # The ROI average pipeline uses tau for its spikes and the neuropil
+            # coefficient for its annulus when those are on.
+            visible = suite2p or (
+                (widget is self._tau_spin and roi_dff)
+                or (widget is self._neucoeff_spin and roi_neuropil)
+            )
+            self._set_row_visible(widget, visible)
+        self._set_row_visible(self._neuropil_checkbox, roi_average)
+        self._set_row_visible(self._dff_checkbox, roi_average)
+        self._set_row_visible(self._dff_spike_threshold_spin, roi_dff)
 
         for widget in self._auto_detect_parameter_widgets:
             widget.setVisible(auto_detect)
@@ -631,7 +694,6 @@ class TifImportDialog(QtWidgets.QDialog):
 
         self._pipeline_combo.setEnabled(not auto_detect)
 
-        roi_average = not suite2p
         self._suppress_stimulation_artefact_checkbox.setVisible(roi_average)
         stim_label = self._params_layout.labelForField(self._stim_array_combo)
         show_stim_array = (
@@ -642,6 +704,23 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_array_combo.setVisible(show_stim_array)
         if stim_label is not None:
             stim_label.setVisible(show_stim_array)
+        self._set_row_visible(self._imaging_start_spin, show_stim_array)
+
+    def _set_row_visible(self, widget: QtWidgets.QWidget, visible: bool) -> None:
+        widget.setVisible(visible)
+        label = self._params_layout.labelForField(widget)
+        if label is not None:
+            label.setVisible(visible)
+
+    def _pipeline_params(self) -> TifPipelineParams:
+        return TifPipelineParams(
+            fs=self._fs_spin.value(),
+            tau=self._tau_spin.value(),
+            nchannels=self._nchannels_spin.value(),
+            functional_chan=self._functional_chan_spin.value(),
+            neuropil_coefficient=self._neucoeff_spin.value(),
+            diameter=self._diameter_spin.value(),
+        )
 
     def _on_pipeline_changed(self) -> None:
         """Apply pipeline-specific acquisition defaults and update the form."""
@@ -801,14 +880,7 @@ class TifImportDialog(QtWidgets.QDialog):
         if self._propagate_new_segmentation and self._use_seg_radio.isChecked():
             self._new_segmentation_path = self._seg_file_path
 
-        params = TifPipelineParams(
-            fs=self._fs_spin.value(),
-            tau=self._tau_spin.value(),
-            nchannels=self._nchannels_spin.value(),
-            functional_chan=self._functional_chan_spin.value(),
-            neuropil_coefficient=self._neucoeff_spin.value(),
-            diameter=self._diameter_spin.value(),
-        )
+        params = self._pipeline_params()
 
         self._run_button.setEnabled(False)
         self._progress_dialog = _PipelineProgressDialog(
@@ -825,7 +897,13 @@ class TifImportDialog(QtWidgets.QDialog):
         ):
             stim_array = self._stim_array_combo.currentData()
         worker = _PipelineWorker(
-            list(self._tif_paths), masks, params, pipeline, stim_array
+            list(self._tif_paths),
+            masks,
+            params,
+            pipeline,
+            stim_array,
+            neuropil=pipeline == "roi_average" and self._neuropil_checkbox.isChecked(),
+            imaging_start_s=self._imaging_start_spin.value(),
         )
         worker.log.connect(self._progress_dialog.appendLog)
         self._job.start(
@@ -913,24 +991,29 @@ class TifImportDialog(QtWidgets.QDialog):
             )
 
         if result.extra.get("pipeline") == "roi_average":
-            from neuroseq.data import TraceData
-
             raw_cellpose_ids = np.arange(n_neurons, dtype=np.uint32)
             indices = _resolve_suite2p_indices(n_neurons, self._selected_mapping())
-            traces = TraceData(
-                "Simply averaged ROI traces",
-                result.F,
+            self.imported_data = roi_average_import_data(
+                result,
                 indices,
-                "fluorescence",
-                dt,
                 raw_cellpose_ids,
+                fs=fs,
+                params=self._pipeline_params(),
+                dff=self._dff_checkbox.isChecked(),
+                spike_threshold=self._dff_spike_threshold_spin.value(),
             )
-            self.imported_data = [traces]
+            no_spikes = self._dff_checkbox.isChecked() and len(self.imported_data) == 1
             QtWidgets.QMessageBox.information(
                 self,
                 "Import successful",
                 f"Imported {n_neurons} neurons × {n_timepoints} frames "
-                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
+                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz)."
+                + (
+                    "\n\nSpikes were not deconvolved: Suite2p (for OASIS) is not "
+                    "installed."
+                    if no_spikes
+                    else ""
+                ),
             )
             self.accept()
             return
@@ -959,3 +1042,55 @@ class TifImportDialog(QtWidgets.QDialog):
             f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
         )
         self.accept()
+
+
+def roi_average_import_data(
+    result: TifPipelineResult,
+    indices: npt.NDArray[Any],
+    raw_cellpose_ids: npt.NDArray[Any],
+    *,
+    fs: float,
+    params: TifPipelineParams,
+    dff: bool,
+    spike_threshold: float,
+) -> list[Data]:
+    """The data the ROI average pipeline imports: raw (or neuropil-corrected)
+    fluorescence, or with ``dff`` ΔF/F (see
+    :func:`neuroseq.importers.roi_traces.roi_delta_f_over_f`) and its OASIS spikes
+    (only the ΔF/F when Suite2p, which provides OASIS, is not installed)."""
+    from neuroseq.importers.importer_scanimage_traces import DFF_TRACE_NAME
+    from neuroseq.importers.importer_scanimage_traces import DFF_UNITS
+    from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
+    from neuroseq.importers.roi_traces import roi_delta_f_over_f
+
+    dt = 1.0 / fs
+    neuropil = bool(result.extra.get("neuropil"))
+    Fneu = result.Fneu if neuropil else None
+    if dff:
+        values = roi_delta_f_over_f(
+            result.F,
+            Fneu,
+            fs,
+            neuropil_coefficient=params.neuropil_coefficient,
+            method=params.baseline,
+            win_baseline_s=params.win_baseline,
+            sig_baseline_frames=params.sig_baseline,
+            prctile_baseline=params.prctile_baseline,
+        )
+        trace = TraceData(
+            DFF_TRACE_NAME, values, indices, DFF_UNITS, dt, raw_cellpose_ids
+        )
+        if importlib.util.find_spec("suite2p") is None:
+            return [trace]
+        return [
+            trace,
+            deconvolve_dff(trace, threshold=spike_threshold, tau=params.tau),
+        ]
+    if neuropil:
+        values = (result.F - float(params.neuropil_coefficient) * result.Fneu).astype(
+            np.float32
+        )
+        name = "Neuropil-corrected ROI traces"
+    else:
+        values, name = result.F, "Simply averaged ROI traces"
+    return [TraceData(name, values, indices, "fluorescence", dt, raw_cellpose_ids)]

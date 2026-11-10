@@ -45,8 +45,10 @@ def test_recording_options_only_apply_to_automatic_blocks(qtbot) -> None:
     widget.chk_automatic.setChecked(False)
     assert not widget.spn_tail_s.isEnabled()
     assert not widget.spn_spike_threshold.isEnabled()
+    assert not widget.chk_remove_artefact.isEnabled()
     widget.chk_automatic.setChecked(True)
     assert widget.spn_tail_s.isEnabled()
+    assert widget.chk_remove_artefact.isEnabled()
 
 
 def test_readout_shows_its_own_threshold(qtbot) -> None:
@@ -73,6 +75,10 @@ def test_block_recording_describes_the_block(qtbot) -> None:
     assert (recording.label, recording.tail_s) == ("rheobase", 4.0)
     assert recording.spike_threshold == 0.3
     assert recording.duration_s == 0.004
+    assert recording.remove_artefact  # on by default
+    assert recording.extraction == "suite2p"
+    widget.chk_remove_artefact.setChecked(False)
+    assert not widget.block_recording(stim, 2, 6, "rheobase").remove_artefact
 
 
 def test_refresh_leaves_a_running_routines_lock_alone(qtbot) -> None:
@@ -109,3 +115,18 @@ def test_switching_hosts_stops_following_the_old_one(qtbot) -> None:
     old.settings = SysconExportSettings(config_text="", target_power_mw=99.0)
     old.export_settings_changed.emit()
     assert widget.spn_power_mw.value() == 7.0
+
+
+def test_suite2p_extraction_is_the_default_and_can_warn_when_slow(qtbot) -> None:
+    widget, _host = _widget(qtbot, response_threshold=True)
+    assert widget.cmb_extraction.currentData() == "suite2p"
+    assert widget.spn_extraction_slow_s.isVisibleTo(widget)
+    widget.spn_extraction_slow_s.setValue(45.0)
+    stim = StimArray("Stim", StimType.External, np.ones((10, 2)), "", 0.001)
+    recording = widget.block_recording(stim, 0, 5, "rheobase")
+    assert (recording.extraction, recording.extraction_slow_s) == ("suite2p", 45.0)
+    widget.cmb_extraction.setCurrentIndex(widget.cmb_extraction.findData("roi_average"))
+    assert not widget.spn_extraction_slow_s.isVisibleTo(widget)
+    assert widget.block_recording(stim, 0, 5, "rheobase").extraction == "roi_average"
+    widget.chk_automatic.setChecked(False)
+    assert not widget.cmb_extraction.isEnabled()

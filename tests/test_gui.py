@@ -4600,7 +4600,7 @@ def test_refused_hardware_rheobase_keeps_the_existing_input(qtbot, monkeypatch):
     gui.stim_editor.bss2_host = FakeBss2Host()  # type: ignore[assignment]
     # The start prompt is answered "continue after the last stimulus".
     monkeypatch.setattr(
-        rheobase_dialog, "confirm_start_routine", lambda *_args: "continue"
+        rheobase_dialog, "confirm_start_routine", lambda *_args, **_kwargs: "continue"
     )
     dialog = RheobaseDialog(gui.stim_editor)
     qtbot.addWidget(dialog)
@@ -4615,3 +4615,25 @@ def test_refused_hardware_rheobase_keeps_the_existing_input(qtbot, monkeypatch):
     last = int(np.flatnonzero(np.any(before != 0, axis=1))[-1])
     assert after.shape[0] > last
     project.dirty = False
+
+
+def test_file_export_offers_traces_and_spikes_as_numpy_arrays(
+    qtbot: QtBot, mocker
+) -> None:
+    from neuroseq.export import numpy_export_dialog
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    submenus = {
+        action.text().replace("&", ""): action.menu()
+        for action in gui.menu_file.actions()
+        if action.menu() is not None
+    }
+    actions = {
+        action.text().replace("&", ""): action
+        for action in submenus["Export"].actions()
+    }
+    opened = mocker.patch.object(numpy_export_dialog.NumpyExportDialog, "exec")
+    for label in ("Traces as NumPy Array…", "Spikes as NumPy Array…"):
+        actions[label].trigger()
+    assert opened.call_count == 2

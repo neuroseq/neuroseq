@@ -7,9 +7,11 @@ reuses the same masks, so neuron IDs stay those of the stimulation targets. Qt-f
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Literal
 
 import numpy as np
 
@@ -18,13 +20,25 @@ from neuroseq.data import TraceData
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.importers.importer_tif import DEFAULT_TAU
+from neuroseq.importers.importer_tif import ProgressCallback
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import cellpose_result_to_masks
+from neuroseq.importers.importer_tif import impute_contaminated_frames
 from neuroseq.importers.importer_tif import run_roi_average_pipeline
+from neuroseq.importers.importer_tif import run_suite2p_pipeline
+from neuroseq.importers.importer_tif import stimulation_contaminated_frames
 
 if TYPE_CHECKING:
     from neuroseq.importers.importer_cellpose import CellposeImportResult
     from neuroseq.stimulation.stim import StimArray
+
+#: How a recorded block's fluorescence is extracted: the mean of each Cellpose ROI's
+#: pixels, or Suite2p's extraction with neuropil subtraction (slower).
+ExtractionMethod = Literal["roi_average", "suite2p"]
+EXTRACTION_METHODS: dict[str, str] = {
+    "suite2p": "Suite2p (motion-corrected, neuropil-corrected)",
+    "roi_average": "ROI average (fast)",
+}
 
 DFF_TRACE_NAME = "dF/F"
 DFF_UNITS = "dF/F"
@@ -44,17 +58,36 @@ def baseline_frame_count(stim_block: StimArray | None, fs: float) -> int:
     return int(np.floor(float(active[0]) * float(stim_block.dt) * fs))
 
 
-def delta_f_over_f(traces: np.ndarray, baseline_frames: int) -> np.ndarray:
-    """ΔF/F per row: ``(F - F0) / |F0|``. F0 is the mean of the first
-    ``baseline_frames`` frames, or the 20th percentile of the whole trace when there
-    are none. Only the divisor is made positive (and non-zero), so a negative
-    baseline (offset-corrected detectors) still subtracts correctly."""
-    traces = np.asarray(traces, dtype=np.float64)
+def _baseline(traces: np.ndarray, baseline_frames: int) -> np.ndarray:
+    """Per row: the mean of the first ``baseline_frames`` frames, or the 20th
+    percentile of the whole trace when there are none."""
     if baseline_frames >= 1:
-        f0 = traces[:, : min(baseline_frames, traces.shape[1])].mean(axis=1)
-    else:
-        f0 = np.percentile(traces, 20, axis=1)
-    scale = np.maximum(np.abs(f0), 1e-9)
+        return traces[:, : min(baseline_frames, traces.shape[1])].mean(axis=1)
+    return np.percentile(traces, 20, axis=1)
+
+
+def delta_f_over_f(
+    traces: np.ndarray,
+    baseline_frames: int,
+    divisor_traces: np.ndarray | None = None,
+) -> np.ndarray:
+    """ΔF/F per row: ``(F - F0) / |D0|``. F0 is the baseline of ``traces`` (the
+    mean of the first ``baseline_frames`` frames, or the 20th percentile of the
+    whole trace when there are none) and D0 the same baseline of
+    ``divisor_traces``, by default ``traces`` itself.
+
+    Neuropil-subtracted traces pass the raw fluorescence as ``divisor_traces``: their
+    own baseline can be near zero or negative, which would blow ΔF/F up or flip its
+    sign. Only the divisor is made positive (and non-zero), so a negative baseline
+    (offset-corrected detectors) still subtracts correctly."""
+    traces = np.asarray(traces, dtype=np.float64)
+    f0 = _baseline(traces, baseline_frames)
+    d0 = (
+        f0
+        if divisor_traces is None
+        else _baseline(np.asarray(divisor_traces, dtype=np.float64), baseline_frames)
+    )
+    scale = np.maximum(np.abs(d0), 1e-9)
     return ((traces - f0[:, np.newaxis]) / scale[:, np.newaxis]).astype(np.float32)
 
 
@@ -66,14 +99,27 @@ def extract_recording_dff(
     functional_channel: int,
     cellpose_data: CellposeImportResult | None,
     stim_block: StimArray | None = None,
+    remove_artefact: bool = True,
+    method: ExtractionMethod = "roi_average",
+    progress: ProgressCallback | None = None,
+    on_registered: Callable[[dict], None] | None = None,
 ) -> TraceData:
     """ΔF/F of every Cellpose ROI in a ScanImage recording.
 
     ``saved_channels`` are the ScanImage channel numbers interleaved in the TIFFs and
     ``functional_channel`` the one carrying the calcium indicator. ``stim_block`` is the
     stimulus delivered during the recording, starting at its first frame: frames lit by
-    the stimulation laser are interpolated, and the frames before its first stimulus are
-    the ΔF/F baseline.
+    the stimulation laser are interpolated (unless ``remove_artefact`` is False), and the
+    frames before its first stimulus are the ΔF/F baseline.
+
+    ``method`` "roi_average" averages each ROI's pixels; "suite2p" motion-corrects the
+    recording with Suite2p, aligned to the image the Cellpose masks were drawn on (see
+    :func:`fov_reference_image`), runs Suite2p's extraction with those masks and uses
+    F - neuropil coefficient x Fneu, divided by the baseline of the raw F;
+    ``on_registered`` then gets the registration
+    summary (``TifPipelineResult.extra["registration"]``). Both methods are then turned
+    into ΔF/F the same way. ``progress`` is passed to the pipeline, which
+    calls it between its stages (raise ``PipelineCancelled`` there to stop it).
     """
     if cellpose_data is None:
         raise ValueError(
@@ -94,13 +140,51 @@ def extract_recording_dff(
         nchannels=len(channels),
         functional_chan=channels.index(functional_channel) + 1,
     )
-    result = run_roi_average_pipeline(
-        [Path(path) for path in paths], masks, params, stim_array=stim_block
-    )
-    cellpose_ids = np.asarray(result.extra["roi_labels"], dtype=np.uint32) - 1
+    tif_paths = [Path(path) for path in paths]
+    if method == "suite2p":
+        result = run_suite2p_pipeline(
+            tif_paths,
+            masks,
+            params,
+            progress=progress,
+            register=True,
+            reference_image=fov_reference_image(cellpose_data),
+            traces_only=True,
+        )
+        if on_registered is not None and "registration" in result.extra:
+            on_registered(result.extra["registration"])
+        raw = np.asarray(result.F, dtype=np.float64)
+        fluorescence = raw - float(params.neuropil_coefficient) * np.asarray(
+            result.Fneu, dtype=np.float64
+        )
+        if remove_artefact and stim_block is not None:
+            contaminated = stimulation_contaminated_frames(
+                stim_block, fps, fluorescence.shape[1]
+            )
+            impute_contaminated_frames(fluorescence, contaminated)
+            impute_contaminated_frames(raw, contaminated)
+        # ΔF/F is relative to the raw (not neuropil-subtracted) baseline.
+        divisor: np.ndarray | None = raw
+        # Suite2p's ROIs are the mask labels in increasing order.
+        labels = np.unique(masks)
+        labels = labels[labels != 0]
+    elif method == "roi_average":
+        result = run_roi_average_pipeline(
+            tif_paths,
+            masks,
+            params,
+            progress=progress,
+            stim_array=stim_block if remove_artefact else None,
+        )
+        fluorescence = result.F
+        divisor = None
+        labels = result.extra["roi_labels"]
+    else:
+        raise ValueError(f"Unknown trace extraction method '{method}'.")
+    cellpose_ids = np.asarray(labels, dtype=np.uint32) - 1
     return TraceData(
         DFF_TRACE_NAME,
-        delta_f_over_f(result.F, baseline_frame_count(stim_block, fps)),
+        delta_f_over_f(fluorescence, baseline_frame_count(stim_block, fps), divisor),
         remap_raw_cellpose_ids(
             cellpose_ids, resolve_stimulus_to_cellpose_mapping(cellpose_data)
         ),
@@ -108,6 +192,23 @@ def extract_recording_dff(
         1.0 / fps,
         cellpose_ids,
     )
+
+
+def fov_reference_image(cellpose_data: CellposeImportResult) -> np.ndarray | None:
+    """The image the Cellpose masks were drawn on (e.g. a "Grab FOV" mean TIFF), as
+    a 2D float array to register recordings to; None if it is not a readable TIFF."""
+    path = Path(cellpose_data.image_path)
+    if path.suffix.lower() not in {".tif", ".tiff"} or not path.is_file():
+        return None
+    try:
+        import tifffile
+
+        image = np.asarray(tifffile.imread(path), dtype=np.float64)
+    except Exception:
+        return None
+    while image.ndim > 2:
+        image = image.mean(axis=0)
+    return image if image.ndim == 2 else None
 
 
 def deconvolve_dff(

@@ -16,6 +16,7 @@ from neuroseq.device_control.syscon2_stimulation_host import BlockRecording
 from neuroseq.export.exporter_syscon2 import SUPPORTED_LASER_WAVELENGTHS_NM
 from neuroseq.export.syscon2_export_service import slice_stim_array
 from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
+from neuroseq.importers.importer_scanimage_traces import EXTRACTION_METHODS
 
 if TYPE_CHECKING:
     from neuroseq.device_control.syscon2_stimulation_host import SysCon2StimulationHost
@@ -81,6 +82,43 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             "decay. The number of frames follows from the block length and this tail."
         )
         form.addRow("Record after block:", self.spn_tail_s)
+        self.chk_remove_artefact = QtWidgets.QCheckBox(
+            "Remove stimulation artefact", self
+        )
+        self.chk_remove_artefact.setChecked(True)
+        self.chk_remove_artefact.setToolTip(
+            "Replace the fluorescence of imaging frames recorded while the "
+            "stimulation laser is on with the mean of the nearest clean frames before "
+            "and after, so laser light is not measured as a calcium response. "
+            "Unticked, those frames are kept as recorded."
+        )
+        form.addRow(self.chk_remove_artefact)
+        self.cmb_extraction = QtWidgets.QComboBox(self)
+        for method, label in EXTRACTION_METHODS.items():
+            self.cmb_extraction.addItem(label, method)
+        self.cmb_extraction.setToolTip(
+            "Suite2p: motion-corrects each recording (rigid + non-rigid, aligned to "
+            "the image the Cellpose masks were drawn on), then extracts each ROI "
+            "subtracting 0.7 x the surrounding neuropil; slower. ROI average: the "
+            "mean of each ROI's pixels as recorded, quick enough for fast probing."
+        )
+        form.addRow("Trace extraction:", self.cmb_extraction)
+        self.spn_extraction_slow_s = QtWidgets.QDoubleSpinBox(self)
+        self.spn_extraction_slow_s.setRange(5.0, 3600.0)
+        self.spn_extraction_slow_s.setDecimals(0)
+        self.spn_extraction_slow_s.setValue(120.0)
+        self.spn_extraction_slow_s.setSuffix(" s")
+        self.spn_extraction_slow_s.setToolTip(
+            "If Suite2p takes longer than this for one block, a warning is written to "
+            "the routine's log; the routine keeps waiting for it and carries on."
+        )
+        self._lbl_extraction_slow = QtWidgets.QLabel(
+            "Warn if Suite2p takes over:", self
+        )
+        form.addRow(self._lbl_extraction_slow, self.spn_extraction_slow_s)
+        self.cmb_extraction.currentIndexChanged.connect(
+            lambda _index: self._update_recording_controls(self.automatic)
+        )
         channel_note = QtWidgets.QLabel(
             "Measured on the Functional channel set in the ScanImage tab.", self
         )
@@ -131,6 +169,7 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             lambda checked: self._store_setting(ten_spots_per_roi=checked)
         )
         self.chk_automatic.toggled.connect(self._update_recording_controls)
+        self._update_recording_controls(self.automatic)
         self._export_widgets: tuple[QtWidgets.QWidget, ...] = (
             self.spn_power_mw,
             self.cmb_laser,
@@ -141,6 +180,12 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
     def _update_recording_controls(self, automatic: bool) -> None:
         """Recording options only apply to blocks NeuroSeq records itself."""
         self.spn_tail_s.setEnabled(automatic)
+        self.chk_remove_artefact.setEnabled(automatic)
+        self.cmb_extraction.setEnabled(automatic)
+        suite2p = self.cmb_extraction.currentData() == "suite2p"
+        self._lbl_extraction_slow.setVisible(suite2p)
+        self.spn_extraction_slow_s.setVisible(suite2p)
+        self.spn_extraction_slow_s.setEnabled(automatic)
         self.spn_spike_threshold.setEnabled(automatic)
 
     def show_readout(self, dff: bool) -> None:
@@ -218,6 +263,9 @@ class HardwareSettingsWidget(QtWidgets.QGroupBox):
             stim_block=slice_stim_array(stim, start, stop),
             tail_s=self.spn_tail_s.value(),
             spike_threshold=self.spn_spike_threshold.value(),
+            remove_artefact=self.chk_remove_artefact.isChecked(),
+            extraction=str(self.cmb_extraction.currentData()),
+            extraction_slow_s=self.spn_extraction_slow_s.value(),
             group=group,
             offset_s=start * float(stim.dt),
         )
