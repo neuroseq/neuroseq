@@ -262,5 +262,7 @@ Projects are saved as `.nseq` archives: ZIP files containing a JSON metadata fil
   `VIRTUAL_ENV` prefix).
 
 - When `elise` is missing, ~27 ELISE tests skip rather than fail, so `uv run pytest` still
-  reports a green suite. If a full-suite run shows ~29 skipped instead of ~2, that install has
-  gone missing — reinstall it before comparing pass counts against a baseline.
+  reports a green suite. On Linux about 18 tests skip anyway (Windows-only launcher and
+  named-pipe tests, opt-in screenshot tests, pyNN not installed, two `.pxp` sample files that
+  only exist on some hosts). If a full-suite run shows ~45 skipped instead of ~18, the `elise`
+  install has gone missing — reinstall it before comparing pass counts against a baseline.

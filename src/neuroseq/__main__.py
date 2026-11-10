@@ -236,8 +236,10 @@ def main(
     app = QtWidgets.QApplication(sys.argv)
     from neuroseq import console_art
 
-    # Taskbar/dock and every top-level window, dialogs included.
-    app.setWindowIcon(QtGui.QIcon(str(console_art.app_icon_path())))
+    # Taskbar/dock and every top-level window, dialogs included. A QIcon
+    # needs a real Qt application; Qt aborts the process without one.
+    if QtGui.QGuiApplication.instance() is not None:
+        app.setWindowIcon(QtGui.QIcon(str(console_art.app_icon_path())))
     app._interrupt_timer = _install_interrupt_handlers(app)
     splash = _show_loading_splash(app)
     try:
