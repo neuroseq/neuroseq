@@ -427,7 +427,9 @@ def test_worker_dispatches_plugin_writes(qtbot):
 def _plugin_chat_widget(qtbot, monkeypatch, accept):
     from neuroseq.llm import chat_widget
 
-    monkeypatch.setattr(chat_widget.ChatWidget, "reload_backend", lambda self: None)
+    monkeypatch.setattr(
+        chat_widget.ChatWidget, "reload_backend", lambda self, *args: None
+    )
     confirm = ConfirmStub(accept=accept)
     monkeypatch.setattr(
         chat_widget.ChatWidget,
@@ -487,7 +489,9 @@ def test_chat_widget_reports_declined_plugin(
 def test_chat_widget_passes_busy_check_to_read_access(qtbot, monkeypatch):
     from neuroseq.llm import chat_widget
 
-    monkeypatch.setattr(chat_widget.ChatWidget, "reload_backend", lambda self: None)
+    monkeypatch.setattr(
+        chat_widget.ChatWidget, "reload_backend", lambda self, *args: None
+    )
     widget = chat_widget.ChatWidget()
     qtbot.addWidget(widget)
     widget.set_project(Project())
