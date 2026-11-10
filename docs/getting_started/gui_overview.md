@@ -3,7 +3,8 @@
 ![GUI layout](../images/layout.png)
 
 Panels: input array editor (1), traces (2), spikes (3), synapse heatmap (4),
-custom analysis (5) and console (6). Show or hide each with **View → Show …** or
+Cell segmentation and Imaging tabs (5) and console (6). The Custom Analysis
+panel opens when you run an analysis. Show or hide each with **View → Show …** or
 the View toolbar (**Show Data** is the All data panel). Right-click a panel for **Detach panel** or **Detach copy of panel**
 (e.g. to compare two time windows).
 

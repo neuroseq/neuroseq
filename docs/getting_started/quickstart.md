@@ -1,5 +1,7 @@
 # Quickstart
 
+![Welcome to NeuroSeq dialog](../images/startup.png)
+
 1. Run `neuroseq`. In the **Welcome to NeuroSeq** dialog, click
    **Open example project**. This opens the _Getting Started Project_: a
    10-neuron Brian2 network with an input array and a 2-photon field of view
