@@ -55,6 +55,12 @@ and Claude Code; off for Ollama, which runs locally. Turn it on for an Ollama
 server on another machine. The chat badge shows "data not shared" while it is
 on.
 
+The checkbox only limits what NeuroSeq hands to the assistant. Codex keeps its
+own shell, file and MCP tools (it has no single switch that turns them all
+off), and its read-only sandbox can still read any file your user account can,
+including saved projects and recordings. Use another provider when project
+data must stay private; Claude Code runs with all native tools disabled.
+
 Earlier replies can contain project data, so the chat clears its history (with
 a short note) when you switch provider or endpoint, or turn the checkbox on.
 Changing only the model keeps the history. Every chat panel, including
