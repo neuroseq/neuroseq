@@ -479,3 +479,34 @@ def test_codex_badge_only_claims_neuroseq_data_is_withheld(
     widget.reload_backend()
     assert "not shared" not in widget.badge_label.text()
     assert widget.badge_label.toolTip() == ""
+
+
+def test_settings_change_updates_every_open_chat_panel(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    from neuroseq.llm.chat_widget import notify_llm_settings_changed
+
+    settings = _FakeSettings()
+    docked = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    detached = ChatWidget()
+    qtbot.addWidget(detached)
+    gone = ChatWidget()
+    gone.deleteLater()
+    qtbot.waitUntil(lambda: not _is_alive(gone), timeout=WAIT_TIMEOUT_MS)
+
+    settings.llm_provider = "openai"
+    settings.llm_model = "gpt-test"
+    notify_llm_settings_changed()  # a deleted panel must not break this
+
+    for widget in (docked, detached):
+        assert "Openai · gpt-test" in widget.badge_label.text()
+
+
+def _is_alive(widget: QtCore.QObject) -> bool:
+    try:
+        widget.objectName()
+    except RuntimeError:
+        return False
+    return True

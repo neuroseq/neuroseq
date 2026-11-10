@@ -67,7 +67,8 @@ Endpoint), Claude Code (all native tools disabled) or Ollama.
 Earlier replies can contain project data, so the chat clears its history (with
 a short note) when you switch provider or endpoint, or turn the checkbox on.
 Changing only the model keeps the history. Every chat panel, including
-detached ones and other project tabs, uses the current settings when you send.
+detached ones and other project tabs, switches to the new settings as soon as
+you change them.
 
 ## Writing analysis plugins
 

@@ -163,6 +163,26 @@ class _ChatWorker(QtCore.QThread):
             self.error.emit(f"Internal error: {e!r}")
 
 
+class _SettingsBroadcast(QtCore.QObject):
+    changed = QtCore.Signal()
+
+
+_broadcast: _SettingsBroadcast | None = None
+
+
+def _settings_broadcast() -> _SettingsBroadcast:
+    global _broadcast
+    if _broadcast is None:
+        _broadcast = _SettingsBroadcast()
+    return _broadcast
+
+
+def notify_llm_settings_changed() -> None:
+    """Tell every open chat panel (docked, detached, in any project tab) to
+    pick up the current LLM settings, so none shows a stale provider."""
+    _settings_broadcast().changed.emit()
+
+
 class ChatWidget(QtWidgets.QWidget):
     request_settings_dialog = QtCore.Signal()
 
@@ -186,6 +206,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._static_prompt = build_static_prompt()
         self._build_ui()
         self.reload_backend()
+        _settings_broadcast().changed.connect(self._refresh_settings)
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)

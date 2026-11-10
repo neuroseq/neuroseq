@@ -60,6 +60,7 @@ from neuroseq.importers.patch_clamp_data_input_import_dialog import (
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.llm.chat_widget import ChatWidget
+from neuroseq.llm.chat_widget import notify_llm_settings_changed
 from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
@@ -2741,7 +2742,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._llm_settings_dialog is None:
             self._llm_settings_dialog = LLMSettingsDialog()
             self._llm_settings_dialog.settings_changed.connect(
-                self.chat_widget.reload_backend
+                notify_llm_settings_changed
             )
         self._llm_settings_dialog.show()
         self._llm_settings_dialog.raise_()
