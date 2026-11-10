@@ -1505,6 +1505,25 @@ def test_syscon2_export_template_is_saved_with_the_project(tmp_path):
     assert Project(path).syscon2_export_template_text is None
 
 
+def test_save_keeps_dirty_when_project_changes_during_the_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = default_project()
+    project.mark_dirty()
+    original_write = Project._write_project_zip
+
+    def _write_while_user_edits(self, filepath, options):
+        original_write(self, filepath, options)
+        self.mark_dirty()
+
+    monkeypatch.setattr(Project, "_write_project_zip", _write_while_user_edits)
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, False, False))
+    assert project.dirty is True
+    monkeypatch.undo()
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, False, False))
+    assert project.dirty is False
+
+
 def test_device_settings_are_saved_with_the_project(tmp_path):
     project = Project()
     project.syscon_export_settings = SysconExportSettings(

@@ -157,6 +157,9 @@ class Project:
         # (see mark_dirty()'s docstring); cleared by save() and, defensively,
         # at the very end of this constructor regardless of how it got here.
         self.dirty = False
+        # Bumped by mark_dirty(), so save() only clears ``dirty`` when nothing
+        # changed while it was writing.
+        self._change_count = 0
         self.history = ProjectHistory()
         self.history.subscribe(self._history_changed)
         self.filepath = None
@@ -294,6 +297,7 @@ class Project:
         ``project.b2_model`` or ``project.cellpose_data`` after a dialog
         accepts new state).
         """
+        self._change_count += 1
         self.dirty = True
 
     def _history_changed(self, event: str) -> None:
@@ -1741,6 +1745,7 @@ class Project:
         """
 
         filepath = pathlib.Path(filepath)
+        change_count = self._change_count
         # Serialise into a temporary file next to the target and only replace
         # the target once everything succeeded, so a serialisation error can
         # never truncate an existing project file.
@@ -1763,7 +1768,9 @@ class Project:
             tmp_path.unlink(missing_ok=True)
             raise
         self.filepath = filepath
-        self.dirty = False
+        # The GUI stays usable while a worker saves; keep edits made meanwhile.
+        if self._change_count == change_count:
+            self.dirty = False
 
     def _write_project_zip(
         self, filepath: pathlib.Path, options: SaveLoadOptions
