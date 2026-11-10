@@ -179,6 +179,8 @@ class ChatWidget(QtWidgets.QWidget):
         self._backend_model = ""
         self._private_data = True
         self._settings_key: tuple[object, ...] = ()
+        self._destination: tuple[str, str] | None = None
+        self._notice_html = ""
         self._current_assistant_buffer = ""
         self._transient_assistant_html: str | None = None
         self._static_prompt = build_static_prompt()
@@ -258,8 +260,49 @@ class ChatWidget(QtWidgets.QWidget):
         if self._settings_key_of(settings) != self._settings_key:
             self.reload_backend(settings)
 
+    @staticmethod
+    def _destination_of(settings: GuiSettings) -> tuple[str, str]:
+        endpoint = {
+            "ollama": settings.llm_ollama_base_url,
+            "openai": settings.llm_openai_base_url,
+        }.get(settings.llm_provider, "")
+        return settings.llm_provider, endpoint
+
+    def copy_conversation_from(self, source: ChatWidget) -> None:
+        """Continue ``source``'s chat, applying the history rule of ``reload_backend``."""
+        self._history = list(source._history)
+        self._destination = source._destination
+        self._private_data = source._private_data
+        self.reload_backend()
+        self._render_history()
+
+    def _clear_history_note(self, settings: GuiSettings) -> str:
+        if not self._history:
+            return ""
+        if self._destination and self._destination != self._destination_of(settings):
+            return "Chat history cleared: the LLM provider changed."
+        if not self._private_data and settings.llm_project_data_private(
+            settings.llm_provider
+        ):
+            return "Chat history cleared: project data is no longer shared."
+        return ""
+
     def reload_backend(self, settings: GuiSettings | None = None) -> None:
+        if self._worker is not None:
+            # Applied when the stream finishes, so its reply is not orphaned.
+            return
         settings = settings or GuiSettings()
+        # Earlier answers may contain project data; never resend them to a
+        # different provider or after sharing was turned off.
+        note = self._clear_history_note(settings)
+        if note:
+            self._history.clear()
+            self._transient_assistant_html = None
+            self._notice_html = (
+                f"<div class='msg notice'><pre>{html.escape(note)}</pre></div>"
+            )
+            self._render_history()
+        self._destination = self._destination_of(settings)
         self._settings_key = self._settings_key_of(settings)
         self._backend_name = settings.llm_provider
         self._backend_model = settings.llm_model
@@ -398,6 +441,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._cleanup_worker()
         self._set_status("Idle")
         self._render_history()
+        self._refresh_settings()
         self._update_input_enabled()
 
     def _on_worker_error(self, message: str) -> None:
@@ -429,6 +473,7 @@ class ChatWidget(QtWidgets.QWidget):
     def _on_clear_clicked(self) -> None:
         self._history.clear()
         self._transient_assistant_html = None
+        self._notice_html = ""
         self.history_view.clear()
         self._set_status("Idle")
 
@@ -451,8 +496,10 @@ class ChatWidget(QtWidgets.QWidget):
             .error { color: #b42318; }
             .title { font-weight: 600; margin-bottom: 4px; }
             pre { white-space: pre-wrap; margin: 0; font-family: inherit; }
+            .notice { color: #667085; font-style: italic; }
             </style>
-            """
+            """,
+            self._notice_html,
         ]
         for message in self._history:
             parts.append(self._render_message_html(message.role, message.content))

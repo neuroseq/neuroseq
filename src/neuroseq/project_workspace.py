@@ -3539,8 +3539,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def _build_fresh_chat_widget(self) -> ChatWidget:
         widget = ChatWidget(parent=None)
         widget.set_project(self.project)
-        widget._history = list(self.chat_widget._history)
-        widget._render_history()
+        widget.copy_conversation_from(self.chat_widget)
         widget.request_settings_dialog.connect(self.open_llm_settings)
         widget.set_busy_check(self._background_job_busy)
         return widget

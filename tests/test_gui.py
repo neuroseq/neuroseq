@@ -983,6 +983,22 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
     )
 
 
+def test_detached_chat_continues_the_docked_conversation(qtbot: QtBot) -> None:
+    from neuroseq.llm.backend import Message
+    from neuroseq.llm.backend import Role
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.chat_widget._history = [Message(Role.USER, "hi"), Message(Role.ASSISTANT, "yo")]
+
+    detached = gui._build_fresh_chat_widget()
+    qtbot.addWidget(detached)
+
+    assert detached._history == gui.chat_widget._history
+    assert detached._project is gui.project
+    assert "yo" in detached.history_view.toPlainText()
+
+
 def test_detach_custom_analysis_before_anything_analyzed_shows_message(
     qtbot: QtBot,
     qmessagebox_calls: list,

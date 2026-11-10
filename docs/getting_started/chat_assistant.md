@@ -55,6 +55,11 @@ and Claude Code; off for Ollama, which runs locally. Turn it on for an Ollama
 server on another machine. The chat badge shows "data not shared" while it is
 on.
 
+Earlier replies can contain project data, so the chat clears its history (with
+a short note) when you switch provider or endpoint, or turn the checkbox on.
+Changing only the model keeps the history. Every chat panel, including
+detached ones and other project tabs, uses the current settings when you send.
+
 ## Writing analysis plugins
 
 Ask e.g. "Create an analysis plugin that plots the mean trace across selected
