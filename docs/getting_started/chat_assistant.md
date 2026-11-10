@@ -58,8 +58,11 @@ on.
 The checkbox only limits what NeuroSeq hands to the assistant. Codex keeps its
 own shell, file and MCP tools (it has no single switch that turns them all
 off), and its read-only sandbox can still read any file your user account can,
-including saved projects and recordings. Use another provider when project
-data must stay private; Claude Code runs with all native tools disabled.
+including saved projects and recordings. The settings dialog warns about this
+when Codex is selected, and the chat badge then reads "NeuroSeq data not
+shared". To keep project data private, use OpenAI with an API key (or any
+OpenAI-compatible server, such as Azure OpenAI or a local vLLM, set as
+Endpoint), Claude Code (all native tools disabled) or Ollama.
 
 Earlier replies can contain project data, so the chat clears its history (with
 a short note) when you switch provider or endpoint, or turn the checkbox on.

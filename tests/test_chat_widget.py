@@ -463,3 +463,19 @@ def test_copied_conversation_is_cleared_when_provider_changed_since(
     detached.copy_conversation_from(source)
     assert detached._history == []
     assert len(source._history) == 2
+
+
+def test_codex_badge_only_claims_neuroseq_data_is_withheld(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings(llm_provider="codex")
+    widget = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    assert "NeuroSeq data not shared" in widget.badge_label.text()
+    assert "read files on disk" in widget.badge_label.toolTip()
+
+    settings.set_llm_project_data_private("codex", False)
+    widget.reload_backend()
+    assert "not shared" not in widget.badge_label.text()
+    assert widget.badge_label.toolTip() == ""

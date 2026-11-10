@@ -107,6 +107,16 @@ class LLMSettingsDialog(SelfRaisingDialog):
             "readable. Remembered per provider; off by default only for Ollama."
         )
         form.addRow("Privacy:", self.private_data_check)
+        self.codex_privacy_label = QtWidgets.QLabel(
+            "Codex can still read files on disk with its own shell and MCP "
+            "tools, so this only limits what NeuroSeq sends. To keep project "
+            "data private, use OpenAI (an API key, or an OpenAI-compatible "
+            "server as Endpoint), Claude Code or Ollama.",
+            self,
+        )
+        self.codex_privacy_label.setWordWrap(True)
+        self.codex_privacy_label.setStyleSheet("color: #b35c00;")
+        form.addRow("", self.codex_privacy_label)
 
         self.status_label = QtWidgets.QLabel("", self)
         form.addRow("Status:", self.status_label)
@@ -176,6 +186,7 @@ class LLMSettingsDialog(SelfRaisingDialog):
             api_key_label.setVisible(show_key)
         self.save_key_button.setVisible(show_key)
         self.clear_key_button.setVisible(show_key)
+        self.codex_privacy_label.setVisible(provider == "codex")
         for cli_provider, executable_edit, help_label in (
             ("codex", self.codex_executable_edit, self.codex_help_label),
             ("claude_code", self.claude_executable_edit, self.claude_help_label),

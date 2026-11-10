@@ -337,8 +337,20 @@ class ChatWidget(QtWidgets.QWidget):
         label = self._backend_name.capitalize() if self._backend_name else "LLM"
         if self._backend_name == "ollama":
             label = "Ollama"
-        suffix = " · data not shared" if self._private_data else ""
+        suffix = ""
+        tooltip = ""
+        if self._private_data and self._backend_name == "codex":
+            # Codex's own tools can still read files, so promise less.
+            suffix = " · NeuroSeq data not shared"
+            tooltip = (
+                "NeuroSeq does not send project data, but Codex can still read "
+                "files on disk with its own tools. Use OpenAI, Claude Code or "
+                "Ollama to keep project data private."
+            )
+        elif self._private_data:
+            suffix = " · data not shared"
         self.badge_label.setText(f"{label} · {self._backend_model}{suffix}")
+        self.badge_label.setToolTip(tooltip)
 
     def _update_input_enabled(self) -> None:
         enabled = self._backend is not None and self._worker is None

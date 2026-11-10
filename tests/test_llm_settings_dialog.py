@@ -212,3 +212,19 @@ def test_private_data_checkbox_defaults_per_provider_and_persists(
     assert dialog.private_data_check.isChecked()
     dialog.provider_combo.setCurrentText("Anthropic")
     assert not dialog.private_data_check.isChecked()
+
+
+def test_codex_privacy_warning_shows_only_for_codex(qtbot: QtBot, monkeypatch) -> None:
+    settings = _FakeSettings()
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog = LLMSettingsDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.codex_privacy_label.isHidden()
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert not dialog.codex_privacy_label.isHidden()
+    assert "OpenAI" in dialog.codex_privacy_label.text()
+    dialog.provider_combo.setCurrentText("Anthropic")
+    assert dialog.codex_privacy_label.isHidden()
