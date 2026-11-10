@@ -52,6 +52,8 @@ class _FakeSettings:
     llm_model: str = "fake-model"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
+    llm_codex_executable: str = ""
+    llm_claude_executable: str = ""
     llm_private_project_data: dict = field(default_factory=dict)
 
     def llm_project_data_private(self, provider: str) -> bool:
@@ -320,8 +322,10 @@ def test_private_data_setting_controls_snapshot_and_badge(
         widget.input_edit.setPlainText("hello")
         widget.send_button.click()
         qtbot.waitUntil(
-            lambda: len(backend.seen_messages) > count
-            and widget.status_label.text() == "Idle",
+            lambda: (
+                len(backend.seen_messages) > count
+                and widget.status_label.text() == "Idle"
+            ),
             timeout=WAIT_TIMEOUT_MS,
         )
         return backend.seen_messages[-1][0].content
@@ -336,3 +340,30 @@ def test_private_data_setting_controls_snapshot_and_badge(
     shared_prompt = send()
     assert "'stimulus'" in shared_prompt
     assert not widget._read_access.private_data
+
+
+def test_send_rereads_settings_changed_outside_this_panel(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    # Detached panels and other tabs never get the settings dialog's signal.
+    backends = {"fake": FakeBackend(tokens=["one"]), "openai": FakeBackend(["two"])}
+    settings = _FakeSettings()
+    settings.set_llm_project_data_private("fake", False)
+    settings.set_llm_project_data_private("openai", True)
+    widget = _make_widget(
+        qtbot,
+        monkeypatch,
+        lambda self, current: backends[current.llm_provider],
+        settings=settings,
+    )
+    widget.set_project(_make_project())
+
+    settings.llm_provider = "openai"
+    widget.input_edit.setPlainText("hello")
+    widget.send_button.click()
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert not backends["fake"].seen_messages
+    assert "'stimulus'" not in backends["openai"].seen_messages[0][0].content
+    assert widget._read_access is not None and widget._read_access.private_data
+    assert "data not shared" in widget.badge_label.text()

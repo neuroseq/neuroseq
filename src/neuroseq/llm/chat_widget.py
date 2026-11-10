@@ -178,6 +178,7 @@ class ChatWidget(QtWidgets.QWidget):
         self._backend_name = ""
         self._backend_model = ""
         self._private_data = True
+        self._settings_key: tuple[object, ...] = ()
         self._current_assistant_buffer = ""
         self._transient_assistant_html: str | None = None
         self._static_prompt = build_static_prompt()
@@ -239,8 +240,27 @@ class ChatWidget(QtWidgets.QWidget):
     ) -> bool:
         return confirm_plugin_write(target, content, previous, parent=self)
 
-    def reload_backend(self) -> None:
+    @staticmethod
+    def _settings_key_of(settings: GuiSettings) -> tuple[object, ...]:
+        return (
+            settings.llm_provider,
+            settings.llm_model,
+            settings.llm_ollama_base_url,
+            settings.llm_openai_base_url,
+            settings.llm_codex_executable,
+            settings.llm_claude_executable,
+            settings.llm_project_data_private(settings.llm_provider),
+        )
+
+    def _refresh_settings(self) -> None:
+        """Pick up settings changed elsewhere (another tab, a detached panel)."""
         settings = GuiSettings()
+        if self._settings_key_of(settings) != self._settings_key:
+            self.reload_backend(settings)
+
+    def reload_backend(self, settings: GuiSettings | None = None) -> None:
+        settings = settings or GuiSettings()
+        self._settings_key = self._settings_key_of(settings)
         self._backend_name = settings.llm_provider
         self._backend_model = settings.llm_model
         self._private_data = settings.llm_project_data_private(settings.llm_provider)
@@ -290,7 +310,12 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_send_clicked(self) -> None:
         text = self.input_edit.toPlainText().strip()
-        if not text or self._worker is not None or self._backend is None:
+        if not text or self._worker is not None:
+            return
+        # Every chat panel re-reads the settings before sending, so detached
+        # panels and other tabs never use a stale provider or privacy flag.
+        self._refresh_settings()
+        if self._backend is None:
             return
         self.input_edit.clear()
         self._history.append(Message(Role.USER, text))
