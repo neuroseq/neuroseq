@@ -24,7 +24,9 @@ class RoutineBackend:
 
     def __init__(self, host: SimulationHost) -> None:
         self._host = host
-        self.running = False
+        #: Called with the new state whenever ``running`` changes.
+        self.on_running_changed: Callable[[bool], None] | None = None
+        self._running = False
         self.awaiting_simulation = False
         self.paused = False
         self.pending_simulation_seconds: float | None = None
@@ -33,6 +35,19 @@ class RoutineBackend:
         self.on_finished: Callable[[str], None] | None = None
         self.on_advance: Callable[[], None] | None = None
         self.on_measurement: Callable[[], None] | None = None
+
+    @property
+    def running(self) -> bool:
+        return self._running
+
+    @running.setter
+    def running(self, value: bool) -> None:
+        value = bool(value)
+        if value == self._running:
+            return
+        self._running = value
+        if self.on_running_changed is not None:
+            self.on_running_changed(value)
 
     def begin(self) -> None:
         self.running = True

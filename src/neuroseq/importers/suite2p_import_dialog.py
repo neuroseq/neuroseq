@@ -20,8 +20,14 @@ class Suite2pImportDialog(QtWidgets.QDialog):
     def __init__(
         self,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        stimulus_to_cellpose_mapping: dict[int, int] | None = None,
     ) -> None:
+        """``stimulus_to_cellpose_mapping`` is the project's resolved Cellpose
+        mapping: rows (Cellpose ID k = row k) are mapped to input neurons at
+        import, exactly as ``Project.remap_cellpose_indices`` does later."""
         super().__init__(parent)
+        self._stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
 
         self.experiment_name: str = "Suite2p Import"
         self.experiment_duration: float = 0.0
@@ -569,6 +575,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                 self.fneu_data,
                 max_neurons=max_neurons,
                 sampling_rate=sampling_rate,
+                stimulus_to_cellpose_mapping=self._stimulus_to_cellpose_mapping,
             )
 
             self.imported_data = [traces]
@@ -581,6 +588,7 @@ class Suite2pImportDialog(QtWidgets.QDialog):
                     dt=dt,
                     threshold=threshold,
                     max_neurons=max_neurons,
+                    stimulus_to_cellpose_mapping=self._stimulus_to_cellpose_mapping,
                 )
                 self.imported_data.append(spike_data)
                 self.logger.debug(

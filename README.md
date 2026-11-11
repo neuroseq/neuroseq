@@ -1,78 +1,59 @@
-# NeuroSeq: A unified framework for biological, neuromorphic, and computational neural networks
+# NeuroSeq: Neuronal Sequencer
 
 [![CI](https://github.com/neuroseq/neuroseq/actions/workflows/ci.yml/badge.svg)](https://github.com/neuroseq/neuroseq/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/neuroseq)](https://pypi.org/project/neuroseq/)
 [![Docs](https://img.shields.io/badge/docs-neuroseq.github.io-blue)](https://neuroseq.github.io/)
 
-NeuroSeq is an open-source framework to bring biological neuronal circuits, neuromorphic hardware, and computational neural network models into a unified experimental environment. It integrates experimental protocol design, data acquisition and control, and methods for data analysis and parameter inference across these fundamentally different neural network implementations.
+NeuroSeq controls the input to a neural network and reads out its output, whether the network is simulated, biological or neuromorphic. The same stimulation protocol and the same analysis run on all three.
 
-## What is a neuronal sequencer?
+| Network      | Input                                                             | Readout                                     |
+| ------------ | ----------------------------------------------------------------- | ------------------------------------------- |
+| Digital      | Brian2 (built in) or external simulators                          | Voltage traces, spikes, synaptic weights    |
+| Biological   | Two-photon holographic optogenetics (HOLO4D/SysCon2), patch clamp | Calcium imaging (ScanImage, suite2p), Igor2 |
+| Neuromorphic | BrainScaleS-2 spike sources                                       | Spikes and membrane traces                  |
 
-NeuroSeq is a first implementation of a neuronal sequencer. We define a neuronal sequencer as a software system for controlling structured sequences of inputs to neural networks and analyzing their responses. It provides a unified framework for designing, delivering, and dynamically adjusting spatiotemporal patterns of neuronal stimulation, enabling systematic exploration of neural network input–output relationships.
+![NeuroSeq GUI](https://raw.githubusercontent.com/neuroseq/neuroseq/main/docs/images/screenshot.png)
 
-The concept is partially inspired by [music sequencers](https://en.wikipedia.org/wiki/Music_sequencer) and [digital audio workstations (DAWs)](https://en.wikipedia.org/wiki/Digital_audio_workstation), which have long been used to compose, arrange, and control sequences of musical events. Similarly, NeuroSeq allows users to organize and execute precisely timed sequences of inputs, but instead of controlling musical instruments, it interfaces with neural networks. However, the analogy has its limitations as neural networks exhibit a substantially richer repertoire of dynamical responses, plasticity mechanisms, and adaptive behaviors.
+## Why
 
-From a control perspective, a neuronal sequencer treats a neural network as a dynamical system whose activity can be probed and influenced through precisely defined inputs. By integrating stimulation control, data acquisition, and methods for analysis and inference, it enables both open-loop and closed-loop experimentation, in which network responses can guide subsequent stimulation. Importantly, it enables a frictionless transfer of the methods and concepts between seemingly distant research domains.
+Simulations expose every input and every variable. Biological and neuromorphic networks usually do not, so the three fields developed separate methods. Modern all-optical and electrophysiological interfaces now give cell-level control and readout of living networks. NeuroSeq uses this to treat every network as a programmable system: design an input, deliver it, read the response, decide the next input.
 
-A neuronal sequencer provides a common experimental interface for biological neural circuits, neuromorphic hardware, and computational network models, enabling the investigation and comparison of neural dynamics, computation, and plasticity across different physical substrates.
+This lets you:
 
-## Graphical User Interface
+- run real experiments and neuromorphic hardware almost like simulations,
+- run models as if they were experiments, with realistic instrument constraints,
+- test a protocol in simulation, then run it unchanged on a microscope or chip.
 
-NeuroSeq provides a graphical user interface (GUI) for defining, configuring, and executing experimental protocols across biological neural circuits, computational models, and neuromorphic hardware.
+## Features
 
-The GUI serves as a unified control environment, allowing users to define and manage input arrays delivered to neural systems, including stimulation patterns, timing, intensity, and spatial or temporal organization. It also provides control over experimental hardware, simulation parameters, data acquisition, and the execution of experimental sequences. Acquired data can subsequently be processed using integrated analysis and inference tools.
+- **Input design**: draw, paste or script stimulus arrays (static input), or run interactive routines that choose the next stimulus from the last response (dynamic input, e.g. rheobase search, STDP tuning).
+- **Neuron ID matching**: links input rows to real cells via Cellpose segmentation.
+- **Delivery**: Brian2, external simulators, SysCon2 `.seq` scripts, ScanImage acquisition, BrainScaleS-2, patch clamp stimulus export.
+- **Readout and analysis**: import imaging (Cellpose + suite2p), Igor2 and patch clamp data; compare with simulations; extend with analysis plugins.
+- **Embedded Python console** and an experimental LLM assistant.
 
-By bringing stimulation, system control, data acquisition, and analysis into a single interface, NeuroSeq enables users to interact with different neural substrates through a common experimental workflow.
+## Install
 
-![screenshot](https://raw.githubusercontent.com/neuroseq/neuroseq/main/docs/images/screenshot.png)
-
-## Installation
-
-NeuroSeq requires Python 3.12 or newer. Install the latest release from
-[PyPI](https://pypi.org/project/neuroseq/), ideally into a virtual environment
-or Conda environment:
+Python 3.12 or newer:
 
 ```bash
 pip install neuroseq
-```
-
-Then launch the GUI with:
-
-```bash
 neuroseq
 ```
 
-To upgrade to a newer release, run `pip install --upgrade neuroseq`.
-
-See the [installation guide](https://neuroseq.github.io/getting_started/installation/)
-for details, including GPU setup and Cython on Windows, and the
-[developer installation guide](https://neuroseq.github.io/developer/developer_installation/)
-to work on NeuroSeq from a repository checkout with uv or Conda.
+See the [installation guide](https://neuroseq.github.io/getting_started/installation/) (GPU, Windows) and the [developer guide](https://neuroseq.github.io/developer/developer_installation/) (uv or Conda checkout).
 
 ## Documentation
 
-Documentation for NeuroSeq is available [online](https://neuroseq.github.io/). We are actively developing and expanding it, and community contributions are very welcome, whether to improve existing content, add tutorials and examples, or document new features. See our [documentation guide](https://neuroseq.github.io/developer/documentation/) to learn how to build it locally, preview, and contribute to the documentation.
+[neuroseq.github.io](https://neuroseq.github.io/). Contributions to the docs are welcome, see the [documentation guide](https://neuroseq.github.io/developer/documentation/).
 
-An AI-powered assistant has also been integrated directly into the NeuroSeq application. The users can log-in with their presered accounts or API key and explore NeuroSeq functionality while application is running. The assistant enables users to ask questions, explore features, and receive contextual guidance through an interactive chatbot. Its functionality is still being refined, and user feedback is highly appreciated.
+## Contributing
 
-## Open-Source Development and Contributions
+Extensions go in as plugins where possible: new network backends, analysis methods and stimulation protocols. They need no core changes and get a lighter review. Changes to the core architecture should be discussed with the core developers first.
 
-NeuroSeq is an **open-source project maintained within a public GitHub organization**. Everyone is welcome to propose and implement improvements, extend its functionality, and contribute to the overall reliability, stability, and performance of the application.
-
-Our current development policy prioritizes modular extensions through plugins. In particular, contributions implementing **new neural substrates**, **analysis methods**, and **inference tools** as plugins are highly encouraged. These extensions are designed to require minimal changes to the existing codebase and therefore generally follow a simpler review and integration process.
-
-In contrast, **modifications to the core architecture or fundamental functionality** require more substantial discussion with the core developers to ensure compatibility, maintainability, and alignment with the project's long-term development goals.
-
-### How to Contribute
-
-- **Report a bug or suggest a feature:** Open a new [GitHub issue](https://github.com/neuroseq/neuroseq/issues) describing the problem, proposed improvement, or requested functionality.
-- **Extend NeuroSeq through plugins:** Contributions introducing new neural substrates, analysis pipelines, or inference tools are particularly welcome and are expected to have the most straightforward integration process.
-- **Implement a new feature:** Fork the [NeuroSeq repository](https://github.com/neuroseq/neuroseq), make the necessary modifications, and submit a pull request to initiate a review and discussion with the core developers.
-- **Improve reliability and stability:** Bug fixes, performance optimizations, testing, and improvements to existing functionality are equally valuable contributions.
-
-We encourage open discussions and collaborative development to make NeuroSeq a flexible, reliable, and accessible framework for experimentation with biological, computational, and neuromorphic neural networks.
+- Bugs and feature requests: [GitHub issues](https://github.com/neuroseq/neuroseq/issues)
+- Code: fork, branch, open a pull request. See the [contributing guide](https://neuroseq.github.io/developer/contributing/).
 
 ## License
 
-NeuroSeq is released under the [MIT License](https://github.com/neuroseq/neuroseq/blob/main/LICENSE). Copyright © 2024-2026 Andrey Formozov.
-See [AUTHORS.md](https://github.com/neuroseq/neuroseq/blob/main/AUTHORS.md) for the list of contributors.
+[MIT](https://github.com/neuroseq/neuroseq/blob/main/LICENSE). Copyright © 2024-2026 Andrey Formozov. Contributors are listed in [AUTHORS.md](https://github.com/neuroseq/neuroseq/blob/main/AUTHORS.md).

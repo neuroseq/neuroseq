@@ -34,6 +34,8 @@ from neuroseq.data import Experiment
 from neuroseq.device_control.scanimage_controls import ScanImageControls
 from neuroseq.device_control.scanimage_files import STIMULUS_SUFFIX
 from neuroseq.device_control.scanimage_files import stimulus_file_name
+from neuroseq.device_control.syscon2_stimulation_host import REUPLOAD_SETTLE_S
+from neuroseq.device_control.syscon2_stimulation_host import UPLOAD_TIMEOUT_S
 from neuroseq.importers.importer_scanimage_traces import deconvolve_dff
 from neuroseq.importers.importer_scanimage_traces import extract_recording_dff
 from neuroseq.importers.importer_scanimage_traces import functional_channel_mean
@@ -56,6 +58,10 @@ _FAILED_STATES = {"failed", "aborted", "interrupted", "finalization_failed", "un
 #: Slack beyond a block's length before an armed recording that has not finished
 #: is aborted (e.g. ScanImage never received the trigger).
 BLOCK_DEADLINE_MARGIN_S = 15.0
+#: The recording is armed before SysCon2 runs the block, and the run may first
+#: upload the sequence again (up to UPLOAD_TIMEOUT_S after REUPLOAD_SETTLE_S):
+#: allow for that, so a slow upload fails with its own message, not a TTL one.
+RUN_START_ALLOWANCE_S = UPLOAD_TIMEOUT_S + REUPLOAD_SETTLE_S
 
 
 def registration_note(registration: dict) -> str:
@@ -151,7 +157,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         self._disposed = False
         #: Shown as the "ScanImage (imaging)" tab of the Stimulation setup pane.
         self.controls = ScanImageControls(
-            connection, settings, owns_run=self.run_ids.__contains__
+            connection, settings, owns_run=self._tab_times_out_run
         )
         self.controls.channel_changed.connect(self.set_scanimage_channel)
         self.controls.record_requested.connect(self.start_scanimage_recording)
@@ -201,14 +207,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
 
     def _record(self, run_id: str) -> dict | None:
         """The project's record of ``run_id``; ``None`` if the project was replaced."""
-        return next(
-            (
-                record
-                for record in self._project().imaging_acquisitions
-                if record.get("run_id") == run_id
-            ),
-            None,
-        )
+        return self._project().imaging_acquisition(run_id)
 
     def _forget_run(self, run_id: str) -> None:
         self.run_ids.discard(run_id)
@@ -324,8 +323,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             if samples_path is not None:
                 samples_path.unlink(missing_ok=True)
             return False
-        project.imaging_acquisitions.append(record)
-        project.mark_dirty()
+        project.add_imaging_acquisition(record)
         # The project records the folder its recordings went to.
         self._remember_directory(str(arguments["directory"]))
         self.run_ids.add(arguments["run_id"])
@@ -371,16 +369,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     or self._abort_messages.get(run_id)
                     or self._block_failure_message(run_id, state, previous_state),
                 )
-        record = self._record(run_id)
-        if record is None:
-            logger.warning("No project record for ScanImage run %s", run_id)
-            return
-        previous = record.get("status")
-        record["status"] = state
+        changes: dict = {"status": state}
+        remove: tuple[str, ...] = ()
         if "error" in run:
-            record["error"] = run["error"]
-        elif record["status"] in {"recording", "completed", "aborted"}:
-            record.pop("error", None)
+            changes["error"] = run["error"]
+        elif state in {"recording", "completed", "aborted"}:
+            remove = ("error",)
         for source, target in (
             ("matlab_version", "matlab_version"),
             ("scanimage_version", "scanimage_version"),
@@ -388,9 +382,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             ("files", "files"),
         ):
             if source in status:
-                record[target] = status[source]
-        if record["status"] != previous:
-            self._project().mark_dirty()
+                changes[target] = status[source]
+        if not self._project().update_imaging_acquisition(run_id, changes, remove):
+            logger.warning("No project record for ScanImage run %s", run_id)
 
     def set_scanimage_channel(self, channel: int) -> None:
         index = self._project().calcium_scanimage_index
@@ -428,22 +422,24 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                 )
             self._fail_block(run_id, "The project changed during the recording.")
             return
-        record.update(
-            status=result["status"],
-            recording=result,
-            finished_at=datetime.now(UTC).isoformat(),
+        project.update_imaging_acquisition(
+            run_id,
+            {
+                "status": result["status"],
+                "recording": result,
+                "finished_at": datetime.now(UTC).isoformat(),
+            },
+            remove=("error",),
         )
-        record.pop("error", None)
         if run_id in self._fov_runs:
             channel = self._fov_runs.pop(run_id)
-            self._save_fov_image(run_id, result, record, channel)
-            project.mark_dirty()
+            self._save_fov_image(run_id, result, channel)
             return
         name = record["name"]
         block = self._blocks.get(run_id)
         if block is not None and block.group is not None:
             # Its traces join the routine run's data group (see _extract_block).
-            record["experiment_name"] = block.group
+            project.update_imaging_acquisition(run_id, {"experiment_name": block.group})
         else:
             if name in project.experiments:
                 name = f"{name} ({run_id[:8]})"
@@ -452,7 +448,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
                     name=name, duration=result["duration_s"], timepoints=[], data=[]
                 )
             )
-            record["experiment_name"] = name
+            project.update_imaging_acquisition(run_id, {"experiment_name": name})
         project.add_calcium_video(
             [pathlib.Path(p) for p in result["paths"]],
             result["fps"],
@@ -480,9 +476,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
         )
         self._extract_block(run_id, block, result, name)
 
-    def _save_fov_image(
-        self, run_id: str, result: dict, record: dict, channel: int
-    ) -> None:
+    def _save_fov_image(self, run_id: str, result: dict, channel: int) -> None:
         """Average ``channel`` and save it beside the recording, in the background
         like a block's trace extraction."""
         paths = [pathlib.Path(p) for p in result["paths"]]
@@ -497,8 +491,9 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             return str(target)
 
         def finished(_path: object) -> None:
-            record["fov_image"] = str(target)
-            self._project().mark_dirty()
+            self._project().update_imaging_acquisition(
+                run_id, {"fov_image": str(target)}
+            )
             recorded = ", ".join(path.name for path in paths)
             self.controls.show_message(
                 f"FOV recording saved: {recorded}. Its mean of channel {channel}: "
@@ -534,7 +529,12 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _start_deadline(self, run_id: str, recording: BlockRecording) -> None:
         """Abort the block if its recording has not finished well after its length:
         a recording that started without the trigger would otherwise wait forever."""
-        limit_s = recording.duration_s + recording.tail_s + BLOCK_DEADLINE_MARGIN_S
+        limit_s = (
+            recording.duration_s
+            + recording.tail_s
+            + BLOCK_DEADLINE_MARGIN_S
+            + RUN_START_ALLOWANCE_S
+        )
         timer = QtCore.QTimer(self)
         timer.setSingleShot(True)
         timer.timeout.connect(lambda: self._deadline_passed(run_id, limit_s))
@@ -795,6 +795,15 @@ class WorkspaceAcquisitionController(QtCore.QObject):
     def _frame_rate(self) -> float | None:
         fps = self.connection.last_status.get("fps")
         return float(fps) if isinstance(fps, (int, float)) and fps > 0 else None
+
+    def _tab_times_out_run(self, run_id: str | None) -> bool:
+        """Whether the tab's first-frame timeout may abort ``run_id``.
+
+        Only runs this workspace started, and not block recordings: those wait
+        for SysCon2's trigger, possibly after a second upload, and have their
+        own deadline (RUN_START_ALLOWANCE_S), which the tab's must not undercut.
+        """
+        return run_id in self.run_ids and run_id not in self._blocks
 
     def arm_block(self, recording: BlockRecording) -> str:
         reason = self.block_recording_unavailable()

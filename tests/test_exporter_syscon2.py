@@ -10,6 +10,7 @@ from neuroseq.export.exporter_syscon2 import PulseOverrunViolation
 from neuroseq.export.exporter_syscon2 import _compute_cell_centroids
 from neuroseq.export.exporter_syscon2 import _compute_cell_stimulation_spots
 from neuroseq.export.exporter_syscon2 import _find_pulse_overrun_violations
+from neuroseq.export.exporter_syscon2 import _resolve_neuron_to_cellpose_mapping
 from neuroseq.export.exporter_syscon2 import _ScheduledEntityWindow
 from neuroseq.export.exporter_syscon2 import align_overlapping_pulses_to_shortest
 from neuroseq.export.exporter_syscon2 import align_stim_values_left_for_slm
@@ -1029,9 +1030,12 @@ def test_export_seq_skips_unmapped_active_neurons_and_reports_them() -> None:
     assert _timeline_index(entities[0]) == 0
 
 
-def test_export_seq_accepts_one_based_mapping_keys() -> None:
-    values = np.zeros((40, 1), dtype=np.float32)
-    values[20:22, 0] = 1.0
+def test_export_seq_reads_mapping_keys_zero_based_like_the_readout() -> None:
+    """Key 1 is stimulus row 1, never row 0: the readout labels cell 0 as id 1
+    for {1: 0, 2: 1}, so an export that aimed row 0 at cell 0 (reading the
+    keys 1-based because they span 1..n_neurons) would mislabel it."""
+    values = np.zeros((40, 2), dtype=np.float32)
+    values[20:22, :] = 1.0
     stim_array = StimArray(
         name="stim",
         stim_type=StimType.Excitation,
@@ -1040,18 +1044,62 @@ def test_export_seq_accepts_one_based_mapping_keys() -> None:
         dt=_DT_S,
     )
 
-    seq_text, report = generate_syscon2_sequence_text(
+    _seq_text, report = generate_syscon2_sequence_text(
         stim_array,
-        _cellpose_result(mapping={1: 0}),
+        _cellpose_result(mapping={1: 0, 2: 1}),
         template_text=_template_header(),
         spiralling=False,
     )
-    sequence = parse_syscon2_seq_text(seq_text)
 
-    entities = [obj for obj in sequence.objects if obj.object_type == "Shape"]
-    assert len(entities) == 1
-    assert report.exported_segments == 1
-    assert report.unmapped_active_neurons == []
+    assert report.unmapped_active_neurons == [0]
+
+
+def test_sparse_custom_mapping_never_targets_one_cell_twice() -> None:
+    """A sparse 0-based Custom mapping must not borrow key i+1 for an unmapped
+    neuron i: {1: 12, 2: 3} used to give neuron 0 cell 12 as well."""
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((1, 1), dtype=np.int32),
+        overlay_image=np.zeros((1, 1, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=None,
+        stimulus_to_cellpose_mapping={1: 12, 2: 3},
+        mapping_strategy="Custom",
+    )
+
+    resolved = _resolve_neuron_to_cellpose_mapping(cellpose, 4, set(range(20)))
+
+    assert resolved == {1: 12, 2: 3}
+
+
+@pytest.mark.parametrize(
+    ("mapping", "n_neurons", "expected"),
+    [
+        # Never 1-based, whatever the key set or the array's neuron count.
+        ({1: 5, 2: 6, 3: 7}, 3, {1: 5, 2: 6}),
+        ({1: 5, 2: 6, 3: 7}, 4, {1: 5, 2: 6, 3: 7}),
+        ({0: 5, 1: 6, 3: 7}, 3, {0: 5, 1: 6}),
+        ({2: 6, 3: 7}, 3, {2: 6}),
+        ({1: 6}, 3, {1: 6}),
+    ],
+)
+def test_mapping_keys_are_always_zero_based(
+    mapping: dict[int, int], n_neurons: int, expected: dict[int, int]
+) -> None:
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((1, 1), dtype=np.int32),
+        overlay_image=np.zeros((1, 1, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=None,
+        stimulus_to_cellpose_mapping=mapping,
+        mapping_strategy="Custom",
+    )
+    resolved = _resolve_neuron_to_cellpose_mapping(cellpose, n_neurons, set(range(20)))
+    assert resolved == expected
+    assert len(set(resolved.values())) == len(resolved)
 
 
 def test_export_seq_applies_the_linear_mapping_offset() -> None:
@@ -1402,7 +1450,7 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = shift_stim_values_right_for_initial_slm_load(
+    new_values, extended_samples = shift_stim_values_right_for_initial_slm_load(
         stim_array
     )
     shifted = StimArray(
@@ -1413,7 +1461,8 @@ def test_shift_stim_values_right_for_initial_slm_load_moves_all_inputs() -> None
         dt=stim_array.dt,
     )
 
-    assert truncated_tail_samples == 32
+    assert extended_samples == 0  # the shifted pulses still fit
+    assert new_values.shape == values.shape
     assert np.all(new_values[0:32, :] == 0.0)
     assert np.all(new_values[32:35, 0] == 1.0)
     assert np.all(new_values[42:44, 1] == 1.0)
@@ -1432,7 +1481,7 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = space_out_stim_values_for_slm(
+    new_values, extended_samples = space_out_stim_values_for_slm(
         stim_array,
         active_threshold=0.0,
     )
@@ -1445,7 +1494,40 @@ def test_space_out_stim_values_for_slm_resolves_violations() -> None:
     )
 
     assert len(find_slm_gap_violations(resolved, active_threshold=0.0)) == 0
-    assert truncated_tail_samples > 0
+    assert extended_samples == 0
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
+
+
+@pytest.mark.parametrize(
+    "shifter",
+    [
+        shift_stim_values_right_for_initial_slm_load,
+        space_out_stim_values_for_slm,
+        space_out_stim_values_for_slm_off_on_overlap,
+    ],
+)
+def test_slm_shift_fixes_grow_the_array_instead_of_dropping_pulses(
+    shifter: object,
+) -> None:
+    """Shifting pulses right must never push active samples off the end."""
+    values = np.zeros((200, 2), dtype=np.float32)
+    values[40:50, 0] = 1.0
+    values[52:62, 0:2] = 1.0  # new hologram too soon: gap and off/on violation
+    values[190:200, 0] = 1.0
+    stim_array = StimArray(
+        name="stim",
+        stim_type=StimType.Excitation,
+        values=values,
+        units="1",
+        dt=_DT_S,
+    )
+
+    new_values, extended_samples = shifter(stim_array)  # type: ignore[operator]
+
+    assert extended_samples > 0
+    assert new_values.shape == (200 + extended_samples, 2)
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
+    assert np.any(new_values[-1] != 0)  # grown just enough for the last pulse
 
 
 def test_align_stim_values_left_for_slm_resolves_violations() -> None:
@@ -1489,7 +1571,7 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         dt=_DT_S,
     )
 
-    new_values, truncated_tail_samples = space_out_stim_values_for_slm_off_on_overlap(
+    new_values, extended_samples = space_out_stim_values_for_slm_off_on_overlap(
         stim_array,
         active_threshold=0.0,
     )
@@ -1501,7 +1583,8 @@ def test_space_out_stim_values_for_slm_off_on_overlap_resolves_violations() -> N
         dt=_DT_S,
     )
 
-    assert truncated_tail_samples > 0
+    assert extended_samples == 0
+    assert np.count_nonzero(new_values) == np.count_nonzero(values)
     assert len(find_slm_off_on_overlap_violations(resolved, active_threshold=0.0)) == 0
 
 
@@ -2283,3 +2366,54 @@ def test_original_stim_sidecar_restores_exact_timings_and_rows(
     # A sidecar that does not belong to the file is ignored.
     seq_path.write_text(seq_text + "\n", encoding="utf-8", newline=newline)
     assert parse_syscon2_seq_file(seq_path).original_values is None
+
+
+@pytest.mark.parametrize("exact_slm_timing", [True, False])
+def test_sanity_fixes_extend_array_instead_of_dropping_shifted_pulses(
+    exact_slm_timing: bool,
+) -> None:
+    """Preblank/SLM-load shifts push neuron 1's pulse past tick 100; the fixed
+    array must grow to keep it rather than silently cutting it."""
+    values = np.zeros((100, 2), dtype=np.float32)
+    values[0:10, 0] = 1.0
+    values[40:50, 1] = 1.0
+    stim = StimArray(
+        name="s", stim_type=StimType.External, values=values, units="", dt=_DT_S
+    )
+
+    report = check_syscon2_input_sanity(
+        stim, None, template_text="", exact_slm_timing=exact_slm_timing
+    )
+
+    fixed = report.sanitized_values
+    assert fixed is not None
+    assert fixed.shape[0] > values.shape[0]
+    np.testing.assert_array_equal((fixed > 0).sum(axis=0), [10, 10])
+    assert any("extended from 100" in warning for warning in report.warnings)
+    # No phantom "truncated" warning for windows that were empty anyway.
+    assert not any("truncated" in warning for warning in report.warnings)
+
+
+def test_preblank_insertion_grows_window_matrix_only_when_needed() -> None:
+    from neuroseq.export.exporter_syscon2 import _enforce_preblank_windows
+
+    # Trailing windows are blank: shifting loses nothing, nothing is appended.
+    windows = np.zeros((4, 2), dtype=np.float32)
+    windows[0, 0] = 1.0
+    windows[1, 1] = 1.0
+    adjusted, _, fixes, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 0
+    assert adjusted.shape == (4, 2)
+    assert len(fixes) == 2
+
+    # Last window active: the shift must append a window instead of dropping it.
+    windows = np.zeros((3, 1), dtype=np.float32)
+    windows[1:3, 0] = 1.0
+    adjusted, _, _, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 0  # window 0 is already a blank preload
+    windows = np.zeros((2, 2), dtype=np.float32)
+    windows[0, 0] = 1.0
+    windows[1, 1] = 1.0
+    adjusted, _, _, extended, _ = _enforce_preblank_windows(windows)
+    assert extended == 2
+    np.testing.assert_array_equal(adjusted.sum(axis=0), [1.0, 1.0])

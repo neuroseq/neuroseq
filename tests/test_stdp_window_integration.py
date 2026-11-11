@@ -18,6 +18,8 @@ pytestmark = pytest.mark.timeout(300)
 class _BrianEditor:
     def __init__(self, project) -> None:
         self.project = project
+        self.routine_running = False
+        self.routine_stim_name: str | None = None
         self.stimulation_host = None
         self.bss2_host = None
         self.current_stim_modifier = SimpleNamespace(

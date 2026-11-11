@@ -983,6 +983,22 @@ def test_detach_context_menu_installed_on_panel_canvases(qtbot: QtBot) -> None:
     )
 
 
+def test_detached_chat_continues_the_docked_conversation(qtbot: QtBot) -> None:
+    from neuroseq.llm.backend import Message
+    from neuroseq.llm.backend import Role
+
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.chat_widget._history = [Message(Role.USER, "hi"), Message(Role.ASSISTANT, "yo")]
+
+    detached = gui._build_fresh_chat_widget()
+    qtbot.addWidget(detached)
+
+    assert detached._history == gui.chat_widget._history
+    assert detached._project is gui.project
+    assert "yo" in detached.history_view.toPlainText()
+
+
 def test_detach_custom_analysis_before_anything_analyzed_shows_message(
     qtbot: QtBot,
     qmessagebox_calls: list,
@@ -1637,9 +1653,14 @@ def test_deleting_cellpose_data_clears_spatial_footprint_panel(qtbot: QtBot) -> 
     gui.project.cellpose_data = _make_gui_cellpose_result()
     gui.spatial_footprint_widget.set_data(gui.project.cellpose_data)
 
+    gui.project.update_limits()
+    gui.project.dirty = False
+
     gui._delete_cellpose_data()
 
     assert gui.project.cellpose_data is None
+    # Removing the data is an unsaved project change.
+    assert gui.project.dirty
     assert gui.spatial_footprint_widget.overlay_widget.overlay_image is None
     assert gui.spatial_footprint_widget.overlay_widget.segmentation is None
     assert not gui.spatial_footprint_widget.empty_state_widget.isHidden()
@@ -2132,15 +2153,23 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     )
 
     def make_fake_gui() -> Any:
+        project = Project()
+        project.dirty = True
+
         def fake_save(on_success: Any = None) -> bool:
             save_events.append("save")
+            project.dirty = False
             if on_success is not None:
                 on_success(None)
             return True
 
-        project = Project()
-        project.dirty = True
-        return SimpleNamespace(_save_project=fake_save, project=project)
+        fake: Any = SimpleNamespace(_save_project=fake_save, project=project)
+        fake._prompt_save_before_action = (
+            lambda title, message, proceed: ProjectWorkspace._prompt_save_before_action(
+                fake, title, message, proceed
+            )
+        )
+        return fake
 
     def proceed() -> None:
         proceeded[0] += 1
@@ -2161,6 +2190,50 @@ def test_prompt_save_before_action_branches(monkeypatch: MonkeyPatch) -> None:
     ProjectWorkspace._prompt_save_before_action(make_fake_gui(), "T", "M", proceed)
     assert save_events == ["save"]
     assert proceeded[0] == 2
+
+
+def test_prompt_save_before_action_asks_again_after_edits_during_save(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """An edit made while the save ran keeps the project dirty: ask again
+    instead of proceeding and dropping it."""
+    answers = [
+        QtWidgets.QMessageBox.StandardButton.Save,
+        QtWidgets.QMessageBox.StandardButton.Cancel,
+    ]
+    prompts: list[object] = []
+
+    def _fake_warning(*a: object, **k: object) -> QtWidgets.QMessageBox.StandardButton:
+        prompts.append(a)
+        return answers.pop(0)
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "warning", _fake_warning)
+    project = Project()
+    project.mark_dirty()
+
+    def save_while_editing(on_success: Any = None) -> bool:
+        change_count = project._change_count
+        project.mark_dirty()  # edit lands while the save is writing
+        if project._change_count == change_count:
+            project.dirty = False
+        on_success(None)
+        return True
+
+    fake: Any = SimpleNamespace(project=project, _save_project=save_while_editing)
+    fake._prompt_save_before_action = (
+        lambda title, message, proceed: ProjectWorkspace._prompt_save_before_action(
+            fake, title, message, proceed
+        )
+    )
+    proceeded = [0]
+
+    ProjectWorkspace._prompt_save_before_action(
+        fake, "T", "M", lambda: proceeded.__setitem__(0, 1)
+    )
+
+    assert len(prompts) == 2
+    assert proceeded == [0]
+    assert project.dirty
 
 
 def test_prompt_save_before_action_skips_prompt_when_not_dirty(
@@ -2230,8 +2303,10 @@ def test_prompt_save_before_close_branches(monkeypatch: MonkeyPatch) -> None:
     assert len(save_callbacks) == 1
     assert closed == [0]
 
+    # The callback closes again through the prompt instead of confirming
+    # outright, so edits made during the save are asked about.
     save_callbacks[0](None)
-    assert fake_gui._close_confirmed
+    assert not fake_gui._close_confirmed
     assert closed == [1]
 
 
@@ -3786,12 +3861,6 @@ def test_gui_apply_cellpose_import_result_expands_stim_arrays(
         def update_limits(self) -> None:
             self.update_limits_calls += 1
 
-        def _cellpose_neuron_count(
-            self,
-            imported: CellposeImportResult | None,
-        ) -> int:
-            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
-
         def _expand_stim_arrays_to_neuron_count(
             self,
             target_neuron_count: int,
@@ -3833,12 +3902,6 @@ class _RemapFakeGui:
 
     def update_limits(self) -> None:
         pass
-
-    def _cellpose_neuron_count(
-        self,
-        imported: CellposeImportResult | None,
-    ) -> int:
-        return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
 
 
 def _cellpose_result_with_mapping(
@@ -3895,11 +3958,10 @@ def test_gui_apply_cellpose_import_result_warns_on_remap_conflict(
     project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
     fake_gui = _RemapFakeGui(project)
 
-    # Cellpose id 0 maps explicitly to stim 1, cellpose id 1 falls back to
-    # identity (stim 1 too) - a collision that cannot be resolved.
+    # Two stimulus IDs target Cellpose id 0 - a mapping that cannot be resolved.
     ProjectWorkspace._apply_cellpose_import_result(
         fake_gui,  # type: ignore[arg-type]
-        _cellpose_result_with_mapping({1: 0}),
+        _cellpose_result_with_mapping({0: 0, 1: 0}),
     )
 
     np.testing.assert_array_equal(trace_data.indices, np.array([4, 7], dtype=np.uint32))
@@ -4281,9 +4343,6 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
         def __init__(self, project: Project) -> None:
             self.project = project
 
-        def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
-            return ProjectWorkspace._cellpose_neuron_count(self, imported)  # type: ignore[arg-type]
-
     fake = _FakeGui(project)
 
     def _cellpose_with(n_cells: int) -> CellposeImportResult:
@@ -4315,6 +4374,14 @@ def test_warn_if_cellpose_model_mismatch(qmessagebox_calls: list) -> None:
     assert "mismatch" in qmessagebox_calls[0]["title"].lower()
     assert "10" in qmessagebox_calls[0]["text"]
     assert "25" in qmessagebox_calls[0]["text"]
+
+    # 25 segmented ROIs but a mapping that picks 10 of them as neurons -> the
+    # neuron count is the mapping's size, so no warning
+    mapped = _cellpose_with(25)
+    mapped.stimulus_to_cellpose_mapping = {i: i for i in range(10)}
+    project.cellpose_data = mapped
+    ProjectWorkspace._warn_if_cellpose_model_mismatch(fake)  # type: ignore[arg-type]
+    assert len(qmessagebox_calls) == 1
 
 
 def test_brian2_busy_notifies_dynamic_input(

@@ -57,7 +57,8 @@ class SpikeWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.figure import Figure
-        from matplotlib.ticker import MaxNLocator
+
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
 
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -69,11 +70,11 @@ class SpikeWidget(TimeseriesWidget):
         layout.addWidget(NavigationToolbar2QT(canvas, dialog))
         layout.addWidget(canvas)
         ax = figure.add_subplot(111, facecolor="none")
-        points = np.asarray(self.graphic.data[:]).copy()
+        points, spike_ids = self._display_spike_points()
         spikes = ax.scatter(
             points[:, 0] + self.graphic.offset[0],
             points[:, 1] + self.graphic.offset[1],
-            c=neuron_indices_to_colors(self.data.spike_indices),
+            c=neuron_indices_to_colors(spike_ids),
             marker="|",
             s=(7 * 72 / figure.dpi) ** 2,
             linewidths=72 / figure.dpi,
@@ -91,7 +92,7 @@ class SpikeWidget(TimeseriesWidget):
             start, stop, _ = self.selected_neuron_slice.indices(self.n_neurons)
             if stop > start:
                 ax.set_ylim(start - 0.5, stop - 0.5)
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+        set_neuron_id_ticks(ax.yaxis, self._visible_neuron_ids)
         ax.set_xlabel("Time (ms)")
         ax.set_ylabel("Neuron index")
         ax.set_title(self.data.name)
@@ -125,17 +126,48 @@ class SpikeWidget(TimeseriesWidget):
         # so we choose dt=1ms so time slices have a resolution of 1ms
         self.dt_ms = 1.0
         self.n_timestamps = int(1000.0 * max(data.spike_times) / self.dt_ms) + 1
-        spike_data = np.stack(
+        self._add_spike_graphic()
+        self.post_set_data()
+
+    def _display_spike_points(self) -> tuple[np.ndarray, np.ndarray]:
+        """Spikes of the visible neurons as (time ms, display row) points,
+        plus each point's real neuron id. Hidden neurons' spikes are dropped
+        and the rest move to their compacted rows."""
+        assert isinstance(self.data, SpikeData)
+        ids = self.data.spike_indices.astype(np.int64)
+        row_of_id = np.full(int(ids.max()) + 1 if ids.size else 0, -1, np.int64)
+        for neuron_id, row in self._neuron_id_to_display_row.items():
+            if neuron_id < row_of_id.shape[0]:
+                row_of_id[neuron_id] = row
+        rows = row_of_id[ids] if ids.size else ids
+        keep = rows >= 0
+        points = np.stack(
             [
-                data.spike_times.astype(np.float32) * np.float32(1000),
-                data.spike_indices.astype(np.float32),
+                self.data.spike_times[keep].astype(np.float32) * np.float32(1000),
+                rows[keep].astype(np.float32),
             ],
             axis=1,
         )
+        return points, ids[keep]
+
+    def _add_spike_graphic(self) -> None:
+        points, spike_ids = self._display_spike_points()
+        visible = points.shape[0] > 0
+        if not visible:
+            # A scatter needs at least one point; keep a hidden placeholder.
+            points = np.zeros((1, 2), dtype=np.float32)
+            spike_ids = np.zeros(1, dtype=np.int64)
         self.graphic = self.subplot.add_scatter(
-            spike_data,
-            colors=neuron_indices_to_colors(data.spike_indices),
+            points,
+            colors=neuron_indices_to_colors(spike_ids),
             sizes=7,
             size_space="screen",
         )
-        self.post_set_data()
+        self.graphic.visible = visible
+
+    def _apply_visible_neuron_layout(self) -> None:
+        # Scatter buffers are fixed-size, so rebuild with the visible spikes.
+        if self.graphic is None or not isinstance(self.data, SpikeData):
+            return
+        self.subplot.remove_graphic(self.graphic)
+        self._add_spike_graphic()

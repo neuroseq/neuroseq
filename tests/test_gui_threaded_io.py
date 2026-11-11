@@ -10,6 +10,7 @@ from pytestqt.qtbot import QtBot
 from qtpy import QtWidgets
 
 import neuroseq
+from neuroseq.background_jobs import SimulationGuard
 from neuroseq.example_projects import default_project
 from neuroseq.project import Project
 from neuroseq.project_workspace import ProjectWorkspace
@@ -254,3 +255,75 @@ def test_load_runs_on_worker_thread(
     )
     assert worker_init_seen
     assert gui.project.filepath == src_path
+
+
+def _record_history_threads(project: Project) -> list[tuple[str, bool]]:
+    events: list[tuple[str, bool]] = []
+    project.history.subscribe(
+        lambda event: events.append(
+            (event, threading.current_thread() is threading.main_thread())
+        )
+    )
+    return events
+
+
+def test_simulation_clears_history_on_the_gui_thread(
+    qtbot: QtBot, gui: ProjectWorkspace
+) -> None:
+    project = default_project()
+    gui.load_project(project)
+    events = _record_history_threads(project)
+    longest = max(s.values.shape[0] * s.dt for s in project.stim_arrays.values())
+
+    gui._do_brian2_simulation_threaded(longest + 0.01)
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert ("clear", True) in events
+    assert all(on_main for _event, on_main in events)
+
+
+def test_import_clears_history_on_the_gui_thread(
+    qtbot: QtBot, gui: ProjectWorkspace, monkeypatch: MonkeyPatch, tmp_path
+) -> None:
+    src_path = tmp_path / "src.nseq"
+    default_project().save(src_path, _MockSaveLoadOptionsDialog.options)
+    project = default_project()
+    gui.load_project(project)
+    events = _record_history_threads(project)
+    monkeypatch.setattr(
+        neuroseq.project_workspace, "SaveLoadOptionsDialog", _MockSaveLoadOptionsDialog
+    )
+    _patch_open_dialog(monkeypatch, str(src_path))
+
+    gui._import_project_dialog()
+    qtbot.waitUntil(lambda: gui._background_job.worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert ("clear", True) in events
+    assert all(on_main for _event, on_main in events)
+    assert project.dirty is True
+
+
+def test_simulation_that_cannot_be_prepared_is_reported_and_releases_the_guard(
+    gui: ProjectWorkspace,
+    monkeypatch: MonkeyPatch,
+    qmessagebox_calls: list[dict[str, str]],
+) -> None:
+    project = default_project()
+    gui.load_project(project)
+    failures: list[str] = []
+    monkeypatch.setattr(
+        gui.dynamic_input_controller,
+        "dynamic_input_simulation_failed",
+        failures.append,
+    )
+
+    def _fail(*_args: object) -> None:
+        raise ValueError("bad stim arrays")
+
+    monkeypatch.setattr(project, "prepare_simulation", _fail)
+    gui._do_brian2_simulation_threaded(0.01)
+
+    assert failures == ["bad stim arrays"]
+    assert [call["name"] for call in qmessagebox_calls] == ["critical"]
+    assert SimulationGuard.held_by() is None
+    assert gui._background_job.worker is None

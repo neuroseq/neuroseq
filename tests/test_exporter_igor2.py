@@ -486,6 +486,26 @@ def test_export_igor2_pxp_deduplicates_long_wave_names(tmp_path: Path) -> None:
     assert len(report.wave_names) == 2
 
 
+def test_export_igor2_pxp_keeps_the_neuron_suffix_of_long_array_names(
+    tmp_path: Path,
+) -> None:
+    stim = StimArray(
+        name="ChrimsonR_power_sweep_1140nm_cells",
+        stim_type=StimType.Excitation,
+        values=np.zeros((5, 3), dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+
+    report = export_igor2_pxp(tmp_path / "long.pxp", {stim.name: stim})
+
+    assert report.wave_names == [
+        "ChrimsonR_power_sweep_1140nm_n0",
+        "ChrimsonR_power_sweep_1140nm_n1",
+        "ChrimsonR_power_sweep_1140nm_n2",
+    ]
+
+
 def test_export_igor2_pxp_unit_override_replaces_per_array_units(
     tmp_path: Path,
 ) -> None:
@@ -727,3 +747,33 @@ def test_export_igor2_csv_applies_scaling(tmp_path: Path) -> None:
     )
 
     assert output_path.read_text(encoding="utf-8") == "scaled_example\n2.5\n5.0\n7.5\n"
+
+
+def test_all_igor_formats_negate_inhibitory_arrays_alike(tmp_path: Path) -> None:
+    """.pxp negated Inhibition arrays but .ibw/.csv did not, so the same array
+    reached the rig with opposite sign depending on the format."""
+    binarywave = importlib.import_module("igor2.binarywave")
+    packed = importlib.import_module("igor2.packed")
+    stim = StimArray(
+        name="Inh",
+        stim_type=StimType.Inhibition,
+        values=np.array([[1.0], [2.0], [3.0]], dtype=np.float32),
+        units="pA",
+        dt=0.001,
+    )
+    expected = np.array([-2.0, -4.0, -6.0])
+
+    csv_text = generate_igor2_csv_text(
+        stim, experiment_name="e", neuron_index=0, scaling_factor=2.0
+    )
+    np.testing.assert_allclose([float(x) for x in csv_text.split()[1:]], expected)
+
+    export_igor2_ibw(
+        tmp_path / "inh.ibw", stim, wave_name="inh", neuron_index=0, scaling_factor=2.0
+    )
+    ibw = binarywave.load(tmp_path / "inh.ibw")["wave"]["wData"]
+    np.testing.assert_allclose(ibw, expected)
+
+    export_igor2_pxp(tmp_path / "inh.pxp", {"Inh": stim}, scaling_factor=2.0)
+    records, _ = packed.load(tmp_path / "inh.pxp")
+    np.testing.assert_allclose(records[0].wave["wave"]["wData"], expected)

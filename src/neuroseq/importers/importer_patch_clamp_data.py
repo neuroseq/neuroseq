@@ -133,7 +133,13 @@ def _decode_igor_text(value: object) -> str | None:
     raw_bytes = _as_bytes(value)
     if raw_bytes is None:
         return None
-    text = raw_bytes.split(b"\x00", 1)[0].decode("utf-8", errors="ignore").strip()
+    raw_text = raw_bytes.split(b"\x00", 1)[0]
+    try:
+        text = raw_text.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        # Igor stores text in a single-byte system encoding (Windows-1252 or
+        # Mac Roman); both put the micro sign of "µs" at 0xB5, as Latin-1 does.
+        text = raw_text.decode("latin-1").strip()
     return text or None
 
 
@@ -163,11 +169,46 @@ def _extract_wave_name(header: dict[str, object], fallback_name: str) -> str:
     )
 
 
-def _extract_source_dt_seconds(header: dict[str, object]) -> float | None:
+# Seconds per x-axis unit for the time units Igor waves are commonly scaled in.
+_TIME_UNIT_SECONDS: dict[str, float] = {
+    "s": 1.0,
+    "sec": 1.0,
+    "ms": 1e-3,
+    "us": 1e-6,
+    "µs": 1e-6,  # micro sign
+    "μs": 1e-6,  # Greek mu
+    "ns": 1e-9,
+}
+
+
+def _extract_source_dt_seconds(
+    header: dict[str, object], axis_units: str | None = None
+) -> float | None:
+    """The x-axis delta (``sfA``/``hsA``) converted to seconds.
+
+    Igor stores the delta in the wave's own x units; a wave scaled in ms or µs
+    would otherwise import 1000x/10^6x too slow. Unknown or missing units are
+    taken as seconds.
+    """
     if "sfA" in header:
-        return _first_float(header.get("sfA"))
-    if "hsA" in header:
-        return _first_float(header.get("hsA"))
+        delta = _first_float(header.get("sfA"))
+    elif "hsA" in header:
+        delta = _first_float(header.get("hsA"))
+    else:
+        return None
+    if delta is None:
+        return None
+    scale = _TIME_UNIT_SECONDS.get((axis_units or "").strip(), 1.0)
+    return delta * scale
+
+
+def _first_axis_units(dim_units: object) -> object | None:
+    """Units of the first (x) dimension from a per-dimension units field."""
+    if isinstance(dim_units, (list, tuple)):
+        return dim_units[0] if len(dim_units) > 0 else None
+    if isinstance(dim_units, np.ndarray) and dim_units.ndim >= 1:
+        # igor2 returns v5 ``dimUnits`` as a (dims x chars) bytes array.
+        return dim_units[0] if dim_units.shape[0] > 0 else None
     return None
 
 
@@ -179,14 +220,9 @@ def _extract_units(
     if units is None:
         units = _decode_igor_text(header.get("dataUnits"))
 
-    axis_units = None
-    dimension_units = wave.get("dimension_units")
-    if isinstance(dimension_units, (list, tuple)) and len(dimension_units) > 0:
-        axis_units = _decode_igor_text(dimension_units[0])
+    axis_units = _decode_igor_text(_first_axis_units(wave.get("dimension_units")))
     if axis_units is None:
-        dim_units = header.get("dimUnits")
-        if isinstance(dim_units, (list, tuple)) and len(dim_units) > 0:
-            axis_units = _decode_igor_text(dim_units[0])
+        axis_units = _decode_igor_text(_first_axis_units(header.get("dimUnits")))
     if axis_units is None:
         axis_units = _decode_igor_text(header.get("xUnits"))
     return units, axis_units
@@ -232,7 +268,7 @@ def parse_igor_binary_wave_data(
     return IgorWave(
         name=_extract_wave_name(header, fallback_name=fallback_name),
         values=values.astype(np.float32, copy=False),
-        source_dt=_extract_source_dt_seconds(header),
+        source_dt=_extract_source_dt_seconds(header, axis_units),
         units=units,
         axis_units=axis_units,
         source_format="ibw",
@@ -777,6 +813,16 @@ def import_igor_wave_into_trace_data(
         trace_data.indices = np.concatenate(
             [trace_data.indices, np.array([int(neuron_id)], dtype=np.uint32)]
         )
+        if trace_data.raw_cellpose_ids is not None:
+            # A patch-clamped neuron has no Cellpose ROI, so the per-row raw ids
+            # can no longer cover every row; drop them (Project's Cellpose remap
+            # then leaves this dataset alone) rather than keep a misaligned array.
+            logger.info(
+                "Trace data '%s' now mixes patch-clamp rows with Cellpose rows; "
+                "it will no longer follow Cellpose mapping changes",
+                trace_data.name,
+            )
+            trace_data.raw_cellpose_ids = None
 
     logger.info(
         "Imported Igor wave '%s' into TraceData '%s' neuron %d: %d -> %d samples",

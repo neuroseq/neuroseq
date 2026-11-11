@@ -40,12 +40,52 @@ def test_console_brain_has_a_transparent_background() -> None:
             assert alpha.getpixel(corner) <= 1
 
 
-def test_console_brain_right_half_is_transparent_between_details() -> None:
+def test_console_art_is_three_brains_side_by_side() -> None:
     with Image.open(console_art.brain_image_path()) as image:
         alpha = image.getchannel("A")
-        # Gaps between binary digits and circuit traces must show the console.
-        for x, y in ((0.6, 0.6), (0.65, 0.7), (0.7, 0.3), (0.75, 0.7), (0.8, 0.6)):
-            assert alpha.getpixel((int(image.width * x), int(image.height * y))) == 0
+        width, height = image.size
+        assert width > 2.5 * height  # a row, not a single brain
+
+        def column_is_empty(x: int) -> bool:
+            return all(alpha.getpixel((x, y)) == 0 for y in range(height))
+
+        # Two fully transparent gaps split the row into three brains.
+        assert column_is_empty(int(width * 0.32))
+        assert column_is_empty(int(width * 0.68))
+        for x in (0.16, 0.5, 0.84):
+            assert not column_is_empty(int(width * x))
+
+
+def test_console_brains_show_the_console_between_digits_and_traces() -> None:
+    with Image.open(console_art.brain_image_path()) as image:
+        alpha = image.getchannel("A")
+        width, height = image.size
+
+        def transparent_fraction(left: float, right: float) -> float:
+            box = (
+                int(width * left),
+                int(height * 0.3),
+                int(width * right),
+                int(height * 0.7),
+            )
+            region = alpha.crop(box)
+            return region.histogram()[0] / (region.width * region.height)
+
+        # The binary (left) and circuit (right) brains are open patterns,
+        # while the biological brain in the middle is solid.
+        assert transparent_fraction(0.05, 0.27) > 0.3
+        assert transparent_fraction(0.73, 0.95) > 0.3
+        assert transparent_fraction(0.42, 0.58) < 0.05
+
+
+def test_app_icon_is_a_square_transparent_png_distinct_from_the_console_art() -> None:
+    path = console_art.app_icon_path()
+    assert path.exists() and path.suffix == ".png"
+    assert path != console_art.brain_image_path()
+    with Image.open(path) as image:
+        assert image.mode == "RGBA"
+        assert image.width == image.height >= 256
+        assert image.getchannel("A").getpixel((0, 0)) == 0
 
 
 def test_startup_brain_image_path_points_at_a_different_real_bundled_file() -> None:

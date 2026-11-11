@@ -1457,6 +1457,7 @@ def test_stim_editor_draw_region_extends_short_stim_for_follow_up_input() -> Non
             0.0 if erase else 2.5
         ),
         _stim_values_updated=lambda: None,
+        routine_edit_blocked_message=lambda: None,
     )
     fake_editor._ensure_time_capacity_for_slice = lambda time_slice: (
         StimEditor._ensure_time_capacity_for_slice(

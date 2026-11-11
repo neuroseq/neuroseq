@@ -19,6 +19,7 @@ from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
 from neuroseq.qt_helpers import wrap_in_scroll_area
 from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
+from neuroseq.stimulation.dynamic_input.dialog_helpers import routine_start_blocked
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import EPSPMeasurement
@@ -247,6 +248,8 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
     """Closed-loop EPSP targeting with an STDP induction protocol."""
 
     simulation_requested = QtCore.Signal(float)
+    #: Emitted when a run starts or ends (the controller locks the editor).
+    running_changed = QtCore.Signal(bool)
     PROBE_PULSES = 5
     PROBE_PERIOD_MS = 100.0
     PULSE_MS = 5.0
@@ -269,6 +272,7 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
         self.editor = editor
         self.project = editor.project
         self._backend = StdpSynapticTuningBackend(self)
+        self._backend.on_running_changed = self.running_changed.emit
         self._backend.on_advance = self._advance_domain
         self._backend.on_measurement = self._update_plots
         self._backend.on_finished = self._on_backend_finished
@@ -673,6 +677,10 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
 
     def start(self) -> None:
         self.refresh()
+        blocked = routine_start_blocked(self.editor)
+        if blocked is not None:
+            self._append_log(blocked)
+            return
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
             return

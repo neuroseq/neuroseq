@@ -168,7 +168,7 @@ def test_stim_editor_loop_stim_array_rejected_refreshes_trim(
 ) -> None:
     class _RejectedDialog:
         def __init__(self, project: Project, parent=None) -> None:
-            project.trim_stim_arrays(0.002)
+            project.replace_stim_values("stim", project.stim_arrays["stim"].values[:2])
             self.loop_count = 2
 
         def exec(self) -> int:

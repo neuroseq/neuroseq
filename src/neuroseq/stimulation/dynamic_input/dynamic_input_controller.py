@@ -16,6 +16,7 @@ from neuroseq.stimulation.dynamic_input.stdp_synaptic_tuning_dialog import (
 from neuroseq.stimulation.dynamic_input.stdp_window_dialog import StdpWindowDialog
 
 if TYPE_CHECKING:
+    from neuroseq.project import Project
     from neuroseq.stimulation.stim_editor import StimEditor
 
 
@@ -46,6 +47,9 @@ class DynamicInputController(QtCore.QObject):
         self._stdp_window_dialog: StdpWindowDialog | None = None
         self._routine_selector_dialog: RoutineSelectorDialog | None = None
         self._dynamic_input_theme = "light"
+        #: Routine dialogs with a run in progress; the editor stays locked
+        #: (array selection, undo/redo) while any is running.
+        self._running_dialogs: set[QtCore.QObject] = set()
 
     def open_dynamic_input_designer(self) -> None:
         if self.editor.current_stim_modifier is None or self.editor.project is None:
@@ -103,12 +107,35 @@ class DynamicInputController(QtCore.QObject):
             # others by clicking - not even this one.
             dialog = cls(self.editor, None)
             dialog.simulation_requested.connect(self.simulation_requested)
+            dialog.running_changed.connect(
+                lambda running, d=dialog: self._routine_running_changed(d, running)
+            )
             setattr(self, attr_name, dialog)
         dialog.apply_theme(self._dynamic_input_theme)
         dialog.refresh()
         dialog.show()
         dialog.raise_()
         dialog.activateWindow()
+
+    def _routine_running_changed(self, dialog: QtCore.QObject, running: bool) -> None:
+        was_locked = bool(self._running_dialogs)
+        if running:
+            self._running_dialogs.add(dialog)
+        else:
+            self._running_dialogs.discard(dialog)
+        if bool(self._running_dialogs) != was_locked:
+            self.editor.set_routine_running(bool(self._running_dialogs))
+
+    def update_project(self, project: Project) -> None:
+        """Keep the routine dialogs unless ``project`` replaces the editor's.
+
+        Call before the stim editor switches to ``project``: discarding a
+        running routine trims the array it ran in, which must be the old
+        project's, not the new one's. Rebuilding views of the same project
+        (data deleted or imported, model edited) keeps a running routine.
+        """
+        if project is not self.editor.project:
+            self.discard_dynamic_input_dialogs()
 
     def discard_dynamic_input_dialogs(self) -> None:
         """Drop any cached Design dynamic input dialogs.
@@ -132,6 +159,9 @@ class DynamicInputController(QtCore.QObject):
                 dialog.close()
                 dialog.deleteLater()
                 setattr(self, attr_name, None)
+        if self._running_dialogs:
+            self._running_dialogs.clear()
+            self.editor.set_routine_running(False)
 
     def dynamic_input_simulation_finished(self) -> None:
         for dialog in self._dynamic_input_dialogs():

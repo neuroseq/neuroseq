@@ -65,7 +65,7 @@ class TraceNormDialog(SelfRaisingDialog):
         self.content_layout.addLayout(norm_input_layout)
 
         self.chk_offset = QtWidgets.QCheckBox("Center median")
-        self.chk_offset.setChecked(self.clip)
+        self.chk_offset.setChecked(self.offset_by_median)
         self.chk_offset.clicked.connect(self.chk_offset_clicked)
         self.content_layout.addWidget(self.chk_offset)
 
@@ -100,7 +100,7 @@ class TraceNormDialog(SelfRaisingDialog):
         self.clip = True
         self.auto_extend_vertical_space = False
         self.chk_offset.setChecked(self.offset_by_median)
-        self.chk_offset.setChecked(self.clip)
+        self.chk_clip.setChecked(self.clip)
         self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
         self.update_norm_input(self.slider_norm.value())
 
@@ -191,6 +191,9 @@ class TraceWidget(TimeseriesWidget):
         self._stim_overlay_enabled = False
         self._stim_overlay_array: StimArray | None = None
         self._stim_overlay_graphic: fpl.ImageGraphic | None = None
+        # Under auto-extend rows differ in height, so the overlay is one
+        # single-row image per visible row instead of _stim_overlay_graphic.
+        self._stim_overlay_row_graphics: list[fpl.ImageGraphic] = []
         self._stim_onset_graphic: fpl.LineGraphic | None = None
         if isinstance(self.controller, ConstrainedPanZoomController):
             self.controller.add_state_change_listener(self._update_line_thickness)
@@ -347,6 +350,8 @@ class TraceWidget(TimeseriesWidget):
                 self._apply_visible_neuron_layout()
                 if self.grid_lines is not None:
                     self.grid_lines.update_neuron_extent(self.n_neurons)
+            # The overlay rows and onset marks follow the row layout.
+            self._rebuild_stim_overlay()
 
     def _compute_row_layout(self) -> None:
         """Recompute per-row half-heights/centers/boundaries so that every
@@ -407,6 +412,30 @@ class TraceWidget(TimeseriesWidget):
             return self._row_centers[display_row]
         return float(display_row)
 
+    def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
+        super().set_limits(max_time_secs, max_neurons)
+        if (
+            self._base_max_height is None
+            or self.controller is None
+            or float(max_time_secs) <= 0.0
+            or int(max_neurons) <= 0
+        ):
+            return
+        # The controller's height was just reset to the project's neuron
+        # count: that is the new height to restore when auto-extend ends, and
+        # the auto-extended rows still need their grown extent on top of it.
+        self._base_max_height = self.controller.max_height
+        self._grow_view_extent_for_visible_neurons()
+
+    def _display_rows_y_extent(self, first: int, last: int) -> tuple[float, float]:
+        """The y range covering display rows ``first`` to ``last``."""
+        if self.auto_extend_vertical_space and last < len(self._row_centers):
+            return (
+                self._row_centers[first] - self._row_half_heights[first],
+                self._row_centers[last] + self._row_half_heights[last],
+            )
+        return (first - 0.5, last + 0.5)
+
     def _refit_view_to_visible_neurons(self) -> None:
         if not self.auto_extend_vertical_space or not self._row_half_heights:
             super()._refit_view_to_visible_neurons()
@@ -457,6 +486,8 @@ class TraceWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.figure import Figure
 
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
+
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
         dialog.setWindowTitle(f"Trace preview: {self.data.name}")
@@ -499,8 +530,14 @@ class TraceWidget(TimeseriesWidget):
                 and (selection.stop is None or neuron_id < selection.stop)
             ]
             if rows:
-                ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
+                ax.set_ylim(*self._display_rows_y_extent(rows[0], rows[-1]))
         ax.set_xlabel("Time (ms)")
+        auto_extended = self.auto_extend_vertical_space and self._row_centers
+        set_neuron_id_ticks(
+            ax.yaxis,
+            self._visible_neuron_ids,
+            self._row_centers if auto_extended else None,
+        )
         ax.set_ylabel("Neuron index (normalized traces)")
         ax.set_title(self.data.name)
 
@@ -640,6 +677,9 @@ class TraceWidget(TimeseriesWidget):
         )
         self.data = data
         self.data_values = data.traces.T
+        self._data_column_by_neuron_id = {
+            int(neuron_id): row for row, neuron_id in enumerate(data.indices)
+        }
         self.units = data.units if data.units else "mV"
         # Voltage traces use the existing volts-to-millivolts convention.
         # Fluorescence and other trace types already contain display values.
@@ -711,18 +751,15 @@ class TraceWidget(TimeseriesWidget):
                 line.offset = (line.offset[0], y, line.offset[2])
 
     def clear_data(self) -> None:
-        # Must be nulled *before* calling super(): TimeseriesWidget.clear_data()
-        # wipes the whole subplot via FPLWidget.clear_data() and then, at its
-        # own tail end, calls clear_greyed_neurons() - which (via
-        # TraceWidgetState) can synchronously emit greyed_changed and
-        # re-enter _rebuild_stim_overlay() before this method gets a chance
-        # to run its own cleanup. If the stale reference were still set at
-        # that point, _rebuild_stim_overlay() would try to remove a graphic
-        # the subplot wipe already discarded (pygfx logs, but does not
-        # raise, "Attempting to remove object that was not a child" for
-        # this). _stim_overlay_enabled/_stim_overlay_array are left alone so
+        # super().clear_data() wipes the whole subplot (FPLWidget.clear_data()),
+        # discarding these graphics; drop the references first so a later
+        # _rebuild_stim_overlay() does not try to remove graphics that are
+        # already gone (pygfx logs, but does not raise, "Attempting to remove
+        # object that was not a child"). Greyed neurons are kept across the
+        # clear. _stim_overlay_enabled/_stim_overlay_array are left alone so
         # the setting survives a data refresh.
         self._stim_overlay_graphic = None
+        self._stim_overlay_row_graphics = []
         self._stim_onset_graphic = None
         if self._base_max_height is not None and self.controller is not None:
             self.controller.max_height = self._base_max_height
@@ -746,11 +783,16 @@ class TraceWidget(TimeseriesWidget):
         self._rebuild_stim_overlay()
 
     def _rebuild_stim_overlay(self) -> None:
-        for graphic in (self._stim_overlay_graphic, self._stim_onset_graphic):
+        for graphic in (
+            self._stim_overlay_graphic,
+            self._stim_onset_graphic,
+            *self._stim_overlay_row_graphics,
+        ):
             if graphic is not None:
                 with contextlib.suppress(Exception):
                     self.subplot.remove_graphic(graphic)
         self._stim_overlay_graphic = None
+        self._stim_overlay_row_graphics = []
         self._stim_onset_graphic = None
 
         stim_array = self._stim_overlay_array
@@ -779,16 +821,37 @@ class TraceWidget(TimeseriesWidget):
             vmax = 1.0
         vmin = -vmax if stim_array.stim_type == StimType.External else 0.0
         cmap = get_cmap(stim_array.stim_type, alpha=self.STIM_OVERLAY_ALPHA)
-        self._stim_overlay_graphic = self.subplot.add_image(
-            visible_values.T,
-            vmin=vmin,
-            vmax=vmax,
-            cmap=cmap,
-        )
-        apply_cmap_alpha(self._stim_overlay_graphic, cmap)
         dt_ms = float(stim_array.dt) * 1000.0
-        self._stim_overlay_graphic.offset = (0.5 * dt_ms, 0.0, self.STIM_OVERLAY_Z)
-        self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
+        if self.auto_extend_vertical_space and self._row_centers:
+            # Auto-extended rows differ in height: give each row its own
+            # image, centred on and as tall as the row.
+            for row, (center, half_height) in enumerate(
+                zip(self._row_centers, self._row_half_heights, strict=True)
+            ):
+                graphic = self.subplot.add_image(
+                    visible_values[:, row][np.newaxis, :],
+                    vmin=vmin,
+                    vmax=vmax,
+                    cmap=cmap,
+                )
+                apply_cmap_alpha(graphic, cmap)
+                graphic.offset = (0.5 * dt_ms, center, self.STIM_OVERLAY_Z)
+                graphic.world_object.world.scale = (dt_ms, 2.0 * half_height, 1.0)
+                self._stim_overlay_row_graphics.append(graphic)
+        else:
+            self._stim_overlay_graphic = self.subplot.add_image(
+                visible_values.T,
+                vmin=vmin,
+                vmax=vmax,
+                cmap=cmap,
+            )
+            apply_cmap_alpha(self._stim_overlay_graphic, cmap)
+            self._stim_overlay_graphic.offset = (
+                0.5 * dt_ms,
+                0.0,
+                self.STIM_OVERLAY_Z,
+            )
+            self._stim_overlay_graphic.world_object.world.scale = (dt_ms, 1.0, 1.0)
         self._add_stim_onsets(visible_values, dt_ms, stim_array.stim_type)
 
     def _add_stim_onsets(

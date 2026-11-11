@@ -18,6 +18,8 @@ from neuroseq.project import Project
 # under the same name (see _randomize_brain_image()) restyles the existing
 # inline image in place instead of inserting a second copy.
 _BRAIN_RESOURCE_URL = QtCore.QUrl("neuroseq-console-brain.png")
+# Keeps the brain row legible if the console font reports a tiny width.
+_MIN_BRAIN_WIDTH = 360
 
 SAMPLE_CODE = """\
 # ── Project ──────────────────────────────────────────────────
@@ -209,10 +211,10 @@ class ConsoleWidget(ReplWidget):
         """
         image = QtGui.QImage()
         image.loadFromData(console_art.tinted_brain_image_bytes(random.Random()))
-        image = image.scaled(
-            240,
-            240,
-            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+        # As wide as the welcome banner above it, so the row of brains is
+        # centered on (and spans) the "Welcome to NeuroSeq" text.
+        image = image.scaledToWidth(
+            self._banner_width(),
             QtCore.Qt.TransformationMode.SmoothTransformation,
         )
         self.output.document().addResource(
@@ -220,6 +222,12 @@ class ConsoleWidget(ReplWidget):
             _BRAIN_RESOURCE_URL,
             image,
         )
+
+    def _banner_width(self) -> int:
+        """Pixel width of one welcome-banner line in the console font."""
+        metrics = QtGui.QFontMetrics(self.output.font())
+        line = console_art.welcome_banner()[0]
+        return max(_MIN_BRAIN_WIDTH, metrics.horizontalAdvance(line))
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         super().showEvent(event)

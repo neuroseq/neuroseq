@@ -11,46 +11,49 @@ nav = [
         { Installation = "getting_started/installation.md" },
         { Quickstart = "getting_started/quickstart.md" },
         { "GUI Overview" = "getting_started/gui_overview.md" },
-        { "In-App LLM Assistant (Experimental)" = "getting_started/chat_assistant.md" },
+        { "LLM Assistant (Experimental)" = "getting_started/chat_assistant.md" },
     ] },
-    { "Neural Networks" = [
-        { Overview = "Neural Networks/overview.md" },
-        { Simulations = "Neural Networks/simulations.md" },
-        { "Run External Simulators" = "Neural Networks/run_external_simulators.md" },
-        { "ScanImage Acquisition" = "Neural Networks/scanimage_acquisition.md" },
-        { "Multiphoton Holographic Stimulation" = "Neural Networks/multiphoton_holographic_stimulation.md" },
-        { "Deliver stimuli to BrainScaleS-2" = "Neural Networks/brainscales2_delivery.md" },
+    { Networks = [
+        { Overview = "networks/overview.md" },
+        { "Digital: Built-in Simulator" = "networks/simulations.md" },
+        { "Digital: External Simulators" = "networks/external_simulators.md" },
+        { "Biological: Holographic Stimulation" = "networks/holographic_stimulation.md" },
+        { "Biological: Calcium Imaging Acquisition" = "networks/imaging_acquisition.md" },
+        { "Neuromorphic: Hardware" = "networks/neuromorphic_hardware.md" },
     ] },
-    { "Input Design and Readout Analysis" = [
-        { Overview = "Input Design and Readout Analysis/overview.md" },
-        { "Input Design" = [
-            { "Stimulation editor and static input" = "Input Design and Readout Analysis/static_input_design.md" },
-            { "Design dynamic input" = "Input Design and Readout Analysis/stdp_synaptic_tuning.md" },
-            { "Export stimuli for patch clamp recordings" = "Input Design and Readout Analysis/export_patch_clamp_stimuli.md" },
-        ] },
-        { "Readout Analysis" = [
-            { Experiments = "Input Design and Readout Analysis/experiments.md" },
-            { "Importing Igor2 Waves" = "Input Design and Readout Analysis/importing_igor2_waves.md" },
-            { "Importing Imaging Data" = "Input Design and Readout Analysis/importing_imaging_data.md" },
-            { "Analysis tools and plugins" = "Input Design and Readout Analysis/analysis_and_plugins.md" },
-            { "Connecting simulations and experiments" = "Input Design and Readout Analysis/simulations_and_experiments.md" },
-        ] },
+    { "Input Design" = [
+        { Overview = "input_design/overview.md" },
+        { "Static Input" = "input_design/static_input.md" },
+        { "Dynamic Input" = "input_design/dynamic_input.md" },
+        { "Holography Export" = "input_design/holography_export.md" },
+        { "Patch Clamp Export" = "input_design/patch_clamp_export.md" },
+    ] },
+    { Readout = [
+        { Overview = "readout/overview.md" },
+        { Experiments = "readout/experiments.md" },
+        { "Imaging Data" = "readout/imaging_data.md" },
+        { "Patch-Clamp Data" = "readout/patch_clamp_data.md" },
+    ] },
+    { "Data Analysis" = [
+        { "Analysis and Plugins" = "data_analysis/analysis.md" },
+        { "Simulations vs. Experiments" = "data_analysis/simulations_and_experiments.md" },
     ] },
     { Examples = "examples.md" },
     { "Developer Guide" = [
-        { "Installation and use" = "developer/developer_installation.md" },
-        { Documentation = "developer/documentation.md" },
-        { "Implementation of Custom Simulators" = "developer/custom_simulators.md" },
-        { "Analysis plugins" = "developer/analysis_plugins.md" },
-        { "Project data history" = "developer/project_history.md" },
-        { "Making a release" = "developer/releases.md" },
-        { Miscellaneous = "developer/miscellaneous.md" },
-        { Testing = "developer/testing.md" },
+        { Installation = "developer/developer_installation.md" },
         { Contributing = "developer/contributing.md" },
-        { "Responsible use of AI" = "developer/responsible_ai.md" },
+        { Testing = "developer/testing.md" },
+        { Documentation = "developer/documentation.md" },
+        { "Custom Simulators" = "developer/custom_simulators.md" },
+        { "Analysis Plugins" = "developer/analysis_plugins.md" },
+        { "Project History" = "developer/project_history.md" },
+        { Releases = "developer/releases.md" },
+        { "Desktop Shortcut" = "developer/desktop_shortcut.md" },
+        { "Responsible Use of AI" = "developer/responsible_ai.md" },
     ] },
     { Troubleshooting = "common_issues.md" },
 ]
+
 
 [project.theme]
 variant = "classic"
@@ -73,3 +76,22 @@ generic = true
 [project.markdown_extensions.pymdownx.superfences]
 [project.markdown_extensions.attr_list]
 [project.markdown_extensions.md_in_html]
+
+# old URLs from before the docs/ folder reorganization
+[project.plugins.redirects.redirect_maps]
+"Neural Networks/overview.md" = "networks/overview.md"
+"Neural Networks/simulations.md" = "networks/simulations.md"
+"Neural Networks/run_external_simulators.md" = "networks/external_simulators.md"
+"Neural Networks/multiphoton_holographic_stimulation.md" = "networks/holographic_stimulation.md"
+"Neural Networks/scanimage_acquisition.md" = "networks/imaging_acquisition.md"
+"Neural Networks/brainscales2_delivery.md" = "networks/neuromorphic_hardware.md"
+"Input Design and Readout Analysis/overview.md" = "input_design/overview.md"
+"Input Design and Readout Analysis/static_input_design.md" = "input_design/static_input.md"
+"Input Design and Readout Analysis/stdp_synaptic_tuning.md" = "input_design/dynamic_input.md"
+"Input Design and Readout Analysis/export_patch_clamp_stimuli.md" = "input_design/patch_clamp_export.md"
+"Input Design and Readout Analysis/experiments.md" = "readout/experiments.md"
+"Input Design and Readout Analysis/importing_imaging_data.md" = "readout/imaging_data.md"
+"Input Design and Readout Analysis/importing_igor2_waves.md" = "readout/patch_clamp_data.md"
+"Input Design and Readout Analysis/analysis_and_plugins.md" = "data_analysis/analysis.md"
+"Input Design and Readout Analysis/simulations_and_experiments.md" = "data_analysis/simulations_and_experiments.md"
+"developer/miscellaneous.md" = "developer/desktop_shortcut.md"

@@ -1962,3 +1962,157 @@ def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) 
     gc.collect()
     assert widget_ref() is None
     assert figure_ref() is None
+
+
+@pytest.mark.parametrize(
+    ("indices", "expected"),
+    [
+        # A single trace whose neuron id is not 0 (previously IndexError).
+        ([5], "Neuron 5\n1 a.u."),
+        # Rows in non-id order: row 0 holds neuron 1, row 1 neuron 0.
+        ([1, 0], "Neuron 0\n2 a.u."),
+    ],
+)
+def test_trace_widget_hover_reads_the_row_of_the_hovered_neuron_id(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    indices: list[int],
+    expected: str,
+) -> None:
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        widget.subplot, "map_screen_to_world", lambda ev: np.array([3.0, 0.0, 0.0])
+    )
+    traces = np.stack([np.full(10, 1.0), np.full(10, 2.0)])[: len(indices)]
+    widget.set_data(TraceData("t", traces, np.array(indices), "a.u.", 0.001))
+
+    widget.pointer_move(SimpleNamespace(x=0.0))
+
+    assert captured["t"] == expected
+
+
+@pytest.mark.parametrize("offset_by_median", [False, True])
+@pytest.mark.parametrize("clip", [False, True])
+def test_trace_norm_dialog_checkboxes_reflect_widget_settings(
+    qtbot: QtBot, offset_by_median: bool, clip: bool
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.offset_by_median = offset_by_median
+    trace_widget.clip = clip
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+
+    assert dialog.chk_offset.isChecked() == offset_by_median
+    assert dialog.chk_clip.isChecked() == clip
+
+    dialog.chk_offset.setChecked(False)
+    dialog.chk_clip.setChecked(False)
+    dialog.reset_defaults()
+
+    assert dialog.chk_offset.isChecked()
+    assert dialog.chk_clip.isChecked()
+
+
+def test_stim_overlay_follows_auto_extended_rows(qtbot: QtBot) -> None:
+    """Under auto-extend the onset marks sit at the grown row centers, so the
+    overlay must too; replot_traces() must also rebuild the overlay when the
+    row layout changes."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.set_stim_overlay_data(_stim_array(n_neurons=5))
+    trace_widget.set_stim_overlay_enabled(True)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    centers = trace_widget._row_centers
+    half_heights = trace_widget._row_half_heights
+    rows = trace_widget._stim_overlay_row_graphics
+    assert len(rows) == 5
+    for graphic, center, half in zip(rows, centers, half_heights, strict=True):
+        assert graphic.offset[1] == pytest.approx(center)
+        assert graphic.world_object.world.scale[1] == pytest.approx(2 * half)
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx(centers))
+
+    trace_widget.auto_extend_vertical_space = False
+    trace_widget.replot_traces()
+    assert trace_widget._stim_overlay_row_graphics == []
+    assert trace_widget._stim_overlay_graphic is not None
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0]))
+
+
+def test_trace_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    data = _make_scaled_trace_data(5)
+    data.indices = np.array([10, 11, 12, 13, 14], dtype=np.uint32)
+    widget.set_data(data)
+    widget.set_neuron_greyed(11, True)
+
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(y, 0) for y in (0.0, 1.0, 3.0)] == ["10", "12", "14"]
+    assert formatter(4.0, 0) == ""
+    dialog.close()
+
+    widget.trace_norm_percent = 500
+    widget.auto_extend_vertical_space = True
+    widget.replot_traces()
+    centers = widget._row_centers
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    ax.set_ylim(-0.5, widget._row_boundaries[-1])
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(c, 0) for c in centers] == ["10", "12", "13", "14"]
+    ticks = ax.yaxis.get_major_locator()()
+    assert set(ticks) <= set(centers)
+    assert ticks
+    dialog.close()
+
+
+def test_auto_extend_vertical_space_survives_set_limits(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_limits(1.0, 5)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+    total_height = sum(2 * h for h in trace_widget._row_half_heights)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # e.g. the project's limits being refreshed after an unrelated edit
+    trace_widget.set_limits(1.0, 6)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # the refreshed neuron count, not the one from before, comes back
+    trace_widget.set_data(None)
+    assert controller.max_height == pytest.approx(6.0)

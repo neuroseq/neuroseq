@@ -30,11 +30,12 @@ from neuroseq.data import Data
 from neuroseq.data import TraceData
 from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
+from neuroseq.importers.importer_cellpose import read_segmentation_file
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage_traces import DEFAULT_SPIKE_THRESHOLD
-from neuroseq.importers.importer_suite2p import _resolve_suite2p_indices
 from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
 from neuroseq.importers.importer_suite2p import prepare_suite2p_traces
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.importers.importer_tif import DEFAULT_FS
 from neuroseq.importers.importer_tif import DEFAULT_WIN_BASELINE
 from neuroseq.importers.importer_tif import PipelineCancelled
@@ -44,17 +45,6 @@ from neuroseq.importers.importer_tif import cellpose_result_to_masks
 from neuroseq.importers.roi_traces import NEUROPIL_INNER_RADIUS_PX
 from neuroseq.importers.roi_traces import NEUROPIL_MIN_PIXELS
 from neuroseq.stimulation.stim import StimArray
-
-
-def _load_masks_from_seg_file(path: Path) -> npt.NDArray[Any]:
-    """Load a Cellpose `_seg.npy` (or plain mask npy) into a Suite2p label image."""
-    loaded = np.load(path, allow_pickle=True)
-    if isinstance(loaded, np.ndarray) and loaded.dtype == object and loaded.ndim == 0:
-        data = loaded.item()
-        if isinstance(data, dict) and "masks" in data:
-            return np.asarray(data["masks"], dtype=np.int32)
-        raise ValueError(f"Could not find 'masks' key in {path}")
-    return np.asarray(loaded, dtype=np.int32)
 
 
 def _load_seg_file_background_image(path: Path) -> npt.NDArray[Any] | None:
@@ -835,7 +825,7 @@ class TifImportDialog(QtWidgets.QDialog):
         self._seg_file_background_image = _load_seg_file_background_image(
             self._seg_file_path
         )
-        return _load_masks_from_seg_file(self._seg_file_path)
+        return read_segmentation_file(self._seg_file_path)
 
     def _selected_mapping(self) -> dict[int, int] | None:
         """Return the experiment mapping only for its stored Cellpose masks."""
@@ -990,9 +980,9 @@ class TifImportDialog(QtWidgets.QDialog):
                 background_image=self._seg_file_background_image,
             )
 
+        raw_cellpose_ids = pipeline_row_cellpose_ids(result)
         if result.extra.get("pipeline") == "roi_average":
-            raw_cellpose_ids = np.arange(n_neurons, dtype=np.uint32)
-            indices = _resolve_suite2p_indices(n_neurons, self._selected_mapping())
+            indices = remap_raw_cellpose_ids(raw_cellpose_ids, self._selected_mapping())
             self.imported_data = roi_average_import_data(
                 result,
                 indices,
@@ -1024,6 +1014,8 @@ class TifImportDialog(QtWidgets.QDialog):
             max_neurons=n_neurons,
             sampling_rate=fs,
             stimulus_to_cellpose_mapping=self._selected_mapping(),
+            neuropil_coefficient=self._pipeline_params().neuropil_coefficient,
+            raw_cellpose_ids=raw_cellpose_ids,
         )
 
         spike_data = prepare_suite2p_spikes(
@@ -1032,6 +1024,7 @@ class TifImportDialog(QtWidgets.QDialog):
             threshold=self._spike_threshold_spin.value(),
             max_neurons=n_neurons,
             stimulus_to_cellpose_mapping=self._selected_mapping(),
+            raw_cellpose_ids=raw_cellpose_ids,
         )
 
         self.imported_data = [traces, spike_data]
@@ -1042,6 +1035,27 @@ class TifImportDialog(QtWidgets.QDialog):
             f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
         )
         self.accept()
+
+
+def pipeline_row_cellpose_ids(result: TifPipelineResult) -> npt.NDArray[Any]:
+    """The Cellpose ID of each trace row of a pipeline result.
+
+    Cellpose IDs are mask labels - 1 (as in ``extract_recording_dff``). The ROI
+    average pipeline reports its labels; Suite2p rows follow the sorted mask
+    labels (Cellpose masks) or are labelled 1..N (Suite2p detection), so Cellpose
+    IDs with gaps no longer shift every later row onto the wrong cell.
+    """
+    n_rows = int(np.shape(result.F)[0])
+    labels = result.extra.get("roi_labels")
+    if labels is None:
+        unique = np.unique(np.asarray(result.masks))
+        labels = unique[unique > 0]
+    labels = np.asarray(labels, dtype=np.int64)
+    if labels.shape[0] != n_rows:
+        # E.g. a Suite2p ROI fully overlapped in the rebuilt mask image; rows
+        # then follow detection order 0..N-1.
+        return np.arange(n_rows, dtype=np.uint32)
+    return (labels - 1).astype(np.uint32)
 
 
 def roi_average_import_data(

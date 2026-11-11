@@ -346,25 +346,25 @@ def test_cellpose_result_to_masks_round_trips_background_and_labels():
     )
 
 
-def test_load_masks_from_seg_file_unwraps_cellpose_dict(tmp_path: Path):
-    from neuroseq.importers.tif_import_dialog import _load_masks_from_seg_file
+def test_read_segmentation_file_unwraps_cellpose_dict(tmp_path: Path):
+    from neuroseq.importers.importer_cellpose import read_segmentation_file
 
     masks = _make_mask_image()
     seg_path = tmp_path / "image_seg.npy"
     np.save(seg_path, np.array({"masks": masks, "outlines": None}, dtype=object))
 
-    loaded = _load_masks_from_seg_file(seg_path)
+    loaded = read_segmentation_file(seg_path)
     np.testing.assert_array_equal(loaded, masks)
 
 
-def test_load_masks_from_seg_file_accepts_plain_array(tmp_path: Path):
-    from neuroseq.importers.tif_import_dialog import _load_masks_from_seg_file
+def test_read_segmentation_file_accepts_plain_array(tmp_path: Path):
+    from neuroseq.importers.importer_cellpose import read_segmentation_file
 
     masks = _make_mask_image()
     seg_path = tmp_path / "plain.npy"
     np.save(seg_path, masks)
 
-    loaded = _load_masks_from_seg_file(seg_path)
+    loaded = read_segmentation_file(seg_path)
     np.testing.assert_array_equal(loaded, masks)
 
 

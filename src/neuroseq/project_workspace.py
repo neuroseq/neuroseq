@@ -22,6 +22,7 @@ from qtpy.compat import getsavefilename
 
 import neuroseq.elise_support.workflows as elise_workflows
 from neuroseq import __version__
+from neuroseq import console_art
 from neuroseq import theme as theme_module
 from neuroseq.add_experiment_data_dialog import AddExperimentDataDialog
 from neuroseq.analysis_plugins import AnalysisPlugin
@@ -51,6 +52,7 @@ from neuroseq.icon_manager import icons
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import clone_cellpose_result
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_tif import DEFAULT_FS
 from neuroseq.importers.patch_clamp_data_input_import_dialog import (
     PatchClampDataInputImportDialog,
@@ -58,11 +60,13 @@ from neuroseq.importers.patch_clamp_data_input_import_dialog import (
 from neuroseq.importers.suite2p_import_dialog import Suite2pImportDialog
 from neuroseq.importers.syscon2_import_dialog import Syscon2ImportDialog
 from neuroseq.llm.chat_widget import ChatWidget
+from neuroseq.llm.chat_widget import notify_llm_settings_changed
 from neuroseq.llm.llm_settings_dialog import LLMSettingsDialog
 from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.project import ImportedComponents
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.save_load_options import SaveLoadOptionsDialog
@@ -500,7 +504,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.scanimage_connection = self.acquisition_controller.connection
         self.scanimage_controls = self.acquisition_controller.controls
         self._create_menus_and_toolbars()
-        self.setWindowIcon(qta.icon("fa6s.brain"))
+        self.setWindowIcon(QtGui.QIcon(str(console_art.app_icon_path())))
         main_horizontal_layout = QtWidgets.QHBoxLayout()
         central_widget = QtWidgets.QWidget()
         central_widget.setLayout(main_horizontal_layout)
@@ -789,13 +793,20 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if not active:
             self.time_slider.timer.stop()
 
+    def _plot_limits(self) -> tuple[float, int]:
+        return float(self.project.max_time_secs), int(self.project.max_neurons)
+
     def update_limits(self) -> None:
-        max_time_secs = float(self.project.max_time_secs)
-        max_neurons = int(self.project.max_neurons)
+        max_time_secs, max_neurons = self._plot_limits()
         self.controller.set_limits(max_time_secs, max_neurons)
         self.trace_controller.set_limits(max_time_secs, max_neurons)
         self.spike_controller.set_limits(max_time_secs, max_neurons)
         self.data_widget.set_limits(max_time_secs, max_neurons)
+        for window in self._detached_panel_windows:
+            # Detached Trace/Spike/Data panels own their controllers.
+            set_limits = getattr(window._widget, "set_limits", None)
+            if callable(set_limits):
+                set_limits(max_time_secs, max_neurons)
         self.time_slider.set_max_time_secs(max_time_secs)
 
     def _custom_analysis(
@@ -899,7 +910,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
         Shows a Save / Discard / Cancel prompt. Cancel aborts. Discard runs
         ``proceed`` immediately. Save persists the current project first and
-        runs ``proceed`` only after the save completes; if the user backs out
+        runs ``proceed`` only after the save completes (asking again if the
+        project was edited while it ran); if the user backs out
         of the save dialog, ``proceed`` never runs and the current project is
         left untouched.
 
@@ -921,7 +933,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if answer == QtWidgets.QMessageBox.StandardButton.Cancel:
             return
         if answer == QtWidgets.QMessageBox.StandardButton.Save:
-            self._save_project(on_success=lambda _result: proceed())
+            # Ask again rather than proceed: edits made while the save ran
+            # leave the project dirty and must not be dropped silently.
+            self._save_project(
+                on_success=lambda _result: self._prompt_save_before_action(
+                    title, message, proceed
+                )
+            )
             return
         proceed()
 
@@ -958,7 +976,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if answer == QtWidgets.QMessageBox.StandardButton.Save:
 
             def _close_after_save(_result: object) -> None:
-                self._close_confirmed = True
+                # Close again through the prompt: it only asks again if the
+                # project was edited while the save ran.
                 self.close()
 
             self._save_project(on_success=_close_after_save)
@@ -1021,11 +1040,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         options = options_dialog.options
         filename_path = pathlib.Path(filename)
 
-        def _import_task(report: Callable[[int], None]) -> None:
-            project.import_project(filename_path, options, report=report)
-            return None
+        def _import_task(report: Callable[[int], None]) -> ImportedComponents:
+            return project.read_import(filename_path, options, report=report)
 
-        def _on_imported(_: object) -> None:
+        def _on_imported(components: object) -> None:
+            # Applied here: it clears the undo history, whose listeners are widgets.
+            assert isinstance(components, ImportedComponents)
+            project.apply_import(components)
             self.update_project(self.project)
 
         self._dispatch_io_task(
@@ -1242,12 +1263,6 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.controller.reset()
             self.trace_controller.reset()
             self.spike_controller.reset()
-        self.console_widget.set_project(self.project)
-        self.chat_widget.set_project(self.project)
-        self.syscon2_panel.set_project(self.project)
-        self.bss2_panel.set_project(self.project)
-        self.acquisition_controller.project_changed()
-        self._refresh_video_selector()
         self.continue_simulation_action.setText("&Run simulation")
         for widget in self.plot_widgets:
             widget.clear_data()
@@ -1259,16 +1274,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             )
             self.project.cellpose_data = self.last_cellpose_import
 
+        # A replaced project must not inherit the previous run's Design dynamic
+        # input state (plots, log, EPSP history) or static pattern designer;
+        # drop the cached dialogs (before the editor switches project) so they
+        # are rebuilt fresh on next open.
+        self.dynamic_input_controller.update_project(self.project)
         self.stim_editor.set_project(
             self.project, keep_undo_history=preserve_dynamic_input
         )
-        # A replaced project must not inherit the previous run's Design dynamic
-        # input state (plots, log, EPSP history) or static pattern designer;
-        # drop the cached dialogs so they are rebuilt fresh on next open.
-        if preserve_dynamic_input:
-            self.dynamic_input_controller.refresh()
-        else:
-            self.dynamic_input_controller.discard_dynamic_input_dialogs()
+        self.dynamic_input_controller.refresh()
+        if not preserve_dynamic_input:
             self.static_input_controller.discard_dialog()
         self.console_widget.set_project(self.project)
         self.chat_widget.set_project(self.project)
@@ -1303,23 +1318,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
 
-    def _cellpose_neuron_count(self, imported: CellposeImportResult | None) -> int:
-        if imported is None:
-            return 0
-        if imported.original_cellpose_ids is not None:
-            return int(len(imported.original_cellpose_ids))
-        if imported.segmentation_array is None:
-            return 0
-        unique_ids = np.unique(imported.segmentation_array)
-        return int(np.sum(unique_ids >= 0))
-
     def _warn_if_cellpose_model_mismatch(self) -> None:
         """Warn when Cellpose data is present but its cell count differs from the
         model's neuron count (the two must agree for neuron-to-cell mapping,
         e.g. holographic stimulation export)."""
         if self.project is None or self.project.cellpose_data is None:
             return
-        cellpose_count = self._cellpose_neuron_count(self.project.cellpose_data)
+        cellpose_count = self.project.cellpose_neuron_count()
         model_count = self.project.b2_model.get_defined_neuron_count()
         if cellpose_count > 0 and model_count > 0 and cellpose_count != model_count:
             QtWidgets.QMessageBox.warning(
@@ -1361,7 +1366,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self.project is None:
             return []
 
-        self.project.cellpose_data = imported_copy
+        self.project.set_cellpose_data(imported_copy)
         failed_remaps = self.project.remap_cellpose_indices()
         if failed_remaps:
             QtWidgets.QMessageBox.warning(
@@ -1374,7 +1379,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 "duplicate or out-of-range IDs); their displayed indices were left "
                 "unchanged.",
             )
-        detected_neurons = self._cellpose_neuron_count(imported_copy)
+        detected_neurons = self.project.cellpose_neuron_count()
         resized_names: list[str] = []
         if detected_neurons > 0 and self.project.stim_arrays:
             current_max_neurons = max(
@@ -1655,7 +1660,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         if not ok:
             return
-        self.project.b2_model.store(checkpoint)
+        self.project.store_checkpoint(checkpoint)
 
     def btn_restore_checkpoint_clicked(self) -> None:
         if len(self.project.b2_model.checkpoints) == 0:
@@ -1676,7 +1681,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if not ok:
             return
         try:
-            self.project.b2_model.restore(checkpoint)
+            self.project.restore_checkpoint(checkpoint)
             self._update_data(keep_undo_history=False)
         except ValueError as error:
             QtWidgets.QMessageBox.critical(self, "Error", f"{error}")
@@ -1960,6 +1965,18 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
         project = self.project
         padding_secs = self.settings.stim_padding_secs
+        try:
+            # On this thread: padding may clear the undo history, which
+            # notifies widgets.
+            project.prepare_simulation(simulation_time, padding_secs)
+        except Exception as exc:
+            SimulationGuard.release(self)
+            self.logger.exception("Could not prepare the Brian2 simulation")
+            QtWidgets.QMessageBox.critical(
+                self, "Simulation error", f"Could not run simulation: {exc}"
+            )
+            self.dynamic_input_controller.dynamic_input_simulation_failed(str(exc))
+            return
 
         def _request_brian2_cancel() -> None:
             self.logger.info("Brian2 simulation cancellation requested by user.")
@@ -2149,7 +2166,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
     def btn_import_suite2p_data_clicked(self) -> None:
         """Open dialog to import experimental traces/spikes from Suite2p/CSV data"""
-        dialog = Suite2pImportDialog(self)
+        dialog = Suite2pImportDialog(
+            self,
+            stimulus_to_cellpose_mapping=resolve_stimulus_to_cellpose_mapping(
+                self.project.cellpose_data
+            ),
+        )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
                 Experiment(
@@ -2428,9 +2450,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 self._auto_show_widget(self.spatial_footprint_widget)
             message = "Cell spatial footprints loaded."
             if resized_names:
-                detected_neurons = self._cellpose_neuron_count(
-                    self.last_cellpose_import
-                )
+                detected_neurons = self.project.cellpose_neuron_count()
                 message += (
                     "\n\nExpanded "
                     f"{len(resized_names)} input array(s) to {detected_neurons} neurons."
@@ -2507,7 +2527,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         """Remove stored cellpose data from both GUI and project."""
         self.last_cellpose_import = None
         if self.project is not None:
-            self.project.cellpose_data = None
+            self.project.set_cellpose_data(None)
+            self.update_limits()
         if hasattr(self, "spatial_footprint_widget"):
             self.spatial_footprint_widget.set_data(None)
             self.calcium_video_widget.set_cellpose_data(None)
@@ -2590,7 +2611,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(
                 self,
                 "Custom simulate function loaded",
-                f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment -> Run external simulation function menu option.",
+                f"Custom simulate function loaded from {path}. You can run this simulation using the Experiment → Run External Input Function menu item.",
             )
         except Exception as e:
             self.project.external_simulate_path = None
@@ -2721,7 +2742,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._llm_settings_dialog is None:
             self._llm_settings_dialog = LLMSettingsDialog()
             self._llm_settings_dialog.settings_changed.connect(
-                self.chat_widget.reload_backend
+                notify_llm_settings_changed
             )
         self._llm_settings_dialog.show()
         self._llm_settings_dialog.raise_()
@@ -3436,6 +3457,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             show_axis_link_controls=True,
             state=self._trace_state,
         )
+        widget.set_limits(*self._plot_limits())
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         return widget
@@ -3447,12 +3469,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             default_controller=self.controller,
             show_axis_link_controls=True,
         )
+        # Before set_data(): the row count includes silent neurons up to the limit.
+        widget.set_limits(*self._plot_limits())
         widget.set_data(self.project.get_data(self.cmb_spike.currentText(), SpikeData))
         widget.custom_analysis_requested.connect(self._custom_analysis)
         return widget
 
     def _build_fresh_data_widget(self) -> DataWidget:
-        widget = DataWidget(ConstrainedPanZoomController(), parent=None)
+        widget = DataWidget(self.controller, parent=None)
+        widget.set_limits(*self._plot_limits())
         widget.set_data(self._current_data_selection())
         widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
@@ -3524,8 +3549,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def _build_fresh_chat_widget(self) -> ChatWidget:
         widget = ChatWidget(parent=None)
         widget.set_project(self.project)
-        widget._history = list(self.chat_widget._history)
-        widget._render_history()
+        widget.copy_conversation_from(self.chat_widget)
         widget.request_settings_dialog.connect(self.open_llm_settings)
         widget.set_busy_check(self._background_job_busy)
         return widget

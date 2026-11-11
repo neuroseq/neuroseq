@@ -16,14 +16,17 @@ from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.power_lut import power_lut_mw_to_percent
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_syscon2 import _BLOCK_START_RE
+from neuroseq.importers.importer_syscon2 import _HEADER_HASH_RE
+from neuroseq.importers.importer_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_US
+from neuroseq.importers.importer_syscon2 import _SYSCON2_WINDOW_TICKS
 from neuroseq.importers.importer_syscon2 import SysconSequenceObject
+from neuroseq.importers.importer_syscon2 import _extract_lightsource_ids
+from neuroseq.importers.importer_syscon2 import _strip_comment
 from neuroseq.importers.importer_syscon2 import parse_syscon2_seq_text
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_timing import ceil_sample_position
 from neuroseq.stimulation.stim_timing import round_sample_position
-
-_BLOCK_START_RE = re.compile(r"^\[(\d+)\]$")
-_HEADER_HASH_RE = re.compile(r"^[0-9A-Fa-f]{2}(?:-[0-9A-Fa-f]{2}){15}$")
 
 _REQUIRED_HEADER_DEFAULTS: dict[str, str] = {
     "version": "3",
@@ -44,7 +47,6 @@ _DEFAULT_TTL_OUT_2_PORT = "Holo4D TTL Out 2"
 
 _SLM_LEAD_IN_US = 16_660  # used only for PNG visualization; one window = 16_666 µs
 _TTL_OUT_1_START_PULSE_US = 10_000
-_SYSCON2_TTL_PULSE_QUANTUM_US = 520.8125
 _SYSCON2_TTL_PULSE_QUANTUM_S = (
     0.0005208125  # exact literal; avoids float rounding from * 1e-6
 )
@@ -67,7 +69,6 @@ _LIGHTSOURCE_ID_BY_WAVELENGTH_NM = {
     1100: "dummy_2_0",
 }
 
-_SYSCON2_WINDOW_TICKS = 32
 _SYSCON2_WINDOW_US = _SYSCON2_WINDOW_TICKS * _SYSCON2_TTL_PULSE_QUANTUM_US
 #: One SLM window (16.67 ms): a hologram's load time and one spiral's period.
 SYSCON2_WINDOW_MS = _SYSCON2_WINDOW_US / 1e3
@@ -256,7 +257,8 @@ class _SanitizedStimModel:
     sanitized_segments: list[_WindowSegment]
     holograms: list[_Hologram]
     fixes: list[_SanityFix]
-    truncated_tail_windows: int
+    # Windows appended past the input's end so preblank insertions lose nothing.
+    extended_tail_windows: int
     # Set when shapes are placed at exact ticks; ``None`` for the window grid.
     exact_shapes: list[_ExactShape] | None = None
 
@@ -1249,17 +1251,35 @@ def _enforce_preblank_windows(
 ) -> tuple[np.ndarray, list[_Hologram], list[_SanityFix], int, list[int]]:
     """Ensure every hologram has a blank load window immediately before it.
 
-    Returns the adjusted window matrix, final holograms, fix records, count of
-    truncated tail windows, and the list of insertion positions (in the
-    cumulative/current frame at the time of each insertion).  The insertion
-    positions are used by callers to compute tick-accurate adjusted raw segment
-    positions.
+    Each insertion shifts the tail right by one window. The matrix grows when
+    a shift would push active windows past the input's end, so no hologram is
+    ever dropped; trailing blank windows beyond the original length are not
+    kept.
+
+    Returns the adjusted window matrix, final holograms, fix records, the
+    number of windows appended past the original length, and the list of
+    insertion positions (in the cumulative/current frame at the time of each
+    insertion).  The insertion positions are used by callers to compute
+    tick-accurate adjusted raw segment positions.
     """
     adjusted = np.array(window_values, copy=True)
     fixes: list[_SanityFix] = []
     insertion_positions: list[int] = []
-    truncated_tail_windows = 0
     n_windows = adjusted.shape[0]
+
+    def finish() -> tuple[
+        np.ndarray, list[_Hologram], list[_SanityFix], int, list[int]
+    ]:
+        active_rows = np.flatnonzero(np.any(adjusted != 0, axis=1))
+        n_rows = max(n_windows, int(active_rows[-1]) + 1 if active_rows.size else 0)
+        trimmed = adjusted[:n_rows, :]
+        return (
+            trimmed,
+            _build_holograms_from_window_values(trimmed),
+            fixes,
+            n_rows - n_windows,
+            insertion_positions,
+        )
 
     max_iterations = max(1, n_windows * 3)
     for _ in range(max_iterations):
@@ -1269,27 +1289,11 @@ def _enforce_preblank_windows(
             None,
         )
         if violation is None:
-            return (
-                adjusted,
-                holograms,
-                fixes,
-                truncated_tail_windows,
-                insertion_positions,
-            )
+            return finish()
 
         shift_start = violation.start_win
         insertion_positions.append(shift_start)
-        tail = adjusted[shift_start:, :].copy()
-        adjusted[shift_start:, :] = 0
-        write_start = shift_start + 1
-        if write_start < n_windows:
-            writable = n_windows - write_start
-            adjusted[write_start:, :] = tail[:writable, :]
-            dropped = max(0, tail.shape[0] - writable)
-        else:
-            dropped = tail.shape[0]
-        if dropped > 0:
-            truncated_tail_windows += dropped
+        adjusted = np.insert(adjusted, shift_start, 0, axis=0)
 
         fixes.append(
             _SanityFix(
@@ -1305,8 +1309,7 @@ def _enforce_preblank_windows(
             )
         )
 
-    final_holograms = _build_holograms_from_window_values(adjusted)
-    return adjusted, final_holograms, fixes, truncated_tail_windows, insertion_positions
+    return finish()
 
 
 def _apply_preblank_insertions_to_raw_segments(
@@ -1512,14 +1515,14 @@ def _sanitize_stim_array_for_export(
             sanitized_segments=sanitized_segments_unshifted,
             holograms=holograms,
             fixes=[*quantization_fixes, *overlap_fixes, *exact_fixes],
-            truncated_tail_windows=0,
+            extended_tail_windows=0,
             exact_shapes=exact_shapes,
         )
     (
         adjusted_windows,
         holograms,
         preblank_fixes,
-        truncated_tail_windows,
+        extended_tail_windows,
         insertion_positions,
     ) = _enforce_preblank_windows(window_values)
     adjusted_raw_segments = _apply_preblank_insertions_to_raw_segments(
@@ -1536,24 +1539,8 @@ def _sanitize_stim_array_for_export(
         sanitized_segments=sanitized_segments,
         holograms=holograms,
         fixes=[*quantization_fixes, *overlap_fixes, *preblank_fixes],
-        truncated_tail_windows=truncated_tail_windows,
+        extended_tail_windows=extended_tail_windows,
     )
-
-
-def _window_values_to_sample_values(
-    window_values: np.ndarray,
-    *,
-    n_timepoints: int,
-) -> np.ndarray:
-    n_windows, n_neurons = window_values.shape
-    result = np.zeros((n_timepoints, n_neurons), dtype=np.float32)
-    for window_idx in range(n_windows):
-        start_idx = window_idx * _SYSCON2_WINDOW_TICKS
-        if start_idx >= n_timepoints:
-            break
-        end_idx = min(n_timepoints, start_idx + _SYSCON2_WINDOW_TICKS)
-        result[start_idx:end_idx, :] = window_values[window_idx, :]
-    return result
 
 
 def _adjusted_raw_segments_to_sample_values(
@@ -1564,7 +1551,7 @@ def _adjusted_raw_segments_to_sample_values(
 ) -> np.ndarray:
     """Reconstruct a stim-array values matrix from preblank-shifted raw segments.
 
-    Unlike ``_window_values_to_sample_values``, this preserves the original
+    Unlike rebuilding from the window grid, this preserves the original
     pulse duration exactly (no window-boundary rounding).  Only the tick
     positions are shifted to account for preblank window insertions.
     """
@@ -2211,10 +2198,11 @@ def check_syscon2_input_sanity(
                 "Non-binary export mode clips ON amplitudes to [0, 1] before export."
             )
 
-    if sanitized.truncated_tail_windows > 0:
+    if sanitized.extended_tail_windows > 0:
         warnings.append(
-            "Sanity fixes inserted preload blank windows and truncated "
-            f"{sanitized.truncated_tail_windows} trailing window(s)."
+            "Sanity fixes inserted preload blank windows and extended the "
+            f"sequence by {sanitized.extended_tail_windows} window(s) so no "
+            "pulse is cut off."
         )
 
     # Report overlapping-pulse group fixes — these require changes to the stim array.
@@ -2241,11 +2229,26 @@ def check_syscon2_input_sanity(
     all_fix_messages = overlap_fix_messages + [
         fix.message for fix in sanitized.fixes if fix.code == "insert_preblank_window"
     ]
+    # Shifted pulses may end past the input's last sample; grow the fixed array
+    # to hold them rather than clipping (the export keeps them too).
     sanitized_values_out = _adjusted_raw_segments_to_sample_values(
         sanitized.adjusted_raw_segments,
-        n_timepoints=values.shape[0],
+        n_timepoints=max(
+            values.shape[0],
+            max(
+                (segment.end_idx for segment in sanitized.adjusted_raw_segments),
+                default=0,
+            ),
+        ),
         n_neurons=values.shape[1],
     )
+    if sanitized_values_out.shape[0] > values.shape[0]:
+        extension_msg = (
+            "Sanity fixes shift pulses past the end of the input; the fixed array "
+            f"is extended from {values.shape[0]} to {sanitized_values_out.shape[0]} "
+            "ticks."
+        )
+        warnings.append(extension_msg)
 
     # Pre-compute all pulse overrun violations so we can return a complete fix
     # even though generate_syscon2_sequence_text raises on the first one.
@@ -2576,6 +2579,21 @@ def resample_stim_values_to_dt(
     return new_values, n_new
 
 
+def _insert_blank_samples(
+    values: np.ndarray, start: int, n_samples: int, min_length: int
+) -> np.ndarray:
+    """Delay everything from ``start`` on by ``n_samples`` blank rows.
+
+    The array grows when active samples would otherwise fall off its end;
+    trailing blank rows beyond ``min_length`` are dropped, so it never grows
+    more than needed (like ``_enforce_preblank_windows``).
+    """
+    shifted = np.insert(values, [start] * n_samples, 0, axis=0)
+    active_rows = np.flatnonzero(np.any(shifted != 0, axis=1))
+    n_rows = max(min_length, int(active_rows[-1]) + 1 if active_rows.size else 0)
+    return shifted[:n_rows, :]
+
+
 def shift_stim_values_right_for_initial_slm_load(
     stim_array: StimArray,
     *,
@@ -2583,8 +2601,10 @@ def shift_stim_values_right_for_initial_slm_load(
 ) -> tuple[np.ndarray, int]:
     """Translate entire stim array to the right by the SLM load-up window.
 
+    The array grows rather than losing samples shifted past its end.
+
     Returns:
-      (new_values, truncated_tail_timepoints)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
@@ -2598,12 +2618,8 @@ def shift_stim_values_right_for_initial_slm_load(
     shift_samples = int(np.ceil((min_start_us * 1e-6) / float(stim_array.dt)))
     shift_samples = max(1, shift_samples)
 
-    shifted = np.zeros_like(values)
-    if shift_samples < n_timepoints:
-        shifted[shift_samples:, :] = values[: n_timepoints - shift_samples, :]
-
-    truncated_tail_timepoints = min(shift_samples, n_timepoints)
-    return shifted, truncated_tail_timepoints
+    shifted = _insert_blank_samples(values, 0, shift_samples, n_timepoints)
+    return shifted, shifted.shape[0] - n_timepoints
 
 
 def space_out_stim_values_for_slm(
@@ -2612,16 +2628,17 @@ def space_out_stim_values_for_slm(
     active_threshold: float = 0.0,
     min_gap_us: int = _SLM_LEAD_IN_US,
 ) -> tuple[np.ndarray, int]:
-    """Right-shift tail segments to enforce SLM gap in-place (fixed length).
+    """Right-shift tail segments to enforce the SLM gap.
+
+    The array grows rather than losing samples shifted past its end.
 
     Returns:
-      (new_values, truncated_tail_samples)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
-    truncated_tail_samples = 0
 
     max_iterations = max(1, n_timepoints * 2)
     for _ in range(max_iterations):
@@ -2645,16 +2662,11 @@ def space_out_stim_values_for_slm(
         if shift_samples <= 0:
             break
 
-        shift_start = violation.current_start_idx
-        tail_before_shift = values[shift_start:, :].copy()
-        values[shift_start:, :] = 0
-        write_start = shift_start + shift_samples
-        if write_start < n_timepoints:
-            writable_rows = n_timepoints - write_start
-            values[write_start:, :] = tail_before_shift[:writable_rows, :]
-        truncated_tail_samples += min(shift_samples, tail_before_shift.shape[0])
+        values = _insert_blank_samples(
+            values, violation.current_start_idx, shift_samples, n_timepoints
+        )
 
-    return values, truncated_tail_samples
+    return values, values.shape[0] - n_timepoints
 
 
 def align_stim_values_left_for_slm(
@@ -2721,14 +2733,15 @@ def space_out_stim_values_for_slm_off_on_overlap(
 ) -> tuple[np.ndarray, int]:
     """Right-shift tail segments to eliminate SLM off/on overlap violations.
 
+    The array grows rather than losing samples shifted past its end.
+
     Returns:
-      (new_values, truncated_tail_samples)
+      (new_values, extended_samples): samples appended past the original length
     """
     if stim_array.values.ndim != 2:
         raise ValueError("Input array values must be 2D (timepoints x neurons)")
     values = np.array(stim_array.values, copy=True)
     n_timepoints = values.shape[0]
-    truncated_tail_samples = 0
 
     max_iterations = max(1, n_timepoints * 2)
     for _ in range(max_iterations):
@@ -2750,18 +2763,12 @@ def space_out_stim_values_for_slm_off_on_overlap(
         violation = violations[0]
         shift_samples = violation.required_shift_samples
         shift_start = violation.phase_start_idx
-        if shift_samples <= 0 or shift_start >= n_timepoints:
+        if shift_samples <= 0 or shift_start >= values.shape[0]:
             break
 
-        tail_before_shift = values[shift_start:, :].copy()
-        values[shift_start:, :] = 0
-        write_start = shift_start + shift_samples
-        if write_start < n_timepoints:
-            writable_rows = n_timepoints - write_start
-            values[write_start:, :] = tail_before_shift[:writable_rows, :]
-        truncated_tail_samples += min(shift_samples, tail_before_shift.shape[0])
+        values = _insert_blank_samples(values, shift_start, shift_samples, n_timepoints)
 
-    return values, truncated_tail_samples
+    return values, values.shape[0] - n_timepoints
 
 
 def find_simultaneous_duration_violations(
@@ -3199,16 +3206,15 @@ def _resolve_neuron_to_cellpose_mapping(
     resolved: dict[int, int] = {}
 
     if explicit_mapping:
+        # Keys are 0-based stimulus indices, read exactly like the readout
+        # (remap_raw_cellpose_ids): key i always targets neuron i.
         for neuron_idx in range(n_neurons):
-            raw_cellpose_id: int | None = None
-            if neuron_idx in explicit_mapping:
-                raw_cellpose_id = int(explicit_mapping[neuron_idx])
-            elif (neuron_idx + 1) in explicit_mapping:
-                # Accept 1-based mapping keys for backwards compatibility.
-                raw_cellpose_id = int(explicit_mapping[neuron_idx + 1])
-
-            if raw_cellpose_id is None:
+            if neuron_idx not in explicit_mapping:
+                # Unmapped neurons stay unmapped so the export warns about them;
+                # never borrow a neighbouring key (that would aim two neurons
+                # at the same cell).
                 continue
+            raw_cellpose_id = int(explicit_mapping[neuron_idx])
             if raw_cellpose_id in available_cellpose_ids:
                 resolved[neuron_idx] = raw_cellpose_id
         return resolved
@@ -3240,19 +3246,6 @@ def _merge_tick_intervals(intervals: list[tuple[int, int]]) -> list[tuple[int, i
         current_start, current_end = start, end
     merged.append((current_start, current_end))
     return merged
-
-
-def _max_simultaneous_segments(segments: list[_MappedSegment]) -> int:
-    timeline_events: dict[int, int] = defaultdict(int)
-    for segment in segments:
-        timeline_events[segment.start_tick] += 1
-        timeline_events[segment.end_tick] -= 1
-    concurrent = 0
-    max_concurrent = 0
-    for tick in sorted(timeline_events.keys()):
-        concurrent += timeline_events[tick]
-        max_concurrent = max(max_concurrent, concurrent)
-    return max(1, max_concurrent)
 
 
 def _build_entity_windows(
@@ -3386,88 +3379,6 @@ def _find_new_target_appearance_ticks(
             active_counts[neuron_idx] = active_counts.get(neuron_idx, 0) + 1
 
     return sorted(set(boundaries))
-
-
-def _validate_no_off_on_overlap(
-    windows: list[_EntityWindow],
-    *,
-    lead_ticks: int,
-    pulse_guard_ticks: int = 0,
-) -> None:
-    if lead_ticks <= 0:
-        raise ValueError("lead_ticks must be positive")
-    if pulse_guard_ticks < 0:
-        raise ValueError("pulse_guard_ticks must be non-negative")
-    if len(windows) <= 1:
-        return
-
-    for off_window in windows:
-        off_start = off_window.start_tick
-        off_end = min(
-            off_window.end_tick,
-            off_window.start_tick + lead_ticks + pulse_guard_ticks,
-        )
-        if off_end <= off_start:
-            continue
-
-        for on_window in windows:
-            if off_window is on_window:
-                continue
-            if off_window.neuron_index == on_window.neuron_index:
-                continue
-            on_start = max(
-                on_window.start_tick + lead_ticks + pulse_guard_ticks,
-                on_window.start_tick,
-            )
-            on_end = on_window.end_tick
-            if on_end <= on_start:
-                continue
-            if off_end <= on_start or on_end <= off_start:
-                continue
-
-            overlap_start = max(off_start, on_start)
-            overlap_end = min(off_end, on_end)
-            raise ValueError(
-                "Invalid input for SysCon2 export: an SLM off-state interval "
-                "overlaps with another neuron's ON interval "
-                f"(off neuron={off_window.neuron_index}, "
-                f"on neuron={on_window.neuron_index}, "
-                f"overlap_ticks=[{overlap_start}, {overlap_end}))."
-            )
-
-
-def _validate_pulse_bounds_within_entity_windows(
-    windows: list[_EntityWindow],
-    *,
-    lead_ticks: int,
-    pulse_guard_ticks: int = 0,
-) -> None:
-    if lead_ticks <= 0:
-        raise ValueError("lead_ticks must be positive")
-    if pulse_guard_ticks < 0:
-        raise ValueError("pulse_guard_ticks must be non-negative")
-    if len(windows) == 0:
-        return
-
-    for window in windows:
-        expected_stimulation_start = window.start_tick + lead_ticks + pulse_guard_ticks
-        if window.stimulation_start_tick != expected_stimulation_start:
-            raise ValueError(
-                "Invalid input for SysCon2 export: first associated laser pulse "
-                "must start exactly after lead-in + guard interval "
-                f"(neuron={window.neuron_index}, "
-                f"stimulation_start_tick={window.stimulation_start_tick}, "
-                f"expected_start_tick={expected_stimulation_start})."
-            )
-        max_stimulation_end = window.end_tick - pulse_guard_ticks
-        if window.stimulation_end_tick > max_stimulation_end:
-            raise ValueError(
-                "Invalid input for SysCon2 export: laser pulse end is too "
-                "close to the end of the associated shape object "
-                f"(neuron={window.neuron_index}, "
-                f"stimulation_end_tick={window.stimulation_end_tick}, "
-                f"maximum_allowed_tick={max_stimulation_end})."
-            )
 
 
 def _find_pulse_overrun_violations(
@@ -3610,12 +3521,6 @@ def _assign_entity_lanes(
             )
         )
     return scheduled
-
-
-def _strip_comment(line: str) -> str:
-    if "//" not in line:
-        return line
-    return line.split("//", 1)[0]
 
 
 def _build_header_lines(template_text: str) -> list[str]:
@@ -3965,17 +3870,6 @@ def _preview_object_color(object_type: str) -> str:
     return "#636363"
 
 
-def _extract_lightsource_ids_from_object(obj: SysconSequenceObject) -> set[str]:
-    ids: set[str] = set()
-    for key, value in obj.properties.items():
-        if "_lightsourceid_" not in key.lower():
-            continue
-        stripped = value.strip()
-        if stripped:
-            ids.add(stripped)
-    return ids
-
-
 def _build_timeline_axis_labels(
     timeline_indices: list[int],
     *,
@@ -4020,7 +3914,7 @@ def _build_timeline_axis_labels(
                 {
                     lightsource_id
                     for obj in ttl_objects
-                    for lightsource_id in _extract_lightsource_ids_from_object(obj)
+                    for lightsource_id in _extract_lightsource_ids(obj)
                 }
             )
             if lightsource_ids:

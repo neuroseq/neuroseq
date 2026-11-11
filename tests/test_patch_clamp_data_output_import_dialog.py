@@ -15,6 +15,7 @@ from neuroseq.export.exporter_igor2 import _write_ibw_v5
 from neuroseq.importers.importer_patch_clamp_data import IgorPxpLoadReport
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
 from neuroseq.importers.importer_patch_clamp_data import SkippedPxpRecord
+from neuroseq.importers.importer_patch_clamp_data import prepare_igor_wave_for_neuroseq
 from neuroseq.importers.patch_clamp_data_input_import_dialog import DtMismatchChoice
 from neuroseq.importers.patch_clamp_data_output_import_dialog import (
     PatchClampDataOutputImportDialog,
@@ -910,6 +911,56 @@ def test_spike_detection_converts_time_defaults_with_the_wave_dt(
     assert calls[0]["peak_width"] == 50  # 1 ms
 
 
+def test_spike_detection_skips_samples_cut_off_by_the_import(
+    tmp_path: Path, qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With extend off a longer wave is truncated to the trace; spikes in the
+    dropped tail must not be detected."""
+    csv_path = tmp_path / "wave.csv"
+    csv_path.write_text("igor_wave\n10.0\n20.0\n30.0\n40.0\n", encoding="utf-8")
+    seen_lengths: list[int] = []
+
+    def detect(values, **kwargs):
+        seen_lengths.append(len(values))
+        return SpikeData("s", np.array([], dtype=np.uint32), np.array([]))
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        detect,
+    )
+    project = Project()
+    project.add_experiment(
+        Experiment(
+            name="Experiment A",
+            duration=0.002,
+            timepoints=[],
+            data=[
+                TraceData(
+                    name="Existing Trace",
+                    traces=np.array([[1.0, 2.0]], dtype=np.float32),
+                    indices=np.array([0], dtype=np.uint32),
+                    units="mV",
+                    dt=0.001,
+                )
+            ],
+        )
+    )
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    dialog._load_file(str(csv_path))
+    dialog.import_existing_radio.setChecked(True)
+    dialog.existing_experiment_combo.setCurrentText("Experiment A")
+    dialog.existing_trace_combo.setCurrentText("Existing Trace")
+    dialog.existing_neuron_id_spin.setValue(5)
+    dialog.existing_extend_checkbox.setChecked(False)
+    dialog.spike_detect_checkbox.setChecked(True)
+    dialog._import_file()
+
+    trace = _find_trace_data(project, "Experiment A", "Existing Trace")
+    assert trace.traces.shape[1] == 2
+    assert seen_lengths == [2]
+
+
 def test_seconds_to_peak_samples() -> None:
     from neuroseq.spike_detection import seconds_to_peak_samples
 
@@ -918,3 +969,47 @@ def test_seconds_to_peak_samples() -> None:
     assert seconds_to_peak_samples(0.001, 0.01) == 1  # never below one sample
     with pytest.raises(ValueError):
         seconds_to_peak_samples(0.001, 0.0)
+
+
+def test_repeated_spike_detection_merges_into_one_dataset(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each detection used to add another "Patch Clamp Spikes" dataset, of which
+    only the first was reachable; later neurons' spikes were invisible."""
+    detected_times = {0: [0.001, 0.003], 1: [0.002]}
+
+    def fake_detect(values, *, neuron_id, **kwargs):
+        times = detected_times[neuron_id]
+        return SpikeData(
+            name="Detected spikes",
+            spike_indices=np.full(len(times), neuron_id, dtype=np.uint32),
+            spike_times=np.array(times, dtype=np.float32),
+        )
+
+    monkeypatch.setattr(
+        "neuroseq.importers.patch_clamp_data_output_import_dialog.detect_spikes_voltage_trace",
+        fake_detect,
+    )
+    project = Project()
+    project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], []))
+    dialog = PatchClampDataOutputImportDialog(project)
+    qtbot.addWidget(dialog)
+    wave = prepare_igor_wave_for_neuroseq(
+        IgorWave("w", np.zeros(10, dtype=np.float32), 0.001, "mV", "s", "csv")
+    )
+
+    dialog._run_spike_detection(wave, experiment_name="exp", neuron_id=0)
+    dialog._run_spike_detection(wave, experiment_name="exp", neuron_id=1)
+    detected_times[0] = [0.005]
+    dialog._run_spike_detection(wave, experiment_name="exp", neuron_id=0)
+
+    spike_data = _find_spike_data(project, "exp")
+    assert len(spike_data) == 1
+    np.testing.assert_array_equal(spike_data[0].spike_indices, [1, 0])
+    np.testing.assert_allclose(spike_data[0].spike_times, [0.002, 0.005])
+
+    project.history.undo()
+    np.testing.assert_array_equal(
+        _find_spike_data(project, "exp")[0].spike_indices, [0, 1, 0]
+    )

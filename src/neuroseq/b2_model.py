@@ -2389,9 +2389,6 @@ class B2Model:
         self.cancel_requested = False
 
         if self.must_be_rebuilt:
-            network_name = self.network.name if self.network else "Network"
-            del self.network
-            self.network = b2.Network(name=network_name)
             self.assemble_network()
 
         if len(self.checkpoints) == 0:
@@ -2757,8 +2754,13 @@ class B2Model:
                 model.define_init(n, k, v)
             model._assemble_initial_conditions(n)
 
-        # restore checkpoints
+        # restore checkpoints; drop names whose state was not loaded (e.g. the
+        # model was imported without simulation data) so they are not offered
+        # for restore and "Initial state" is stored again on the next run.
         model.network._stored_state = b2_stored_state
+        model.checkpoints = [
+            name for name in model.checkpoints if name in b2_stored_state
+        ]
         # restore state when saved if provided, then remove this temporary checkpoint
         if save_store_name in model.network._stored_state:
             model.network.restore(save_store_name)

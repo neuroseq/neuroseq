@@ -1,158 +1,96 @@
-# In-App LLM Assistance (Experimental feature)
+# LLM Assistant (Experimental)
 
-NeuroSeq provides an optional chat panel that lets you talk to an LLM about
-the currently loaded project, and availible neuronal sequencer functionality. The assistant has an access to the source code and is given a snapshot of the project state (model, stimuli, experiments) as context and replies in a side
-panel next to the main window.
+An optional chat panel for questions about the loaded project and NeuroSeq.
+It receives the documentation, a fresh project summary with each message, and
+read-only access to project details and the NeuroSeq source. Behaviour and
+supported providers may change.
 
-The in-app chat assistant is experimental and under active development.
-Behaviour, UI, supported providers, and the project context it receives
-may change without notice.
+## Setup
 
-## Installation
+Open **Settings → LLM Assistant**, choose a provider and model, then click
+**Test connection** (checks sign-in without sending a prompt).
 
-The chat panel is included in the standard NeuroSeq installation. Additional
-requirements depend on your chosen provider:
+| Provider                    | Requirements                                                                                                                                      |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Codex (local sign-in)       | [Codex CLI](https://learn.chatgpt.com/docs/codex/cli) and `codex login`. Recommended.                                                             |
+| Claude Code (local sign-in) | [Claude Code](https://code.claude.com/docs/en/setup) and `claude auth login` (subscription, Console account or `ANTHROPIC_API_KEY`). Recommended. |
+| Ollama (local) (default)    | running [Ollama](https://ollama.com) daemon (default `http://localhost:11434`) and a pulled model (default `qwen2.5:7b`)                          |
+| OpenAI                      | API key; any OpenAI-compatible endpoint via the base URL field                                                                                    |
+| Anthropic                   | API key                                                                                                                                           |
 
-- **Codex / Claude Code:** no extra Python packages are needed. Install and sign
-  in to the corresponding CLI as described below.
-- **OpenAI / Anthropic API / Ollama:** the provider's Python dependencies must be
-  installed. If they are already available in your NeuroSeq environment, no
-  additional installation is needed.
+- Ollama, OpenAI and Anthropic need the `chat` extra:
+  `pip install "neuroseq[chat]"` (installs `openai`, `anthropic`, `httpx`,
+  `keyring`).
+- API keys are stored in the OS keyring. Without a keyring backend, NeuroSeq
+  reads `OPENAI_API_KEY` / `ANTHROPIC_API_KEY`.
+- Codex and Claude Code: sign in under the same OS account as NeuroSeq. Leave
+  the executable field empty to use `PATH` (restart NeuroSeq after changing
+  `PATH`); Codex may also point to the binary bundled with its VS Code
+  extension. Model `default` uses your CLI configuration; Claude Code also
+  offers `opus`, `sonnet`, `haiku`, Codex lists models via **Refresh**.
 
-The optional `chat` extra installs the dependencies for all three API providers
-(`openai`, `anthropic`, and `httpx`), plus `keyring` for API key storage.
-Use one of the following commands if you need these packages.
+## Use
 
-From the repository directly (requires SSH access to GitHub):
+Toggle **View → Show Chat** (robot icon). **Enter** sends, **Shift+Enter** adds
+a line, **Stop** cancels. Replies stream in.
 
-```bash
-pip install "neuroseq[chat] @ git+ssh://git@github.com/neuroseq/neuroseq.git"
-```
+The assistant can read model equations, parameters, initial conditions,
+synapses, monitors, runtime state, stimuli, experiments, imaging metadata
+(large arrays in pages) and Python files inside the installed `neuroseq`
+package. It cannot read other files, run code or run simulations. Anything it
+reads is sent to the provider.
 
-From a local checkout:
+## Data scope
 
-```bash
-pip install ".[chat]"
-```
+The **Don't share project data with the provider** checkbox in Settings → LLM
+Assistant limits what the assistant can read:
 
-## Configuring a provider
+| Checkbox | Readable                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------- |
+| On       | Docs, source, model, parameters, runtime state, neuron count and duration                   |
+| Off      | All of the above, plus input arrays, experiments, Cellpose and imaging data and their names |
 
-Open **Settings → LLM assistant** to choose a provider and model. Five
-backends are bundled:
+Each provider keeps its own value. Default: on for OpenAI, Anthropic, Codex
+and Claude Code; off for Ollama, which runs locally. Turn it on for an Ollama
+server on another machine. The chat badge shows "data not shared" while it is
+on.
 
-| Provider                          | Notes                                                                       |
-| --------------------------------- | --------------------------------------------------------------------------- |
-| Codex (currently preferred)       | Local Codex app-server using your existing Codex sign-in and configuration. |
-| Claude Code (currently preferred) | Local Claude Code CLI using your existing Claude sign-in.                   |
-| Ollama                            | Local models served by a running [Ollama](https://ollama.com) daemon.       |
-| OpenAI                            | OpenAI API, or any OpenAI-compatible endpoint via the base URL field.       |
-| Anthropic                         | Anthropic Claude API.                                                       |
+The checkbox only limits what NeuroSeq hands to the assistant. Codex keeps its
+own shell, file and MCP tools (it has no single switch that turns them all
+off), and its read-only sandbox can still read any file your user account can,
+including saved projects and recordings. The settings dialog warns about this
+when Codex is selected, and the chat badge then reads "NeuroSeq data not
+shared". To keep project data private, use OpenAI with an API key (or any
+OpenAI-compatible server, such as Azure OpenAI or a local vLLM, set as
+Endpoint), Claude Code (all native tools disabled) or Ollama.
 
-For OpenAI and Anthropic you can paste an API key into the settings dialog.
-Keys are stored in the OS keyring via the `keyring` package; if no keyring
-backend is available NeuroSeq falls back to the `OPENAI_API_KEY` /
-`ANTHROPIC_API_KEY` environment variables.
+Earlier replies can contain project data, so the chat clears its history (with
+a short note) when you switch provider or endpoint, or turn the checkbox on.
+Changing only the model keeps the history. Every chat panel, including
+detached ones and other project tabs, switches to the new settings as soon as
+you change them.
 
-For Ollama you only need the base URL of the daemon (default
-`http://localhost:11434`) and the name of a pulled model.
+## Writing analysis plugins
 
-### Codex
+Ask e.g. "Create an analysis plugin that plots the mean trace across selected
+neurons." NeuroSeq shows the target path and full code (or a diff) and saves
+only after you click **Save plugin**. Review the code: a shared project could
+contain text that steers the assistant towards harmful code.
 
-1. Install the [Codex CLI](https://learn.chatgpt.com/docs/codex/cli), then run
-   `codex login` from a terminal under the same operating-system account as NeuroSeq.
-2. In **Settings → LLM Assistant**, choose **Codex (local sign-in)**.
-3. Leave **Codex executable** empty to find `codex` on PATH, or enter the full
-   executable path. This can also point to the Codex binary bundled with your
-   VS Code extension. Restart NeuroSeq after changing your system PATH.
-4. Leave **Model** set to `default` to use your Codex configuration, or use
-   **Refresh** to choose a model. Model access depends on your account and provider.
-5. Use **Test connection** to check the local app-server and sign-in without
-   sending an inference request. Open **Chat** from the toolbar and ask a question.
-
-For example: “Where is the stimulation editor implemented?” or “Explain the
-equations and parameters in my current model.” The panel supplies NeuroSeq's
-documentation, a fresh project summary, and the conversation so far. It can
-request project details and source pages through the same inspection protocol
-as the other providers.
-
-The integration uses the [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server),
-which also supports custom IDE clients. It is a NeuroSeq help panel with streamed
-answers and Stop support. It does not embed the VS Code extension or share its
-open conversation. Each request uses an ephemeral thread with a read-only Codex
-sandbox and no native tool approvals. Your local Codex provider configuration
-and configured tools still apply; the native filesystem sandbox does not confine
-reads to the NeuroSeq source package. Native tool approval requests and interactive
-tool prompts are rejected. This panel does not provide a code-editing review workflow.
-
-### Claude Code
-
-1. Install [Claude Code](https://code.claude.com/docs/en/setup), then run
-   `claude auth login` from a terminal under the same operating-system account as
-   NeuroSeq. A Claude subscription sign-in, a Console account, or an
-   `ANTHROPIC_API_KEY` in the environment all work.
-2. In **Settings → LLM Assistant**, choose **Claude Code (local sign-in)**.
-3. Leave **Claude Code executable** empty to find `claude` on PATH, or enter the
-   full executable path. Restart NeuroSeq after changing your system PATH.
-4. Leave **Model** set to `default` to use your Claude Code configuration, or pick
-   `opus`, `sonnet` or `haiku` (any model name Claude Code accepts also works).
-   Model access depends on your plan.
-5. Use **Test connection** to check the CLI and sign-in (`claude auth status`)
-   without sending an inference request.
-
-Each request runs `claude --print` once with streamed output. All native
-Claude Code tools, MCP servers, settings files, slash commands and session
-persistence are disabled, and the process runs in an empty temporary directory,
-so the model reaches the project and source only through NeuroSeq's inspection
-protocol below. Stop terminates the process.
-
-## Using the assistant
-
-Toggle the chat panel from the **Chat** action in the toolbar (robot icon).
-Type a message and press **Enter** or click **Send**; use **Shift+Enter** for a
-new line. Replies stream in token by token. Each
-new message includes a fresh snapshot of the current project so the model
-can answer questions about the loaded simulation and data.
-
-The assistant can request read-only details from the loaded project: model
-equations, parameters, initial conditions, synapses, monitors, runtime state,
-stimuli, experiments, and imaging metadata. Large arrays are read in pages of
-flattened values, with shape and units supplied where available. It can also
-list and read Python files within the installed `neuroseq` source package,
-including example projects. This inspection protocol does not expose files
-elsewhere on your computer; see the Codex-specific tool behavior above.
-
-Requested project data and source text are sent to your selected provider.
-With a hosted provider, this includes the requested experimental data. Reads
-reflect the project at the time of each request. Stop cancels further requests;
-files already saved remain on disk.
-
-To create an analysis plugin, ask the assistant, for example: "Create an
-analysis plugin that plots the mean trace across selected neurons." Before
-anything is saved, NeuroSeq shows a confirmation dialog with the target path and
-the complete code (or, for an update, a diff against the current file). The file
-is written only if you click **Save plugin**; if you cancel, the assistant is told
-that you declined. Review the code before accepting: tool results can contain
-text from shared project files, so a malicious project could try to steer the
-assistant into proposing harmful code.
-
-Chat-authored plugins are saved only in your per-user plugin folder (for example
-`~/.local/share/neuroseq/analysis_plugins` on Linux; override with the
-`NEUROSEQ_USER_PLUGIN_DIR` environment variable), never in the NeuroSeq package.
-Names starting with `_` and names of built-in plugins are rejected, and only
-plugins already in your folder can be overwritten. Python syntax is checked
-before saving; this does not verify scientific correctness or runtime behavior.
-Reopen the right-click analysis menu to discover the new plugin. Discovery
-imports the Python code.
+- Saved only to the per-user plugin folder (Linux:
+  `~/.local/share/neuroseq/analysis_plugins`, override with
+  `NEUROSEQ_USER_PLUGIN_DIR`), never into the package.
+- Names starting with `_` or matching built-in plugins are rejected; only
+  plugins already in your folder can be overwritten.
+- Syntax is checked, correctness is not. Reopen the right-click analysis menu
+  to load the plugin (this imports its code).
 
 ## Limitations
 
-- Project and source access is read-only except for Python files in the analysis
-  plugin folder. NeuroSeq's inspection protocol cannot directly execute Python
-  or run simulations. Codex's configured native tools have their own sandbox policy.
-- Inspection uses a JSON request protocol supported by all five backends;
-  reliability depends on the model following that protocol. Each turn allows
-  up to 12 read/write requests; ask a follow-up to continue. Data is read on demand rather
-  than sending the entire project and source tree in every prompt.
-- Conversations are not persisted across sessions.
-- Provider availability, model lists, and rate limits depend entirely on
-  the chosen backend.
+- Up to 12 read/write requests per turn; ask a follow-up to continue.
+  Reliability depends on the model following NeuroSeq's JSON request protocol.
+- Conversations are not saved between sessions.
+- Codex runs each request in an ephemeral read-only sandbox, but your configured
+  Codex tools still apply and its filesystem sandbox is not limited to the
+  NeuroSeq package. Claude Code runs `claude --print` in an empty temporary
+  directory with all native tools, MCP servers and settings disabled.

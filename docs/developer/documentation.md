@@ -1,52 +1,44 @@
 # Documentation
 
-This project uses [Zensical](https://zensical.org/docs/), configured in
-`zensical.toml` at the repository root. The published documentation is at
-<https://neuroseq.github.io/>.
+The docs are Markdown in `docs/`, built with [Zensical](https://zensical.org/docs/)
+and published at <https://neuroseq.github.io/>. Navigation is in `zensical.toml`.
 
-## To run docs locally
+## Layout
 
-For the uv workflow, install the development dependencies, which include Zensical:
+| Folder                  | Content                                                |
+| ----------------------- | ------------------------------------------------------ |
+| `docs/getting_started/` | Installation, quickstart, GUI overview, chat assistant |
+| `docs/networks/`        | Simulators, external backends, hardware substrates     |
+| `docs/input_design/`    | Static and dynamic stimulus design, export             |
+| `docs/readout/`         | Experiments, imported imaging and patch-clamp data     |
+| `docs/data_analysis/`   | Analyses, plugins, simulation vs. experiment           |
+| `docs/developer/`       | This guide                                             |
+| `docs/images/`          | Images                                                 |
 
-```bash
-uv sync --locked
-```
+A new page must be added to the `nav` in `zensical.toml`.
 
-Start the local documentation server from the repository root:
+## Docs feed the chat assistant
 
-```bash
-uv run zensical serve
-```
+The wheel bundles `docs/` as `neuroseq/docs` (`[tool.hatch.build.targets.wheel.force-include]`
+in `pyproject.toml`). `neuroseq.llm.system_prompt` concatenates every `.md` file
+into the assistant's system prompt, from the installed package or, in a checkout,
+from the repository's `docs/`. Keep pages short and accurate: every word costs
+prompt tokens and stale text produces wrong answers.
 
-Then open the local URL shown in the terminal.
-
-If NeuroSeq is installed directly into Conda, activate that environment,
-install the documentation packages with `python -m pip install --group docs`,
-and run `zensical serve` instead. See
-[environment selection](developer_installation.md#using-uv-from-a-conda-shell).
-
-## Optional: build static docs
-
-To generate static files for deployment:
+## Build and preview
 
 ```bash
-uv run zensical build --clean --strict
+uv run zensical serve                  # live preview at the URL shown
+uv run zensical build --clean --strict # what CI runs; output in site/
 ```
 
-The generated site is written to the `site/` folder.
+With Conda, install the docs group (`python -m pip install --group docs`) and
+drop `uv run`. `prek run -a` formats Markdown with prettier.
 
 ## Deployment
 
-The `docs` GitHub Actions workflow runs the same clean, strict build on all pull
-requests and pushes to the `main` branch. Only pushes to `main` publish the generated site
-to the `main` branch of [neuroseq/neuroseq.github.io](https://github.com/neuroseq/neuroseq.github.io).
-It can also be run manually on `main` using **Run workflow**.
-
-### Why not publish directly?
-
-The reason to push to and publish from [neuroseq/neuroseq.github.io](https://github.com/neuroseq/neuroseq.github.io)
-is so that the published site is located at <https://neuroseq.github.io/>, i.e. `org-name.github.io`.
-
-If it was published directly from this repo, the url would be https://neuroseq.github.io/neuroseq,
-i.e. `org-name.github.io/repo-name` - but if in the future you get a custom domain name for neuroseq then the extra
-repo, deploy key etc would no longer be needed and the neuroseq.github.io repo could be removed.
+`.github/workflows/docs.yml` runs the strict build on pull requests and pushes
+to `main`, and can be started manually. Pushes to `main` publish `site/` to
+[neuroseq/neuroseq.github.io](https://github.com/neuroseq/neuroseq.github.io),
+so the site lives at `neuroseq.github.io` rather than `neuroseq.github.io/neuroseq`.
+With a custom domain, that extra repository and its deploy key would not be needed.

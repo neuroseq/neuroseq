@@ -477,6 +477,44 @@ def test_stimulation_generator_dialog_applies_sanitized_values_after_confirmatio
     assert "17ms" in qmessagebox_calls[0]["text"]
 
 
+def test_stimulation_generator_dialog_applies_longer_sanitized_values(
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    monkeypatch,
+) -> None:
+    """Sanity fixes that shift a pulse past the end return a longer array; the
+    dialog must apply it (one undoable project edit) instead of ignoring it."""
+    values = np.zeros((40, 1), dtype=np.float32)
+    values[36:40, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    _patch_no_slm_violations(monkeypatch)
+    sanitized_values = np.zeros((48, 1), dtype=np.float32)
+    sanitized_values[44:48, 0] = 1.0
+
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        lambda *args, **kwargs: _build_sanity_report(
+            is_valid=True,
+            export_report=_build_export_report(),
+            sanitized_values=sanitized_values,
+            fix_messages=["Delayed hologram 0 by 8 ticks."],
+        ),
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.show()
+    qtbot.waitUntil(lambda: dialog.isVisible(), timeout=WAIT_TIMEOUT_MS)
+
+    dialog.check_sanity_button.click()
+
+    np.testing.assert_array_equal(project.stim_arrays["stim"].values, sanitized_values)
+    assert project.history.can_undo()
+    project.history.undo()
+    np.testing.assert_array_equal(project.stim_arrays["stim"].values, values)
+
+
 def test_stimulation_generator_dialog_declines_sanitized_values_when_confirmation_is_no(
     qtbot: QtBot,
     qmessagebox_calls: list[dict[str, str]],
@@ -801,6 +839,26 @@ def test_stimulation_generator_dialog_resamples_and_continues_sanity_checks(
     np.testing.assert_array_equal(stim.values, values)
 
 
+def test_dt_prompt_does_not_claim_the_resample_is_irreversible(
+    qtbot: QtBot,
+) -> None:
+    """The resample goes through project.replace_stim_values, which records
+    undo (see the test above), so the prompt must not say otherwise."""
+    project = _build_project(np.zeros((10, 1), dtype=np.float32), mapping={0: 0})
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+
+    dialog._prompt_dt_fix_choice(
+        current_dt=_SYSCON2_TTL_PULSE_QUANTUM_S / 2,
+        required_dt=_SYSCON2_TTL_PULSE_QUANTUM_S,
+    )
+
+    boxes = dialog.findChildren(QtWidgets.QMessageBox)
+    assert boxes
+    assert "cannot be undone" not in boxes[-1].text()
+    assert "undoable" in boxes[-1].text()
+
+
 # ---------------------------------------------------------------------------
 # Pre-sanity SLM load violation (lines 457, 460-468)
 # ---------------------------------------------------------------------------
@@ -867,7 +925,7 @@ def test_stimulation_generator_dialog_applies_slm_load_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "shift_stim_values_right_for_initial_slm_load",
-        lambda *a, **kw: (shifted_values, None),
+        lambda *a, **kw: (shifted_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,
@@ -888,6 +946,52 @@ def test_stimulation_generator_dialog_applies_slm_load_fix(
     dialog.check_sanity_button.click()
 
     assert np.array_equal(project.stim_arrays["stim"].values, shifted_values)
+
+
+def test_slm_load_fix_extends_the_array_instead_of_dropping_late_pulses(
+    qtbot: QtBot,
+    qmessagebox_calls: list[dict[str, str]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real initial-load shift keeps a pulse near the end (it used to fall
+    off the fixed-length array) and warns that the array grew, undoably."""
+    values = np.zeros((64, 1), dtype=np.float32)
+    values[2:4, 0] = 1.0
+    values[60:64, 0] = 1.0
+    project = _build_project(values, mapping={0: 0})
+    for name in (
+        "find_slm_gap_violations",
+        "find_slm_off_on_overlap_violations",
+        "find_simultaneous_duration_violations",
+    ):
+        monkeypatch.setattr(
+            stimulation_generator_dialog_module, name, lambda *a, **kw: []
+        )
+    monkeypatch.setattr(
+        StimulationGeneratorDialog,
+        "_prompt_initial_slm_start_fix_choice",
+        lambda *a, **kw: StimulationGeneratorDialog._InitialSlmFixChoice.SHIFT_RIGHT,
+    )
+    monkeypatch.setattr(
+        stimulation_generator_dialog_module,
+        "check_syscon2_input_sanity",
+        lambda *args, **kwargs: _build_sanity_report(
+            is_valid=True,
+            export_report=_build_export_report(),
+        ),
+    )
+
+    dialog = StimulationGeneratorDialog(project)
+    qtbot.addWidget(dialog)
+    dialog.check_sanity_button.click()
+
+    fixed = project.stim_arrays["stim"].values
+    assert fixed.shape == (96, 1)
+    assert int(np.count_nonzero(fixed)) == int(np.count_nonzero(values))
+    assert np.all(fixed[92:96, 0] == 1.0)
+    assert any(call["title"] == "Input Array Extended" for call in qmessagebox_calls)
+    project.history.undo()
+    assert np.array_equal(project.stim_arrays["stim"].values, values)
 
 
 # ---------------------------------------------------------------------------
@@ -960,7 +1064,7 @@ def test_stimulation_generator_dialog_applies_slm_gap_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "space_out_stim_values_for_slm",
-        lambda *a, **kw: (spaced_values, None),
+        lambda *a, **kw: (spaced_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,
@@ -1058,7 +1162,7 @@ def test_stimulation_generator_dialog_applies_slm_offon_fix(
     monkeypatch.setattr(
         stimulation_generator_dialog_module,
         "space_out_stim_values_for_slm_off_on_overlap",
-        lambda *a, **kw: (spaced_values, None),
+        lambda *a, **kw: (spaced_values, 0),
     )
     monkeypatch.setattr(
         StimulationGeneratorDialog,

@@ -58,6 +58,7 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.t_ms = 0
         self.t_max_ms = 0
         self.t_playback_start_ms = 0
+        self._ticking = False
         self.widgets: list[
             TimeseriesWidget | HeatmapWidget | DataWidget | CalciumVideoWidget
         ] = []
@@ -97,6 +98,13 @@ class TimeSliderWidget(QtWidgets.QWidget):
         self.slider.setMaximum(self.t_max_ms)
 
     def set_relative_playback_speed(self, relative_playback_speed: float) -> None:
+        if self.timer.isActive():
+            # Bank the time played so far at the old speed, so only the time
+            # from now on plays at the new one (no jump).
+            self.t_playback_start_ms += int(
+                self.elapsed_timer.elapsed() * self.relative_playback_speed
+            )
+            self.elapsed_timer.restart()
         self.relative_playback_speed = relative_playback_speed
 
     def stop(self) -> None:
@@ -150,10 +158,19 @@ class TimeSliderWidget(QtWidgets.QWidget):
             new_t_ms = self.t_max_ms
 
         self.t_ms = new_t_ms
-        self.slider.setValue(self.t_ms)
+        self._ticking = True
+        try:
+            self.slider.setValue(self.t_ms)
+        finally:
+            self._ticking = False
 
     def _value_changed(self, value: int) -> None:
         self.t_ms = value
+        if not self._ticking and self.timer.isActive():
+            # The user moved the slider during playback: continue playing
+            # from the new position instead of snapping back on the next tick.
+            self.t_playback_start_ms = value
+            self.elapsed_timer.restart()
         for widget in self.widgets:
             widget.set_time_ms(value)
         self.time_changed.emit(value)

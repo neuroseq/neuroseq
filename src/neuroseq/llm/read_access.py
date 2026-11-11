@@ -23,6 +23,19 @@ from neuroseq.project import Project
 #: ``confirm(target, content, previous_content_or_None) -> accepted``
 PluginWriteConfirm = Callable[[pathlib.Path, str, str | None], bool]
 
+#: Project sections holding experimental data, hidden when sharing is off.
+PRIVATE_PROJECT_SECTIONS = (
+    "stim_arrays",
+    "experiments",
+    "cellpose_data",
+    "calcium_videos",
+    "imaging_acquisitions",
+)
+PRIVATE_DATA_NOTICE = (
+    "Not shared: the user turned off sharing project data with the provider "
+    "(Settings -> LLM Assistant)."
+)
+
 READ_INSTRUCTIONS = """
 You can inspect the loaded project and NeuroSeq's Python source with read-only
 requests. To request information, reply ONLY with a JSON object of this form:
@@ -71,8 +84,10 @@ class ReadAccess:
         confirm_write: PluginWriteConfirm | None = None,
         is_busy: Callable[[], bool] | None = None,
         plugin_directory: Callable[[], pathlib.Path] | None = None,
+        private_data: bool = False,
     ) -> None:
         self.project = project
+        self.private_data = private_data
         self.source_root = (
             source_root or pathlib.Path(__file__).resolve().parents[1]
         ).resolve()
@@ -235,6 +250,8 @@ class ReadAccess:
         if self.project is None:
             return {"error": "No project loaded"}
         project = self.project
+        if self.private_data and path and path[0] in PRIVATE_PROJECT_SECTIONS:
+            return {"error": PRIVATE_DATA_NOTICE}
         # Explicit exports avoid exposing callable objects, loggers and GUI history.
         root = {
             key: getattr(project, key)
@@ -253,6 +270,8 @@ class ReadAccess:
                 "syscon2_export_template_text",
             )
         }
+        if self.private_data:
+            root.update(dict.fromkeys(PRIVATE_PROJECT_SECTIONS, PRIVATE_DATA_NOTICE))
         model = project.b2_model
         root["model"] = {
             key: getattr(model, key)

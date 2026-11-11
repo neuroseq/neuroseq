@@ -135,8 +135,10 @@ include = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-# run tests in parallel by default; use -n 0 to run them serially
-addopts = "-n auto"
+# run tests in parallel by default, at most 8 workers (one per core on small
+# machines; more workers can exhaust memory on many-core hosts, since each
+# starts Qt and Brian2). Use -n 0 to run serially, or -n N to override.
+addopts = "-n auto --maxprocesses=8"
 markers = ["screenshot"]
 log_cli = "true"
 log_cli_level = "ERROR"

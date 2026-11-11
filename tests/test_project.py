@@ -487,7 +487,9 @@ def test_trim_windows_simulated_trace_and_restores_on_regrow() -> None:
     full_samples = full.traces.shape[1]
 
     # Trim to 0.02 s: the trace is windowed to that many of its own samples.
-    project.trim_stim_arrays(0.02)
+    for name, stim_array in project.stim_arrays.items():
+        n_rows = round(0.02 / stim_array.dt)
+        project.replace_stim_values(name, stim_array.values[:n_rows])
     clipped = project.get_data(trace_name, TraceData)
     assert clipped is not None
     expected_samples = round(0.02 / full.dt)
@@ -629,66 +631,22 @@ def test_stim_array_trimming(project_ornstein: Project) -> None:
     assert project_ornstein.trim_stim_array_would_delete_data(1.0) is False
     assert project_ornstein.trim_stim_array_would_delete_data(0.901) is False
     assert project_ornstein.trim_stim_array_would_delete_data(0.899) is True
-    # trim to 0.95s
     assert project_ornstein.trim_stim_array_would_delete_data(0.95) is False
-    project_ornstein.trim_stim_arrays(0.95)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(950, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
-    # trim to 0.5s
     assert project_ornstein.trim_stim_array_would_delete_data(0.5) is True
-    project_ornstein.trim_stim_arrays(0.5)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(500, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
-    # trim to 0s
     assert project_ornstein.trim_stim_array_would_delete_data(0) is True
-    project_ornstein.trim_stim_arrays(0)
-    new_stim_array = project_ornstein.stim_arrays["stim"]
-    assert new_stim_array.values.shape[0] == pytest.approx(0, abs=1)
-    assert np.allclose(
-        new_stim_array.values,
-        arr[0 : new_stim_array.values.shape[0], :],
-    )
 
 
-@pytest.mark.parametrize(
-    "padded_rows,trim_seconds",
-    [
-        (4151, 0.5),
-        (4151, 1.0),
-        (4425, 2.5),
-        (5247, 5.0),
-        (8398, 5.0),
-    ],
-)
-def test_trim_stim_arrays_exact_after_padding(
-    padded_rows: int, trim_seconds: float
-) -> None:
-    """Trimming removes exactly the requested duration.
-
-    Running a simulation pads stim arrays to non-round lengths (via ceil).
-    Trimming those lengths used ``int(seconds / dt)``, which floor-truncated
-    float-representation error and removed one sample too many. The
-    conversion now rounds to the nearest sample so the trim is exact.
-    """
-    dt = 0.001
-    values = np.zeros((padded_rows, 3), dtype=np.float32)
-    project = default_project()
+def test_trim_would_delete_negative_or_cancelling_values() -> None:
+    project = Project()
+    values = np.zeros((10, 2))
+    values[8, 0] = -1.0
+    values[9, :] = [1.0, -1.0]
     project.stim_arrays["stim"] = StimArray(
-        "stim", StimType.Excitation, values, "mS", dt=dt
+        "stim", StimType.Excitation, values, "mS", dt=0.001
     )
-    current_length_secs = dt * padded_rows
-    new_length_secs = current_length_secs - trim_seconds
-    project.trim_stim_arrays(new_length_secs)
-    expected_rows = padded_rows - round(trim_seconds / dt)
-    assert project.stim_arrays["stim"].values.shape[0] == expected_rows
+    assert project.trim_stim_array_would_delete_data(0.009) is True
+    project.stim_arrays["stim"].values[9, :] = 0
+    assert project.trim_stim_array_would_delete_data(0.008) is True
 
 
 def test_simulation_timeline_seconds_uses_longest_stim() -> None:
@@ -1077,9 +1035,9 @@ def test_remap_cellpose_indices_reports_experiments_with_invalid_mapping() -> No
     )
     project.add_experiment(Experiment("exp", 1.0, [0.0, 1.0], [trace_data]))
 
-    # Cellpose id 0 maps explicitly to stim 1, but cellpose id 1 falls back to
-    # identity (stim 1 too) - a collision that _resolve_suite2p_indices rejects.
-    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    # Two stimulus IDs target Cellpose id 0 - a duplicate that
+    # _resolve_suite2p_indices rejects.
+    project.cellpose_data = _cellpose_data_with_mapping({0: 0, 1: 0})
     failed = project.remap_cellpose_indices()
 
     assert failed == ["exp"]
@@ -1487,7 +1445,6 @@ def test_mark_dirty_and_save_roundtrip(tmp_path: Path) -> None:
         lambda p: p.pad_stim_arrays(1.0),
         lambda p: p.pad_stim_arrays_to_neuron_count(5),
         lambda p: p.resize_stim_arrays_to_neuron_count(5),
-        lambda p: p.trim_stim_arrays(0.0),
         lambda p: p.loop_stim_arrays(2),
         lambda p: p.tile_stim_arrays_to_length(0.5),
         lambda p: p.add_experiment(
@@ -1525,6 +1482,79 @@ def test_import_project_marks_dirty(tmp_path: Path) -> None:
     assert project.dirty is False
     project.import_project(tmp_file, SaveLoadOptions(True, True, True, True))
     assert project.dirty is True
+
+
+def test_checkpoint_store_and_restore_mark_the_project_dirty() -> None:
+    project = default_project()
+    assert project.dirty is False
+    project.store_checkpoint("a")
+    assert project.dirty is True
+    project.dirty = False
+    project.restore_checkpoint("a")
+    assert project.dirty is True
+
+
+def test_syscon2_export_template_is_saved_with_the_project(tmp_path):
+    project = Project()
+    project.set_syscon2_export_template_text("template text")
+    path = tmp_path / "template.nseq"
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    assert Project(path).syscon2_export_template_text == "template text"
+    project.set_syscon2_export_template_text(None)
+    project.save(path, SaveLoadOptions(True, True, False, False))
+    assert Project(path).syscon2_export_template_text is None
+
+
+def test_save_keeps_dirty_when_project_changes_during_the_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = default_project()
+    project.mark_dirty()
+    original_write = Project._write_project_zip
+
+    def _write_while_user_edits(self, filepath, options):
+        original_write(self, filepath, options)
+        self.mark_dirty()
+
+    monkeypatch.setattr(Project, "_write_project_zip", _write_while_user_edits)
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, False, False))
+    assert project.dirty is True
+    monkeypatch.undo()
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, False, False))
+    assert project.dirty is False
+
+
+def test_import_experimental_data_brings_its_cellpose_data(tmp_path: Path) -> None:
+    source = Project()
+    source.cellpose_data = _cellpose_data_with_mapping({4: 0, 7: 1})
+    source.add_experiment(
+        Experiment(
+            "exp",
+            1.0,
+            [],
+            [TraceData("t", np.zeros((2, 10)), np.array([0, 1]), "", 0.1)],
+        )
+    )
+    path = tmp_path / "source.nseq"
+    source.save(path, SaveLoadOptions(True, True, False, True))
+
+    project = Project()
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    project.import_project(path, SaveLoadOptions(False, False, False, True))
+    assert set(project.experiments) == {"exp"}
+    assert project.cellpose_data is not None
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {4: 0, 7: 1}
+
+    # Importing without experimental data keeps the project's Cellpose data.
+    project.cellpose_data = _cellpose_data_with_mapping({1: 0})
+    project.import_project(path, SaveLoadOptions(True, False, False, False))
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {1: 0}
+
+    # So does importing data saved without Cellpose data.
+    source.cellpose_data = None
+    source.save(path, SaveLoadOptions(True, True, False, True))
+    project.import_project(path, SaveLoadOptions(False, False, False, True))
+    assert project.cellpose_data.stimulus_to_cellpose_mapping == {1: 0}
 
 
 def test_device_settings_are_saved_with_the_project(tmp_path):
@@ -1696,3 +1726,180 @@ def test_relocate_calcium_video_accepts_a_renamed_single_file(tmp_path):
     project.add_calcium_video([Path("/old/a.tif"), Path("/old/b.tif")], 30.0)
     with pytest.raises(ValueError, match="not one of"):
         project.relocate_calcium_video(None, renamed)
+
+
+def test_failed_save_keeps_existing_project_file(tmp_path: Path) -> None:
+    path = tmp_path / "p.nseq"
+    project = Project()
+    project.add_stim_array(
+        StimArray("s", StimType.Excitation, np.ones((10, 2)), "nA", 0.01)
+    )
+    options = SaveLoadOptions(True, True, True, True)
+    project.save(path, options)
+    good_bytes = path.read_bytes()
+
+    project.external_simulate_params = {"n": {"value": object()}}
+    with pytest.raises(TypeError):
+        project.save(path, options)
+
+    assert path.read_bytes() == good_bytes
+    assert list(tmp_path.iterdir()) == [path]
+    assert "s" in Project(path).stim_arrays
+
+
+def test_save_accepts_numpy_values_in_metadata(tmp_path: Path) -> None:
+    path = tmp_path / "p.nseq"
+    project = Project()
+    project.external_simulate_params = {
+        "n": {"value": np.int64(3)},
+        "w": {"value": np.array([1.5, 2.5])},
+    }
+    project.save(path, SaveLoadOptions(True, True, True, True))
+
+    loaded = Project(path)
+    assert loaded.external_simulate_params == {
+        "n": {"value": 3},
+        "w": {"value": [1.5, 2.5]},
+    }
+
+
+def test_save_does_not_leave_save_checkpoint_in_live_network(tmp_path: Path) -> None:
+    from neuroseq.b2_model import B2Model
+    from neuroseq.example_projects.neurons.single_lif_neuron import single_lif_neuron
+    from neuroseq.utils import save_store_name
+
+    project = single_lif_neuron()
+    project.run_simulation(0.01)
+    project.save(tmp_path / "p.nseq", SaveLoadOptions(True, True, True, True))
+    project.run_simulation(0.01)
+    model = project.b2_model
+
+    assert save_store_name not in model.network._stored_state
+    # What the model editor does: the copy must not rewind to save time.
+    copy_model = B2Model.from_dict(model.to_dict(), dict(model.network._stored_state))
+    assert copy_model.get_sim_time_secs() != pytest.approx(0.01)
+
+
+def test_import_project_without_simulation_data_drops_checkpoints(
+    tmp_path: Path,
+) -> None:
+    from neuroseq.example_projects.neurons.single_lif_neuron import single_lif_neuron
+
+    path = tmp_path / "sim.nseq"
+    source = single_lif_neuron()
+    source.run_simulation(0.01)
+    assert source.b2_model.checkpoints
+    source.save(path, SaveLoadOptions(True, True, True, True))
+
+    project = Project()
+    project.import_project(path, SaveLoadOptions(True, True, False, True))
+    model = project.b2_model
+
+    assert model.checkpoints == []
+    assert not model.has_simulation_data()
+    project.run_simulation(0.01)
+    assert model.checkpoints == ["Initial state"]
+    model.restore("Initial state")
+
+
+def _trimmed_project_with_history() -> tuple[Project, StimArray]:
+    from neuroseq.project_history import ProjectCommand
+    from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
+
+    project = Project()
+    values = np.zeros((100, 2))
+    values[50:, 0] = 1.0
+    project.add_stim_array(StimArray("s", StimType.Excitation, values, "nA", 0.01))
+    stim = project.stim_arrays["s"]
+    action = TrimReversibleAction(project, 0.5, None, "s")
+    action(stim, None)
+    project.history.record_applied(
+        ProjectCommand(
+            "trim", lambda: action(stim, None), lambda: action.undo(stim, None)
+        )
+    )
+    assert project.history.can_undo()
+    return project, stim
+
+
+def test_run_simulation_padding_clears_stale_history() -> None:
+    project, stim = _trimmed_project_with_history()
+
+    project.run_simulation(0.8)  # longer than the trimmed 0.5 s array
+
+    assert stim.values.shape[0] >= 80
+    assert not project.history.can_undo()
+
+
+def test_run_simulation_without_padding_keeps_history() -> None:
+    project, stim = _trimmed_project_with_history()
+    project.b2_model.get_defined_neuron_count = lambda: 0  # type: ignore[method-assign]
+    project.b2_model.run_simulation = lambda *a, **k: None  # type: ignore[method-assign]
+
+    project.run_simulation(0.1)
+
+    assert stim.values.shape[0] == 50
+    assert project.history.can_undo()
+
+
+def test_tile_stim_arrays_to_length_clears_stale_history() -> None:
+    project, stim = _trimmed_project_with_history()
+
+    project.tile_stim_arrays_to_length(0.4)
+    assert project.history.can_undo()  # nothing changed
+
+    project.tile_stim_arrays_to_length(2.0)
+    assert stim.values.shape[0] == 200
+    assert not project.history.can_undo()
+
+
+def test_set_cellpose_data_updates_limits_and_marks_dirty() -> None:
+    project = Project()
+    project.dirty = False
+    cellpose = CellposeImportResult(
+        image_path=Path("dummy.png"),
+        segmentation_array=np.zeros((2, 2), dtype=np.int32),
+        overlay_image=np.zeros((2, 2, 3), dtype=np.uint8),
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.arange(30, dtype=np.int32),
+        stimulus_to_cellpose_mapping={i: i for i in range(12)},
+    )
+
+    project.set_cellpose_data(cellpose)
+    assert project.dirty
+    assert project.cellpose_neuron_count() == 12
+    assert project.max_neurons >= 12
+
+    project.dirty = False
+    project.set_cellpose_data(None)
+    assert project.dirty
+    assert project.cellpose_neuron_count() == 0
+    assert project.max_neurons < 12
+
+
+def test_imaging_acquisition_records_go_through_project_methods() -> None:
+    project = Project()
+    project.dirty = False
+    project.add_imaging_acquisition({"run_id": "r1", "status": "armed"})
+    assert project.dirty
+    project.dirty = False
+
+    assert project.update_imaging_acquisition("r1", {"status": "armed"}) is True
+    assert not project.dirty  # nothing changed
+    assert project.update_imaging_acquisition(
+        "r1", {"status": "failed", "error": "no trigger"}
+    )
+    assert project.dirty
+    project.dirty = False
+    assert project.update_imaging_acquisition(
+        "r1", {"status": "completed"}, remove=("error",)
+    )
+    assert project.imaging_acquisition("r1") == {"run_id": "r1", "status": "completed"}
+    # A copy: editing it leaves the project's record alone.
+    copy = project.imaging_acquisition("r1")
+    assert copy is not None
+    copy["status"] = "edited"
+    assert project.imaging_acquisitions[0]["status"] == "completed"
+    assert project.update_imaging_acquisition("missing", {"status": "x"}) is False
+    assert project.imaging_acquisition("missing") is None

@@ -61,7 +61,7 @@ The thesis processes raw TIFFs externally before this PR existed; that workflow 
 # Install and run (uv recommended)
 uv run neuroseq
 
-# Run tests (in parallel by default, ~1 min; add -n 0 to run serially, e.g. for -s or --pdb)
+# Run tests (in parallel, at most 8 workers, ~2 min; add -n 0 to run serially, e.g. for -s or --pdb)
 uv run pytest
 
 # Run specific test file
@@ -133,7 +133,10 @@ dialog and its helpers sit together in one package rather than in global
   shared undo history (`project_history.py`) is recorded or cleared; never assign
   `stim_array.values`/`.dt` or `project.experiments[...]` from a dialog.
 - **Plugin folder is not a code location.** `resources/analysis_plugins/` holds
-  only thin, auto-discovered analysis plugins; core code must never import from it.
+  only thin, auto-discovered analysis plugins; core code must never import from it
+  (`tests/test_import_layering.py` enforces this). Logic shared by a plugin and core
+  lives in core and the plugin imports it (e.g. `epsp_detection.py`,
+  `elise_support/plugin_keys.py`).
   LLM-authored plugins are written (after user confirmation) to the per-user folder
   from `analysis_plugins.user_plugins_directory()`.
 - **Example projects** are one factory per file under `example_projects/neurons/`
@@ -259,5 +262,7 @@ Projects are saved as `.nseq` archives: ZIP files containing a JSON metadata fil
   `VIRTUAL_ENV` prefix).
 
 - When `elise` is missing, ~27 ELISE tests skip rather than fail, so `uv run pytest` still
-  reports a green suite. If a full-suite run shows ~29 skipped instead of ~2, that install has
-  gone missing — reinstall it before comparing pass counts against a baseline.
+  reports a green suite. On Linux about 18 tests skip anyway (Windows-only launcher and
+  named-pipe tests, opt-in screenshot tests, pyNN not installed, two `.pxp` sample files that
+  only exist on some hosts). If a full-suite run shows ~45 skipped instead of ~18, the `elise`
+  install has gone missing — reinstall it before comparing pass counts against a baseline.

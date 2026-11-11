@@ -100,10 +100,23 @@ class HeatmapWidget(FPLWidget):
         self._axis_update_timer = QtCore.QTimer(self)
         self._axis_update_timer.setInterval(100)
         self._axis_update_timer.timeout.connect(self._update_index_axes_from_zoom)
-        self._axis_update_timer.start()
+        # Started by showEvent and stopped by hide/close, so a hidden or closed
+        # heatmap does not poll its camera forever.
         self.figure.renderer.add_event_handler(self.pointer_move, "pointer_move")
         self.logger = logging.getLogger(__name__)
         self.context_menu = QtWidgets.QMenu("Synapses", self)
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._axis_update_timer.start()
+
+    def hideEvent(self, event) -> None:
+        self._axis_update_timer.stop()
+        super().hideEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self._axis_update_timer.stop()
+        super().closeEvent(event)
 
     def heatmap_norm_dialog(self):
         HeatmapNormDialog(self).exec()

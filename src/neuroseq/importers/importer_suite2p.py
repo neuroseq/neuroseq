@@ -8,6 +8,7 @@ import numpy.typing as npt
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.importers.importer_tif import DEFAULT_NEUROPIL_COEFFICIENT
 from neuroseq.spike_detection import detect_spikes_threshold
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ def _normalize_array_per_neuron(
 def compute_normalized_suite2p_traces(
     f_data: npt.NDArray[Any],
     fneu_data: npt.NDArray[Any] | None = None,
+    neuropil_coefficient: float = DEFAULT_NEUROPIL_COEFFICIENT,
 ) -> tuple[npt.NDArray[Any], npt.NDArray[Any], npt.NDArray[Any]]:
     """
     Contrast Suite2p fluorescence data (optional neuropil subtraction) and normalize per-neuron.
@@ -57,7 +59,11 @@ def compute_normalized_suite2p_traces(
             f"F.npy shape {f_data.shape} does not match Fneu.npy shape {fneu_data.shape}"
         )
 
-    contrasting_traces = f_data - 0.7 * fneu_data if fneu_data is not None else f_data
+    contrasting_traces = (
+        f_data - float(neuropil_coefficient) * fneu_data
+        if fneu_data is not None
+        else f_data
+    )
     return _normalize_array_per_neuron(contrasting_traces)
 
 
@@ -100,9 +106,19 @@ def _resolve_suite2p_indices(
         )
 
     # Suite2p rows are expected to be ordered by Cellpose ID 0..N-1.
-    # Missing explicit mappings fall back to identity import (cellpose id -> same stim id).
+    # Unmapped Cellpose IDs keep their own number as stimulus ID, unless that
+    # number is already a mapped stimulus ID (a sparse Custom mapping, or a
+    # Linear one over Cellpose IDs with gaps). Those are paired, in sorted
+    # order, with the mapped Cellpose IDs that are not themselves stimulus IDs,
+    # so the mapping extends to a permutation: every Cellpose ID gets a unique
+    # stimulus ID, and the result depends only on the ID and the mapping (not
+    # on which other IDs are present), keeping remaps of subsets consistent.
+    stim_ids_in_use = set(cellpose_to_stim.values())
+    displaced_ids = sorted(stim_ids_in_use - cellpose_to_stim.keys())
+    free_ids = sorted(cellpose_to_stim.keys() - stim_ids_in_use)
+    fallback = dict(zip(displaced_ids, free_ids, strict=True))
     stim_ids = [
-        cellpose_to_stim.get(cellpose_id, cellpose_id)
+        cellpose_to_stim.get(cellpose_id, fallback.get(cellpose_id, cellpose_id))
         for cellpose_id in range(n_neurons_to_import)
     ]
     if len(set(stim_ids)) != len(stim_ids):
@@ -130,6 +146,19 @@ def remap_raw_cellpose_ids(
     return lookup[raw_cellpose_ids]
 
 
+def _row_cellpose_ids(
+    raw_cellpose_ids: npt.NDArray[Any] | None, n_rows: int
+) -> npt.NDArray[Any]:
+    if raw_cellpose_ids is None:
+        return np.arange(n_rows, dtype=np.uint32)
+    ids = np.asarray(raw_cellpose_ids, dtype=np.uint32)
+    if ids.shape[0] < n_rows:
+        raise ValueError(
+            f"raw_cellpose_ids has {ids.shape[0]} entries for {n_rows} rows"
+        )
+    return ids[:n_rows]
+
+
 def prepare_suite2p_traces(
     f_data: npt.NDArray[Any],
     fneu_data: npt.NDArray[Any] | None,
@@ -137,8 +166,14 @@ def prepare_suite2p_traces(
     max_neurons: int,
     sampling_rate: float = 30.0,
     stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+    neuropil_coefficient: float = DEFAULT_NEUROPIL_COEFFICIENT,
+    raw_cellpose_ids: npt.NDArray[Any] | None = None,
 ) -> TraceData:
-    """Create TraceData from Suite2p fluorescence data."""
+    """Create TraceData from Suite2p fluorescence data.
+
+    ``raw_cellpose_ids`` gives the Cellpose ID of each row; by default row k is
+    Cellpose ID k.
+    """
 
     if max_neurons <= 0:
         raise ValueError("max_neurons must be positive")
@@ -146,8 +181,10 @@ def prepare_suite2p_traces(
     dt = 1.0 / float(sampling_rate)
     n_neurons, n_timepoints = f_data.shape
     n_neurons_to_import = min(max_neurons, n_neurons)
-    normalized_traces, _, _ = compute_normalized_suite2p_traces(f_data, fneu_data)
-    raw_cellpose_ids = np.arange(n_neurons_to_import, dtype=np.uint32)
+    normalized_traces, _, _ = compute_normalized_suite2p_traces(
+        f_data, fneu_data, neuropil_coefficient
+    )
+    raw_cellpose_ids = _row_cellpose_ids(raw_cellpose_ids, n_neurons_to_import)
     indices = remap_raw_cellpose_ids(raw_cellpose_ids, stimulus_to_cellpose_mapping)
 
     return TraceData(
@@ -167,9 +204,13 @@ def prepare_suite2p_spikes(
     threshold: float,
     max_neurons: int,
     stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+    raw_cellpose_ids: npt.NDArray[Any] | None = None,
 ) -> SpikeData:
     """
     Create SpikeData from Suite2p spks.npy data using shared spike detection.
+
+    ``raw_cellpose_ids`` gives the Cellpose ID of each row; by default row k is
+    Cellpose ID k.
     """
     logger.debug(
         "Preparing Suite2p spikes: shape=%s dt=%.6f threshold=%.4f max_neurons=%s",
@@ -191,15 +232,11 @@ def prepare_suite2p_spikes(
     # Validate/resolve against the full declared neuron count (not just the ids that
     # actually spiked) so a mapping collision among silent neurons is still caught.
     n_neurons = min(max_neurons, spike_data.shape[0])
-    lookup = _resolve_suite2p_indices(n_neurons, stimulus_to_cellpose_mapping)
-    raw_cellpose_ids = result.spike_indices.astype(np.uint32, copy=True)
-    remapped_indices = (
-        lookup[raw_cellpose_ids]
-        if raw_cellpose_ids.size
-        else raw_cellpose_ids.astype(lookup.dtype, copy=True)
-    )
+    row_ids = _row_cellpose_ids(raw_cellpose_ids, n_neurons)
+    row_stim_ids = remap_raw_cellpose_ids(row_ids, stimulus_to_cellpose_mapping)
+    rows = result.spike_indices.astype(np.intp, copy=False)
     result = SpikeData(
-        result.name, remapped_indices, result.spike_times, raw_cellpose_ids
+        result.name, row_stim_ids[rows], result.spike_times, row_ids[rows]
     )
 
     logger.debug(

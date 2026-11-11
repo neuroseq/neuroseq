@@ -134,3 +134,56 @@ def test_slider_tooltip_shows_seconds_and_movie_frame(qtbot: QtBot, tmp_path) ->
     assert slider.slider.describe_value(0) == "0.000 s (0 ms)\nframe 1 / 30"
     assert slider.slider.describe_value(1250) == "1.250 s (1250 ms)\nframe 13 / 30"
     assert slider.slider.describe_value(9000).endswith("frame 30 / 30")
+
+
+def test_time_slider_speed_change_during_playback_does_not_jump(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slider = TimeSliderWidget()
+    qtbot.addWidget(slider)
+    slider.set_max_time_secs(100.0)
+    elapsed = {"ms": 0}
+    monkeypatch.setattr(slider.elapsed_timer, "elapsed", lambda: elapsed["ms"])
+    monkeypatch.setattr(
+        slider.elapsed_timer, "restart", lambda: elapsed.__setitem__("ms", 0)
+    )
+    slider.set_relative_playback_speed(1.0)
+    slider.toggle_pause()  # play
+    elapsed["ms"] = 4000
+    slider._tick()
+    assert slider.t_ms == 4000
+
+    slider.set_relative_playback_speed(4.0)
+    slider._tick()
+    # Previously 4000 ms of wall time were replayed at 4x: a jump to 16000.
+    assert slider.t_ms == 4000
+    elapsed["ms"] = 500
+    slider._tick()
+    assert slider.t_ms == 6000
+    slider.toggle_pause()
+
+
+def test_time_slider_drag_during_playback_continues_from_dragged_time(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    slider = TimeSliderWidget()
+    qtbot.addWidget(slider)
+    slider.set_max_time_secs(100.0)
+    elapsed = {"ms": 0}
+    monkeypatch.setattr(slider.elapsed_timer, "elapsed", lambda: elapsed["ms"])
+    monkeypatch.setattr(
+        slider.elapsed_timer, "restart", lambda: elapsed.__setitem__("ms", 0)
+    )
+    slider.set_relative_playback_speed(1.0)
+    slider.toggle_pause()  # play
+    elapsed["ms"] = 2000
+    slider._tick()
+    assert slider.t_ms == 2000
+
+    slider.slider.setValue(50000)  # the user drags the handle
+    assert slider.t_ms == 50000
+    elapsed["ms"] = 40
+    slider._tick()
+    # Previously playback snapped back to 2040 ms.
+    assert slider.t_ms == 50040
+    slider.toggle_pause()

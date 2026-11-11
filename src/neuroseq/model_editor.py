@@ -1051,7 +1051,7 @@ class ModelEditorDialog(QtWidgets.QDialog):
             return
 
         self.b2model = B2Model.from_dict(
-            b2model.to_dict(), b2model.network._stored_state
+            b2model.to_dict(), dict(b2model.network._stored_state)
         )
 
         trees = {

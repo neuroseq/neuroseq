@@ -441,10 +441,6 @@ def _ttl_pulse_duration_us(
     return float(duration_ticks) * _SYSCON2_TTL_PULSE_QUANTUM_US
 
 
-def _time_us_to_tick(time_us: float) -> int:
-    return int(np.rint(time_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
-
-
 def _shape_object_duration_us(
     obj: SysconSequenceObject,
     *,

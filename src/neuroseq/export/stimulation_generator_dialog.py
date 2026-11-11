@@ -706,10 +706,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if load_choice == self._InitialSlmFixChoice.CANCEL:
                 return
-            fixed_values, _ = shift_stim_values_right_for_initial_slm_load(stim_array)
+            fixed_values, extended_samples = (
+                shift_stim_values_right_for_initial_slm_load(stim_array)
+            )
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Shifted stim '%s' right for initial SLM load-up.", stim_name
             )
@@ -722,10 +725,11 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if gap_choice == self._SlmFixChoice.CANCEL:
                 return
-            fixed_values, _ = space_out_stim_values_for_slm(stim_array)
+            fixed_values, extended_samples = space_out_stim_values_for_slm(stim_array)
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Spaced out stim '%s' to resolve SLM gap violations.", stim_name
             )
@@ -738,10 +742,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             )
             if offon_choice == self._SlmOffOnFixChoice.CANCEL:
                 return
-            fixed_values, _ = space_out_stim_values_for_slm_off_on_overlap(stim_array)
+            fixed_values, extended_samples = (
+                space_out_stim_values_for_slm_off_on_overlap(stim_array)
+            )
             if not self._replace_stim_values_preserving_undo(stim_name, fixed_values):
                 return
             stim_array = self.project.stim_arrays[stim_name]
+            self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
                 "Spaced out stim '%s' to resolve SLM off/on overlap.", stim_name
             )
@@ -780,9 +787,13 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
         sanity_report = self._input_sanity_report(stim_array)
 
         sanitized_values = sanity_report.sanitized_values
+        # The fixes may lengthen the array (pulses shifted past its end), never
+        # shorten it or change the neuron count.
         has_sanitized_update = (
             sanitized_values is not None
-            and sanitized_values.shape == stim_array.values.shape
+            and sanitized_values.ndim == 2
+            and sanitized_values.shape[1] == stim_array.values.shape[1]
+            and sanitized_values.shape[0] >= stim_array.values.shape[0]
             and not np.array_equal(sanitized_values, stim_array.values)
         )
         if has_sanitized_update:
@@ -968,9 +979,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             "Choose how to resolve:",
             "1) Clear array: set dt and blank all stimuli — you redraw from scratch.",
             "2) Resample: nearest-neighbor resample the existing pattern onto the new "
-            "tick grid, preserving it as closely as the new grid allows. This replaces "
-            "the array directly and cannot be undone with Ctrl+Z, unlike the other "
-            "fixes in this dialog.",
+            "tick grid, preserving it as closely as the new grid allows (undoable).",
             "3) Cancel",
         ]
         msg_box = QtWidgets.QMessageBox(self)
@@ -1133,6 +1142,21 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             return self._InitialSlmFixChoice.SHIFT_RIGHT
         return self._InitialSlmFixChoice.CANCEL
 
+    def _warn_input_extended(
+        self, stim_name: str, extended_samples: int, dt_seconds: float
+    ) -> None:
+        """Tell the user a sanity fix lengthened the array instead of cutting
+        pulses shifted past its end."""
+        if extended_samples <= 0:
+            return
+        message = (
+            f"Shifting pulses extended input array '{stim_name}' by "
+            f"{extended_samples} sample(s) ({extended_samples * dt_seconds * 1e3:.3f} ms) "
+            "so no pulse is cut off."
+        )
+        self._log_status("%s", message)
+        QtWidgets.QMessageBox.warning(self, "Input Array Extended", message)
+
     def _replace_stim_values_preserving_undo(
         self,
         stim_name: str,
@@ -1153,16 +1177,22 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 if parent_widget is not None
                 else None
             )
-            if stim_editor is not None and hasattr(
+            target_shape = self.project.stim_arrays[stim_name].values.shape
+            if new_values.shape != target_shape:
+                # A longer sample grid (sanity fixes shifted pulses past the end)
+                # replaces the whole grid through the project as one undoable edit.
+                self.project.replace_stim_values(
+                    stim_name,
+                    np.array(new_values, copy=True),
+                    label=f"Apply SysCon2 sanity fixes to {stim_name}",
+                )
+                if stim_editor is not None and hasattr(stim_editor, "select_stim"):
+                    stim_editor.select_stim(stim_name)
+            elif stim_editor is not None and hasattr(
                 stim_editor, "replace_stim_values_with_undo"
             ):
                 stim_editor.replace_stim_values_with_undo(stim_name, new_values)
             else:
-                target = self.project.stim_arrays[stim_name]
-                if target.values.shape != new_values.shape:
-                    raise ValueError(
-                        "Automatic sanity fixes require matching input-array shape."
-                    )
                 self.project.replace_stim_values(
                     stim_name, np.array(new_values, copy=True)
                 )
@@ -1276,8 +1306,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 f"Could not parse LUT file:\n{exc}",
             )
             return
-        self.project.power_luts[wavelength_nm] = lut
-        self.project.mark_dirty()
+        self.project.set_power_lut(wavelength_nm, lut)
         self.lut_status_label.setText(self._format_lut_status())
 
     def _default_syscon2_config_text(self) -> str:

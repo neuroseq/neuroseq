@@ -272,9 +272,15 @@ class StimWidget(TimeseriesWidget):
             self.vmin = -self.vmax
         self.units = "" if stim_array.units == "1" else stim_array.units
         self.dt_ms = float(stim_array.dt) * 1000.0  # convert to milliseconds
+        # Neurons hidden by the cell selection stay hidden across set_data().
+        self._all_neuron_ids = list(range(stim_array.values.shape[1]))
+        self._rebuild_visible_neuron_mapping()
+        shown_values = (
+            self._visible_values() if self._visible_neuron_ids else stim_array.values
+        )
         cmap = get_cmap(self.stim_type)
         self.graphic = self.subplot.add_image(
-            stim_array.values.T,
+            shown_values.T,
             vmin=self.vmin,
             vmax=self.vmax,
             cmap=cmap,
@@ -283,11 +289,12 @@ class StimWidget(TimeseriesWidget):
         # is drawn as opaque white, hiding the reduced-opacity background stims)
         apply_cmap_alpha(self.graphic, cmap)
         self._configure_time_scaled_image(self.graphic)
+        self.graphic.visible = bool(self._visible_neuron_ids)
         self.minimum_size_graphic = self._add_minimum_size_graphic(
-            stim_array.values, self.dt_ms, self.stim_type
+            shown_values if self._visible_neuron_ids else shown_values[:, :0],
+            self.dt_ms,
+            self.stim_type,
         )
-        self._all_neuron_ids = list(range(stim_array.values.shape[1]))
-        self._rebuild_visible_neuron_mapping()
         self.n_timestamps = stim_array.values.shape[0]
         self.post_set_data()
 
@@ -302,14 +309,32 @@ class StimWidget(TimeseriesWidget):
             )
         return self.data_values[:, self._visible_neuron_ids]
 
+    def _visible_columns(self, values: np.ndarray) -> np.ndarray:
+        """Another (background) array narrowed to the visible neurons' rows,
+        so it lines up with the compacted foreground. Neurons the array has
+        no column for stay empty; with no foreground the array is unchanged."""
+        if not self._all_neuron_ids:
+            return values
+        compact = np.zeros(
+            (values.shape[0], len(self._visible_neuron_ids)), dtype=values.dtype
+        )
+        for row, neuron_id in enumerate(self._visible_neuron_ids):
+            if neuron_id < values.shape[1]:
+                compact[:, row] = values[:, neuron_id]
+        return compact
+
     def _apply_visible_neuron_layout(self) -> None:
-        if (
-            self.graphic is None
-            or self.data_values is None
-            or not self._visible_neuron_ids
-        ):
-            # Leave the existing graphic in place rather than trying to build a
-            # zero-height image if every neuron is currently hidden.
+        if self.graphic is None or self.data_values is None:
+            return
+        if not self._visible_neuron_ids:
+            # Every neuron is hidden: keep the image (a zero-height one can't
+            # be built) but hide it, as set_data() does, and drop the overlays
+            # still drawn for the old rows. The next layout rebuilds them.
+            self.graphic.visible = False
+            if self.minimum_size_graphic is not None:
+                self.subplot.remove_graphic(self.minimum_size_graphic)
+                self.minimum_size_graphic = None
+            self._rebuild_background_graphics()
             return
         # ImageGraphic's buffer is fixed-size at creation (like the lasso-line
         # buffer issue) - it can't be resized via `.data = ...`, so rebuild it
@@ -332,6 +357,18 @@ class StimWidget(TimeseriesWidget):
         self.minimum_size_graphic = self._add_minimum_size_graphic(
             visible_values, self.dt_ms, self.stim_type
         )
+        self._rebuild_background_graphics()
+
+    def _rebuild_background_graphics(self) -> None:
+        for graphic in [
+            *self.background_graphics,
+            *self._background_minimum_size_graphics,
+        ]:
+            self.subplot.remove_graphic(graphic)
+        self.background_graphics = []
+        self._background_minimum_size_graphics = []
+        for values, _units, dt_ms, stim_type in self._background_stim_arrays:
+            self._add_background_graphics(values, dt_ms, stim_type)
 
     def post_set_data(self):
         super().post_set_data()
@@ -355,6 +392,8 @@ class StimWidget(TimeseriesWidget):
         from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
         from matplotlib.collections import PolyCollection
         from matplotlib.figure import Figure
+
+        from neuroseq.visualization_support.preview_ticks import set_neuron_id_ticks
 
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
@@ -380,7 +419,11 @@ class StimWidget(TimeseriesWidget):
         arrays.append((self.data_values, self.dt_ms, self.stim_type, 1.0))
         for values, dt_ms, stim_type, alpha in arrays:
             vertices = []
-            amplitudes = []
+            amplitudes: list[float] = []
+            # Draw visible neurons at their display rows, matching the camera
+            # and selection rows used for the limits below.
+            vmax = float(np.max(np.abs(values))) or 1.0
+            values = self._visible_columns(values)
             # Merge adjacent equal samples into one vector rectangle per pulse.
             for neuron, row in enumerate(values.T):
                 edges = np.r_[0, np.flatnonzero(row[1:] != row[:-1]) + 1, len(row)]
@@ -397,7 +440,6 @@ class StimWidget(TimeseriesWidget):
                         ]
                     )
                     amplitudes.append(row[start])
-            vmax = float(np.max(np.abs(values))) or 1.0
             normalized = np.asarray(amplitudes) / vmax
             if stim_type == StimType.External:
                 normalized = (normalized + 1.0) / 2.0
@@ -428,6 +470,7 @@ class StimWidget(TimeseriesWidget):
             if rows:
                 ax.set_ylim(rows[0] - 0.5, rows[-1] + 0.5)
         ax.set_xlabel("Time (ms)")
+        set_neuron_id_ticks(ax.yaxis, self._visible_neuron_ids)
         ax.set_ylabel("Neuron index")
         ax.set_title(self._stim_name)
         dialog.show()
@@ -479,25 +522,41 @@ class StimWidget(TimeseriesWidget):
     def set_background_data(self, stim_array: StimArray | None = None) -> None:
         if stim_array is None:
             return
-        vmax = np.max(np.abs(stim_array.values))
+        units_str = "" if stim_array.units == "1" else str(stim_array.units)
+        self._background_stim_arrays.append(
+            (
+                stim_array.values,
+                units_str,
+                float(stim_array.dt) * 1000.0,
+                stim_array.stim_type,
+            )
+        )
+        self._add_background_graphics(
+            stim_array.values, float(stim_array.dt) * 1000.0, stim_array.stim_type
+        )
+
+    def _add_background_graphics(
+        self, values: np.ndarray, dt_ms: float, stim_type: StimType
+    ) -> None:
+        vmax = np.max(np.abs(values))
         if vmax == 0:
             vmax = 1.0
-        vmin = -vmax if stim_array.stim_type == StimType.External else 0
-        cmap = get_cmap(stim_array.stim_type, alpha=0.25)
+        vmin = -vmax if stim_type == StimType.External else 0
+        shown_values = self._visible_columns(values)
+        if shown_values.shape[1] == 0:
+            return
+        cmap = get_cmap(stim_type, alpha=0.25)
         image_graphic = self.subplot.add_image(
-            stim_array.values.T, vmin=vmin, vmax=vmax, cmap=cmap
+            shown_values.T, vmin=vmin, vmax=vmax, cmap=cmap
         )
-        self._configure_time_scaled_image(
-            image_graphic,
-            dt_ms=float(stim_array.dt) * 1000.0,
-        )
+        self._configure_time_scaled_image(image_graphic, dt_ms=dt_ms)
         apply_cmap_alpha(image_graphic, cmap)
         image_graphic.visible = self.show_background_graphics
         self.background_graphics.append(image_graphic)
         minimum_graphic = self._add_minimum_size_graphic(
-            stim_array.values,
-            float(stim_array.dt) * 1000.0,
-            stim_array.stim_type,
+            shown_values,
+            dt_ms,
+            stim_type,
             alpha=0.25,
         )
         if minimum_graphic is not None:
@@ -509,15 +568,6 @@ class StimWidget(TimeseriesWidget):
                 self.keep_short_stimuli_visible and self.show_background_graphics
             )
             self._background_minimum_size_graphics.append(minimum_graphic)
-        units_str = "" if stim_array.units == "1" else str(stim_array.units)
-        self._background_stim_arrays.append(
-            (
-                stim_array.values,
-                units_str,
-                float(stim_array.dt) * 1000.0,
-                stim_array.stim_type,
-            )
-        )
 
     def set_background_data_visible(self, visible: bool) -> None:
         self.show_background_graphics = visible
@@ -629,12 +679,14 @@ class StimWidget(TimeseriesWidget):
         best_span = _active_span(self.data_values[:, neuron_id], t_idx_fg)
         best_dt_ms = self.dt_ms
         for arr, units, dt_ms, stim_type in self._background_stim_arrays:
+            if neuron_id >= arr.shape[1]:
+                continue  # this array has no input for the hovered neuron
             t_idx = np.clip(
                 math.floor(self.mouse_pos[0] / dt_ms),
                 0,
                 arr.shape[0] - 1,
             )
-            n_idx_bg = int(np.clip(neuron_id, 0, arr.shape[1] - 1))
+            n_idx_bg = int(neuron_id)
             raw_val = float(arr[t_idx, n_idx_bg])
             val = -raw_val if stim_type == StimType.Inhibition else raw_val
             if abs(val) > abs(best_val):

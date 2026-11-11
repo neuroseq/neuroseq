@@ -17,15 +17,14 @@ import brian2.numpy_ as np
 from qtpy import QtWidgets
 
 from neuroseq.data import TraceData
+from neuroseq.elise_support.plugin_keys import TARGET_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_DT_ATTR
+from neuroseq.elise_support.plugin_keys import TARGET_MSE_PLUGIN_ID
 from neuroseq.elise_support.replay_metrics import compute_performance_against_target
 
-PLUGIN_ID = "elise_target_mse"
+PLUGIN_ID = TARGET_MSE_PLUGIN_ID
 PLUGIN_NAME = "ELiSe target MSE (vs teaching pattern)"
 PLUGIN_ICON = "mdi6.chart-bell-curve-cumulative"
-
-# Attribute names used by the toolbar action to attach inputs to the widget.
-TARGET_ATTR = "_elise_target_rate"
-TARGET_DT_ATTR = "_elise_target_dt_s"
 
 _CONTROLS_ATTR = "_elise_target_mse_controls"
 
@@ -47,17 +46,9 @@ def _make_controls(widget) -> QtWidgets.QWidget:
 
 
 def _inject_controls(widget, on_refresh) -> QtWidgets.QWidget:
-    layout = widget.layout()
-    if hasattr(widget, _CONTROLS_ATTR):
-        old_bar = getattr(widget, _CONTROLS_ATTR)
-        if old_bar is not None:
-            if layout is not None:
-                layout.removeWidget(old_bar)
-            old_bar.deleteLater()
-
+    # The widget removes the bar again before the next analysis renders.
     bar = _make_controls(widget)
-    if layout is not None:
-        layout.insertWidget(0, bar)
+    widget.add_plugin_controls(bar)
     bar._refresh_btn.clicked.connect(on_refresh)
     setattr(widget, _CONTROLS_ATTR, bar)
     return bar

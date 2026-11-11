@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from dataclasses import field
 
 import brian2.numpy_ as np
 import pytest
@@ -51,6 +52,18 @@ class _FakeSettings:
     llm_model: str = "fake-model"
     llm_ollama_base_url: str = "http://localhost:11434"
     llm_openai_base_url: str = ""
+    llm_codex_executable: str = ""
+    llm_claude_executable: str = ""
+    llm_private_project_data: dict = field(default_factory=dict)
+
+    def llm_project_data_private(self, provider: str) -> bool:
+        return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
+
+    def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        self.llm_private_project_data = {
+            **self.llm_private_project_data,
+            provider: private,
+        }
 
 
 def _make_widget(
@@ -269,3 +282,231 @@ def test_stop_button_interrupts_stream(qtbot: QtBot, monkeypatch) -> None:
     assert widget._history[1].role == Role.ASSISTANT
     assert 0 < len(widget._history[1].content) < 4
     assert widget.send_button.isEnabled()
+
+
+class _SilentBackend(FakeBackend):
+    """Ends the stream before any token, as Stop before the first token does."""
+
+    def stream_chat(self, messages, *, model, temperature=0.7, max_tokens=None):
+        self.seen_messages.append(list(messages))
+        yield from ()
+
+
+def test_stream_without_tokens_adds_no_empty_assistant_message(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    backend = _SilentBackend()
+    widget = _make_widget(qtbot, monkeypatch, lambda self, settings: backend)
+
+    widget.input_edit.setPlainText("hello")
+    widget.send_button.click()
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert [message.role for message in widget._history] == [Role.USER]
+    assert all(message.content for message in widget._history)
+
+
+def test_private_data_setting_controls_snapshot_and_badge(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    backend = FakeBackend(tokens=["ok"])
+    settings = _FakeSettings()
+    widget = _make_widget(
+        qtbot, monkeypatch, lambda self, current: backend, settings=settings
+    )
+    widget.set_project(_make_project())
+    assert "data not shared" in widget.badge_label.text()
+
+    def send() -> str:
+        count = len(backend.seen_messages)
+        widget.input_edit.setPlainText("hello")
+        widget.send_button.click()
+        qtbot.waitUntil(
+            lambda: (
+                len(backend.seen_messages) > count
+                and widget.status_label.text() == "Idle"
+            ),
+            timeout=WAIT_TIMEOUT_MS,
+        )
+        return backend.seen_messages[-1][0].content
+
+    private_prompt = send()
+    assert "'stimulus'" not in private_prompt
+    assert widget._read_access is not None and widget._read_access.private_data
+
+    settings.set_llm_project_data_private("fake", False)
+    widget.reload_backend()
+    assert "data not shared" not in widget.badge_label.text()
+    shared_prompt = send()
+    assert "'stimulus'" in shared_prompt
+    assert not widget._read_access.private_data
+
+
+def test_send_rereads_settings_changed_outside_this_panel(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    # Detached panels and other tabs never get the settings dialog's signal.
+    backends = {"fake": FakeBackend(tokens=["one"]), "openai": FakeBackend(["two"])}
+    settings = _FakeSettings()
+    settings.set_llm_project_data_private("fake", False)
+    settings.set_llm_project_data_private("openai", True)
+    widget = _make_widget(
+        qtbot,
+        monkeypatch,
+        lambda self, current: backends[current.llm_provider],
+        settings=settings,
+    )
+    widget.set_project(_make_project())
+
+    settings.llm_provider = "openai"
+    widget.input_edit.setPlainText("hello")
+    widget.send_button.click()
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert not backends["fake"].seen_messages
+    assert "'stimulus'" not in backends["openai"].seen_messages[0][0].content
+    assert widget._read_access is not None and widget._read_access.private_data
+    assert "data not shared" in widget.badge_label.text()
+
+
+def _send_and_wait(qtbot: QtBot, widget: ChatWidget, text: str = "hello") -> None:
+    widget.input_edit.setPlainText(text)
+    widget.send_button.click()
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+
+def test_provider_change_clears_history_with_a_note(qtbot: QtBot, monkeypatch) -> None:
+    backends = {"fake": FakeBackend(["one"]), "openai": FakeBackend(["two"])}
+    settings = _FakeSettings()
+    widget = _make_widget(
+        qtbot,
+        monkeypatch,
+        lambda self, current: backends[current.llm_provider],
+        settings=settings,
+    )
+    _send_and_wait(qtbot, widget, "first")
+    settings.llm_model = "other-model"
+    widget.reload_backend()
+    assert len(widget._history) == 2
+
+    settings.llm_provider = "openai"
+    widget.reload_backend()
+    assert widget._history == []
+    assert "provider changed" in widget.history_view.toPlainText()
+
+    _send_and_wait(qtbot, widget, "second")
+    sent = backends["openai"].seen_messages[0][1:]
+    assert sent == [Message(Role.USER, "second")]
+    widget.clear_button.click()
+    assert "provider changed" not in widget.history_view.toPlainText()
+
+
+def test_turning_privacy_on_clears_history_but_turning_it_off_keeps_it(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings()
+    widget = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    _send_and_wait(qtbot, widget)
+    settings.set_llm_project_data_private("fake", False)
+    widget.reload_backend()
+    assert len(widget._history) == 2
+
+    settings.set_llm_project_data_private("fake", True)
+    widget.reload_backend()
+    assert widget._history == []
+    assert "no longer shared" in widget.history_view.toPlainText()
+
+
+def test_settings_change_during_stream_applies_after_reply(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings()
+    settings.set_llm_project_data_private("fake", False)
+    widget = _make_widget(
+        qtbot,
+        monkeypatch,
+        lambda self, current: FakeBackend(["a", "b"], delay=0.1),
+        settings=settings,
+    )
+    widget.input_edit.setPlainText("hello")
+    widget.send_button.click()
+    settings.set_llm_project_data_private("fake", True)
+    widget.reload_backend()
+    assert widget._worker is not None and not widget._private_data
+    qtbot.waitUntil(lambda: widget._worker is None, timeout=WAIT_TIMEOUT_MS)
+
+    assert widget._history == []
+    assert widget._private_data
+    assert "no longer shared" in widget.history_view.toPlainText()
+
+
+def test_copied_conversation_is_cleared_when_provider_changed_since(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings()
+    source = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    _send_and_wait(qtbot, source)
+
+    same = ChatWidget()
+    qtbot.addWidget(same)
+    same.copy_conversation_from(source)
+    assert same._history == source._history
+    assert "hello" in same.history_view.toPlainText()
+
+    settings.llm_provider = "openai"
+    detached = ChatWidget()
+    qtbot.addWidget(detached)
+    detached.copy_conversation_from(source)
+    assert detached._history == []
+    assert len(source._history) == 2
+
+
+def test_codex_badge_only_claims_neuroseq_data_is_withheld(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings(llm_provider="codex")
+    widget = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    assert "NeuroSeq data not shared" in widget.badge_label.text()
+    assert "read files on disk" in widget.badge_label.toolTip()
+
+    settings.set_llm_project_data_private("codex", False)
+    widget.reload_backend()
+    assert "not shared" not in widget.badge_label.text()
+    assert widget.badge_label.toolTip() == ""
+
+
+def test_settings_change_updates_every_open_chat_panel(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    from neuroseq.llm.chat_widget import notify_llm_settings_changed
+
+    settings = _FakeSettings()
+    docked = _make_widget(
+        qtbot, monkeypatch, lambda self, current: FakeBackend(), settings=settings
+    )
+    detached = ChatWidget()
+    qtbot.addWidget(detached)
+    gone = ChatWidget()
+    gone.deleteLater()
+    qtbot.waitUntil(lambda: not _is_alive(gone), timeout=WAIT_TIMEOUT_MS)
+
+    settings.llm_provider = "openai"
+    settings.llm_model = "gpt-test"
+    notify_llm_settings_changed()  # a deleted panel must not break this
+
+    for widget in (docked, detached):
+        assert "Openai · gpt-test" in widget.badge_label.text()
+
+
+def _is_alive(widget: QtCore.QObject) -> bool:
+    try:
+        widget.objectName()
+    except RuntimeError:
+        return False
+    return True
