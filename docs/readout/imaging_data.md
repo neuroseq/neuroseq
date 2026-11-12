@@ -13,7 +13,9 @@ Patch-clamp recordings are covered in [Patch-clamp data](patch_clamp_data.md).
 ## Cell segmentation
 
 Open **File → Cell segmentation**, or drop a TIFF or PNG on the Cell
-segmentation tab (this segments it right away).
+segmentation tab. A dropped file opens the same dialog with the file waiting:
+choose the model and **Adjust brightness first** as below, then click
+**Segment _file_**.
 
 **Segment an image**: choose a **Model** (`cpsam`, `cpsam_v2`, `cpdino`,
 `cpdino-vitb`; `cpsam_v2` is more sensitive on low-SNR fields) and click

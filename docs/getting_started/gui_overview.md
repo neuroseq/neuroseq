@@ -58,16 +58,16 @@ in the folder used last in any project. The folder is saved with the project.
 
 Dropped files open their usual import dialog, prefilled:
 
-| File                           | Dropped on                       | Import                                     |
-| ------------------------------ | -------------------------------- | ------------------------------------------ |
-| `.nseq`                        | anywhere                         | project, in a new tab                      |
-| `.seq`                         | anywhere                         | SysCon2 sequence as an input array         |
-| `.ibw`, `.pxp`, `.csv`, `.txt` | input array editor               | patch-clamp input wave                     |
-| `.ibw`, `.pxp`, `.csv`, `.txt` | anywhere else                    | patch-clamp traces                         |
-| TIFF or PNG                    | Cell segmentation tab            | asks for the Cellpose model, then segments |
-| TIFF                           | traces, spikes or All data panel | calcium trace extraction                   |
-| TIFF, GIF or movie             | Imaging tab                      | imaging data                               |
-| TIFF, PNG, GIF or movie        | anywhere else                    | asks which of the three imaging imports    |
+| File                           | Dropped on                       | Import                                   |
+| ------------------------------ | -------------------------------- | ---------------------------------------- |
+| `.nseq`                        | anywhere                         | project, in a new tab                    |
+| `.seq`                         | anywhere                         | SysCon2 sequence as an input array       |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | input array editor               | patch-clamp input wave                   |
+| `.ibw`, `.pxp`, `.csv`, `.txt` | anywhere else                    | patch-clamp traces                       |
+| TIFF or PNG                    | Cell segmentation tab            | cell segmentation, file ready to segment |
+| TIFF                           | traces, spikes or All data panel | calcium trace extraction                 |
+| TIFF, GIF or movie             | Imaging tab                      | imaging data                             |
+| TIFF, PNG, GIF or movie        | anywhere else                    | asks which of the three imaging imports  |
 
 ## Saving and undo
 

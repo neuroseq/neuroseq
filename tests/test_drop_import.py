@@ -106,12 +106,36 @@ def test_imaging_files_follow_the_panel(
     gui.import_dropped_files([Path("fov.tif")], target=target)
 
     assert [name for name, _ in calls] == [expected]
+    assert prompts == []
     if expected == "btn_import_cellpose_data_clicked":
-        assert prompts == ["Segment cells"]  # only the model is asked for
-        assert calls[0][1]["segment"] == Path("fov.tif")
-        assert calls[0][1]["model"] == "cpsam_v2"
-    else:
-        assert prompts == []
+        # The segmentation dialog opens with the file waiting (issue #658).
+        assert calls[0][1] == {"args": (), "prefill": Path("fov.tif")}
+
+
+def test_dropped_image_waits_in_the_segmentation_dialog(
+    gui: ProjectWorkspace, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A drop opens the full segmentation dialog with the file prefilled, so
+    its model and brightness options apply (issue #658)."""
+    from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+
+    opened: list[CellposeImportDialog] = []
+
+    def _exec(dialog: CellposeImportDialog) -> int:
+        opened.append(dialog)
+        return QtWidgets.QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(CellposeImportDialog, "exec", _exec)
+    fov = tmp_path / "fov.tif"
+    gui.import_dropped_files([fov], target="segmentation")
+
+    assert len(opened) == 1
+    dialog = opened[0]
+    assert dialog._prefilled_segmentation_file == str(fov)
+    assert dialog.segment_prefilled_button.text() == "Segment fov.tif"
+    assert not dialog.segment_prefilled_button.isHidden()
+    assert gui.import_folders.directory() == str(tmp_path)
+    dialog.deleteLater()
 
 
 def test_imaging_files_elsewhere_ask_what_to_do(

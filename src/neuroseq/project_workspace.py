@@ -2445,21 +2445,22 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self,
         *,
         segment: pathlib.Path | None = None,
-        model: str | None = None,
         auto_brightness: bool = False,
+        prefill: pathlib.Path | None = None,
     ) -> None:
         """Open the cell segmentation dialog; with ``segment``, it segments
-        that image with ``model`` right away, after automatic brightness/contrast
-        (Fiji's Enhance Contrast) if ``auto_brightness``."""
+        that image right away, after automatic brightness/contrast (Fiji's
+        Enhance Contrast) if ``auto_brightness``; with ``prefill`` the image
+        waits there to be segmented with the options the user picks."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
             delete_handler=self._delete_cellpose_data,
             import_folders=self.import_folders,
         )
+        if prefill is not None:
+            dialog.prefill_segmentation_file(str(prefill))
         if segment is not None:
-            if model is not None:
-                dialog.cellpose_model_combo.setCurrentText(model)
             # Once the dialog is shown, so it is there while Cellpose runs.
             QtCore.QTimer.singleShot(
                 0,
@@ -4039,20 +4040,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             if not ok:
                 return
         if action == DROP_SEGMENT:
-            from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
-
-            model, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                "Segment cells",
-                f"Cellpose model for {segmentable[0].name}:",
-                list(CELLPOSE_MODEL_NAMES),
-                0,
-                False,
-            )
-            if ok:
-                self.btn_import_cellpose_data_clicked(
-                    segment=segmentable[0], model=model
-                )
+            # The usual dialog with the file waiting, so its model and
+            # brightness options apply (issue #658).
+            self.btn_import_cellpose_data_clicked(prefill=segmentable[0])
         elif action == DROP_TRACES:
             self.btn_import_tif_clicked(paths=tiffs)
         else:

@@ -151,7 +151,9 @@ class CellposeImportDialog(QtWidgets.QDialog):
         self.segmentation_run_group = QtWidgets.QGroupBox(
             "Select file (single or multiframe TIFF, or PNG)"
         )
-        cellpose_button_layout = QtWidgets.QHBoxLayout(self.segmentation_run_group)
+        segmentation_run_layout = QtWidgets.QVBoxLayout(self.segmentation_run_group)
+        cellpose_button_layout = QtWidgets.QHBoxLayout()
+        segmentation_run_layout.addLayout(cellpose_button_layout)
         cellpose_button_layout.addWidget(QtWidgets.QLabel("Model:"))
         self.cellpose_model_combo = QtWidgets.QComboBox()
         self.cellpose_model_combo.addItems(CELLPOSE_MODEL_NAMES)
@@ -179,6 +181,21 @@ class CellposeImportDialog(QtWidgets.QDialog):
         )
         self.annotate_tiff_button.clicked.connect(self._annotate_mean_tiff)
         cellpose_button_layout.addWidget(self.annotate_tiff_button)
+        # A file dropped on the Cell segmentation panel (issue #658) waits
+        # here, so the model and brightness options above apply to it too.
+        self._prefilled_segmentation_file: str | None = None
+        prefilled_layout = QtWidgets.QHBoxLayout()
+        self.prefilled_file_label = QtWidgets.QLabel()
+        prefilled_layout.addWidget(self.prefilled_file_label, stretch=1)
+        self.segment_prefilled_button = QtWidgets.QPushButton("Segment")
+        self.segment_prefilled_button.setToolTip(
+            "Segment this file with the model and brightness options above."
+        )
+        self.segment_prefilled_button.clicked.connect(self._segment_prefilled_file)
+        prefilled_layout.addWidget(self.segment_prefilled_button)
+        segmentation_run_layout.addLayout(prefilled_layout)
+        self.prefilled_file_label.hide()
+        self.segment_prefilled_button.hide()
         selection_layout.addWidget(self.segmentation_run_group)
 
         self.run_cellpose_button = QtWidgets.QPushButton("Open Cellpose")
@@ -1355,6 +1372,40 @@ class CellposeImportDialog(QtWidgets.QDialog):
             remember_folder(self._import_folders, filename)
             self.segment_file(filename)
 
+    def prefill_segmentation_file(self, filename: str) -> None:
+        """Offer ``filename`` (e.g. dropped on the Cell segmentation panel) for
+        segmentation without running it yet, so the model and "Adjust
+        brightness first" can be chosen first; "Segment" then runs it as
+        "Select file for segmentation..." would."""
+        remember_folder(self._import_folders, filename)
+        if self.main_content_container is not None and (
+            not self.main_content_container.isHidden()
+        ):
+            # Existing data is shown: go back to choosing what to segment. The
+            # project's stored segmentation stays until a new one is imported.
+            self._clear_for_new_image()
+        self._prefilled_segmentation_file = filename
+        self.prefilled_file_label.setText(f"File: {Path(filename).name}")
+        self.prefilled_file_label.setToolTip(filename)
+        self.segment_prefilled_button.setText(f"Segment {Path(filename).name}")
+        self.prefilled_file_label.show()
+        self.segment_prefilled_button.show()
+        self.segment_prefilled_button.setDefault(True)
+        self.segment_prefilled_button.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+
+    def _segment_prefilled_file(self) -> None:
+        if self._prefilled_segmentation_file is not None:
+            self.segment_file(self._prefilled_segmentation_file)
+
+    def _clear_for_new_image(self) -> None:
+        """Drop the shown image, segmentation and a Custom mapping, keeping a
+        Linear mapping (it does not name cells) and its offset."""
+        strategy = self._get_mapping_strategy()
+        linear_offset = self._get_linear_offset()
+        self._reset_importer_state()
+        if strategy == "Linear":
+            self._apply_existing_mapping({}, "Linear", linear_offset)
+
     def segment_file(self, filename: str, *, auto_brightness: bool = False) -> None:
         """Segment ``filename`` with the chosen model and load the result, as
         "Select file for segmentation..." does after choosing a file.
@@ -1424,11 +1475,7 @@ class CellposeImportDialog(QtWidgets.QDialog):
             # The stored data itself is only replaced when this one is imported.
             # A Linear mapping does not name cells, so it and its offset are kept;
             # a Custom one lists the old cells' ids and is dropped.
-            strategy = self._get_mapping_strategy()
-            linear_offset = self._get_linear_offset()
-            self._reset_importer_state()
-            if strategy == "Linear":
-                self._apply_existing_mapping({}, "Linear", linear_offset)
+            self._clear_for_new_image()
             self._load_image_file(filename)
             self._display_range = display_range
             self._load_segmentation_file(str(segmentation_path))
