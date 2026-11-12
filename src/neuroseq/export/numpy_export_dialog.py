@@ -13,6 +13,7 @@ from qtpy.compat import getsavefilename
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.data_names import split_data_name
 from neuroseq.export.exporter_numpy import MAX_MATRIX_ELEMENTS
 from neuroseq.export.exporter_numpy import NeuronTimeMatrix
 from neuroseq.export.exporter_numpy import save_matrix
@@ -102,7 +103,7 @@ class NumpyExportDialog(QtWidgets.QDialog):
 
     def _default_bin_ms(self, name: str) -> float:
         """The frame period of a trace in the spikes' data group, else 1 ms."""
-        group = name.split(" :: ", 1)[0]
+        group = split_data_name(name)[0]
         experiment = self.project.experiments.get(group)
         for datum in experiment.data if experiment is not None else ():
             if isinstance(datum, TraceData) and datum.dt > 0:

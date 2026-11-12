@@ -18,6 +18,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.data_names import split_data_name
 from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.export.exporter_syscon2 import SYSCON2_WINDOW_MS
@@ -1828,7 +1829,7 @@ class RheobaseDialog(SelfRaisingDialog):
             trace = self.project.get_data(trace_name, TraceData)
             if trace is not None:
                 return float(trace.dt)
-        experiment_name = spikes_name.split(" :: ", 1)[0]
+        experiment_name = split_data_name(spikes_name)[0]
         experiment = getattr(self.project, "experiments", {}).get(experiment_name)
         for datum in experiment.data if experiment is not None else ():
             if isinstance(datum, TraceData):

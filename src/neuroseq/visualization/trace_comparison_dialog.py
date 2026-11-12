@@ -9,10 +9,10 @@ from collections.abc import Sequence
 from qtpy import QtCore
 from qtpy import QtWidgets
 
+from neuroseq.data_names import group_name_problem
 from neuroseq.visualization_support.trace_comparison import ComparisonView
 from neuroseq.visualization_support.trace_comparison import array_labels
 from neuroseq.visualization_support.trace_comparison import concatenation_group_name
-from neuroseq.visualization_support.trace_comparison import group_name_problem
 from neuroseq.visualization_support.trace_comparison import parse_neuron_ids
 from neuroseq.visualization_support.trace_comparison import shared_dt
 

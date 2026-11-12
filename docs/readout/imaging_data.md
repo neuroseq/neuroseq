@@ -67,12 +67,14 @@ another one can be imported without browsing for it. **Clear list** empties it.
 **Several ticked files** are, by default, **separate recordings**: each runs
 through the pipeline in turn (never two at once) with the same settings and
 becomes its own data group, named after the file (`rec1`, `rec1 (2)` if the
-name is taken), with its movie in the Imaging tab. The progress window names
+name is taken; `Simulation` is reserved and `::` becomes `_`), with its movie
+in the Imaging tab. The progress window names
 the file being processed. One summary at the end lists the imported files and
 the failed ones with the reason; a failed file does not stop the others.
 **Stop after this file** lets the running file finish and imports what is
 done; pressing it again (**Abort this file too**) also stops the running file.
-Undo removes the data groups one at a time.
+One Undo removes the whole batch, data groups and movies; Redo adds it back.
+Undoing a single-file import likewise removes its movie too.
 
 The same Cellpose masks, input array and **Imaging started at** apply to every
 file, so the files must show the same field of view (frame size) and start at

@@ -67,6 +67,7 @@ from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.project import CalciumVideoSpec
 from neuroseq.project import ImportedComponents
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
@@ -415,6 +416,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._owns_devices = devices is None
         self.devices = devices if devices is not None else WorkspaceDevices(self)
         self._disposed = False
+        # Movies the Imaging views were last refreshed for (see
+        # _project_history_changed).
+        self._calcium_videos_shown: tuple = ()
         self._background_job = BackgroundJob(self)
         self._background_job_label = ""
         self._close_gate = WorkspaceCloseGate(self)
@@ -1352,9 +1356,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._disposed:
             return
         if event in ("undo", "redo"):
+            videos_before = self._calcium_videos_shown
             # The stim editor rebuilds itself from its own history listener.
             self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
+            if self._calcium_videos_state() != videos_before:
+                # Imported data and its movies are undone/redone together.
+                self._refresh_calcium_video_widgets()
         # Any edit, undo or redo may have changed the input values that the
         # trace views overlay (issue #663).
         self._refresh_stim_overlays(self._current_stim_array())
@@ -1774,7 +1782,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             return
         self._do_brian2_simulation_threaded(simulation_time)
 
-    def _append_experimental_data(self, experiment: Experiment) -> None:
+    def _append_experimental_data(
+        self,
+        experiment: Experiment,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
+    ) -> None:
+        """Ask whether to add ``experiment`` as a new data group or append it
+        to one, then do so as one undoable step together with its
+        ``calcium_videos`` (nothing is added if the user cancels)."""
         try:
             dialog = AddExperimentDataDialog(experiment, self.project, parent=self)
             if not dialog.exec():
@@ -1785,9 +1800,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                     dialog.experiment.duration,
                     dialog.experiment.data,
                     dialog.offset,
+                    calcium_videos=calcium_videos,
                 )
             else:
-                self.project.add_experiment(experiment)
+                self.project.add_experiment(experiment, calcium_videos)
             self.update_project(self.project, preserve_dynamic_input=True)
             self._select_experiment_data(experiment.name)
         except Exception as e:
@@ -2278,26 +2294,33 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if dialog.batch_imports:
             self._add_batch_tif_imports(dialog)
         else:
+            # The movie is added with the data, in the same undo step.
+            videos = (
+                [
+                    CalciumVideoSpec(
+                        list(dialog.imported_tif_paths),
+                        dialog.imported_fps,
+                        name=dialog.experiment_name,
+                        channels=dialog.imported_channels,
+                        shown_channel=dialog.imported_functional_channel,
+                    )
+                ]
+                if dialog.imported_tif_paths
+                else []
+            )
             self._append_experimental_data(
                 Experiment(
                     dialog.experiment_name,
                     dialog.experiment_duration,
                     [],
                     dialog.imported_data,
-                )
+                ),
+                videos,
             )
         if dialog.new_cellpose_result is not None:
             self._apply_cellpose_import_result(dialog.new_cellpose_result)
             if hasattr(self, "_auto_show_widget"):
                 self._auto_show_widget(self.spatial_footprint_widget)
-        if dialog.imported_tif_paths and not dialog.batch_imports:
-            self.project.add_calcium_video(
-                dialog.imported_tif_paths,
-                dialog.imported_fps,
-                name=dialog.experiment_name,
-                channels=dialog.imported_channels,
-                shown_channel=dialog.imported_functional_channel,
-            )
         if dialog.imported_tif_paths or dialog.batch_imports:
             self._refresh_calcium_video_widgets()
             if hasattr(self, "_auto_show_widget"):
@@ -2305,24 +2328,32 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
 
     def _add_batch_tif_imports(self, dialog: TifImportDialog) -> None:
         """Add each file of a batch TIFF import (#643) as its own data group,
-        named after the file, with its movie in the Imaging tab."""
-        added: list[str] = []
+        named after the file, with its movie in the Imaging tab - all as one
+        undoable step."""
+        experiments: list[Experiment] = []
+        videos: list[CalciumVideoSpec] = []
         for item in dialog.batch_imports:
             if item.status != "imported":
                 continue
-            name = self.project.unique_experiment_name(item.path.stem)
-            self.project.add_experiment(Experiment(name, item.duration, [], item.data))
-            self.project.add_calcium_video(
-                [item.path],
-                dialog.imported_fps,
-                name=name,
-                channels=dialog.imported_channels,
-                shown_channel=dialog.imported_functional_channel,
+            name = self.project.unique_experiment_name(
+                item.path.stem, also_taken=[e.name for e in experiments]
             )
-            added.append(name)
-        if added:
+            experiments.append(Experiment(name, item.duration, [], item.data))
+            videos.append(
+                CalciumVideoSpec(
+                    [item.path],
+                    dialog.imported_fps,
+                    name=name,
+                    channels=dialog.imported_channels,
+                    shown_channel=dialog.imported_functional_channel,
+                )
+            )
+        if experiments:
+            self.project.add_experiments(
+                experiments, videos, label="Import calcium imaging files"
+            )
             self.update_project(self.project, preserve_dynamic_input=True)
-            self._select_experiment_data(added[-1])
+            self._select_experiment_data(experiments[-1].name)
 
     def _on_calcium_video_import_requested(
         self, *, paths: list[pathlib.Path] | None = None
@@ -2402,7 +2433,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_channels(channels, shown_channel)
 
+    def _calcium_videos_state(self) -> tuple:
+        """Which movies the project lists and which one is selected."""
+        return (
+            tuple(video["id"] for video in self.project.calcium_videos),
+            self.project.selected_calcium_video_id,
+        )
+
     def _refresh_calcium_video_widgets(self) -> None:
+        self._calcium_videos_shown = self._calcium_videos_state()
         self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_cellpose_data(self.project.cellpose_data)

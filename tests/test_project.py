@@ -1903,3 +1903,126 @@ def test_imaging_acquisition_records_go_through_project_methods() -> None:
     assert project.imaging_acquisitions[0]["status"] == "completed"
     assert project.update_imaging_acquisition("missing", {"status": "x"}) is False
     assert project.imaging_acquisition("missing") is None
+
+
+def test_unique_experiment_name_never_returns_an_invalid_group_name() -> None:
+    project = Project()
+    project.add_experiment(_make_experiment("rec"))
+
+    assert project.unique_experiment_name("Simulation") == "Simulation (2)"
+    assert project.unique_experiment_name("rec") == "rec (2)"
+    assert project.unique_experiment_name("rec", also_taken=["rec (2)"]) == "rec (3)"
+    assert project.unique_experiment_name("a::b") == "a_b"
+    assert project.unique_experiment_name("") == "Data"
+
+
+def test_rename_experiment_uses_the_shared_group_name_rules() -> None:
+    project = Project()
+    project.add_experiment(_make_experiment("rec"))
+
+    for bad, message in [
+        ("Simulation", "already exists"),
+        ("a :: b", "cannot contain '::'"),
+        ("  ", "cannot be empty"),
+    ]:
+        with pytest.raises(ValueError, match=message):
+            project.rename_experiment("rec", bad)
+
+
+def test_add_experiments_with_videos_is_one_undo_step(tmp_path: Path) -> None:
+    from neuroseq.project import CalciumVideoSpec
+
+    project = Project()
+    project.add_calcium_video([tmp_path / "old.tif"], 30.0)
+    old_id = project.selected_calcium_video_id
+
+    project.add_experiments(
+        [_make_experiment("a"), _make_experiment("b")],
+        [
+            CalciumVideoSpec([tmp_path / "a.tif"], 30.0, name="a"),
+            CalciumVideoSpec([tmp_path / "b.tif"], 30.0, name="b", channels=2),
+        ],
+        label="Import files",
+    )
+    assert project.history.undo_label == "Import files"
+    assert [v["name"] for v in project.calcium_videos] == ["old", "a", "b"]
+    added_ids = [v["id"] for v in project.calcium_videos[1:]]
+    # A movie added outside the history in between is left alone by undo.
+    project.add_calcium_video([tmp_path / "later.tif"], 30.0)
+    later_id = project.selected_calcium_video_id
+
+    project.history.undo()
+    assert set(project.experiments) == set()
+    assert [v["name"] for v in project.calcium_videos] == ["old", "later"]
+    assert project.selected_calcium_video_id == later_id
+
+    project.history.redo()
+    assert set(project.experiments) == {"a", "b"}
+    assert [v["id"] for v in project.calcium_videos][2:] == added_ids
+    assert project.selected_calcium_video_id == added_ids[-1]
+    assert project.calcium_videos[-1]["channels"] == 2
+
+    # Undo restores the earlier selection when the selected movie goes away.
+    project.calcium_videos = [v for v in project.calcium_videos if v["id"] != later_id]
+    project.history.undo()
+    assert project.selected_calcium_video_id == old_id
+
+
+def test_add_experiments_rejects_duplicate_names_and_adds_nothing(
+    tmp_path: Path,
+) -> None:
+    from neuroseq.project import CalciumVideoSpec
+
+    project = Project()
+    project.add_experiment(_make_experiment("a"))
+    video = CalciumVideoSpec([tmp_path / "x.tif"], 30.0)
+    for experiments in (
+        [_make_experiment("b"), _make_experiment("a")],
+        [_make_experiment("b"), _make_experiment("b")],
+    ):
+        with pytest.raises(ValueError, match="already exists"):
+            project.add_experiments(experiments, [video])
+    assert set(project.experiments) == {"a"}
+    assert project.calcium_videos == []
+
+
+def test_failed_append_rolls_back_its_movie(tmp_path: Path, monkeypatch) -> None:
+    from neuroseq.project import CalciumVideoSpec
+
+    project = Project()
+    project.add_experiment(_make_experiment("a"))
+    undo_steps = len(project.history)
+
+    def _fail(*_args, **_kwargs):
+        raise RuntimeError("append failed")
+
+    monkeypatch.setattr("neuroseq.project.append_data", _fail)
+    with pytest.raises(RuntimeError):
+        project.append_experimental_data(
+            "a",
+            1.0,
+            [_make_experiment("a").data[0]],
+            0.0,
+            calcium_videos=[CalciumVideoSpec([tmp_path / "x.tif"], 30.0)],
+        )
+    assert project.calcium_videos == []
+    assert project.selected_calcium_video_id is None
+    assert len(project.history) == undo_steps
+
+
+def test_append_with_a_movie_is_one_undo_step(tmp_path: Path) -> None:
+    from neuroseq.project import CalciumVideoSpec
+
+    project = Project()
+    project.add_experiment(_make_experiment("a"))
+    project.append_experimental_data(
+        "a",
+        1.0,
+        [_make_experiment("a").data[0]],
+        None,  # type: ignore[arg-type]
+        calcium_videos=[CalciumVideoSpec([tmp_path / "x.tif"], 30.0, name="x")],
+    )
+    assert [v["name"] for v in project.calcium_videos] == ["x"]
+    project.history.undo()
+    assert project.calcium_videos == []
+    assert project.experiments["a"].duration == pytest.approx(3.7)

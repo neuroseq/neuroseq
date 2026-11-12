@@ -30,6 +30,8 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import Experiment
 from neuroseq.data import TraceData
+from neuroseq.data_names import SIMULATION_GROUP
+from neuroseq.data_names import split_data_name
 from neuroseq.visualization.trace_comparison_dialog import TraceComparisonDialog
 from neuroseq.visualization.trace_comparison_views import ComparisonPopup
 from neuroseq.visualization.trace_comparison_views import ConcatenatedTraceWindow
@@ -163,7 +165,7 @@ def _current_array_name(
             return name
     for name in names:
         if (
-            name.split(" :: ", 1)[0] != "Simulation"
+            split_data_name(name)[0] != SIMULATION_GROUP
             and project.get_data(name, TraceData) is data
         ):
             return name

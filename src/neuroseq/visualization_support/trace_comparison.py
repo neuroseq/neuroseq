@@ -27,6 +27,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from neuroseq.data import TraceData
+from neuroseq.data_names import NAME_SEPARATOR
+from neuroseq.data_names import SIMULATION_GROUP
+from neuroseq.data_names import unique_group_name
 
 # Categorical colours (matplotlib's "tab10"), one per compared array, cycled
 # when more arrays are compared than there are colours.
@@ -42,10 +45,6 @@ ARRAY_COLORS: tuple[str, ...] = (
     "#bcbd22",
     "#17becf",
 )
-
-# Separator between a data group (experiment) and a data set in project data
-# names ("Repeat 1 :: dF/F"); a group name must not contain it.
-NAME_SEPARATOR = " :: "
 
 
 class ComparisonView(enum.Enum):
@@ -90,18 +89,18 @@ def array_color(position: int) -> str:
 def array_labels(names: Sequence[str]) -> list[str]:
     """Distinct, short legend labels for the project data ``names``.
 
-    When every name shares the same data name after ``" :: "`` (typical for
+    When every name shares the same data name after ``NAME_SEPARATOR`` (typical for
     repeats: ``"Repeat 1 :: dF/F"``, ``"Repeat 2 :: dF/F"``) only the
     experiment part differs, so that part alone labels each array. Otherwise
     the full names are used.
     """
-    parts = [name.partition(" :: ") for name in names]
+    parts = [name.partition(NAME_SEPARATOR) for name in names]
     if (
         len(names) > 1
         and all(sep for _, sep, _ in parts)
         and len({data for _, _, data in parts}) == 1
         and len({group for group, _, _ in parts}) == len(names)
-        and not any(group == "Simulation" for group, _, _ in parts)
+        and not any(group == SIMULATION_GROUP for group, _, _ in parts)
     ):
         return [group for group, _, _ in parts]
     return list(names)
@@ -420,7 +419,7 @@ def concatenation_group_name(
     else:
         joined = " + ".join(labels)
     base = f"Concatenated: {joined}" if joined else "Concatenated"
-    return unique_name(base, existing)
+    return unique_group_name(base, existing)
 
 
 def concatenation_data_name(array_names: Sequence[str]) -> str:
@@ -431,29 +430,6 @@ def concatenation_data_name(array_names: Sequence[str]) -> str:
         if name:
             return name
     return "traces"
-
-
-def unique_name(base: str, existing: Iterable[str]) -> str:
-    """``base``, or ``"base (2)"``, ``"base (3)"`` … when already taken."""
-    taken = set(existing)
-    if base not in taken:
-        return base
-    number = 2
-    while f"{base} ({number})" in taken:
-        number += 1
-    return f"{base} ({number})"
-
-
-def group_name_problem(name: str, existing: Iterable[str]) -> str:
-    """Why ``name`` cannot be a new data-group name ('' when it can)."""
-    name = name.strip()
-    if not name:
-        return "Enter a name for the new trace array."
-    if NAME_SEPARATOR.strip() in name:
-        return f"The name must not contain '{NAME_SEPARATOR.strip()}'."
-    if name == "Simulation" or name in set(existing):
-        return f"A data group named '{name}' already exists."
-    return ""
 
 
 # -- Linked axes across windows ---------------------------------------------

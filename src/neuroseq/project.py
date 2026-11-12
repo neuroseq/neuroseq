@@ -13,6 +13,7 @@ import tempfile
 import uuid
 import zipfile
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
@@ -30,6 +31,12 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.data_names import SIMULATION_GROUP
+from neuroseq.data_names import data_name_problem
+from neuroseq.data_names import group_name_problem
+from neuroseq.data_names import split_data_name
+from neuroseq.data_names import unique_group_name
+from neuroseq.data_names import unique_name
 from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import export_settings_from_dict
@@ -56,6 +63,20 @@ from neuroseq.stimulation.stim_timing import validate_stim_dt_seconds
 from neuroseq.utils import append_data
 from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
+
+
+@dataclass(frozen=True)
+class CalciumVideoSpec:
+    """A calcium imaging movie to add with imported data (see
+    :meth:`Project.add_experiments`); the fields are those of
+    :meth:`Project.add_calcium_video`."""
+
+    paths: Sequence[pathlib.Path]
+    fps: float | None
+    name: str | None = None
+    run_id: str | None = None
+    channels: int = 1
+    shown_channel: int = 1
 
 
 class ExternalSimulateFn(Protocol):
@@ -368,30 +389,92 @@ class Project:
 
         return restore
 
+    def _calcium_video_additions_restorer(
+        self,
+    ) -> Callable[[], tuple[Callable[[], None], Callable[[], None]]]:
+        """Track calcium videos added from now on, for undo/redo.
+
+        Call the result after the additions; it returns ``(remove, re_add)``:
+        ``remove`` takes the added videos out again (selecting what was
+        selected before, if still there), ``re_add`` puts the same entries
+        back and selects what was selected after. Videos added or removed
+        by other means in between are left alone.
+        """
+        ids_before = {video["id"] for video in self.calcium_videos}
+        selected_before = self.selected_calcium_video_id
+
+        def finish() -> tuple[Callable[[], None], Callable[[], None]]:
+            added = [v for v in self.calcium_videos if v["id"] not in ids_before]
+            added_ids = {video["id"] for video in added}
+            selected_after = self.selected_calcium_video_id
+
+            def remove() -> None:
+                self.calcium_videos = [
+                    v for v in self.calcium_videos if v["id"] not in added_ids
+                ]
+                ids = {video["id"] for video in self.calcium_videos}
+                if self.selected_calcium_video_id not in ids:
+                    self.selected_calcium_video_id = (
+                        selected_before
+                        if selected_before in ids
+                        else (self.calcium_videos[-1]["id"] if ids else None)
+                    )
+
+            def re_add() -> None:
+                present = {video["id"] for video in self.calcium_videos}
+                self.calcium_videos.extend(v for v in added if v["id"] not in present)
+                if selected_after in {v["id"] for v in self.calcium_videos}:
+                    self.selected_calcium_video_id = selected_after
+
+            return remove, re_add
+
+        return finish
+
     @contextmanager
-    def edit_experiments(self, names: Sequence[str], label: str) -> Iterator[None]:
+    def edit_experiments(
+        self, names: Sequence[str], label: str, *, calcium_videos: bool = False
+    ) -> Iterator[None]:
         """Record the edits made to the named data groups as one undoable command.
 
         Edits inside the block must replace array buffers instead of writing
         into them (see :meth:`_experiment_restorer`). An exception rolls the
-        groups back and records nothing.
+        groups back and records nothing. With ``calcium_videos``, calcium
+        videos added inside the block are part of the same command: removed
+        on undo and restored on redo.
         """
         names = list(dict.fromkeys(names))
         undo = self._experiment_restorer(names)
         before = {name: self.experiments.get(name) for name in names}
         was_dirty = self.dirty
+        finish_videos = (
+            self._calcium_video_additions_restorer() if calcium_videos else None
+        )
         try:
             yield
         except Exception:
             undo(None)
+            if finish_videos is not None:
+                finish_videos()[0]()
             self.dirty = was_dirty
             raise
         else:
             redo = self._experiment_restorer(names)
             after = {name: self.experiments.get(name) for name in names}
-            self.history.record_applied(
-                ProjectCommand(label, lambda: redo(before), lambda: undo(after))
+            remove_videos, re_add_videos = (
+                finish_videos() if finish_videos is not None else (None, None)
             )
+
+            def do() -> None:
+                redo(before)
+                if re_add_videos is not None:
+                    re_add_videos()
+
+            def undo_command() -> None:
+                undo(after)
+                if remove_videos is not None:
+                    remove_videos()
+
+            self.history.record_applied(ProjectCommand(label, do, undo_command))
 
     def set_syscon_export_settings(self, settings: SysconExportSettings | None) -> None:
         """Store the holographic export options used by the SysCon2 panel and routines."""
@@ -437,13 +520,12 @@ class Project:
         else:
             self.import_file_lists.pop(purpose, None)
 
-    def unique_experiment_name(self, base: str) -> str:
-        """``base``, or ``base (2)``, ``base (3)``, ... if a data group of that
-        name already exists."""
-        unique, suffix = base, 2
-        while unique in self.experiments:
-            unique, suffix = f"{base} ({suffix})", suffix + 1
-        return unique
+    def unique_experiment_name(self, base: str, also_taken: Iterable[str] = ()) -> str:
+        """A valid, unused data group name made from ``base``: ``base``, or
+        ``base (2)``, ``base (3)``, ... if taken by a data group or in
+        ``also_taken`` (``"Simulation"`` always is), with ``'::'`` replaced
+        (see ``data_names.unique_group_name``)."""
+        return unique_group_name(base, [*self.experiments, *also_taken])
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
@@ -482,12 +564,10 @@ class Project:
     def validate_data_name(self, name: str) -> str:
         """Return ``name`` stripped, or raise ``ValueError`` if it cannot be used
         as a data group or data set name (it is shown as ``group :: data``)."""
-        name = name.strip()
-        if not name:
-            raise ValueError("The name cannot be empty.")
-        if "::" in name:
-            raise ValueError("The name cannot contain '::'.")
-        return name
+        problem = data_name_problem(name)
+        if problem:
+            raise ValueError(problem)
+        return name.strip()
 
     def rename_experiment(self, name: str, new_name: str) -> None:
         """Rename a data group (keeping its place in the list) as one undoable edit."""
@@ -496,8 +576,9 @@ class Project:
             return
         if name not in self.experiments:
             raise KeyError(f"Data group '{name}' does not exist")
-        if new_name == "Simulation" or new_name in self.experiments:
-            raise ValueError(f"A data group named '{new_name}' already exists.")
+        problem = group_name_problem(new_name, self.experiments)
+        if problem:
+            raise ValueError(problem)
         with self.edit_experiments([name, new_name], "Rename data group"):
             experiment = self.experiments[name]
             experiment.name = new_name
@@ -648,12 +729,13 @@ class Project:
         channels: int = 1,
         shown_channel: int = 1,
     ) -> dict:
-        """Add a video and select it; returns the new entry."""
+        """Add a video and select it; returns the new entry.
+
+        Not recorded in the undo history by itself; to add a video together
+        with its imported data as one undoable step, pass a
+        :class:`CalciumVideoSpec` to :meth:`add_experiments`."""
         base = name or (pathlib.Path(paths[0]).stem if paths else "Imaging")
-        names = {video["name"] for video in self.calcium_videos}
-        unique, suffix = base, 2
-        while unique in names:
-            unique, suffix = f"{base} ({suffix})", suffix + 1
+        unique = unique_name(base, (video["name"] for video in self.calcium_videos))
         video: dict = {
             "id": uuid.uuid4().hex,
             "name": unique,
@@ -669,6 +751,17 @@ class Project:
         self.selected_calcium_video_id = video["id"]
         self.mark_dirty()
         return video
+
+    def _add_calcium_video_specs(self, specs: Sequence[CalciumVideoSpec]) -> None:
+        for spec in specs:
+            self.add_calcium_video(
+                list(spec.paths),
+                spec.fps,
+                name=spec.name,
+                run_id=spec.run_id,
+                channels=spec.channels,
+                shown_channel=spec.shown_channel,
+            )
 
     def relocate_calcium_video(
         self, video_id: str | None, chosen: pathlib.Path
@@ -915,7 +1008,7 @@ class Project:
     def get_full_resolution_trace(self, name: str) -> TraceData | None:
         """Like ``get_data(name, TraceData)``, but a simulated trace is not
         downsampled to the plotting RAM limit (for exporting it)."""
-        if name.split(" :: ", 1)[0] == "Simulation":
+        if split_data_name(name)[0] == SIMULATION_GROUP:
             return self._clip_trace_to_timeline(
                 self.b2_model.get_simulation_trace_data(name)
             )
@@ -923,8 +1016,8 @@ class Project:
 
     def data_duration_seconds(self, name: str) -> float:
         """Duration of the data group (or simulation) holding the data ``name``."""
-        group = name.split(" :: ", 1)[0]
-        if group == "Simulation":
+        group = split_data_name(name)[0]
+        if group == SIMULATION_GROUP:
             return float(self.b2_model.get_sim_time_secs())
         experiment = self.experiments.get(group)
         return float(experiment.duration) if experiment is not None else 0.0
@@ -1191,6 +1284,7 @@ class Project:
         duration_seconds: float,
         new_data: Sequence[TraceData | SpikeData | SynapseData],
         time_offset_seconds: float,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
     ):
         """
         Append new experimental data to an existing experiment
@@ -1205,6 +1299,8 @@ class Project:
             List of data objects to append to the experiment
         time_offset_seconds : float
             Time in seconds at which to insert the new data.
+        calcium_videos : Sequence[CalciumVideoSpec]
+            Movies to add (and select) in the same undoable edit
         """
         if experiment_name not in self.experiments:
             self.logger.warning(
@@ -1214,7 +1310,12 @@ class Project:
         self.logger.info(
             f"Appending experimental data to experiment '{experiment_name}'"
         )
-        with self.edit_experiments([experiment_name], "Append experimental data"):
+        with self.edit_experiments(
+            [experiment_name],
+            "Append experimental data",
+            calcium_videos=bool(calcium_videos),
+        ):
+            self._add_calcium_video_specs(calcium_videos)
             existing_experiment = self.experiments[experiment_name]
             if time_offset_seconds is None:
                 time_offset_seconds = existing_experiment.duration
@@ -1306,32 +1407,56 @@ class Project:
     def add_experiment(
         self,
         experiment: Experiment,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
     ):
         """
-        Add a new experiment to the model
+        Add a new experiment to the model as one undoable edit
 
         Parameters
         ----------
         experiment : Experiment
             Experiment object to add
+        calcium_videos : Sequence[CalciumVideoSpec]
+            Movies to add (and select) in the same undoable edit
 
         Raises
         ------
         ValueError
             If an experiment with the same name already exists
         """
-        self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        if experiment.name in self.experiments:
-            self.logger.warning(
-                f"Add requested but experiment '{experiment.name}' already exists"
-            )
-            raise ValueError(f"Experiment '{experiment.name}' already exists")
-        self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        with self.edit_experiments([experiment.name], "Add data group"):
-            for t in [0.0, experiment.duration]:
-                if t not in experiment.timepoints:
-                    experiment.timepoints.append(t)
-            self.experiments[experiment.name] = experiment
+        self.add_experiments([experiment], calcium_videos, label="Add data group")
+
+    def add_experiments(
+        self,
+        experiments: Sequence[Experiment],
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
+        label: str = "Add data groups",
+    ) -> None:
+        """Add several data groups, and their calcium videos, as one undoable
+        edit (e.g. a batch import): undo removes them all, movies included.
+
+        Raises ``ValueError`` (adding nothing) if a name is already used, by an
+        existing group or twice among ``experiments``.
+        """
+        names = [experiment.name for experiment in experiments]
+        for name in names:
+            if name in self.experiments or names.count(name) > 1:
+                self.logger.warning(
+                    f"Add requested but experiment '{name}' already exists"
+                )
+                raise ValueError(f"Experiment '{name}' already exists")
+        if not experiments and not calcium_videos:
+            return
+        with self.edit_experiments(names, label, calcium_videos=bool(calcium_videos)):
+            for experiment in experiments:
+                self.logger.info(
+                    f"Adding experimental data for experiment '{experiment.name}'"
+                )
+                for t in [0.0, experiment.duration]:
+                    if t not in experiment.timepoints:
+                        experiment.timepoints.append(t)
+                self.experiments[experiment.name] = experiment
+            self._add_calcium_video_specs(calcium_videos)
             self.update_limits()
             self.mark_dirty()
 

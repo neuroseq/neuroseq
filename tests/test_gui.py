@@ -1745,7 +1745,9 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
             self.spatial_footprint_widget = SimpleNamespace()
             self.import_folders = None
 
-        def _append_experimental_data(self, experiment: Experiment) -> None:
+        def _append_experimental_data(
+            self, experiment: Experiment, *_videos: Any
+        ) -> None:
             appended.append(experiment)
 
         def _apply_cellpose_import_result(
@@ -1772,7 +1774,8 @@ def test_batch_tif_import_adds_one_data_group_per_file(
     qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
     """#643: each imported file becomes its own data group (named after the
-    file, made unique) with its own movie; failed files add nothing."""
+    file, made unique and valid) with its own movie; failed files add
+    nothing. The whole batch, movies included, is one undo step."""
     from neuroseq.importers.tif_import_dialog import TifBatchImport
 
     def _trace() -> TraceData:
@@ -1797,6 +1800,9 @@ def test_batch_tif_import_adds_one_data_group_per_file(
             TifBatchImport(tmp_path / "a.tif", "imported", [_trace()], 1.0),
             TifBatchImport(tmp_path / "b.tif", "failed", message="bad"),
             TifBatchImport(tmp_path / "sub" / "a.tif", "imported", [_trace()], 1.0),
+            # "Simulation" is reserved and "::" splits data names.
+            TifBatchImport(tmp_path / "Simulation.tif", "imported", [_trace()], 1.0),
+            TifBatchImport(tmp_path / "x::y.tif", "imported", [_trace()], 1.0),
         ]
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1815,13 +1821,104 @@ def test_batch_tif_import_adds_one_data_group_per_file(
     gui.btn_import_tif_clicked()
 
     added = set(gui.project.experiments) - before
-    assert added == {"a", "a (2)"}
+    assert added == {"a", "a (2)", "Simulation (2)", "x_y"}
     videos = {video["name"]: video["paths"] for video in gui.project.calcium_videos}
     assert videos["a"] == [str(tmp_path / "a.tif")]
     assert videos["a (2)"] == [str(tmp_path / "sub" / "a.tif")]
-    assert gui.cmb_trace.currentText().startswith("a (2) ::")
+    assert gui.cmb_trace.currentText().startswith("x_y ::")
+    assert gui.project.get_data(
+        "Simulation (2) :: Simply averaged ROI traces", TraceData
+    )
+    assert gui.cmb_video.count() == 4
+
     gui.project.history.undo()
-    assert set(gui.project.experiments) - before == {"a"}
+    assert set(gui.project.experiments) == before
+    assert gui.project.calcium_videos == []
+    assert gui.project.selected_calcium_video_id is None
+    assert gui.cmb_video.itemData(0) is None  # "No imaging data"
+
+    gui.project.history.redo()
+    assert set(gui.project.experiments) - before == added
+    assert [video["name"] for video in gui.project.calcium_videos] == [
+        "a",
+        "a (2)",
+        "Simulation (2)",
+        "x_y",
+    ]
+    assert gui.cmb_video.count() == 4
+    assert gui.cmb_video.currentData() == gui.project.calcium_videos[-1]["id"]
+
+
+def test_single_tif_import_adds_its_movie_in_the_same_undo_step(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Undoing a TIFF import also removes its movie; redo brings it back.
+    Cancelling the add-data dialog adds neither."""
+    trace = TraceData(
+        "Simply averaged ROI traces",
+        np.zeros((2, 30), dtype=np.float32),
+        np.arange(2, dtype=np.uint32),
+        "fluorescence",
+        1 / 30.0,
+    )
+
+    class _FakeDialog:
+        experiment_name = "rec"
+        experiment_duration = 1.0
+        imported_data = [trace]
+        new_cellpose_result = None
+        imported_tif_paths = [tmp_path / "rec.tif"]
+        imported_fps = 30.0
+        imported_channels = 1
+        imported_functional_channel = 1
+        batch_imports: list[Any] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    accept = {"value": True}
+
+    class _FakeAddDialog:
+        append_to_experiment = False
+
+        def __init__(self, experiment: Experiment, *args: Any, **kwargs: Any) -> None:
+            self.experiment = experiment
+
+        def exec(self) -> bool:
+            return accept["value"]
+
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
+    monkeypatch.setattr(
+        "neuroseq.project_workspace.AddExperimentDataDialog", _FakeAddDialog
+    )
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+
+    accept["value"] = False
+    gui.btn_import_tif_clicked()
+    assert "rec" not in gui.project.experiments
+    assert gui.project.calcium_videos == []
+
+    accept["value"] = True
+    gui.btn_import_tif_clicked()
+    assert "rec" in gui.project.experiments
+    assert [video["name"] for video in gui.project.calcium_videos] == ["rec"]
+    assert gui.project.history.undo_label == "Add data group"
+
+    gui.project.history.undo()
+    assert "rec" not in gui.project.experiments
+    assert gui.project.calcium_videos == []
+    assert gui.cmb_video.itemData(0) is None
+
+    gui.project.history.redo()
+    assert "rec" in gui.project.experiments
+    assert [video["name"] for video in gui.project.calcium_videos] == ["rec"]
+    assert gui.cmb_video.currentData() == gui.project.calcium_videos[0]["id"]
 
 
 def test_spatial_footprint_empty_button_opens_cellpose_import(

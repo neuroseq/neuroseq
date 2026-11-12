@@ -4,6 +4,8 @@ import numpy as np
 import pytest
 
 from neuroseq.data import TraceData
+from neuroseq.data_names import group_name_problem
+from neuroseq.data_names import unique_name
 from neuroseq.visualization_support.trace_comparison import ARRAY_COLORS
 from neuroseq.visualization_support.trace_comparison import TIME_AXIS
 from neuroseq.visualization_support.trace_comparison import VALUE_AXIS
@@ -16,11 +18,9 @@ from neuroseq.visualization_support.trace_comparison import cascade_offsets
 from neuroseq.visualization_support.trace_comparison import concatenation_data_name
 from neuroseq.visualization_support.trace_comparison import concatenation_group_name
 from neuroseq.visualization_support.trace_comparison import format_neuron_ids
-from neuroseq.visualization_support.trace_comparison import group_name_problem
 from neuroseq.visualization_support.trace_comparison import parse_neuron_ids
 from neuroseq.visualization_support.trace_comparison import shared_dt
 from neuroseq.visualization_support.trace_comparison import time_axis_ms
-from neuroseq.visualization_support.trace_comparison import unique_name
 
 
 def _trace(name: str, ids, n_samples: int, dt: float, units: str = "dF/F"):
@@ -232,8 +232,9 @@ def test_concatenation_names() -> None:
 
 def test_group_name_problem() -> None:
     assert group_name_problem("New", ["Old"]) == ""
-    assert "Enter a name" in group_name_problem("  ", [])
-    assert "must not contain" in group_name_problem("A :: b", [])
+    assert "cannot be empty" in group_name_problem("  ", [])
+    assert "cannot contain '::'" in group_name_problem("A :: b", [])
+    assert "cannot contain '::'" in group_name_problem("A::b", [])
     assert "already exists" in group_name_problem("Old", ["Old"])
     assert "already exists" in group_name_problem("Simulation", [])
 
