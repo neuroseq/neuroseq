@@ -699,5 +699,10 @@ class StimWidget(TimeseriesWidget):
             first, last = best_span
             start_ms = first * best_dt_ms
             end_ms = (last + 1) * best_dt_ms
-            text += f"\nStart: {start_ms:.6g} ms\nEnd: {end_ms:.6g} ms"
-        self.text.set_pos(self.mouse_pos, text)
+            text += (
+                f"\nStart: {self.format_time_readout(start_ms)}"
+                f"\nEnd: {self.format_time_readout(end_ms)}"
+            )
+        self.text.set_pos(
+            self.mouse_pos, text, self.format_time_readout(float(self.mouse_pos[0]))
+        )

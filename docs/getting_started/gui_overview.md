@@ -90,7 +90,11 @@ controls) and the Imaging tab's data selector.
 - Pan: scrollbars, mouse wheel (vertical) or middle-button drag. Panels are
   linked by default.
 - Zoom: **+**/**−** buttons, `Ctrl`+wheel (time), `Shift`+wheel (neurons).
-- **Toggle Selection Text** hides the coordinate label at the cursor.
+- **Toggle Selection Text** hides the coordinate label at the cursor. The label
+  shows the neuron and its value at the cursor time (traces: the nearest
+  sample, with that sample's time). Times on the axis, the label and selections
+  use seconds when 2 s or more are visible and milliseconds otherwise, with more
+  decimals the further you zoom in.
 - **Toggle Grid** shows a time/neuron grid on the input editor, spaced by the
   array's `dt`.
 - Right-click the traces for **Normalization…** (percent scale, Center median,

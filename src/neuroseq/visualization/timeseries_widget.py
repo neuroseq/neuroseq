@@ -18,7 +18,6 @@ from neuroseq.analysis_plugins import discover_analysis_plugins
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
-from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.utils import InteractMode
 from neuroseq.utils import add_action
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
@@ -29,6 +28,7 @@ from neuroseq.visualization_support.constrained_pan_zoom_controller import (
 from neuroseq.visualization_support.gridlines import GridLines
 from neuroseq.visualization_support.neuron_subset_dialog import NeuronSubsetDialog
 from neuroseq.visualization_support.region_of_interest import RegionOfInterest
+from neuroseq.visualization_support.time_format import format_time_ms
 
 
 class Text(Graphic):
@@ -50,11 +50,12 @@ class Text(Graphic):
         # the widget on each pointer move.
         self.room_right_px: float | None = None
 
-    def set_pos(self, pos: np.ndarray, additional_text: str):
+    def set_pos(self, pos: np.ndarray, additional_text: str, time_text: str):
         # `additional_text` carries the neuron label itself (real id, not the raw
         # display-row position `pos[1]`) - callers know the real id after any
-        # display-row translation, this class doesn't.
-        text = f"{int(pos[0])}ms\n{additional_text}"
+        # display-row translation, this class doesn't. `time_text` is the
+        # already formatted time (see TimeseriesWidget.format_time_readout()).
+        text = f"{time_text}\n{additional_text}"
         self.text.world.position = (pos[0], pos[1], 200)
         self.text.set_text(text)
         # Near the right border the text would be cut off, so show it on the
@@ -699,8 +700,10 @@ class TimeseriesWidget(FPLWidget):
         self.subplot.axes.x.points.visible = False
         self.subplot.axes.x.line.visible = False
         self.subplot.axes.x.min_tick_distance = 100
-        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: (
-            f"{format_milliseconds(x)}ms"
+        # Unit and decimals follow the visible range (#661): seconds with
+        # few decimals zoomed out, milliseconds zoomed in on single pulses.
+        self.subplot.axes.x.tick_format = lambda x, x_min, x_max: format_time_ms(
+            x, x_max - x_min, strip_zeros=True
         )
         # Push axes (incl. tick labels) above gridline z=199 so labels render on top.
         self.subplot.axes.world_object.world.z = 300
@@ -873,6 +876,32 @@ class TimeseriesWidget(FPLWidget):
     def set_time_ms(self, time_ms: int) -> None:
         self.timeline.t = time_ms
 
+    def visible_time_span_ms(self) -> float:
+        """Width of the visible time range in ms (whole recording if unknown)."""
+        if isinstance(self.controller, ConstrainedPanZoomController):
+            time_range = self.controller.current_time_range()
+            if time_range is not None and time_range[1] > time_range[0]:
+                return (time_range[1] - time_range[0]) * 1000.0
+        return float(self.n_timestamps) * float(self.dt_ms)
+
+    def format_time_readout(self, time_ms: float) -> str:
+        """Format a time readout with precision adapted to the current zoom."""
+        return format_time_ms(time_ms, self.visible_time_span_ms())
+
+    def _hover_time_index(self, x_ms: float, n_samples: int) -> int:
+        """Sample shown in the hover readout for pointer time ``x_ms``.
+
+        Image-like views (stim arrays) draw sample ``i`` over
+        ``[i * dt, (i + 1) * dt)``, so the cell under the pointer is the
+        floor. TraceWidget draws samples as line vertices and overrides this
+        to pick the nearest vertex instead.
+        """
+        return int(np.clip(math.floor(x_ms / self.dt_ms), 0, n_samples - 1))
+
+    def _hover_time_ms(self, x_ms: float, time_index: int) -> float:
+        """Time shown in the hover readout: the pointer's own time here."""
+        return x_ms
+
     def pointer_down(self, ev: pygfx.PointerEvent) -> None:
         self.mouse_press_pos = self.subplot.map_screen_to_world(ev)
         self.mouse_pos = self.mouse_press_pos
@@ -947,13 +976,13 @@ class TimeseriesWidget(FPLWidget):
         self.logger.debug(f"pointer_move at {self.mouse_pos} in mode {self.mode}")
         self.text.visible = self.show_text
         hover_value_text = ""
+        hover_time_ms = float(self.mouse_pos[0])
         hovered_neuron_id: int | None = None
         if self.data_values is not None and self._visible_neuron_ids:
-            time_index = np.clip(
-                math.floor(self.mouse_pos[0] / self.dt_ms),
-                0,
-                self.data_values.shape[0] - 1,
+            time_index = self._hover_time_index(
+                float(self.mouse_pos[0]), self.data_values.shape[0]
             )
+            hover_time_ms = self._hover_time_ms(float(self.mouse_pos[0]), time_index)
             display_row = self._display_row_for_mouse_y(self.mouse_pos[1])
             neuron_id = self._visible_neuron_ids[display_row]
             hovered_neuron_id = neuron_id
@@ -967,9 +996,13 @@ class TimeseriesWidget(FPLWidget):
                 hover_value = (
                     self.data_values[time_index, column] * self.data_values_scale
                 )
-                hover_value_text += f"\n{hover_value:.3g} {self.units}"
+                # .5g: enough digits to tell neighbouring samples of a
+                # fluorescence trace (values in the thousands) apart.
+                hover_value_text += f"\n{hover_value:.5g} {self.units}"
         self._set_hovered_neuron_id(hovered_neuron_id)
-        self.text.set_pos(self.mouse_pos, hover_value_text)
+        self.text.set_pos(
+            self.mouse_pos, hover_value_text, self.format_time_readout(hover_time_ms)
+        )
         if self.hover_slice_graphic is not None:
             self.hover_slice_graphic.visible = True
             self._position_hover_slice()
@@ -1095,6 +1128,7 @@ class TimeseriesWidget(FPLWidget):
             time_index_slice,
             self.dt_ms,
             label_neuron_range=(real_start, real_stop),
+            span_ms=self.visible_time_span_ms(),
         )
         self.selected_time_slice = time_index_slice
         self.selected_neuron_slice = slice(real_start, real_stop)

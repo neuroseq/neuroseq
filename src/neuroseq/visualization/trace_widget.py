@@ -459,6 +459,18 @@ class TraceWidget(TimeseriesWidget):
             return self._row_centers[display_row]
         return float(display_row)
 
+    def _hover_time_index(self, x_ms: float, n_samples: int) -> int:
+        # Samples are line vertices at i * dt, so read the vertex nearest the
+        # pointer. Flooring (right for image cells) reported the previous
+        # sample for the whole interval left of each vertex, so once zoomed
+        # in the pointer resting on a transient's peak showed the sample
+        # before it (#576).
+        return int(np.clip(math.floor(x_ms / self.dt_ms + 0.5), 0, n_samples - 1))
+
+    def _hover_time_ms(self, x_ms: float, time_index: int) -> float:
+        # Show the time of the sample whose value is shown, not the pointer's.
+        return time_index * self.dt_ms
+
     def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
         super().set_limits(max_time_secs, max_neurons)
         if (
