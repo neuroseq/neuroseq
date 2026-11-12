@@ -86,6 +86,7 @@ gui.py                        — application shell; hosts one ProjectWorkspace 
 project_workspace.py          — per-tab workspace: menus/toolbars, action wiring, pane management
 background_jobs.py            — worker threads and lifecycle for long-running main-window jobs
 project_history.py            — Qt-free session undo/redo shared by a project's data editors
+data_names.py                 — Qt-free naming rules for data groups/data sets (" :: ", reserved "Simulation", unique names)
 qt_helpers.py                 — shared generic Qt widgets / window helpers
 io.py                         — .nseq archive persistence (ZIP + JSON + .npy blobs)
 ```
