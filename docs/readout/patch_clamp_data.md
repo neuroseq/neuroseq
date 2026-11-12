@@ -9,7 +9,7 @@ Patch-clamp waveforms come in through two menu entries:
 
 | Menu                                          | Imports                                                         | Into                        |
 | --------------------------------------------- | --------------------------------------------------------------- | --------------------------- |
-| **File → Import data → Input → Patch Clamp**  | Command waveforms (stimuli)                                     | Input arrays                |
+| **File → Import data → Input → Patch Clamp**  | Command waveforms (input)                                       | Input arrays                |
 | **File → Import data → Output → Patch Clamp** | Recordings (voltage in current clamp, current in voltage clamp) | Trace data (and spike data) |
 
 ## File formats

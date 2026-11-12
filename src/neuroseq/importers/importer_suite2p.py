@@ -123,7 +123,7 @@ def _resolve_suite2p_indices(
     ]
     if len(set(stim_ids)) != len(stim_ids):
         raise ValueError(
-            "Resolved stimulus IDs are not unique; check stimulus_to_cellpose_mapping for collisions"
+            "Resolved input IDs are not unique; check stimulus_to_cellpose_mapping for collisions"
         )
     return np.asarray(stim_ids, dtype=np.uint32)
 

@@ -9,7 +9,7 @@ and published at <https://neuroseq.github.io/>. Navigation is in `zensical.toml`
 | ----------------------- | ------------------------------------------------------ |
 | `docs/getting_started/` | Installation, quickstart, GUI overview, chat assistant |
 | `docs/networks/`        | Simulators, external backends, hardware substrates     |
-| `docs/input_design/`    | Static and dynamic stimulus design, export             |
+| `docs/input_design/`    | Static and dynamic input design, export                |
 | `docs/readout/`         | Experiments, imported imaging and patch-clamp data     |
 | `docs/data_analysis/`   | Analyses, plugins, simulation vs. experiment           |
 | `docs/developer/`       | This guide                                             |

@@ -40,14 +40,14 @@ def ensure_2d_stim_values(values: np.ndarray) -> np.ndarray:
     if values.ndim == 1:
         return values[:, np.newaxis]
     if values.ndim != 2:
-        raise ValueError("Stimulus arrays must be 2-dimensional.")
+        raise ValueError("Input arrays must be 2-dimensional.")
     return values
 
 
 def validate_stim_dt_seconds(dt_seconds: float | int) -> float:
     dt = float(dt_seconds)
     if not math.isfinite(dt) or dt <= 0.0:
-        raise ValueError("Stimulus timestep must be a positive finite number.")
+        raise ValueError("Input timestep must be a positive finite number.")
     return dt
 
 
@@ -167,7 +167,7 @@ def remap_stim_values_to_dt(
 ) -> np.ndarray:
     values = np.asarray(values)
     if values.ndim != 2 and not stim_dt_matches(old_dt_seconds, new_dt_seconds):
-        raise ValueError("Stimulus arrays must be 2-dimensional to be remapped.")
+        raise ValueError("Input arrays must be 2-dimensional to be remapped.")
     return resample_zero_order_hold(values, old_dt_seconds, new_dt_seconds)
 
 

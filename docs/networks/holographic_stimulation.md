@@ -53,8 +53,8 @@ recovery, 300 ms post-pulse window, **Fixed duration, varying amplitude**, 3
 repeats per probe. Each target keeps its own values. With deconvolved spikes, a
 spike in the frame after the window still counts.
 
-If the input array already holds stimuli, **Start** offers **Clear and start
-over**, **Continue after last stimulus**, or **Start in new arrays** (new empty
+If the input array already holds input, **Start** offers **Clear and start
+over**, **Continue after last input**, or **Start in new arrays** (new empty
 array and data group named after the run, e.g.
 `Exc_stimulation rheobase_2026-10-22_143012`).
 

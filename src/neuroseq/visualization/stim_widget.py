@@ -194,7 +194,7 @@ class StimWidget(TimeseriesWidget):
         self.preview_action.setEnabled(False)
         self.preview_action.triggered.connect(self.preview_stimuli)
         self._stim_name = ""
-        self.subplot.title = "Stimuli"
+        self.subplot.title = "Input"
         self.hover_slice_graphic: fpl.Graphic | None = None
         self._hover_pos_cache: tuple[int, float, float] | None = None
         self.vmin = 0.0
@@ -397,7 +397,7 @@ class StimWidget(TimeseriesWidget):
 
         dialog = QtWidgets.QDialog(self)
         dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
-        dialog.setWindowTitle(f"Stimulus preview: {self._stim_name}")
+        dialog.setWindowTitle(f"Input preview: {self._stim_name}")
         dialog.resize(1000, 650)
         layout = QtWidgets.QVBoxLayout(dialog)
         figure = Figure(layout="tight", facecolor="none")

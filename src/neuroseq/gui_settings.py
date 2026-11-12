@@ -260,11 +260,11 @@ class GuiSettings:
             try:
                 self.__dict__["stim_padding_secs"] = max(0, int(stim_padding_secs))
                 self.logger.info(
-                    f"Loaded stimulus padding from config file {config_file}: {stim_padding_secs}"
+                    f"Loaded input padding from config file {config_file}: {stim_padding_secs}"
                 )
             except ValueError:
                 self.logger.warning(
-                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 0 s"
+                    f"Invalid input padding in config file {config_file}: {stim_padding_secs}. Restoring default of 0 s"
                 )
                 self.__dict__["stim_padding_secs"] = 0
             if theme in theme_module.THEMES:

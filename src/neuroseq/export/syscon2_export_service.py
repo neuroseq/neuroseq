@@ -255,7 +255,7 @@ def export_stim_array(
         raise SysconExportError(
             "No Cellpose ROI is mapped to neuron(s) "
             + ", ".join(str(idx) for idx in unmapped)
-            + ": check the segmentation and its stimulus mapping."
+            + ": check the segmentation and its input mapping."
         )
     warnings = list(sanity.warnings)
     lut = _power_lut(project, settings.laser_wavelength_nm)

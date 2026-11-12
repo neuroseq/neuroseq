@@ -1020,7 +1020,7 @@ class SysCon2Panel(QtWidgets.QWidget):
         the generated sequence to connected hardware."""
         if self._project is None:
             QtWidgets.QMessageBox.warning(
-                self, "No project", "No active project to export a stimulus from."
+                self, "No project", "No active project to export an input array from."
             )
             return
         current = self._current_stim_provider() if self._current_stim_provider else None
@@ -1083,7 +1083,7 @@ class SysCon2Panel(QtWidgets.QWidget):
     def _on_export_current_clicked(self) -> None:
         if self._project is None:
             QtWidgets.QMessageBox.warning(
-                self, "No project", "No active project to export a stimulus from."
+                self, "No project", "No active project to export an input array from."
             )
             return
         if self._export_settings is None:

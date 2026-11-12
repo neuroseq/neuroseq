@@ -2817,9 +2817,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 f"Could not parse padding '{new_padding_secs}' as a number",
             )
             return
-        self.logger.info(
-            f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
-        )
+        self.logger.info(f"Setting input padding to {self.settings.stim_padding_secs}s")
 
     def apply_theme(self, theme: str) -> None:
         """Apply a light/dark/retro theme to the whole application and all plots."""

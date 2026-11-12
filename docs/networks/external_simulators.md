@@ -31,6 +31,6 @@ The returned `Experiment` may hold trace, spike, synapse or other supported data
 
 A file that fails to load clears the connection. A failing run shows
 **External Simulation error**; typical causes are a missing entry point, a
-stimulus name the simulator expects but the project lacks, or an exception in
+input array name the simulator expects but the project lacks, or an exception in
 the backend. To write a simulator, see
 [Custom simulators](../developer/custom_simulators.md).

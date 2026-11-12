@@ -11,6 +11,22 @@ Input arrays have one row per neuron. On biological networks, neuron ID matching
 links each row to a real cell through a Cellpose segmentation
 (**File → Cell segmentation**, _ID Mapping Options_).
 
+## Terminology
+
+- **Import**: loading files of any kind into a project. **File → Import data**
+  has an **Input** submenu (e.g. SysCon2 `.seq`, patch-clamp command waveforms)
+  and an **Output** submenu (calcium imaging, patch-clamp recordings).
+- **Input**: the arrays that drive the network, one row per neuron (input
+  arrays, shown in the **Input** panel and chosen with the **Input data**
+  selector). They are designed with static or dynamic input design and
+  imported or exported as files.
+- **Output**: what is read out from the network: traces, spikes and synapses,
+  simulated or recorded (selected with **Neuron data**, **Spike data**,
+  **Synapse data**).
+- **Stimulation**: the physical delivery of input on a rig, e.g. holographic
+  optogenetic stimulation through SysCon2, configured in the **Stimulation
+  setup** pane. A stimulation artefact is laser light picked up by the imaging.
+
 ## Supported substrates
 
 These are the integrations in use today. They are starting points for new

@@ -656,7 +656,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                     raise ValueError("Input name cannot be empty")
                 if stim_name in self.project.stim_arrays:
                     raise ValueError(
-                        f"An input data entity named '{stim_name}' already exists"
+                        f"An input array named '{stim_name}' already exists"
                     )
                 stim_array = create_stim_array_from_igor_wave(
                     prepared_wave,
@@ -683,7 +683,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
             else:
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
-                    raise ValueError("No target input data entity selected")
+                    raise ValueError("No target input array selected")
                 remapped_target_dt = False
                 resampled_wave = False
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):

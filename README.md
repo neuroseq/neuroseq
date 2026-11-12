@@ -4,7 +4,7 @@
 [![PyPI](https://img.shields.io/pypi/v/neuroseq)](https://pypi.org/project/neuroseq/)
 [![Docs](https://img.shields.io/badge/docs-neuroseq.github.io-blue)](https://neuroseq.github.io/)
 
-NeuroSeq controls the input to a neural network and reads out its output, whether the network is simulated, biological or neuromorphic. The same stimulation protocol and the same analysis run on all three.
+NeuroSeq controls the input to a neural network and reads out its output, whether the network is simulated, biological or neuromorphic. The same input protocol and the same analysis run on all three.
 
 | Network      | Input                                                             | Readout                                     |
 | ------------ | ----------------------------------------------------------------- | ------------------------------------------- |
@@ -26,9 +26,9 @@ This lets you:
 
 ## Features
 
-- **Input design**: draw, paste or script stimulus arrays (static input), or run interactive routines that choose the next stimulus from the last response (dynamic input, e.g. rheobase search, STDP tuning).
+- **Input design**: draw, paste or script input arrays (static input), or run interactive routines that choose the next input from the last response (dynamic input, e.g. rheobase search, STDP tuning).
 - **Neuron ID matching**: links input rows to real cells via Cellpose segmentation.
-- **Delivery**: Brian2, external simulators, SysCon2 `.seq` scripts, ScanImage acquisition, BrainScaleS-2, patch clamp stimulus export.
+- **Delivery**: Brian2, external simulators, SysCon2 `.seq` scripts, ScanImage acquisition, BrainScaleS-2, patch clamp input export.
 - **Readout and analysis**: import imaging (Cellpose + suite2p), Igor2 and patch clamp data; compare with simulations; extend with analysis plugins.
 - **Embedded Python console** and an experimental LLM assistant.
 
@@ -49,7 +49,7 @@ See the [installation guide](https://neuroseq.github.io/getting_started/installa
 
 ## Contributing
 
-Extensions go in as plugins where possible: new network backends, analysis methods and stimulation protocols. They need no core changes and get a lighter review. Changes to the core architecture should be discussed with the core developers first.
+Extensions go in as plugins where possible: new network backends, analysis methods and input protocols. They need no core changes and get a lighter review. Changes to the core architecture should be discussed with the core developers first.
 
 - Bugs and feature requests: [GitHub issues](https://github.com/neuroseq/neuroseq/issues)
 - Code: fork, branch, open a pull request. See the [contributing guide](https://neuroseq.github.io/developer/contributing/).

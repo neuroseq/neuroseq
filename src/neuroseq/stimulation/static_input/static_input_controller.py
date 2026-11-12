@@ -32,7 +32,7 @@ class StaticInputController(QtCore.QObject):
 
     def _current_pattern_context(self) -> StimPatternContext:
         if self.editor.current_stim_modifier is None:
-            raise ValueError("No current stim array selected.")
+            raise ValueError("No current input array selected.")
         stim_array = self.editor.current_stim_modifier.stim_array
         return StimPatternContext(
             stim_name=stim_array.name,

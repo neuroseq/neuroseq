@@ -115,7 +115,7 @@ class CalciumVideoWidget(FPLWidget):
         # actions, rather than a separate row above the canvas, so this tab
         # matches the Cell segmentation tab's shape (content, then one fixed
         # bottom bar) and switching between them doesn't shift anything.
-        actions.addWidget(QtWidgets.QLabel("Stim source:"))
+        actions.addWidget(QtWidgets.QLabel("Input source:"))
         actions.addWidget(self.stim_combo)
         actions.addWidget(self.channel_controls)
         actions.addWidget(self.ids_checkbox)
@@ -492,8 +492,8 @@ class CalciumVideoWidget(FPLWidget):
             if not self._stim_warning_shown:
                 QtWidgets.QMessageBox.warning(
                     self,
-                    "Stimulation data unavailable",
-                    "The selected stimulation source is empty. The imaging data will "
+                    "Input data unavailable",
+                    "The selected input array is empty. The imaging data will "
                     "continue to play without stimulation crosses.",
                 )
                 self._stim_warning_shown = True

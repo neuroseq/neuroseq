@@ -26,7 +26,7 @@ select again and run a follow-up analysis.
 | Replay MSE (cycle vs reference)          | MSE and correlation of replay cycles against the first selected cycle.          |
 | ELiSe target MSE / ELiSe learning curves | ELiSe model metrics.                                                            |
 
-For the **ELISE Sequence Learning Network** example, the stimulation editor
+For the **ELISE Sequence Learning Network** example, the input editor
 toolbar also shows **Analyse ELiSe Replay (target MSE)** (replay MSE and
 correlation of `firing_rate_r` against the teaching pattern from `opsin_exc`,
 saved as `.csv`) and **Run ELiSe Protocol (learning curves)**. They are enabled

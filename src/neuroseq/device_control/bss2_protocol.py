@@ -294,7 +294,7 @@ def stim_to_spike_times(
             arr = arr[:, None]
         stim_dt_s = float(dt)
         if stim_dt_s <= 0:
-            raise ValueError("Stim dt must be > 0")
+            raise ValueError("Input dt must be > 0")
         bins = np.minimum((slot_times_s / stim_dt_s).astype(np.int64), arr.shape[0] - 1)
         summed += channels_to_neurons(arr[bins], n_neurons)
 
@@ -307,7 +307,7 @@ def resolve_neuron_count(
 ) -> tuple[int, list[str]]:
     """The number of driven hardware neurons, plus warnings about the mapping."""
     if n_channels < 1:
-        raise ValueError("The stim array has no channels")
+        raise ValueError("The input array has no channels")
     warnings: list[str] = []
     requested = int(settings.n_neurons) if settings.n_neurons > 0 else n_channels
     n_neurons = min(requested, int(settings.max_neurons))
@@ -318,12 +318,12 @@ def resolve_neuron_count(
         )
     if n_channels > n_neurons:
         warnings.append(
-            f"The stim array has {n_channels} channels; only the first {n_neurons} "
+            f"The input array has {n_channels} channels; only the first {n_neurons} "
             "are delivered."
         )
     elif n_channels < n_neurons and n_channels > 1:
         warnings.append(
-            f"The stim array has {n_channels} channels; neurons {n_channels}-"
+            f"The input array has {n_channels} channels; neurons {n_channels}-"
             f"{n_neurons - 1} receive no input."
         )
     return n_neurons, warnings
@@ -381,9 +381,9 @@ def plan_constant_current(
     if values.ndim == 1:
         values = values[:, None]
     if values.ndim != 2 or values.shape[0] == 0:
-        raise ValueError("The stim array is empty")
+        raise ValueError("The input array is empty")
     if not float(dt) > 0:
-        raise ValueError("Stim dt must be > 0")
+        raise ValueError("Input dt must be > 0")
     n_neurons, warnings = resolve_neuron_count(values.shape[1], settings)
     mapped = channels_to_neurons(values, n_neurons)
     value_at_max = float(settings.value_at_max)
@@ -444,9 +444,9 @@ def plan_spikes_from_stim(
     if values.ndim == 1:
         values = values[:, None]
     if values.ndim != 2 or values.shape[0] == 0:
-        raise ValueError("The stim array is empty")
+        raise ValueError("The input array is empty")
     if not float(dt) > 0:
-        raise ValueError("Stim dt must be > 0")
+        raise ValueError("Input dt must be > 0")
     n_neurons, warnings = resolve_neuron_count(values.shape[1], settings)
     duration_s = values.shape[0] * float(dt)
     trains_ms = stim_to_spike_times(
@@ -518,7 +518,7 @@ def plan_summary(plan: Plan, settings: Bss2Settings) -> str:
     if isinstance(plan, ConstantCurrentPlan):
         lines.append(
             f"Input: constant current, {plan.n_segments} segment(s), "
-            f"i_offset up to {settings.i_offset_max} at stim value "
+            f"i_offset up to {settings.i_offset_max} at input value "
             f"{plan.value_at_max:g}"
         )
     else:

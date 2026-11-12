@@ -84,7 +84,7 @@ def _plot(widget, data) -> None:
             widget,
             "No teaching pattern attached. Trigger this analysis from "
             "the 'Analyse ELiSe replay' toolbar button so the target "
-            "is built automatically from the project's opsin stim.",
+            "is built automatically from the project's opsin input.",
         )
         return
 

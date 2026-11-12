@@ -37,7 +37,7 @@ at a time across all tabs.
 | Import data → Output → Calcium Imaging (raw .tif)        | raw 2-photon TIFF via Cellpose + Suite2p ([imaging data](../readout/imaging_data.md))                                               |
 | Import data → Output → Calcium Imaging (Suite2p outputs) | existing Suite2p results                                                                                                            |
 | Import data → Output → Patch Clamp                       | recorded traces                                                                                                                     |
-| Export → Patch Clamp Input                               | stimulus for SutterPatch ([patch clamp export](../input_design/patch_clamp_export.md))                                              |
+| Export → Patch Clamp Input                               | input for SutterPatch ([patch clamp export](../input_design/patch_clamp_export.md))                                                 |
 | Export → Optogenetic Input                               | SysCon2 `.seq` files only. To also load them into a connected SysCon2, use **Export with settings…** in the Stimulation setup pane. |
 | Export → Traces / Spikes as NumPy Array…                 | array of neurons × time (see below)                                                                                                 |
 
@@ -118,7 +118,7 @@ controls) and the Imaging tab's data selector.
 
 ### Comparing trace arrays
 
-Repeats of the same stimulation give several trace arrays. To compare them
+Repeats of the same input give several trace arrays. To compare them
 without switching the Neuron data selector back and forth, right-click the
 traces and choose **Compare traces…**:
 
@@ -166,7 +166,7 @@ the array again). It is only offered when every ticked array has the same
 sampling interval; otherwise the box is disabled and its tooltip lists the
 arrays' intervals.
 
-## Stimulation editor
+## Input editor
 
 The left toolbar has Undo/Redo, **Draw mode** (`1`) and **Select mode** (`2`).
 

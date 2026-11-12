@@ -13,7 +13,7 @@ next block. Test a routine on a Brian2 simulation, then switch its
 3. Set the parameters and click **Start** (**Start routine** for STDP tuning).
 
 If the array already holds input, choose **Clear and start over** or
-**Continue after last stimulus** (hardware rheobase also offers **Start in new
+**Continue after last input** (hardware rheobase also offers **Start in new
 arrays**). Blocks are appended after the simulated time, never into the past,
 and stay in the array afterwards (undo, edit, save as usual).
 

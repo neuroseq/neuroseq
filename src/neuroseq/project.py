@@ -800,7 +800,7 @@ class Project:
                     or load_from_zip("cellpose_data", zf)
                 ).get("cellpose_import")
             if options.include_stim_arrays:
-                self.logger.info("  - importing stim arrays")
+                self.logger.info("  - importing input arrays")
                 components.stim_arrays = load_from_zip("stim_arrays", zf)
         return components
 
@@ -1678,7 +1678,7 @@ class Project:
             or not self.cellpose_data.stimulus_to_cellpose_mapping
         ):
             raise ValueError(
-                "No Cellpose stimulus mapping to trim to - import Cellpose "
+                "No Cellpose input mapping to trim to - import Cellpose "
                 "data with a mapping first."
             )
         kept_stim_ids = sorted(self.cellpose_data.stimulus_to_cellpose_mapping.keys())

@@ -246,7 +246,7 @@ class StimEditor(QtWidgets.QWidget):
             for k in self.stims_dict:
                 if k in self.project.stim_arrays:
                     self.logger.debug(
-                        f"Updating StimArray for stim '{k}' without clearing undo history"
+                        f"Updating input array '{k}' without clearing undo history"
                     )
                     self.stims_dict[k].stim_array = self.project.stim_arrays[k]
             self.current_stim_modifier = None
@@ -287,7 +287,7 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         """Replace one stim array content via the undoable modifier pathway."""
         if stim_name not in self.stims_dict:
-            raise ValueError(f"Input '{stim_name}' not found in stim editor.")
+            raise ValueError(f"Input '{stim_name}' not found in input editor.")
         if self.project is None or stim_name not in self.project.stim_arrays:
             raise ValueError(f"Input '{stim_name}' not found in project.")
 
@@ -681,7 +681,7 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_values_updated()
 
     def select_stim(self, stim_name: str) -> None:
-        self.logger.debug(f"Selected stim: {stim_name}")
+        self.logger.debug(f"Selected input array: {stim_name}")
         target_modifier = self.stims_dict.get(stim_name)
         # Project.replace_stim_values (e.g. the SysCon2 "Check Input Sanity"
         # resample/clear fixes) swaps in a new buffer, possibly of another
@@ -869,7 +869,7 @@ class StimEditor(QtWidgets.QWidget):
                 or self.select_mode == SelectMode.PASTE_INVERTED
             ):
                 self.logger.debug(
-                    f"Paste stim at neuron {neuron_index}, time {time_index}"
+                    f"Paste input at neuron {neuron_index}, time {time_index}"
                 )
                 self.paste_selected_stim(neuron_index, time_index)
             else:
@@ -1012,7 +1012,7 @@ class StimEditor(QtWidgets.QWidget):
         new_time_slice = slice(time_index, time_index + self.copy_values.shape[0])
         new_neuron_slice = slice(neuron_index, neuron_index + self.copy_values.shape[1])
         self.logger.debug(
-            f"Paste stim with shape {self.copy_values.shape} at neuron {neuron_index}, time {time_index}"
+            f"Paste input with shape {self.copy_values.shape} at neuron {neuron_index}, time {time_index}"
         )
         if not self._is_valid_slice(new_neuron_slice, new_time_slice):
             return
@@ -1071,11 +1071,11 @@ class StimEditor(QtWidgets.QWidget):
         arr = self.current_stim_modifier.stim_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ]
-        self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
+        self.logger.info(f"Saving {arr.shape} input selection to file {filename}")
         try:
             np.save(filename, arr, allow_pickle=False)
         except Exception as e:
-            msg = f"Error saving stim selection to file: {e}"
+            msg = f"Error saving input selection to file: {e}"
             self.logger.error(msg)
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
@@ -1092,7 +1092,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         try:
             arr = np.load(filename, allow_pickle=False, fix_imports=False)
-            self.logger.info(f"Loaded {arr.shape} stim selection from file {filename}")
+            self.logger.info(f"Loaded {arr.shape} input selection from file {filename}")
             if arr.ndim > 2:
                 raise ValueError("Loaded array has wrong shape")
             if arr.shape[0] > self.current_stim_modifier.stim_array.values.shape[0]:
@@ -1106,7 +1106,7 @@ class StimEditor(QtWidgets.QWidget):
             self.init_paste_selected_stim()
 
         except Exception as e:
-            msg = f"Error loading stim selection from file: {e}"
+            msg = f"Error loading input selection from file: {e}"
             self.logger.error(msg)
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
@@ -1180,7 +1180,7 @@ class StimEditor(QtWidgets.QWidget):
             self.draw_stim = dialog.draw_stim
             self.draw_stim_length = dialog.draw_stim_length
             self.logger.debug(
-                "Setting draw stim length to %s samples (%sms)",
+                "Setting draw input length to %s samples (%sms)",
                 self.draw_stim_length,
                 format_milliseconds(self._draw_stim_length_milliseconds()),
             )

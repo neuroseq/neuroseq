@@ -984,7 +984,7 @@ class StdpWindowDialog(SelfRaisingDialog):
             if prepare_seconds > 0.0:
                 self._append_log(
                     f"Simulating {duration:.3f} s to catch up to the "
-                    "existing stimuli before the sweep starts."
+                    "existing input before the sweep starts."
                 )
             else:
                 self._append_log(

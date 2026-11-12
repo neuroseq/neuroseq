@@ -647,7 +647,7 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Spike threshold (ΔF/F):", self._dff_spike_threshold_spin)
 
         self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
-            "Input artefact suppression"
+            "Stimulation artefact suppression"
         )
         self._suppress_stimulation_artefact_checkbox.setChecked(True)
         self._suppress_stimulation_artefact_checkbox.setToolTip(
@@ -1385,7 +1385,7 @@ def artefact_suppression_summary(
     if short:
         return f"; {replaced} frames ({share:.0f}%) replaced by artefact suppression"
     return (
-        f"\n\nInput artefact suppression replaced {replaced} of {n_frames} "
+        f"\n\nStimulation artefact suppression replaced {replaced} of {n_frames} "
         f"frames ({share:.0f}%) with neighbouring clean values."
     )
 

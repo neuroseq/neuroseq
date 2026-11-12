@@ -62,7 +62,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             "Select a SysCon2 .seq file, preview parsed content, and import timing/intensity "
-            "information into a selected input data entity. Channels are assigned by target order, "
+            "information into a selected input array. Channels are assigned by target order, "
             "not matched to your project neuron IDs. Intensities are file values (zero uses a "
             "nominal 1), not measured optical power. Hardware latency is not reconstructed."
         )
@@ -114,7 +114,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         options_layout.addRow(self.import_existing_radio)
         self.target_combo = QtWidgets.QComboBox()
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
-        options_layout.addRow("    Target input data entity:", self.target_combo)
+        options_layout.addRow("    Target input array:", self.target_combo)
 
         self.neuron_offset_spin = QtWidgets.QSpinBox()
         self.neuron_offset_spin.setRange(0, 0)
@@ -313,7 +313,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             "Runs is not expanded; one sequence pass is imported.",
             *(
                 [
-                    "Original stim array found next to the file: its exact timings "
+                    "Original input array found next to the file: its exact timings "
                     "and neuron rows are restored on import."
                 ]
                 if sequence.original_values is not None
@@ -377,7 +377,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Name already in use",
-                    f"An input data entity named '{new_name}' already exists.",
+                    f"An input array named '{new_name}' already exists.",
                 )
                 return
 

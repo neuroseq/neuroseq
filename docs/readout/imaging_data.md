@@ -107,7 +107,7 @@ activity), save it, segment it with **Open Cellpose**, then load the
 - **Compute ΔF/F and deconvolve spikes**: ΔF/F against Suite2p's sliding
   maximin baseline (30 s) of the raw fluorescence; OASIS spikes counted above
   **Spike threshold (ΔF/F)** (default 0.1).
-- **Input artefact suppression**: replaces frames lit by an input array's
+- **Stimulation artefact suppression**: replaces frames lit by an input array's
   stimulation with the mean of the neighbouring clean frames. **Imaging
   started at** is the first frame's time on that array's axis (0 if both
   started together, positive if imaging started later). It is on by default

@@ -35,7 +35,7 @@ Toggle **View → Show Chat** (robot icon). **Enter** sends, **Shift+Enter** add
 a line, **Stop** cancels. Replies stream in.
 
 The assistant can read model equations, parameters, initial conditions,
-synapses, monitors, runtime state, stimuli, experiments, imaging metadata
+synapses, monitors, runtime state, input arrays, experiments, imaging metadata
 (large arrays in pages) and Python files inside the installed `neuroseq`
 package. It cannot read other files, run code or run simulations. Anything it
 reads is sent to the provider.
