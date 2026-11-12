@@ -45,6 +45,7 @@ from neuroseq.importers.importer_tif import PipelineCancelled
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import TifPipelineResult
 from neuroseq.importers.importer_tif import cellpose_result_to_masks
+from neuroseq.importers.importer_tif import suits_artefact_suppression
 from neuroseq.importers.roi_traces import NEUROPIL_INNER_RADIUS_PX
 from neuroseq.importers.roi_traces import NEUROPIL_MIN_PIXELS
 from neuroseq.stimulation.stim import StimArray
@@ -557,6 +558,15 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_array_combo = QtWidgets.QComboBox()
         for name, stim_array in self._stim_arrays.items():
             self._stim_array_combo.addItem(name, stim_array)
+        # Default to pulsed stimulation, never to e.g. a patch-clamp input wave
+        # that is non-zero all along and would flatten the traces (#567).
+        suitable = [
+            index
+            for index, stim_array in enumerate(self._stim_arrays.values())
+            if suits_artefact_suppression(stim_array)
+        ]
+        if suitable:
+            self._stim_array_combo.setCurrentIndex(suitable[0])
         params_layout.addRow("Input array:", self._stim_array_combo)
         self._imaging_start_spin = QtWidgets.QDoubleSpinBox()
         self._imaging_start_spin.setRange(-86400.0, 86400.0)
@@ -570,6 +580,8 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Imaging started at:", self._imaging_start_spin)
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
+        # Off by default unless an input looks like pulsed light stimulation.
+        self._suppress_stimulation_artefact_checkbox.setChecked(bool(suitable))
         if not has_stim_arrays:
             # Disabled-but-still-checked reads as "suppression is on and you
             # can't turn it off", which isn't true (there's no input array to
@@ -988,6 +1000,7 @@ class TifImportDialog(QtWidgets.QDialog):
                 background_image=self._seg_file_background_image,
             )
 
+        suppression_note = artefact_suppression_summary(result)
         raw_cellpose_ids = pipeline_row_cellpose_ids(result)
         if result.extra.get("pipeline") == "roi_average":
             indices = remap_raw_cellpose_ids(raw_cellpose_ids, self._selected_mapping())
@@ -1011,7 +1024,8 @@ class TifImportDialog(QtWidgets.QDialog):
                     "installed."
                     if no_spikes
                     else ""
-                ),
+                )
+                + suppression_note,
             )
             self.accept()
             return
@@ -1043,6 +1057,20 @@ class TifImportDialog(QtWidgets.QDialog):
             f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
         )
         self.accept()
+
+
+def artefact_suppression_summary(result: TifPipelineResult) -> str:
+    """A note on how many frames input artefact suppression replaced ("" if it
+    was off), so a flattened stretch of the traces is never a silent surprise."""
+    if not result.extra.get("stimulation_artefact_suppression"):
+        return ""
+    n_frames = int(np.shape(result.F)[1])
+    replaced = len(result.extra.get("contaminated_frames", ()))
+    share = 100.0 * replaced / n_frames if n_frames else 0.0
+    return (
+        f"\n\nInput artefact suppression replaced {replaced} of {n_frames} "
+        f"frames ({share:.0f}%) with neighbouring clean values."
+    )
 
 
 def pipeline_row_cellpose_ids(result: TifPipelineResult) -> npt.NDArray[Any]:

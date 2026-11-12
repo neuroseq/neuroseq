@@ -298,7 +298,7 @@ def test_stimulation_suppression_selector_uses_project_stim_arrays(qtbot):
     from neuroseq.stimulation.stim import StimArray
     from neuroseq.stimulation.stim import StimType
 
-    stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
+    stim = StimArray("laser", StimType.Excitation, np.array([[1.0], [0.0]]), "mW", 0.1)
     dialog = TifImportDialog(stim_arrays={"laser": stim})
     qtbot.addWidget(dialog)
     dialog.show()
@@ -1067,7 +1067,7 @@ def test_roi_average_options_show_only_what_they_use(qtbot):
     from neuroseq.stimulation.stim import StimArray
     from neuroseq.stimulation.stim import StimType
 
-    stim = StimArray("laser", StimType.Excitation, np.ones((2, 1)), "mW", 0.1)
+    stim = StimArray("laser", StimType.Excitation, np.array([[1.0], [0.0]]), "mW", 0.1)
     dialog = TifImportDialog(stim_arrays={"laser": stim})
     qtbot.addWidget(dialog)
     dialog.show()
@@ -1204,3 +1204,54 @@ def test_finalize_suite2p_follows_mask_labels_and_neuropil_coefficient(qtbot, mo
     assert set(spikes.raw_cellpose_ids.tolist()) == {0, 2}
     expected, _, _ = compute_normalized_suite2p_traces(result.F, result.Fneu, 0.3)
     np.testing.assert_allclose(traces.traces, expected)
+
+
+def test_suppression_defaults_to_pulsed_input_not_patch_clamp_wave(qtbot):
+    """#567: a patch-clamp input wave imported earlier (non-zero all along)
+    must not be the default artefact-suppression input: it flattened the first
+    1.2 s of the calcium traces."""
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+
+    blank = StimArray("stimulus", StimType.Excitation, np.zeros((5, 2)), "nS", 0.1)
+    patch = StimArray(
+        "patch", StimType.External, np.full((1200, 1), -20.0), "pA", 0.001
+    )
+    holo = StimArray(
+        "holo", StimType.Excitation, np.array([[0.0], [30.0], [0.0]]), "mW", 0.1
+    )
+
+    only_patch = TifImportDialog(stim_arrays={"stimulus": blank, "patch": patch})
+    qtbot.addWidget(only_patch)
+    assert only_patch._suppress_stimulation_artefact_checkbox.isEnabled()
+    assert not only_patch._suppress_stimulation_artefact_checkbox.isChecked()
+
+    with_holo = TifImportDialog(
+        stim_arrays={"stimulus": blank, "patch": patch, "holo": holo}
+    )
+    qtbot.addWidget(with_holo)
+    assert with_holo._suppress_stimulation_artefact_checkbox.isChecked()
+    assert with_holo._stim_array_combo.currentData() is holo
+
+
+def test_import_message_reports_frames_replaced_by_suppression(qtbot, mocker):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+    from neuroseq.importers.tif_import_dialog import artefact_suppression_summary
+
+    result = _make_pipeline_result()
+    assert artefact_suppression_summary(result) == ""
+    result.extra = {
+        "pipeline": "roi_average",
+        "roi_labels": np.arange(1, 5),
+        "stimulation_artefact_suppression": True,
+        "contaminated_frames": np.arange(36),
+    }
+    assert "replaced 36 of 100 frames (36%)" in artefact_suppression_summary(result)
+
+    info = mocker.patch.object(QtWidgets.QMessageBox, "information")
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog._tif_paths = [Path("movie.tif")]
+    dialog._finalize_import(result)
+    assert "replaced 36 of 100 frames" in info.call_args.args[2]

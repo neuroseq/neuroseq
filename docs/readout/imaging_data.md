@@ -84,7 +84,13 @@ activity), save it, segment it with **Open Cellpose**, then load the
 - **Input artefact suppression**: replaces frames lit by an input array's
   stimulation with the mean of the neighbouring clean frames. **Imaging
   started at** is the first frame's time on that array's axis (0 if both
-  started together, positive if imaging started later).
+  started together, positive if imaging started later). It is on by default
+  only when an input array looks like pulsed light stimulation, and that array
+  is preselected. Electrophysiology inputs (units A, pA, nA, V, mV, ...; e.g.
+  an imported patch-clamp wave) and inputs non-zero in more than 90% of their
+  samples are not preselected: every frame they overlap would be replaced,
+  flattening that stretch of the traces. The import message reports how many
+  frames were replaced.
 
 ## Precomputed traces
 
