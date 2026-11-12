@@ -558,6 +558,27 @@ def test_discarding_designer_releases_its_dialog(qtbot: QtBot) -> None:
     assert static_input._pattern_dialog is None
 
 
+def test_discarding_designer_after_qt_deleted_its_dialog(qtbot: QtBot) -> None:
+    """At shutdown Qt can delete the dialog before the editor's ``destroyed``
+    signal discards it; discarding must then not touch the dead wrapper."""
+    _, _, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    with qtbot.waitSignal(dialog.destroyed, timeout=WAIT_TIMEOUT_MS):
+        dialog.deleteLater()
+    static_input.discard_dialog()
+    assert static_input._pattern_dialog is None
+
+
+def test_destroying_editor_discards_designer_safely(qtbot: QtBot) -> None:
+    editor, _, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    with qtbot.waitSignal(dialog.destroyed, timeout=WAIT_TIMEOUT_MS):
+        dialog.deleteLater()
+    with qtbot.waitSignal(editor.destroyed, timeout=WAIT_TIMEOUT_MS):
+        editor.deleteLater()
+    assert static_input._pattern_dialog is None
+
+
 def test_dialog_uses_the_same_pattern_names_in_both_scopes(qtbot: QtBot) -> None:
     """Issue #613: the same patterns have the same names whichever scope is
     chosen; only Für Elise, on fixed neurons, is for all neurons alone."""

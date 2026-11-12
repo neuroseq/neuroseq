@@ -85,9 +85,15 @@ class StaticInputController(QtCore.QObject):
         self._pattern_dialog.activateWindow()
 
     def discard_dialog(self) -> None:
-        if self._pattern_dialog is not None:
-            self._pattern_dialog.close()
-            self._pattern_dialog.deleteLater()
-            self._pattern_dialog = None
+        dialog, self._pattern_dialog = self._pattern_dialog, None
+        if dialog is not None:
+            try:
+                dialog.close()
+                dialog.deleteLater()
+            except RuntimeError:
+                # Also runs from the editor's ``destroyed`` signal: at app
+                # shutdown Qt may already have deleted the parentless dialog,
+                # leaving only its Python wrapper. Nothing is left to close.
+                pass
         self._states = {}
         self._dialog_stim_name = None
