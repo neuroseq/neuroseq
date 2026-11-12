@@ -182,8 +182,9 @@ def padded_length_seconds(
 
     ``value_text`` is the seconds to add, or with ``to_end_time`` the time
     point the arrays should end at (#647). Raises ValueError with a message
-    for the user when the entry is not a number, not positive, or an end time
-    that is not after the current end.
+    for the user when the entry is not a number, not positive, or would pad
+    nothing: seconds to add, or an end time past the current end, of at most
+    half a sample.
     """
     try:
         value = float(value_text)
@@ -193,12 +194,19 @@ def padded_length_seconds(
         ) from None
     if not math.isfinite(value):
         raise ValueError(f"Could not parse '{value_text}' as a number of seconds.")
+    # Less than half a sample pads nothing (it rounds to zero samples).
+    half_sample = 0.5 * validate_stim_dt_seconds(dt_seconds)
     if not to_end_time:
         if value <= 0.0:
             raise ValueError("Padding seconds must be positive.")
+        if value <= half_sample:
+            raise ValueError(
+                f"Padding {value:g} s adds no sample: the input arrays' sampling "
+                f"interval is {2 * half_sample:g} s. Enter more than "
+                f"{half_sample:g} s."
+            )
         return current_seconds + value
-    # Within half a sample of the current end pads nothing.
-    if value <= current_seconds + 0.5 * validate_stim_dt_seconds(dt_seconds):
+    if value <= current_seconds + half_sample:
         raise ValueError(
             f"The end time {value:g} s is not after the current end of the input "
             f"array ({current_seconds:g} s). Enter a later end time, or use Trim "

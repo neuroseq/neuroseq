@@ -226,6 +226,7 @@ def test_resample_zero_order_hold_returns_new_arrays() -> None:
         ("0.5", False, 1.5),
         ("4", True, 4.0),
         ("1.0006", True, 1.0006),
+        ("0.0006", False, 1.0006),
     ],
 )
 def test_padded_length_seconds(text, to_end_time, expected) -> None:
@@ -243,6 +244,8 @@ def test_padded_length_seconds(text, to_end_time, expected) -> None:
         ("-1", False, "must be positive"),
         ("0.5", True, "not after the current end"),
         ("1.0004", True, "not after the current end"),
+        ("0.0004", False, "adds no sample"),
+        ("0.0005", False, r"Enter more than 0\.0005 s"),
     ],
 )
 def test_padded_length_seconds_rejects(text, to_end_time, message) -> None:

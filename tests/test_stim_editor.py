@@ -2156,6 +2156,19 @@ def test_pad_to_end_time_before_current_end_is_rejected(
     assert editor.pad_stim_array_to_end_time is False
 
 
+def test_pad_by_less_than_half_a_sample_is_rejected_without_an_undo_step(
+    qtbot, monkeypatch, qmessagebox_calls
+) -> None:
+    editor, project = _pad_test_editor(qtbot)
+    history_length = len(project.history)
+    _answer_pad_dialog(monkeypatch, "0.0004", to_end_time=False)
+    editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 1
+    assert "adds no sample" in qmessagebox_calls[0]["text"]
+    assert project.stim_arrays["a"].values.shape[0] == 125
+    assert len(project.history) == history_length
+
+
 def test_pad_to_end_time_is_one_undoable_step(qtbot, monkeypatch) -> None:
     editor, project = _pad_test_editor(qtbot)
     _answer_pad_dialog(monkeypatch, "1.5", to_end_time=True)
