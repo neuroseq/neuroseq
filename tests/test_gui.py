@@ -1848,9 +1848,9 @@ def test_batch_tif_import_adds_one_data_group_per_file(
             TifBatchImport(tmp_path / "a.tif", "imported", [_trace()], 1.0),
             TifBatchImport(tmp_path / "b.tif", "failed", message="bad"),
             TifBatchImport(tmp_path / "sub" / "a.tif", "imported", [_trace()], 1.0),
-            # "Simulation" is reserved and "::" splits data names.
+            # "Simulation" is reserved. ("::" in a file name is covered in
+            # test_data_names.py: Windows file names cannot contain ":".)
             TifBatchImport(tmp_path / "Simulation.tif", "imported", [_trace()], 1.0),
-            TifBatchImport(tmp_path / "x::y.tif", "imported", [_trace()], 1.0),
         ]
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -1869,15 +1869,15 @@ def test_batch_tif_import_adds_one_data_group_per_file(
     gui.btn_import_tif_clicked()
 
     added = set(gui.project.experiments) - before
-    assert added == {"a", "a (2)", "Simulation (2)", "x_y"}
+    assert added == {"a", "a (2)", "Simulation (2)"}
     videos = {video["name"]: video["paths"] for video in gui.project.calcium_videos}
     assert videos["a"] == [str(tmp_path / "a.tif")]
     assert videos["a (2)"] == [str(tmp_path / "sub" / "a.tif")]
-    assert gui.cmb_trace.currentText().startswith("x_y ::")
+    assert gui.cmb_trace.currentText().startswith("Simulation (2) ::")
     assert gui.project.get_data(
         "Simulation (2) :: Simply averaged ROI traces", TraceData
     )
-    assert gui.cmb_video.count() == 4
+    assert gui.cmb_video.count() == 3
 
     gui.project.history.undo()
     assert set(gui.project.experiments) == before
@@ -1891,9 +1891,8 @@ def test_batch_tif_import_adds_one_data_group_per_file(
         "a",
         "a (2)",
         "Simulation (2)",
-        "x_y",
     ]
-    assert gui.cmb_video.count() == 4
+    assert gui.cmb_video.count() == 3
     assert gui.cmb_video.currentData() == gui.project.calcium_videos[-1]["id"]
 
 
