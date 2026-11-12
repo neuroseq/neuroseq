@@ -645,3 +645,218 @@ def test_dialog_linear_gradient_for_all_neurons(qtbot: QtBot) -> None:
     np.testing.assert_allclose(
         values[[0, 20, 40], :], [[1.0] * 10, [2.0] * 10, [3.0] * 10]
     )
+
+
+def _add_array(project: Project, name: str, n_neurons: int = 10) -> None:
+    project.add_stim_array(
+        StimArray(
+            name,
+            StimType.Excitation,
+            np.zeros((500, n_neurons), dtype=np.float32),
+            "siemens",
+            0.001,
+        )
+    )
+
+
+def test_new_array_starts_from_default_values(qtbot: QtBot) -> None:
+    """#648: the values entered for one array are not carried to another."""
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("3, 4")
+    dialog.radio_ramp.setChecked(True)
+    dialog.spin_pulse_ms.setValue(250.0)
+    dialog.spin_start_time_ms.setValue(40.0)
+
+    _add_array(project, "c")
+    editor.set_project(project, stim_to_select="c")
+
+    assert dialog.lbl_stim_name.text() == "c"
+    assert dialog.radio_scope_all.isChecked()
+    assert dialog.edit_neuron_indices.text() == ""
+    assert dialog.radio_sequential.isChecked()
+    assert dialog.spin_pulse_ms.value() == 100.0
+    assert dialog.spin_start_time_ms.value() == 0.0
+
+    # Re-selecting an array brings back what was entered for it.
+    dialog.spin_pulse_ms.setValue(7.0)
+    editor.cmb_stim.setCurrentText("a")
+    assert dialog.radio_scope_specific.isChecked()
+    assert dialog.edit_neuron_indices.text() == "3, 4"
+    assert dialog.radio_ramp.isChecked()
+    assert dialog.spin_pulse_ms.value() == 250.0
+    assert dialog.spin_start_time_ms.value() == 40.0
+    editor.cmb_stim.setCurrentText("c")
+    assert dialog.spin_pulse_ms.value() == 7.0
+
+
+def test_array_recreated_under_a_deleted_name_starts_from_defaults(
+    qtbot: QtBot,
+) -> None:
+    editor, project, static_input = _make_editor(qtbot, include_second_stim=True)
+    dialog = _open_dialog(static_input)
+    dialog.spin_pulse_ms.setValue(250.0)
+
+    del project.stim_arrays["a"]
+    editor.set_project(project, stim_to_select="b")
+    _add_array(project, "a")
+    editor.set_project(project, stim_to_select="a")
+
+    assert dialog.lbl_stim_name.text() == "a"
+    assert dialog.spin_pulse_ms.value() == 100.0
+
+
+def test_discarded_designer_forgets_the_values_per_array(qtbot: QtBot) -> None:
+    editor, project, static_input = _make_editor(qtbot, include_second_stim=True)
+    dialog = _open_dialog(static_input)
+    dialog.spin_pulse_ms.setValue(250.0)
+    editor.cmb_stim.setCurrentText("b")
+    static_input.discard_dialog()
+
+    editor.cmb_stim.setCurrentText("a")
+    assert _open_dialog(static_input).spin_pulse_ms.value() == 100.0
+
+
+def _shown_patterns(dialog: StimPatternDialog) -> list[str]:
+    return [b.text() for b in dialog._pattern_buttons if b.isVisibleTo(dialog)]
+
+
+def test_single_specific_neuron_offers_constant_instead_of_two_patterns(
+    qtbot: QtBot,
+) -> None:
+    """#659: for one neuron Sequential and Simultaneous are the same pattern."""
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.radio_sequential.setChecked(True)
+
+    dialog.edit_neuron_indices.setText("2")
+    assert _shown_patterns(dialog) == ["Constant", "Linear gradient", "Ramp"]
+    assert dialog.radio_simultaneous.isChecked()
+    assert dialog.selected_pattern() == "simultaneous"
+    assert "Like Constant" in dialog.radio_linear.toolTip()
+    # The kept choice is still Sequential, for when the scope widens again.
+    assert dialog.state()["pattern"] == "sequential"
+
+    # Live: typing more neurons brings back both patterns and Sequential.
+    dialog.edit_neuron_indices.setText("2, 5")
+    assert _shown_patterns(dialog) == [
+        "Sequential",
+        "Simultaneous",
+        "Linear gradient",
+        "Ramp",
+    ]
+    assert dialog.radio_sequential.isChecked()
+
+    # A pattern picked while Constant is shown stays picked.
+    dialog.edit_neuron_indices.setText("5-5")
+    dialog.radio_linear.setChecked(True)
+    dialog.radio_simultaneous.setChecked(True)
+    dialog.edit_neuron_indices.setText("4-5")
+    assert dialog.radio_simultaneous.isChecked()
+
+
+def test_constant_for_one_neuron_writes_its_pulses(qtbot: QtBot) -> None:
+    editor, project, static_input = _make_editor(qtbot, length_samples=1000)
+    dialog = _open_dialog(static_input)
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("2")
+    dialog.radio_simultaneous.setChecked(True)
+    dialog.spin_magnitude.setValue(0.5)
+    dialog.spin_repeats.setValue(2)
+    dialog.btn_apply.click()
+
+    values = project.stim_arrays["a"].values
+    onsets = np.flatnonzero(np.diff(np.r_[0.0, values[:, 2]]) > 0).tolist()
+    assert onsets == [0, 118]
+    assert values[:, 2].max() == np.float32(0.5)
+    assert not np.delete(values, 2, axis=1).any()
+
+
+def test_one_neuron_network_offers_constant_for_all_neurons(qtbot: QtBot) -> None:
+    editor, project, static_input = _make_editor(qtbot, n_neurons=1)
+    dialog = _open_dialog(static_input)
+    dialog.radio_scope_all.setChecked(True)
+    assert _shown_patterns(dialog) == [
+        "Constant",
+        "Linear gradient",
+        "Ramp",
+        "Für Elise",
+    ]
+    assert dialog.radio_simultaneous.isChecked()
+
+
+def test_restored_pattern_accepts_the_constant_name(qtbot: QtBot) -> None:
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    dialog.restore_state({"pattern": "Constant", "scope_specific": True})
+    assert dialog.radio_simultaneous.isChecked()
+    dialog.restore_state({"pattern": "no such pattern"})
+    assert dialog.radio_sequential.isChecked()
+    dialog.restore_state({"pattern": "linear", "duration_gradient": True})
+    assert dialog.radio_linear.isChecked()
+    assert dialog.chk_duration_gradient.isChecked()
+
+
+def test_linear_gradient_can_step_the_pulse_duration(qtbot: QtBot) -> None:
+    """#653: the pulse duration steps from the first pulse to the last."""
+    editor, project, static_input = _make_editor(qtbot, length_samples=2000)
+    dialog = _open_dialog(static_input)
+    dialog.radio_scope_specific.setChecked(True)
+    dialog.edit_neuron_indices.setText("1")
+
+    dialog.radio_simultaneous.setChecked(True)
+    assert not dialog.chk_duration_gradient.isVisibleTo(dialog)
+    dialog.radio_linear.setChecked(True)
+    assert dialog.chk_duration_gradient.isVisibleTo(dialog)
+    assert not dialog.spin_last_pulse_ms.isVisibleTo(dialog)
+    dialog.chk_duration_gradient.setChecked(True)
+    assert dialog.spin_last_pulse_ms.isVisibleTo(dialog)
+    assert dialog.lbl_pulse_ms.text() == "First pulse duration (ms):"
+
+    dialog.spin_pulse_ms.setValue(10.0)
+    dialog.spin_last_pulse_ms.setValue(30.0)
+    dialog.spin_ipi_ms.setValue(5.0)
+    dialog.spin_value1.setValue(1.0)
+    dialog.spin_value2.setValue(3.0)
+    dialog.spin_repeats.setValue(3)
+    dialog.btn_apply.click()
+
+    expected = generate_per_neuron(
+        neuron_index=1,
+        n_neurons=10,
+        pulse_ms=10.0,
+        ipi_ms=5.0,
+        profile=DrawStimType.Linear,
+        value1=1.0,
+        value2=3.0,
+        repeats=3,
+        dt_seconds=0.001,
+        end_pulse_ms=30.0,
+    )
+    assert expected.shape[0] == 10 + 20 + 30 + 3 * 5
+    np.testing.assert_allclose(
+        project.stim_arrays["a"].values[: expected.shape[0], :], expected
+    )
+    assert dialog.spin_start_time_ms.value() == 75.0
+
+    dialog.radio_ramp.setChecked(True)
+    assert not dialog.spin_last_pulse_ms.isVisibleTo(dialog)
+    assert dialog.lbl_pulse_ms.text() == "Ramp duration (ms):"
+
+
+def test_duration_gradient_rejects_a_non_positive_last_pulse(
+    qtbot: QtBot, qmessagebox_calls: list
+) -> None:
+    editor, project, static_input = _make_editor(qtbot)
+    dialog = _open_dialog(static_input)
+    dialog.radio_linear.setChecked(True)
+    dialog.chk_duration_gradient.setChecked(True)
+    dialog.spin_last_pulse_ms.setValue(0.0)
+    dialog.btn_apply.click()
+
+    assert [call["text"] for call in qmessagebox_calls] == [
+        "Last pulse duration must be positive."
+    ]
+    assert not project.stim_arrays["a"].values.any()

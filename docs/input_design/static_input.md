@@ -55,24 +55,37 @@ project.stim_arrays["stimulus"].values[::10, ::2] = 1
 **Design static input** (View toolbar or the editor's right-click menu) writes
 a generated pattern into the selected input array.
 
-| Pattern         | Description                                                               |
-| --------------- | ------------------------------------------------------------------------- |
-| Sequential      | One neuron after another, each firing **Pulses per neuron** pulses.       |
-| Simultaneous    | All neurons in scope fire together with the same magnitude.               |
-| Linear gradient | Like Simultaneous, but magnitude steps linearly from first to last pulse. |
-| Ramp            | A continuous linear ramp of the magnitude, repeated.                      |
-| Für Elise       | Opening notes of Für Elise on neurons 0-5 (**All neurons** scope only).   |
+| Pattern         | Description                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| Sequential      | One neuron after another, each firing **Pulses per neuron** pulses.                              |
+| Simultaneous    | All neurons in scope fire together with the same magnitude.                                      |
+| Constant        | Shown instead of Sequential and Simultaneous when the scope is a single neuron (see below).      |
+| Linear gradient | Like Simultaneous, but magnitude (and optionally pulse duration) steps from first to last pulse. |
+| Ramp            | A continuous linear ramp of the magnitude, repeated.                                             |
+| Für Elise       | Opening notes of Für Elise on neurons 0-5 (**All neurons** scope only).                          |
 
 - **Scope**: **All neurons**, or **Specific neurons** given as indices and
-  ranges (`0, 2, 5-8`). Other neurons are left untouched.
+  ranges (`0, 2, 5-8`). Other neurons are left untouched. When the scope is a
+  single neuron (one index, or **All neurons** of a one-neuron network),
+  Sequential and Simultaneous would write the same pulses, so the two are
+  replaced by one **Constant** pattern. The list updates while you type the
+  indices; widening the scope again brings Sequential back if it was chosen.
 - **Pulse duration** and **Inter-pulse interval** (ms), or **Ramp duration**
   and **Interval between ramps** for Ramp.
 - **Magnitude**, **First/Last pulse magnitude** (Linear gradient) or
   **Start/End magnitude** (Ramp).
+- **Pulse duration: Step from first to last pulse** (Linear gradient): the
+  pulse duration also steps linearly, from **First pulse duration** to **Last
+  pulse duration** (ms), each rounded to whole samples. The inter-pulse
+  interval stays the same.
 - Repeat count (named per pattern) and **Start time (ms)**.
 
 **Apply** writes the pattern and moves **Start time** to its end, so repeated
 clicks append patterns one after another. **Reset start time** returns to 0.
 The window stays open until **Close**.
+
+The designer keeps its values per input array: a newly created (or newly
+selected) array starts from the default values, and an array you return to
+shows the values last entered for it, including its start time.
 
 For closed-loop input, see [Dynamic input](dynamic_input.md).
