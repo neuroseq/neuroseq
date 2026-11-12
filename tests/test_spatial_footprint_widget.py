@@ -40,6 +40,7 @@ from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIG
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
 from neuroseq.visualization_support.footprint_colors import compose_footprint_overlay
 from neuroseq.visualization_support.footprint_colors import footprint_legend
+from neuroseq.visualization_support.footprint_colors import footprint_neuron_ids
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -714,6 +715,25 @@ def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
     # 0, 1, 2, 3, 4 are unmapped strays - must not alias onto neuron 0/1/2
     for unmapped_id in range(5):
         assert state._cellpose_to_stim_id(unmapped_id) is None
+    assert state._cellpose_to_stim_id(-1) is None
+
+
+def test_linking_honours_a_linear_offset_mapping() -> None:
+    """A Linear mapping is stored as an offset, never as a dict: hover and
+    selection must still link a cell to the neuron its traces and colour use."""
+    result = _cellpose_result()
+    result.mapping_strategy = "Linear"
+    result.linear_offset = 1  # cell 1 -> neuron 0, cell 2 -> 1, cell 0 -> 2
+    state = SpatialFootprintState()
+    state.set_data(result)
+
+    neuron_ids = footprint_neuron_ids(np.arange(3), result).tolist()
+    assert neuron_ids == [2, 0, 1]
+    assert [state._cellpose_to_stim_id(cell) for cell in range(3)] == neuron_ids
+    state.set_hovered_stim_id(0)
+    assert state.hovered_cellpose_id == 1
+    state.set_active_stim_ids({2})
+    assert state.active_cellpose_ids == {0}
 
 
 def test_hovered_cellpose_id_resolves_via_mapping() -> None:

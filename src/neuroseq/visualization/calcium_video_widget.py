@@ -19,7 +19,7 @@ from neuroseq.save_imaging_dialog import SaveImagingDialog
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.visualization.cell_overlay_widget import _pixel_at
 from neuroseq.visualization.fpl_widget import FPLWidget
-from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
+from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
 from neuroseq.visualization_support.cellpose_ids import compute_cell_centroids
 from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
 
@@ -447,8 +447,9 @@ class CalciumVideoWidget(FPLWidget):
             != self._cellpose_data.segmentation_array.shape
         ):
             return
+        neuron_ids = cellpose_to_stim_ids(self._centroids, self._cellpose_data)
         for cell_id, (x, y) in self._centroids.items():
-            neuron_id = cellpose_to_stim_id(cell_id, self._cellpose_data)
+            neuron_id = neuron_ids.get(cell_id)
             if neuron_id is None:
                 continue
             self._id_label_graphics.append(

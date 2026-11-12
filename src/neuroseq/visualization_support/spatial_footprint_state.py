@@ -8,6 +8,7 @@ from qtpy import QtCore
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import load_background_image
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
+from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
 from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
 
 
@@ -83,25 +84,22 @@ class SpatialFootprintState(QtCore.QObject):
     @property
     def greyed_stim_ids(self) -> set[int]:
         """Neurons hidden by the current cell selection."""
-        stim_ids = (
-            self._cellpose_to_stim_id(cellpose_id)
-            for cellpose_id in self.greyed_cellpose_ids
+        return set(
+            cellpose_to_stim_ids(self.greyed_cellpose_ids, self.cellpose_data).values()
         )
-        return {stim_id for stim_id in stim_ids if stim_id is not None}
 
     def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
         """Resolve a segmented cell to the trace/stim row it drives, or
         `None` if it doesn't drive one at all.
 
-        When there is no recorded mapping, cellpose ids are used directly as
-        neuron/stim indices (identity), so `cellpose_id` itself is correct.
-        But once a (possibly partial) mapping exists - e.g. Cellpose found
-        more cells than were mapped to simulated/imported neurons - falling
-        back to identity for an *unmapped* id would be wrong: that id's
-        number doesn't refer to a stim/trace row at all, and could easily
-        collide with the real row of some other, unrelated neuron (both id
-        spaces are small ints starting at 0). Such an id must resolve to
-        `None` (and callers must skip emitting for it), not to itself.
+        Uses the mapping in effect (see `cellpose_to_stim_ids`), so a Linear
+        offset mapping links the same cell and row as the footprint colours.
+        Without a mapping, cellpose ids are neuron/stim indices (identity).
+        Once a (possibly partial) mapping exists - e.g. Cellpose found more
+        cells than were mapped to simulated/imported neurons - an *unmapped*
+        id resolves to `None` (and callers must skip emitting for it): its
+        number doesn't refer to a stim/trace row and could collide with the
+        real row of some other, unrelated neuron.
         """
         return cellpose_to_stim_id(cellpose_id, self.cellpose_data)
 
@@ -187,16 +185,17 @@ class SpatialFootprintState(QtCore.QObject):
         new_greyed = self.greyed_cellpose_ids
         self.selection_changed.emit()
 
+        stim_ids = cellpose_to_stim_ids(new_greyed ^ old_greyed, self.cellpose_data)
         newly_hidden_stim_ids: list[int] = []
         for cellpose_id in new_greyed - old_greyed:
-            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            stim_id = stim_ids.get(cellpose_id)
             if stim_id is not None:
                 newly_hidden_stim_ids.append(stim_id)
                 self.neuron_greyed_out_changed.emit(stim_id, True)
 
         newly_shown_stim_ids: list[int] = []
         for cellpose_id in old_greyed - new_greyed:
-            stim_id = self._cellpose_to_stim_id(cellpose_id)
+            stim_id = stim_ids.get(cellpose_id)
             if stim_id is not None:
                 newly_shown_stim_ids.append(stim_id)
                 self.neuron_greyed_out_changed.emit(stim_id, False)
