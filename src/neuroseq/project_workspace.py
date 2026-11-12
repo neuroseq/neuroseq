@@ -94,6 +94,7 @@ from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidg
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
+from neuroseq.visualization.trace_comparison_window import open_trace_comparison
 from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
@@ -726,6 +727,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
+        self.trace_widget.compare_traces_requested.connect(self._compare_traces)
+        self.data_widget.trace_widget.compare_traces_requested.connect(
+            self._compare_traces
+        )
         self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.spike_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -851,6 +856,19 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.custom_analysis_widget.set_data(
                 data, analysis_type, neuron_slice, time_slice
             )
+
+    def _compare_traces(
+        self, data: TraceData | None, neuron_ids: Sequence[int]
+    ) -> QtWidgets.QDialog:
+        """Open the read-only "Compare traces" dialog and popup (#662)."""
+        return open_trace_comparison(
+            self.project,
+            data,
+            neuron_ids,
+            theme=self.settings.theme,
+            parent=self,
+            title_suffix=self._tab_label_for(self.project),
+        )
 
     def _update_data(
         self, keep_undo_history: bool = False, refresh_stim_editor: bool = True
@@ -3474,6 +3492,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.set_limits(*self._plot_limits())
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
+        widget.compare_traces_requested.connect(self._compare_traces)
         return widget
 
     def _build_fresh_spike_widget(self) -> SpikeWidget:
@@ -3494,6 +3513,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.set_limits(*self._plot_limits())
         widget.set_data(self._current_data_selection())
         widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        widget.trace_widget.compare_traces_requested.connect(self._compare_traces)
         widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
         return widget
 

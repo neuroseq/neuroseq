@@ -347,6 +347,49 @@ def test_trace_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
     assert trace_widget._trace_norm_dialog.isVisible()
 
 
+def _compare_action(trace_widget: TraceWidget) -> QtWidgets.QAction:
+    trace_widget._rebuild_custom_analysis_menu()
+    return next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Compare traces…"
+    )
+
+
+def test_trace_widget_context_menu_offers_compare_traces(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    assert not _compare_action(trace_widget).isEnabled()
+
+    data = make_trace_data(n_neurons=6)
+    trace_widget.set_data(data)
+    received: list[tuple[object, object]] = []
+    trace_widget.compare_traces_requested.connect(
+        lambda d, ids: received.append((d, ids))
+    )
+
+    # Nothing selected or hovered: no neuron preselected.
+    action = _compare_action(trace_widget)
+    assert action.isEnabled()
+    action.trigger()
+    assert received[-1] == (data, [])
+
+    # The hovered neuron (captured when the menu opens) is preselected.
+    trace_widget._last_hovered_neuron_id = 4
+    action = _compare_action(trace_widget)
+    trace_widget._last_hovered_neuron_id = None
+    action.trigger()
+    assert received[-1] == (data, [4])
+
+    # A selected neuron range wins over the hovered neuron.
+    trace_widget._last_hovered_neuron_id = 4
+    trace_widget.select_neurons(slice(1, 3))
+    _compare_action(trace_widget).trigger()
+    assert received[-1] == (data, [1, 2])
+
+
 @pytest.mark.parametrize("widget_cls", [TraceWidget, SpikeWidget])
 def test_timeseries_context_menu_offers_detach_actions(
     qtbot: QtBot, widget_cls

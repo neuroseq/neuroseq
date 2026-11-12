@@ -184,6 +184,8 @@ class TraceWidget(TimeseriesWidget):
     """
 
     vector_export_requested = QtCore.Signal()
+    # TraceData shown, neuron ids to preselect - see _request_trace_comparison().
+    compare_traces_requested = QtCore.Signal(object, object)
 
     # Line thickness is expressed in screen pixels. Below this fraction of a
     # neuron's pixel band, adjacent traces' strokes start to touch; above the
@@ -530,6 +532,34 @@ class TraceWidget(TimeseriesWidget):
         norm_action = QtWidgets.QAction("Normalization…", self)
         norm_action.triggered.connect(self.trace_norm_dialog)
         self.context_menu.insertAction(self.context_menu.actions()[0], norm_action)
+        # Captured now: the pointer leaves the plot once the menu opens.
+        preselected = self._comparison_neuron_ids()
+        compare_action = QtWidgets.QAction("Compare traces…", self)
+        compare_action.setToolTip(
+            "Overlay chosen neurons' traces from several trace arrays in a new window"
+        )
+        compare_action.setEnabled(isinstance(self.data, TraceData))
+        compare_action.triggered.connect(
+            lambda: self.compare_traces_requested.emit(self.data, preselected)
+        )
+        self.context_menu.insertAction(self.context_menu.actions()[0], compare_action)
+
+    def _comparison_neuron_ids(self) -> list[int]:
+        """Neurons to preselect for a comparison: the selected neuron range
+        (visible neurons only), else the hovered neuron, else none."""
+        selection = self.selected_neuron_slice
+        if selection is not None:
+            ids = [
+                neuron_id
+                for neuron_id in self._visible_neuron_ids
+                if (selection.start is None or neuron_id >= selection.start)
+                and (selection.stop is None or neuron_id < selection.stop)
+            ]
+            if ids:
+                return ids
+        if self._last_hovered_neuron_id is not None:
+            return [int(self._last_hovered_neuron_id)]
+        return []
 
     def preview_traces(self) -> QtWidgets.QDialog | None:
         """Preview the selected region, or the current view when nothing is selected."""

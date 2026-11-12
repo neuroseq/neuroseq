@@ -107,6 +107,29 @@ controls) and the Imaging tab's data selector.
   Clip values, Auto-extend vertical space) and **Preview vector graphic…**.
   The synapse heatmap has its own **Normalization…**.
 
+### Comparing trace arrays
+
+Repeats of the same stimulation give several trace arrays. To compare them
+without switching the Neuron data selector back and forth, right-click the
+traces and choose **Compare traces…**:
+
+- Tick any number of **Neurons**. The selected neuron range (or the neuron
+  under the cursor) is ticked already. Filter the list by id or range
+  (`10-20`); **Select all**/**Select none** act on the neurons the filter
+  shows, and the field below ticks a list such as `0-5, 9`.
+- Tick the **Trace arrays** to compare. Every trace array of the project is
+  listed; the one the trace view shows is ticked.
+
+**OK** opens a separate window (you can keep several open) with one row per
+neuron. Each row overlays that neuron's trace from every chosen array, each
+array in its own colour as named in the legend; **Side by side** gives every
+array its own column instead. All rows share one time axis, so zooming or
+panning one (toolbar above the plot) moves them all. Each array is drawn on its
+own time axis, so arrays with a different sampling interval or length still
+line up in time. A neuron missing from an array is skipped there, and a note
+at the top lists which. The window only reads the data: it changes nothing in
+the project and adds no undo step.
+
 ## Stimulation editor
 
 The left toolbar has Undo/Redo, **Draw mode** (`1`) and **Select mode** (`2`).
