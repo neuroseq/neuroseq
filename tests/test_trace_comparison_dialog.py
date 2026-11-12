@@ -219,3 +219,72 @@ def test_arrays_can_be_reordered(qtbot: QtBot) -> None:
         dialog.array_list.dragDropMode()
         == QtWidgets.QAbstractItemView.DragDropMode.InternalMove
     )
+
+
+def test_huge_ranges_are_not_listed_id_by_id(qtbot: QtBot) -> None:
+    """Typing a huge range filters and ticks by range membership instead of
+    building a set of every id in it (which froze the dialog)."""
+    import time
+
+    dialog = _dialog(qtbot)
+    started = time.perf_counter()
+    dialog.filter_edit.setText("0-99999999")
+    assert len(_shown_ids(dialog)) == 12
+    dialog.filter_edit.setText("3-99999999")
+    assert _shown_ids(dialog)[0] == 3
+    dialog.filter_edit.setText("")
+    dialog.range_edit.setText("10-99999999")
+    dialog.range_button.click()
+    assert dialog.selected_neuron_ids == [10, 11]
+    assert f"{99999999 - 11} id(s)" in dialog.range_error.text()
+    # Listing 10^8 ids took many seconds per keystroke; ranges take none.
+    assert time.perf_counter() - started < 2.0
+
+
+def test_bulk_ticking_updates_ok_once(qtbot: QtBot, monkeypatch) -> None:
+    """Select all / none / Tick range check every item with one update after,
+    not one full rescan per item."""
+    dialog = TraceComparisonDialog(list(range(200)), ARRAYS)
+    qtbot.addWidget(dialog)
+    calls: list[int] = []
+    original = dialog._update_ok_enabled
+
+    def _counted_ok(*_args) -> None:
+        calls.append(1)
+        original()
+
+    monkeypatch.setattr(dialog, "_update_ok_enabled", _counted_ok)
+    original_arrays = dialog._arrays_changed
+    array_calls: list[int] = []
+
+    def _counted_arrays(*_args) -> None:
+        array_calls.append(1)
+        original_arrays()
+
+    monkeypatch.setattr(dialog, "_arrays_changed", _counted_arrays)
+
+    per_item: list[object] = []
+    dialog.neuron_list.itemChanged.connect(per_item.append)
+    dialog.array_list.itemChanged.connect(per_item.append)
+
+    dialog.select_all_button.click()
+    assert len(calls) == 1
+    assert len(dialog.selected_neuron_ids) == 200
+    dialog.select_none_button.click()
+    assert len(calls) == 2
+    dialog.range_edit.setText("0-99")
+    dialog.range_button.click()
+    assert len(calls) == 3
+    assert len(dialog.selected_neuron_ids) == 100
+
+    dialog.select_all_arrays_button.click()
+    assert len(array_calls) == 1
+    assert dialog.selected_array_names == ARRAYS
+    assert dialog.ok_button.isEnabled()
+    dialog.select_no_arrays_button.click()
+    assert len(array_calls) == 2
+    assert not dialog.ok_button.isEnabled()
+    assert per_item == []  # no per-item rescans during bulk changes
+    # Single ticks still update right away.
+    dialog.array_list.item(0).setCheckState(QtCore.Qt.CheckState.Checked)
+    assert dialog.ok_button.isEnabled()

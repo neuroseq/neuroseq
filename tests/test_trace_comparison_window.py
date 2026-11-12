@@ -476,3 +476,57 @@ def test_workspace_trace_context_menu_opens_comparison_dialog(qtbot: QtBot) -> N
     assert fresh.receivers(fresh.compare_traces_requested) == 1
     data_trace = gui.data_widget.trace_widget
     assert data_trace.receivers(data_trace.compare_traces_requested) == 1
+
+
+def test_locked_windows_open_with_one_shared_range(qtbot: QtBot) -> None:
+    """Windows opened with an axis locked start in step: on the union of
+    their own ranges (per row for values; rows a window lacks don't count)."""
+    a = _trace([0, 1], 50, 0.01, seed=1)
+    b = _trace([0, 1, 2], 100, 0.01, seed=2)
+    b.traces = b.traces * 10.0
+    comparison = build_trace_comparison(
+        [("Rep 1 :: dF/F", a), ("Rep 2 :: dF/F", b)], [0, 1, 2]
+    )
+    group: AxisLinkGroup[LinkedArrayWindow] = AxisLinkGroup()
+    windows = [
+        LinkedArrayWindow(comparison, label, group, lock_time=True, lock_value=True)
+        for label in ("Rep 1", "Rep 2")
+    ]
+    for window in windows:
+        qtbot.addWidget(window)
+    rep1, rep2 = windows
+    own_time = [r for r in (rep1.time_range, rep2.time_range) if r is not None]
+    own_values = [r for r in (rep1.value_range(0), rep2.value_range(0)) if r]
+    assert len(own_time) == len(own_values) == 2
+    rep2_row2 = rep2.value_range(2)
+
+    LinkedArrayWindow.sync_locked_ranges(group)
+
+    expected_time = (min(r[0] for r in own_time), max(r[1] for r in own_time))
+    assert rep1.time_range == rep2.time_range == expected_time
+    expected_value = (
+        min(r[0] for r in own_values),
+        max(r[1] for r in own_values),
+    )
+    assert rep1.value_range(0) == rep2.value_range(0) == expected_value
+    # Rep 1 has no neuron 2: the shared row range is Rep 2's own.
+    assert rep1.value_range(2) == rep2.value_range(2) == rep2_row2
+
+
+def test_unlocked_windows_keep_their_own_ranges_at_open(qtbot: QtBot) -> None:
+    (rep1, rep2), group = _linked_windows(qtbot, lock_time=False, lock_value=False)
+    before = [rep1.value_range(0), rep2.value_range(0)]
+    LinkedArrayWindow.sync_locked_ranges(group)
+    assert [rep1.value_range(0), rep2.value_range(0)] == before
+
+
+def test_open_separate_windows_syncs_locked_value_ranges(qtbot: QtBot) -> None:
+    traces = [_trace([0, 1], 20, 0.01, seed=i) for i in range(2)]
+    traces[1].traces = traces[1].traces * 5.0
+    project = _project(*traces)
+    dialog = _open(qtbot, project, ComparisonView.SEPARATE_WINDOWS)
+    dialog.lock_value_checkbox.setChecked(True)
+    dialog.accept()
+    first, second = dialog.comparison_windows
+    assert first.value_range(1) == second.value_range(1)
+    assert first.time_range == second.time_range

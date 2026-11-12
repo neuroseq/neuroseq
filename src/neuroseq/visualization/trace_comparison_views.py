@@ -35,6 +35,7 @@ from neuroseq.visualization_support.trace_comparison import AxisLinkGroup
 from neuroseq.visualization_support.trace_comparison import TraceComparison
 from neuroseq.visualization_support.trace_comparison import TraceConcatenation
 from neuroseq.visualization_support.trace_comparison import format_neuron_ids
+from neuroseq.visualization_support.trace_comparison import union_range
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -176,6 +177,8 @@ class LinkedArrayWindow(ComparisonPopup):
         self.label = label
         self.link_group = link_group
         self.axes: list[Axes] = []
+        # Rows showing a "not in this array" note: their value range is no data.
+        self._empty_rows: set[int] = set()
         self._closed = False
 
         self.lock_time_checkbox = QtWidgets.QCheckBox("Lock time axis", self)
@@ -208,9 +211,10 @@ class LinkedArrayWindow(ComparisonPopup):
         color = dict(self.comparison.legend).get(self.label, text)
         axes = self.figure.subplots(len(rows), 1, sharex=True, squeeze=False)
         units = self.comparison.units
-        for ax, row in zip(axes[:, 0], rows, strict=True):
+        for row_index, (ax, row) in enumerate(zip(axes[:, 0], rows, strict=True)):
             series = next((s for s in row.series if s.label == self.label), None)
             if series is None:
+                self._empty_rows.add(row_index)
                 ax.text(
                     0.5,
                     0.5,
@@ -291,6 +295,31 @@ class LinkedArrayWindow(ComparisonPopup):
                 row_limits = reference.value_range(row_index)
                 if row_limits is not None:
                     self.apply_value_range(row_index, row_limits)
+
+    @staticmethod
+    def sync_locked_ranges(link_group: AxisLinkGroup[LinkedArrayWindow]) -> None:
+        """Give the group's windows that lock an axis one shared range on it:
+        the union of their own (autoscaled) ranges, per row for the value axis.
+
+        Call once every window of the group is built; until then each
+        window has only scaled itself to its own data.
+        """
+        timed = link_group.locked_members(TIME_AXIS)
+        limits = union_range(window.time_range for window in timed)
+        if limits is not None:
+            for window in timed:
+                window.apply_time_range(limits)
+        valued = link_group.locked_members(VALUE_AXIS)
+        rows = max((len(window.axes) for window in valued), default=0)
+        for row_index in range(rows):
+            row_limits = union_range(
+                window.value_range(row_index)
+                for window in valued
+                if row_index not in window._empty_rows
+            )
+            if row_limits is not None:
+                for window in valued:
+                    window.apply_value_range(row_index, row_limits)
 
     def closeEvent(self, event) -> None:
         self._closed = True

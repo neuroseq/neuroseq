@@ -259,6 +259,7 @@ def open_trace_comparison(
                 )
                 window.setWindowTitle(_titled(f"Trace array {label}", title_suffix))
                 windows.append(window)
+            LinkedArrayWindow.sync_locked_ranges(group)
         else:
             comparison = build_trace_comparison(arrays, neuron_choice)
             window = TraceComparisonWindow(

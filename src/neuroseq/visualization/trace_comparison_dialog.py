@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from collections.abc import Collection
+from collections.abc import Iterator
 from collections.abc import Sequence
+from contextlib import contextmanager
 
 from qtpy import QtCore
 from qtpy import QtWidgets
@@ -13,7 +15,9 @@ from neuroseq.data_names import group_name_problem
 from neuroseq.visualization_support.trace_comparison import ComparisonView
 from neuroseq.visualization_support.trace_comparison import array_labels
 from neuroseq.visualization_support.trace_comparison import concatenation_group_name
-from neuroseq.visualization_support.trace_comparison import parse_neuron_ids
+from neuroseq.visualization_support.trace_comparison import in_ranges
+from neuroseq.visualization_support.trace_comparison import parse_neuron_ranges
+from neuroseq.visualization_support.trace_comparison import range_size
 from neuroseq.visualization_support.trace_comparison import shared_dt
 
 _CHECKED = QtCore.Qt.CheckState.Checked
@@ -335,9 +339,9 @@ class TraceComparisonDialog(QtWidgets.QDialog):
     def _apply_filter(self, text: str) -> None:
         """Show neurons whose id matches the filter (an id/range or a substring)."""
         text = text.strip()
-        wanted: set[int] | None
+        wanted: list[tuple[int, int]] | None
         try:
-            wanted = set(parse_neuron_ids(text)) if text else None
+            wanted = parse_neuron_ranges(text) if text else None
         except ValueError:
             wanted = None
         for item in self._items(self.neuron_list):
@@ -345,38 +349,54 @@ class TraceComparisonDialog(QtWidgets.QDialog):
             if not text:
                 hidden = False
             elif wanted is not None:
-                hidden = neuron_id not in wanted
+                hidden = not in_ranges(neuron_id, wanted)
             else:
                 hidden = text.lower() not in item.text().lower()
             item.setHidden(hidden)
 
+    @contextmanager
+    def _bulk_check(self, list_widget: QtWidgets.QListWidget) -> Iterator[None]:
+        """Tick/untick many items with one update afterwards: without it
+        every item's ``itemChanged`` rescans the whole list (O(n²))."""
+        blocked = list_widget.blockSignals(True)
+        try:
+            yield
+        finally:
+            list_widget.blockSignals(blocked)
+        if list_widget is self.array_list:
+            self._arrays_changed()
+        else:
+            self._update_ok_enabled()
+
     def _set_shown_checked(self, checked: bool) -> None:
-        for item in self._items(self.neuron_list):
-            if not item.isHidden():
-                item.setCheckState(_check_state(checked))
+        with self._bulk_check(self.neuron_list):
+            for item in self._items(self.neuron_list):
+                if not item.isHidden():
+                    item.setCheckState(_check_state(checked))
 
     def _set_arrays_checked(self, checked: bool) -> None:
-        for item in self._items(self.array_list):
-            item.setCheckState(_check_state(checked))
+        with self._bulk_check(self.array_list):
+            for item in self._items(self.array_list):
+                item.setCheckState(_check_state(checked))
 
     def _tick_range(self) -> None:
         try:
-            ids = set(parse_neuron_ids(self.range_edit.text()))
+            ranges = parse_neuron_ranges(self.range_edit.text())
         except ValueError as error:
             self.range_error.setText(str(error))
             self.range_error.show()
             return
         self.range_error.hide()
         found = set()
-        for item in self._items(self.neuron_list):
-            neuron_id = int(item.data(_ID_ROLE))
-            if neuron_id in ids:
-                item.setCheckState(_CHECKED)
-                found.add(neuron_id)
-        if ids - found:
-            self.range_error.setText(
-                f"{len(ids - found)} id(s) not in this array were ignored."
-            )
+        with self._bulk_check(self.neuron_list):
+            for item in self._items(self.neuron_list):
+                neuron_id = int(item.data(_ID_ROLE))
+                if in_ranges(neuron_id, ranges):
+                    item.setCheckState(_CHECKED)
+                    found.add(neuron_id)
+        ignored = range_size(ranges) - len(found)
+        if ignored:
+            self.range_error.setText(f"{ignored} id(s) not in this array were ignored.")
             self.range_error.show()
 
     # -- results ---------------------------------------------------------

@@ -287,3 +287,34 @@ def test_axis_link_group_does_not_echo() -> None:
 def test_cascade_offsets() -> None:
     assert cascade_offsets(3, step=10) == [(0, 0), (10, 10), (20, 20)]
     assert cascade_offsets(0) == []
+
+
+def test_union_range_and_locked_members() -> None:
+    from neuroseq.visualization_support.trace_comparison import union_range
+
+    assert union_range([]) is None
+    assert union_range([None, (1.0, 2.0), (-1.0, 1.5)]) == (-1.0, 2.0)
+    group: AxisLinkGroup[str] = AxisLinkGroup()
+    group.add("a", lock_time=True, lock_value=False)
+    group.add("b", lock_time=False, lock_value=True)
+    group.add("c", lock_time=True, lock_value=True)
+    assert group.locked_members(TIME_AXIS) == ["a", "c"]
+    assert group.locked_members(VALUE_AXIS) == ["b", "c"]
+
+
+def test_parse_neuron_ranges_merges_without_listing_ids() -> None:
+    from neuroseq.visualization_support.trace_comparison import in_ranges
+    from neuroseq.visualization_support.trace_comparison import parse_neuron_ranges
+    from neuroseq.visualization_support.trace_comparison import range_size
+
+    ranges = parse_neuron_ranges("10-12, 0-3 2..5 ; 7, 99999999-0")
+    assert ranges == [(0, 99999999)]
+    assert range_size(ranges) == 100000000
+    ranges = parse_neuron_ranges("10-12, 0-3 2..5 ; 7, 4")
+    assert ranges == [(0, 5), (7, 7), (10, 12)]
+    assert range_size(ranges) == 10
+    assert [n for n in range(14) if in_ranges(n, ranges)] == [
+        0, 1, 2, 3, 4, 5, 7, 10, 11, 12,
+    ]  # fmt: skip
+    assert not in_ranges(-1, ranges)
+    assert parse_neuron_ranges("") == []

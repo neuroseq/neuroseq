@@ -14,6 +14,7 @@ returns.
 
 from __future__ import annotations
 
+import bisect
 import enum
 import re
 from collections.abc import Callable
@@ -59,14 +60,16 @@ class ComparisonView(enum.Enum):
 _RANGE_PART = re.compile(r"^\s*(\d+)\s*(?:(?:-|\.\.|:)\s*(\d+)\s*)?$")
 
 
-def parse_neuron_ids(text: str) -> list[int]:
-    """Parse ``"0-3, 7, 10..12"`` into sorted unique neuron ids.
+def parse_neuron_ranges(text: str) -> list[tuple[int, int]]:
+    """Parse ``"0-3, 7, 10..12"`` into sorted, merged inclusive id ranges
+    (``[(0, 3), (7, 7), (10, 12)]``) without listing every id, so a huge
+    range such as ``0-99999999`` costs nothing.
 
     Parts are separated by commas, semicolons or whitespace; a range ``a-b``
     (or ``a..b``, ``a:b``) includes both ends and may be given backwards.
     Raises ``ValueError`` naming the first part that is not an id or range.
     """
-    ids: set[int] = set()
+    ranges: list[tuple[int, int]] = []
     for part in re.split(r"[,;\s]+", text.strip()):
         if not part:
             continue
@@ -77,8 +80,36 @@ def parse_neuron_ids(text: str) -> list[int]:
         stop = int(match.group(2)) if match.group(2) is not None else start
         if stop < start:
             start, stop = stop, start
-        ids.update(range(start, stop + 1))
-    return sorted(ids)
+        ranges.append((start, stop))
+    merged: list[tuple[int, int]] = []
+    for start, stop in sorted(ranges):
+        if merged and start <= merged[-1][1] + 1:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], stop))
+        else:
+            merged.append((start, stop))
+    return merged
+
+
+def in_ranges(neuron_id: int, ranges: Sequence[tuple[int, int]]) -> bool:
+    """Whether ``neuron_id`` lies in the sorted, merged ``ranges``
+    (as returned by :func:`parse_neuron_ranges`)."""
+    index = bisect.bisect_right(ranges, neuron_id, key=lambda r: r[0]) - 1
+    return index >= 0 and ranges[index][0] <= neuron_id <= ranges[index][1]
+
+
+def range_size(ranges: Sequence[tuple[int, int]]) -> int:
+    """How many ids the merged ``ranges`` cover."""
+    return sum(stop - start + 1 for start, stop in ranges)
+
+
+def parse_neuron_ids(text: str) -> list[int]:
+    """Parse ``"0-3, 7, 10..12"`` into sorted unique neuron ids (see
+    :func:`parse_neuron_ranges`, which avoids listing huge ranges)."""
+    return [
+        neuron_id
+        for start, stop in parse_neuron_ranges(text)
+        for neuron_id in range(start, stop + 1)
+    ]
 
 
 def array_color(position: int) -> str:
@@ -487,6 +518,10 @@ class AxisLinkGroup[M: Hashable]:
                 return other
         return None
 
+    def locked_members(self, axis: str) -> list[M]:
+        """Members with ``axis`` locked, in the order they were added."""
+        return [member for member in self._locks if self.is_locked(member, axis)]
+
     def propagate(self, source: M, axis: str, apply: Callable[[M], None]) -> list[M]:
         """Call ``apply(target)`` for every target of ``source`` on ``axis``.
 
@@ -503,6 +538,18 @@ class AxisLinkGroup[M: Hashable]:
         finally:
             self._propagating = False
         return targets
+
+
+def union_range(
+    ranges: Iterable[tuple[float, float] | None],
+) -> tuple[float, float] | None:
+    """The smallest range covering every given ``(low, high)`` (``None``s are
+    skipped); ``None`` if there is none. Used to give windows whose axes are
+    locked together one shared range when they open."""
+    known = [r for r in ranges if r is not None]
+    if not known:
+        return None
+    return (min(low for low, _ in known), max(high for _, high in known))
 
 
 def cascade_offsets(count: int, step: int = 32) -> list[tuple[int, int]]:
