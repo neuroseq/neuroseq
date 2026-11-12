@@ -9,47 +9,62 @@ from scipy import ndimage
 
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_suite2p import cellpose_to_stimulus_permutation
+
+
+def _permutation(cellpose_data: CellposeImportResult | None) -> dict[int, int]:
+    """Cellpose -> neuron id entries of the mapping in effect (identity for
+    every other id); identity when the mapping cannot be resolved, which is
+    what the importers and footprint colours then fall back to as well."""
+    try:
+        return cellpose_to_stimulus_permutation(
+            resolve_stimulus_to_cellpose_mapping(cellpose_data)
+        )
+    except ValueError:
+        return {}
 
 
 def cellpose_to_stim_ids(
     cellpose_ids: Iterable[int], cellpose_data: CellposeImportResult | None
 ) -> dict[int, int]:
-    """Neuron (stimulus) id of each non-negative Cellpose id that drives one.
+    """Neuron (stimulus) id of each non-negative Cellpose id.
 
-    Uses the mapping in effect (``resolve_stimulus_to_cellpose_mapping``), the
-    one the trace importers and footprint colours use, so a Linear offset
-    mapping, which is never stored as a dict, is honoured too. Without a
-    mapping Cellpose ids are neuron ids. With one, a cell the mapping leaves
-    out drives no neuron and is omitted: its number is not a neuron id and
-    could alias an unrelated neuron. The mapping is resolved once for all ids.
+    Resolved exactly as the trace importers and the footprint colours resolve
+    it (``cellpose_to_stimulus_permutation`` over the mapping in effect, so a
+    Linear offset mapping, which is never stored as a dict, is honoured too).
+    A cell the mapping leaves out gets the same fallback id its traces get;
+    the resolution is a permutation, so no two cells share a neuron id. The
+    mapping is resolved once for all ids.
     """
+    permutation = _permutation(cellpose_data)
     ids = {int(i) for i in cellpose_ids if int(i) >= 0}
-    mapping = resolve_stimulus_to_cellpose_mapping(cellpose_data)
-    if not mapping:
-        return {cell: cell for cell in ids}
-    to_stim = {int(cell): int(stim) for stim, cell in mapping.items()}
-    return {cell: to_stim[cell] for cell in ids if cell in to_stim}
+    return {cell: permutation.get(cell, cell) for cell in ids}
 
 
 def cellpose_to_stim_id(
     cellpose_id: int, cellpose_data: CellposeImportResult | None
 ) -> int | None:
-    """See :func:`cellpose_to_stim_ids`; ``None`` if the cell drives no neuron."""
+    """See :func:`cellpose_to_stim_ids`; ``None`` for a negative (background) id."""
     return cellpose_to_stim_ids([cellpose_id], cellpose_data).get(int(cellpose_id))
+
+
+def stim_ids_to_cellpose_ids(
+    stim_ids: Iterable[int], cellpose_data: CellposeImportResult | None
+) -> dict[int, int]:
+    """The Cellpose cell whose traces get each non-negative neuron id (the
+    inverse of :func:`cellpose_to_stim_ids`); the mapping is resolved once."""
+    inverse = {neuron: cell for cell, neuron in _permutation(cellpose_data).items()}
+    ids = {int(i) for i in stim_ids if int(i) >= 0}
+    return {stim: inverse.get(stim, stim) for stim in ids}
 
 
 def stim_id_to_cellpose_id(
     stim_id: int | None, cellpose_data: CellposeImportResult | None
 ) -> int | None:
-    """The Cellpose cell driving neuron ``stim_id`` (the inverse of
-    :func:`cellpose_to_stim_id`), or ``None`` if no cell does."""
+    """See :func:`stim_ids_to_cellpose_ids`; ``None`` for ``None``/negative ids."""
     if stim_id is None:
         return None
-    mapping = resolve_stimulus_to_cellpose_mapping(cellpose_data)
-    if not mapping:
-        return stim_id
-    cell = mapping.get(int(stim_id))
-    return None if cell is None else int(cell)
+    return stim_ids_to_cellpose_ids([stim_id], cellpose_data).get(int(stim_id))
 
 
 def compute_cell_centroids(

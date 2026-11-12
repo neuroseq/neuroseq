@@ -704,18 +704,46 @@ def test_selecting_a_previously_hidden_cell_shows_it_again(qtbot: QtBot) -> None
     assert emitted == [[1, False]]
 
 
-def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
+def test_unmapped_cells_link_to_their_fallback_trace_ids() -> None:
+    """A cell a partial mapping leaves out links to the fallback neuron id
+    its traces and footprint colour get, and never aliases a mapped neuron."""
+    result = _cellpose_result_with_unmapped_cells()
     state = SpatialFootprintState()
-    state.set_data(_cellpose_result_with_unmapped_cells())
+    state.set_data(result)
 
     # 5, 6, 7 are the real mapped cells (-> neurons 0, 1, 2)
     assert state._cellpose_to_stim_id(5) == 0
     assert state._cellpose_to_stim_id(6) == 1
     assert state._cellpose_to_stim_id(7) == 2
-    # 0, 1, 2, 3, 4 are unmapped strays - must not alias onto neuron 0/1/2
-    for unmapped_id in range(5):
-        assert state._cellpose_to_stim_id(unmapped_id) is None
+    linked = [state._cellpose_to_stim_id(cell) for cell in range(8)]
+    trace_ids = remap_raw_cellpose_ids(
+        np.arange(8), resolve_stimulus_to_cellpose_mapping(result)
+    ).tolist()
+    assert linked == trace_ids == footprint_neuron_ids(np.arange(8), result).tolist()
+    # 0..4 are unmapped strays: their ids must not alias onto neuron 0/1/2
+    assert linked[:5] == [5, 6, 7, 3, 4]
+    assert len(set(linked)) == len(linked)
     assert state._cellpose_to_stim_id(-1) is None
+    for cell, neuron in enumerate(linked):
+        assert state._stim_id_to_cellpose_id(neuron) == cell
+
+
+def test_custom_mapping_links_unmapped_cells_like_their_colours() -> None:
+    """Custom mapping {0: 5} on cells 0..5: cell 1 is coloured as neuron 1,
+    so hovering neuron 1 must find cell 1 (it used to resolve to nothing)."""
+    result = _cellpose_result(mapping={0: 5})
+    result.segmentation_array = np.repeat(np.arange(6, dtype=np.int32), 2)[None, :]
+    result.original_cellpose_ids = np.arange(6, dtype=np.int32)
+    state = SpatialFootprintState()
+    state.set_data(result)
+
+    colours = footprint_neuron_ids(np.arange(6), result).tolist()
+    assert colours == [5, 1, 2, 3, 4, 0]
+    assert [state._cellpose_to_stim_id(cell) for cell in range(6)] == colours
+    state.set_hovered_stim_id(0)
+    assert state.hovered_cellpose_id == 5
+    state.set_hovered_stim_id(1)
+    assert state.hovered_cellpose_id == 1
 
 
 def test_linking_honours_a_linear_offset_mapping() -> None:
@@ -776,13 +804,16 @@ def test_active_cellpose_ids_resolves_via_mapping() -> None:
     assert state.active_cellpose_ids == {2, 1}
 
 
-def test_active_cellpose_ids_skips_stim_ids_with_no_mapping_entry() -> None:
+def test_active_cellpose_ids_resolve_unmapped_stim_ids_to_their_fallback_cells() -> (
+    None
+):
     state = SpatialFootprintState()
     state.set_data(_cellpose_result_with_unmapped_cells())
 
-    state.set_active_stim_ids({0, 99})  # 99 has no mapping entry at all
+    # neuron 0 is mapped cell 5; neuron 5 is the fallback id of stray cell 0
+    state.set_active_stim_ids({0, 5})
 
-    assert state.active_cellpose_ids == {5}
+    assert state.active_cellpose_ids == {5, 0}
 
 
 def test_set_active_stim_ids_is_a_noop_when_unchanged() -> None:
@@ -2062,3 +2093,17 @@ def test_footprint_colors_follow_custom_mapping(qtbot: QtBot) -> None:
         assert np.allclose(
             np.array(legend[cellpose_id]) / 255, expected[cellpose_id], atol=1 / 255
         )
+
+
+def test_linking_falls_back_to_identity_for_an_unresolvable_mapping() -> None:
+    """A mapping with duplicate Cellpose ids cannot be applied to traces or
+    colours either; linking then treats Cellpose ids as neuron ids, like them."""
+    from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
+    from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
+
+    result = _cellpose_result(mapping={0: 1, 1: 1})
+    assert cellpose_to_stim_ids([0, 1, 2, -1], result) == {0: 0, 1: 1, 2: 2}
+    assert footprint_neuron_ids(np.arange(3), result).tolist() == [0, 1, 2]
+    assert stim_id_to_cellpose_id(2, result) == 2
+    assert stim_id_to_cellpose_id(-1, result) is None
+    assert stim_id_to_cellpose_id(None, result) is None

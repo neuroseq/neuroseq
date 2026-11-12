@@ -21,7 +21,7 @@ from neuroseq.visualization.cell_overlay_widget import _pixel_at
 from neuroseq.visualization.fpl_widget import FPLWidget
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
 from neuroseq.visualization_support.cellpose_ids import compute_cell_centroids
-from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
+from neuroseq.visualization_support.cellpose_ids import stim_ids_to_cellpose_ids
 
 ALL_STIM_ARRAYS_COMBINED = "All arrays combined"
 NO_STIM_ARRAY = "None"
@@ -570,9 +570,9 @@ class CalciumVideoWidget(FPLWidget):
             if selected in self._stim_arrays
             else []
         )
-        result: set[int] = set()
         if selected == NO_STIM_ARRAY:
-            return result
+            return set()
+        stim_ids: set[int] = set()
         for array in arrays:
             dt = float(array.dt)
             if dt <= 0 or array.values.ndim != 2:
@@ -581,13 +581,13 @@ class CalciumVideoWidget(FPLWidget):
             last = min(array.values.shape[0], int(np.ceil(end / dt)))
             if last <= first:
                 continue
-            for stim_id in np.flatnonzero(
-                np.any(array.values[first:last] != 0, axis=0)
-            ):
-                cellpose_id = stim_id_to_cellpose_id(int(stim_id), self._cellpose_data)
-                if cellpose_id is not None:
-                    result.add(cellpose_id)
-        return result
+            stim_ids.update(
+                int(stim_id)
+                for stim_id in np.flatnonzero(
+                    np.any(array.values[first:last] != 0, axis=0)
+                )
+            )
+        return set(stim_ids_to_cellpose_ids(stim_ids, self._cellpose_data).values())
 
     def _set_crosses(self, cellpose_ids: set[int]) -> None:
         positions = [

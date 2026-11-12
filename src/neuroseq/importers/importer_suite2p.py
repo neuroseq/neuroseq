@@ -74,19 +74,26 @@ def compute_normalized_suite2p_spikes(
     return _normalize_array_per_neuron(spike_data)
 
 
-def _resolve_suite2p_indices(
-    n_neurons_to_import: int,
+def cellpose_to_stimulus_permutation(
     stimulus_to_cellpose_mapping: dict[int, int] | None,
-) -> npt.NDArray[Any]:
-    """
-    Resolve Suite2p row indices (Cellpose IDs) to stimulus IDs. From Branch 417 with improvements.
-    """
-    if n_neurons_to_import <= 0:
-        raise ValueError("n_neurons_to_import must be positive")
+) -> dict[int, int]:
+    """Cellpose id -> stimulus (neuron) id for every Cellpose id the mapping
+    moves; every Cellpose id not in the result keeps its own number.
 
+    The one resolution shared by the trace importers, the footprint colours
+    and footprint/video linking, so a cell always means the same neuron.
+    Unmapped Cellpose IDs keep their own number as stimulus ID, unless that
+    number is already a mapped stimulus ID (a sparse Custom mapping, or a
+    Linear one over Cellpose IDs with gaps). Those are paired, in sorted
+    order, with the mapped Cellpose IDs that are not themselves stimulus IDs,
+    so the mapping extends to a permutation: every Cellpose ID gets a unique
+    stimulus ID, and the result depends only on the ID and the mapping (not
+    on which other IDs are present), keeping remaps of subsets consistent.
+
+    Raises ``ValueError`` if two stimulus ids map to the same Cellpose id.
+    """
     if not stimulus_to_cellpose_mapping:
-        return np.arange(n_neurons_to_import, dtype=np.uint32)
-
+        return {}
     cellpose_to_stim: dict[int, int] = {}
     duplicate_cellpose_ids: set[int] = set()
     for stim_id, cellpose_id in stimulus_to_cellpose_mapping.items():
@@ -105,20 +112,33 @@ def _resolve_suite2p_indices(
             f"stimulus_to_cellpose_mapping contains duplicate Cellpose IDs: {duplicate_ids}"
         )
 
-    # Suite2p rows are expected to be ordered by Cellpose ID 0..N-1.
-    # Unmapped Cellpose IDs keep their own number as stimulus ID, unless that
-    # number is already a mapped stimulus ID (a sparse Custom mapping, or a
-    # Linear one over Cellpose IDs with gaps). Those are paired, in sorted
-    # order, with the mapped Cellpose IDs that are not themselves stimulus IDs,
-    # so the mapping extends to a permutation: every Cellpose ID gets a unique
-    # stimulus ID, and the result depends only on the ID and the mapping (not
-    # on which other IDs are present), keeping remaps of subsets consistent.
     stim_ids_in_use = set(cellpose_to_stim.values())
     displaced_ids = sorted(stim_ids_in_use - cellpose_to_stim.keys())
     free_ids = sorted(cellpose_to_stim.keys() - stim_ids_in_use)
-    fallback = dict(zip(displaced_ids, free_ids, strict=True))
+    permutation = dict(zip(displaced_ids, free_ids, strict=True))
+    permutation.update(cellpose_to_stim)
+    return permutation
+
+
+def _resolve_suite2p_indices(
+    n_neurons_to_import: int,
+    stimulus_to_cellpose_mapping: dict[int, int] | None,
+) -> npt.NDArray[Any]:
+    """
+    Resolve Suite2p row indices (Cellpose IDs) to stimulus IDs. From Branch 417 with improvements.
+
+    Suite2p rows are expected to be ordered by Cellpose ID 0..N-1; see
+    :func:`cellpose_to_stimulus_permutation` for the resolution.
+    """
+    if n_neurons_to_import <= 0:
+        raise ValueError("n_neurons_to_import must be positive")
+
+    if not stimulus_to_cellpose_mapping:
+        return np.arange(n_neurons_to_import, dtype=np.uint32)
+
+    permutation = cellpose_to_stimulus_permutation(stimulus_to_cellpose_mapping)
     stim_ids = [
-        cellpose_to_stim.get(cellpose_id, fallback.get(cellpose_id, cellpose_id))
+        permutation.get(cellpose_id, cellpose_id)
         for cellpose_id in range(n_neurons_to_import)
     ]
     if len(set(stim_ids)) != len(stim_ids):

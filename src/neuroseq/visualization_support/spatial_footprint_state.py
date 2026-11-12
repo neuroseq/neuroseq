@@ -10,6 +10,7 @@ from neuroseq.importers.importer_cellpose import load_background_image
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
 from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
+from neuroseq.visualization_support.cellpose_ids import stim_ids_to_cellpose_ids
 
 
 class SpatialFootprintState(QtCore.QObject):
@@ -89,24 +90,20 @@ class SpatialFootprintState(QtCore.QObject):
         )
 
     def _cellpose_to_stim_id(self, cellpose_id: int) -> int | None:
-        """Resolve a segmented cell to the trace/stim row it drives, or
-        `None` if it doesn't drive one at all.
+        """Resolve a segmented cell to the trace/stim row its traces get
+        (`None` only for a negative/background id).
 
-        Uses the mapping in effect (see `cellpose_to_stim_ids`), so a Linear
-        offset mapping links the same cell and row as the footprint colours.
-        Without a mapping, cellpose ids are neuron/stim indices (identity).
-        Once a (possibly partial) mapping exists - e.g. Cellpose found more
-        cells than were mapped to simulated/imported neurons - an *unmapped*
-        id resolves to `None` (and callers must skip emitting for it): its
-        number doesn't refer to a stim/trace row and could collide with the
-        real row of some other, unrelated neuron.
+        Uses the same resolution as the trace importers and footprint colours
+        (see `cellpose_to_stim_ids`): a Linear offset is honoured, and a cell a
+        partial mapping leaves out gets its fallback trace id, which never
+        collides with a mapped neuron's id.
         """
         return cellpose_to_stim_id(cellpose_id, self.cellpose_data)
 
     def _stim_id_to_cellpose_id(self, stim_id: int | None) -> int | None:
         """The reverse of `_cellpose_to_stim_id`: resolve a trace/stim row
-        to the segmented cell that drives it, or `None` if `stim_id` is
-        `None` or there is no mapping entry for it."""
+        to the segmented cell whose traces get it, or `None` if `stim_id` is
+        `None` or negative."""
         return stim_id_to_cellpose_id(stim_id, self.cellpose_data)
 
     @property
@@ -121,10 +118,9 @@ class SpatialFootprintState(QtCore.QObject):
 
     @property
     def active_cellpose_ids(self) -> set[int]:
-        cellpose_ids = (
-            self._stim_id_to_cellpose_id(stim_id) for stim_id in self.active_stim_ids
+        return set(
+            stim_ids_to_cellpose_ids(self.active_stim_ids, self.cellpose_data).values()
         )
-        return {cellpose_id for cellpose_id in cellpose_ids if cellpose_id is not None}
 
     def set_active_stim_ids(self, stim_ids: Iterable[int]) -> None:
         new_ids = frozenset(stim_ids)
@@ -135,10 +131,11 @@ class SpatialFootprintState(QtCore.QObject):
 
     @property
     def targeted_cellpose_ids(self) -> set[int]:
-        cellpose_ids = (
-            self._stim_id_to_cellpose_id(stim_id) for stim_id in self.targeted_stim_ids
+        return set(
+            stim_ids_to_cellpose_ids(
+                self.targeted_stim_ids, self.cellpose_data
+            ).values()
         )
-        return {cellpose_id for cellpose_id in cellpose_ids if cellpose_id is not None}
 
     def set_targeted_stim_ids(self, stim_ids: Iterable[int]) -> None:
         new_ids = frozenset(stim_ids)
