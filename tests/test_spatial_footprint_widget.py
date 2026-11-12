@@ -19,6 +19,8 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import CircleAOI
 from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
@@ -27,15 +29,17 @@ from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
 from neuroseq.visualization.cell_overlay_widget import OverlayView
-from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.visualization.spatial_footprint_widget import ACTIVE_STIM_BRIGHTNESS_BOOST
 from neuroseq.visualization.spatial_footprint_widget import (
     HOVERED_CELL_BRIGHTNESS_BOOST,
 )
+from neuroseq.visualization.spatial_footprint_widget import OVERLAY_CELL_OPACITY
 from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization_support.footprint_colors import compose_footprint_overlay
+from neuroseq.visualization_support.footprint_colors import footprint_legend
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -78,6 +82,17 @@ def _cellpose_result(
         original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
         stimulus_to_cellpose_mapping=mapping,
         aoi_config=aoi_config,
+    )
+
+
+def _recoloured_overlay(
+    background: np.ndarray, segmentation: np.ndarray, result: CellposeImportResult
+) -> np.ndarray:
+    return compose_footprint_overlay(
+        background,
+        segmentation,
+        footprint_legend(segmentation, result),
+        OVERLAY_CELL_OPACITY,
     )
 
 
@@ -238,7 +253,11 @@ def test_show_segmentation_checkbox_reveals_the_stored_background_image(
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
     assert image_graphic is not None
     before_image = np.asarray(image_graphic.data.value).copy()
-    np.testing.assert_array_equal(before_image, overlay_image)
+    # The stored overlay is re-blended over the background with the cells'
+    # trace colours (#649).
+    np.testing.assert_array_equal(
+        before_image, _recoloured_overlay(background_image, segmentation, result)
+    )
 
     widget.show_segmentation_checkbox.setChecked(False)
 
@@ -284,13 +303,16 @@ def test_show_segmentation_checkbox_reloads_background_from_disk_when_missing(
 
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
     assert image_graphic is not None
-    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), overlay_image)
+    before_image = np.asarray(image_graphic.data.value).copy()
+    np.testing.assert_array_equal(
+        before_image, _recoloured_overlay(background_image, segmentation, result)
+    )
 
     widget.show_segmentation_checkbox.setChecked(False)
 
     after_image = np.asarray(image_graphic.data.value)
     np.testing.assert_array_equal(after_image, result.background_image)
-    assert not np.array_equal(after_image, overlay_image)
+    assert not np.array_equal(after_image, before_image)
 
 
 def test_set_data_leaves_background_image_none_when_file_unreachable(
@@ -1856,7 +1878,7 @@ def test_segmentation_legend_colors_match_trace_widget_for_non_zero_ids() -> Non
     neuron_ids = np.array([5, 8, 12], dtype=np.int32)
     segmentation = np.array([[5, 8], [12, -1]], dtype=np.int32)
 
-    legend = dict(compute_segmentation_legend(segmentation))
+    legend = dict(footprint_legend(segmentation))
     expected = neuron_indices_to_colors(neuron_ids)
 
     for neuron_id, expected_rgb in zip(neuron_ids, expected, strict=False):
@@ -1963,3 +1985,60 @@ def test_hover_shows_the_cursor_pixel_coordinates(
     position[0] = np.array([0.0, 2.0, 0.0])
     view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
     assert view.text.text == "x 0, y 2"  # background
+
+
+def test_footprint_colors_match_trace_colors_when_cellpose_ids_have_gaps(
+    qtbot: QtBot,
+) -> None:
+    """#649: cells removed (by an area of interest or deleted) leave gaps in
+    the Cellpose ids, which the Linear mapping compacts into consecutive
+    neuron ids for the traces. Footprints were coloured by Cellpose id and
+    traces by neuron id, so every cell after a gap had another colour."""
+    segmentation = -1 * np.ones((4, 6), dtype=np.int32)
+    segmentation[:, 0:2] = 0
+    segmentation[:, 2:4] = 3
+    segmentation[:, 4:6] = 7
+    background = np.full((4, 6, 3), 100, dtype=np.uint8)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=background.copy(),
+        background_image=background,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 3, 7], dtype=np.int32),
+        mapping_strategy="Linear",
+        linear_offset=0,
+    )
+    # What the trace importers give these cells' rows.
+    trace_ids = remap_raw_cellpose_ids(
+        np.array([0, 3, 7]), resolve_stimulus_to_cellpose_mapping(result)
+    )
+    assert trace_ids.tolist() == [0, 1, 2]
+    trace_colors = neuron_indices_to_colors(trace_ids)[:, :3]
+
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(result)
+
+    legend = dict(widget._base_legend)
+    for cellpose_id, color in zip([0, 3, 7], trace_colors, strict=True):
+        assert np.allclose(np.array(legend[cellpose_id]) / 255, color, atol=1 / 255)
+    image = widget._composed_overlay_image()
+    for column, color in zip([0, 2, 4], trace_colors, strict=True):
+        expected = 0.5 * 100 + 0.5 * np.floor(color * 255)
+        assert np.allclose(image[0, column], expected, atol=1)
+
+
+def test_footprint_colors_follow_custom_mapping(qtbot: QtBot) -> None:
+    result = _cellpose_result(mapping={0: 2, 1: 0, 2: 1})
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(result)
+
+    legend = dict(widget._base_legend)
+    expected = neuron_indices_to_colors(np.array([1, 2, 0]))[:, :3]
+    for cellpose_id in range(3):
+        assert np.allclose(
+            np.array(legend[cellpose_id]) / 255, expected[cellpose_id], atol=1 / 255
+        )

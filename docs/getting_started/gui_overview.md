@@ -116,7 +116,8 @@ Details: [static input](../input_design/static_input.md).
 
 ## Cell segmentation and Imaging tabs
 
-The **Cell segmentation** tab shows Cellpose cells labelled with neuron ids:
+The **Cell segmentation** tab shows Cellpose cells labelled with neuron ids,
+each in the same colour as that neuron's traces, spikes and inputs:
 
 - Left click: select or deselect a cell. Traces, inputs and spikes then show
   only selected neurons.
