@@ -118,17 +118,44 @@ traces and choose **Compare traces…**:
   (`10-20`); **Select all**/**Select none** act on the neurons the filter
   shows, and the field below ticks a list such as `0-5, 9`.
 - Tick the **Trace arrays** to compare. Every trace array of the project is
-  listed; the one the trace view shows is ticked.
+  listed; the one the trace view shows is ticked. Drag the arrays, or use
+  **Up**/**Down**, to set their order (it matters for **Concatenated**).
+- Choose a **View**:
+  - **Overlay per neuron**: one row per neuron, overlaying that neuron's
+    trace from every chosen array, each array in its own colour as named in
+    the legend.
+  - **Side by side per neuron**: the same rows, but every array gets its own
+    column. The window's **Side by side** box switches between these two.
+  - **Separate window per array**: one window per array, each showing the
+    chosen neurons stacked one row per neuron. With **Lock time axis** (on by
+    default), zooming or panning time in one window moves every other locked
+    window; **Lock value axis** (off by default) does the same for each
+    neuron's value range. Every window has its own lock boxes, so you can
+    unlink a window later (ticking a box again snaps it back to the others).
+    The windows open fanned out so they don't cover each other completely;
+    closing one leaves the others linked.
+  - **Concatenated**: the arrays joined end to end, in the list's order, into
+    one long timeline per neuron. Each segment is drawn in its array's
+    colour on its own sampling interval, starting where the previous one
+    ended (plus the optional **Gap**). Dashed lines mark the boundaries and
+    the array names label the segments.
 
-**OK** opens a separate window (you can keep several open) with one row per
-neuron. Each row overlays that neuron's trace from every chosen array, each
-array in its own colour as named in the legend; **Side by side** gives every
-array its own column instead. All rows share one time axis, so zooming or
-panning one (toolbar above the plot) moves them all. Each array is drawn on its
-own time axis, so arrays with a different sampling interval or length still
-line up in time. A neuron missing from an array is skipped there, and a note
-at the top lists which. The window only reads the data: it changes nothing in
-the project and adds no undo step.
+**OK** opens the window(s); you can keep several open. All rows of a window
+share one time axis, so zooming or panning one (toolbar above the plot) moves
+them all. Each array is drawn on its own time axis, so arrays with a different
+sampling interval or length still line up in time. A neuron missing from an
+array is skipped there (left empty in the concatenated view), and a note at
+the top lists which. The windows only read the data: they change nothing in
+the project and add no undo step.
+
+The one exception is **Also add as new trace array to the project** under
+**Concatenated**. It stores the joined traces of the ticked neurons as a new
+data group, named in the **Name** field (`Concatenated: Rep 1 + Rep 2 + …` by
+default), which then appears in the data selectors. Neurons missing from an
+array and the gap are filled with NaN. Adding is one undo step (Undo removes
+the array again). It is only offered when every ticked array has the same
+sampling interval; otherwise the box is disabled and its tooltip lists the
+arrays' intervals.
 
 ## Stimulation editor
 

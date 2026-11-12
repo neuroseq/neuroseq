@@ -861,7 +861,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def _compare_traces(
         self, data: TraceData | None, neuron_ids: Sequence[int]
     ) -> QtWidgets.QDialog:
-        """Open the read-only "Compare traces" dialog and popup (#662)."""
+        """Open the "Compare traces" dialog and its popup(s) (#662)."""
         return open_trace_comparison(
             self.project,
             data,
@@ -869,7 +869,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             theme=self.settings.theme,
             parent=self,
             title_suffix=self._tab_label_for(self.project),
+            on_data_added=lambda _name: self._refresh_after_data_added(),
         )
+
+    def _refresh_after_data_added(self) -> None:
+        """List a trace array added outside an importer (as undo/redo do)."""
+        self._update_data(keep_undo_history=True, refresh_stim_editor=False)
+        self._update_window_title()
 
     def _update_data(
         self, keep_undo_history: bool = False, refresh_stim_editor: bool = True

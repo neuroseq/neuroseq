@@ -1,50 +1,57 @@
-"""Popup comparing chosen neurons' traces across several trace arrays.
+"""Popups comparing chosen neurons' traces across several trace arrays.
 
-Opened from the trace view's context menu (**Compare traces…**). The window
-is read-only: it copies nothing back into the project and records no undo
-step. It draws with Matplotlib rather than fastplotlib: a figure with one
-subplot per neuron, a shared (linked) time axis, a legend and a navigation
-toolbar is a few lines there, whereas fastplotlib (0.6) has no legends and
-every popup would need its own GPU canvas per subplot. The trace view's
-vector preview and the custom analysis popups use Matplotlib for the same
-reason.
+Opened from the trace view's context menu (**Compare traces…**). The dialog's
+**View** picks one of four presentations (#662):
+
+- overlay per neuron and side by side per neuron (:class:`TraceComparisonWindow`),
+- one window per array with linked axes (``LinkedArrayWindow``),
+- the arrays joined end to end (``ConcatenatedTraceWindow``).
+
+The windows are read-only. Only the concatenated view can, when asked, store
+the joined traces as a new trace array, through ``Project.add_experiment`` so
+the step is undoable. Drawing uses Matplotlib rather than fastplotlib: a
+figure with one subplot per neuron, a shared (linked) time axis, a legend and
+a navigation toolbar is a few lines there, whereas fastplotlib (0.6) has no
+legends and every popup would need its own GPU canvas per subplot. The trace
+view's vector preview and the custom analysis popups use Matplotlib for the
+same reason.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
 from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq import theme as theme_module
+from neuroseq.data import Experiment
 from neuroseq.data import TraceData
 from neuroseq.visualization.trace_comparison_dialog import TraceComparisonDialog
-from neuroseq.visualization_support.time_format import format_time_ms
+from neuroseq.visualization.trace_comparison_views import ComparisonPopup
+from neuroseq.visualization.trace_comparison_views import ConcatenatedTraceWindow
+from neuroseq.visualization.trace_comparison_views import LinkedArrayWindow
+from neuroseq.visualization.trace_comparison_views import neuron_ylabel
+from neuroseq.visualization_support.trace_comparison import AxisLinkGroup
+from neuroseq.visualization_support.trace_comparison import ComparisonView
 from neuroseq.visualization_support.trace_comparison import TraceComparison
+from neuroseq.visualization_support.trace_comparison import array_labels
 from neuroseq.visualization_support.trace_comparison import build_trace_comparison
+from neuroseq.visualization_support.trace_comparison import build_trace_concatenation
+from neuroseq.visualization_support.trace_comparison import cascade_offsets
+from neuroseq.visualization_support.trace_comparison import concatenation_data_name
 
 if TYPE_CHECKING:
-    from matplotlib.axes import Axes
-
     from neuroseq.project import Project
-
-# Height of one neuron row in the figure, in inches.
-ROW_HEIGHT_IN = 1.6
-# Extra figure height for the legend and the time axis, in inches.
-FIGURE_MARGIN_IN = 1.2
 
 # Parentless comparison windows, kept alive until they are closed.
 _open_windows: list[QtWidgets.QWidget] = []
 
 
-class TraceComparisonWindow(QtWidgets.QWidget):
+class TraceComparisonWindow(ComparisonPopup):
     """Top-level, non-modal window with one row per neuron.
 
     Each row overlays that neuron's trace from every compared array in the
@@ -58,43 +65,21 @@ class TraceComparisonWindow(QtWidgets.QWidget):
         comparison: TraceComparison,
         theme: str = theme_module.LIGHT,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        side_by_side: bool = False,
     ) -> None:
-        super().__init__(parent)
-        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.setWindowFlags(QtCore.Qt.WindowType.Window)
+        super().__init__(comparison.missing_note(), theme=theme, parent=parent)
         self.setWindowTitle("Trace comparison")
-        self.resize(1000, 700)
         self.comparison = comparison
-        self._theme = theme_module.normalize_theme(theme)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        controls = QtWidgets.QHBoxLayout()
         self.side_by_side_checkbox = QtWidgets.QCheckBox("Side by side", self)
         self.side_by_side_checkbox.setToolTip(
             "Give each trace array its own column instead of overlaying them"
         )
+        self.side_by_side_checkbox.setChecked(side_by_side)
         self.side_by_side_checkbox.toggled.connect(self._redraw)
-        controls.addWidget(self.side_by_side_checkbox)
-        controls.addStretch()
-        layout.addLayout(controls)
-
-        self.note_label = QtWidgets.QLabel(comparison.missing_note(), self)
-        self.note_label.setWordWrap(True)
-        self.note_label.setStyleSheet(
-            f"color: {theme_module.warning_color(self._theme)};"
-        )
-        self.note_label.setVisible(bool(self.note_label.text()))
-        layout.addWidget(self.note_label)
-
-        face, _ = theme_module.mpl_colors(self._theme)
-        self.figure = Figure(layout="constrained", facecolor=face)
-        self.canvas = FigureCanvasQTAgg(self.figure)
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        layout.addWidget(self.toolbar)
-        self.scroll_area = QtWidgets.QScrollArea(self)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setWidget(self.canvas)
-        layout.addWidget(self.scroll_area, stretch=1)
+        self.controls.addWidget(self.side_by_side_checkbox)
+        self.controls.addStretch()
         self._redraw()
 
     @property
@@ -106,29 +91,15 @@ class TraceComparisonWindow(QtWidgets.QWidget):
         figure.clear()
         rows = self.comparison.rows
         legend = self.comparison.legend
-        face, text = theme_module.mpl_colors(self._theme)
-        n_rows = max(1, len(rows))
-        self.canvas.setMinimumHeight(
-            int((ROW_HEIGHT_IN * n_rows + FIGURE_MARGIN_IN) * figure.dpi)
-        )
+        _, text = theme_module.mpl_colors(self._theme)
+        self._fit_rows(len(rows))
         if not rows:
-            ax = figure.add_subplot(111, facecolor=face)
-            ax.text(
-                0.5,
-                0.5,
-                "None of the chosen neurons is in the chosen arrays.",
-                ha="center",
-                va="center",
-                color=text,
-                transform=ax.transAxes,
-            )
-            ax.set_axis_off()
-            self.canvas.draw_idle()
+            self._show_message("None of the chosen neurons is in the chosen arrays.")
             return
 
         n_cols = len(legend) if self.side_by_side else 1
         axes = figure.subplots(
-            n_rows,
+            len(rows),
             n_cols,
             sharex=True,
             sharey="row" if self.side_by_side else False,
@@ -159,21 +130,11 @@ class TraceComparisonWindow(QtWidgets.QWidget):
                             color=theme_module.muted_color(self._theme),
                             transform=axes[row_index][column].transAxes,
                         )
-            ylabel = f"Neuron {row.neuron_id}"
-            if units:
-                ylabel += f"\n({units})"
-            axes[row_index][0].set_ylabel(ylabel)
+            axes[row_index][0].set_ylabel(neuron_ylabel(row.neuron_id, units))
         if self.side_by_side:
             for (label, color), ax in zip(legend, axes[0], strict=True):
                 ax.set_title(label, color=color, fontsize="medium")
-        for ax in axes[-1]:
-            ax.set_xlabel("Time")
-            ax.xaxis.set_major_formatter(_time_formatter(ax))
-        max_time = self.comparison.max_time_ms
-        if max_time > 0:
-            axes[0][0].set_xlim(0.0, max_time)
-        for ax in axes.flat:
-            _style_axes(ax, face, text)
+        self._finish_time_axes(axes, self.comparison.max_time_ms)
         handles = [
             Line2D([], [], color=color, linewidth=2, label=label)
             for label, color in legend
@@ -187,29 +148,6 @@ class TraceComparisonWindow(QtWidgets.QWidget):
         for legend_text in figure_legend.get_texts():
             legend_text.set_color(text)
         self.canvas.draw_idle()
-
-    def closeEvent(self, event) -> None:
-        self.figure.clear()
-        super().closeEvent(event)
-
-
-def _time_formatter(ax: Axes) -> FuncFormatter:
-    """Tick labels in ms or s, precision following the visible range."""
-
-    def format_tick(value: float, _position: int | None) -> str:
-        low, high = ax.get_xlim()
-        return format_time_ms(value, high - low, strip_zeros=True)
-
-    return FuncFormatter(format_tick)
-
-
-def _style_axes(ax: Axes, face: str, text: str) -> None:
-    ax.set_facecolor(face)
-    ax.tick_params(colors=text, labelsize="small")
-    for spine in ax.spines.values():
-        spine.set_color(text)
-    ax.xaxis.label.set_color(text)
-    ax.yaxis.label.set_color(text)
 
 
 def _current_array_name(
@@ -232,6 +170,20 @@ def _current_array_name(
     return None
 
 
+def _keep_alive(window: QtWidgets.QWidget, parent: QtWidgets.QWidget | None) -> None:
+    """Hold a parentless popup until it is closed (a parent owns the others)."""
+    if parent is not None:
+        return
+    _open_windows.append(window)
+    window.destroyed.connect(
+        lambda *_: _open_windows.remove(window) if window in _open_windows else None
+    )
+
+
+def _titled(title: str, suffix: str) -> str:
+    return f"{title} - {suffix}" if suffix else title
+
+
 def open_trace_comparison(
     project: Project,
     data: TraceData | None,
@@ -240,54 +192,126 @@ def open_trace_comparison(
     theme: str = theme_module.LIGHT,
     parent: QtWidgets.QWidget | None = None,
     title_suffix: str = "",
+    on_data_added: Callable[[str], None] | None = None,
 ) -> TraceComparisonDialog:
-    """Ask which neurons and arrays to compare, then open the comparison popup.
+    """Ask which neurons and arrays to compare and how, then open the popup(s).
 
     The neuron list offers the ids of ``data`` (the array the trace view
     shows), ticking ``preselected_neuron_ids``; every trace array of the
-    project is listed with the current one ticked. Accepting the dialog
-    opens a new :class:`TraceComparisonWindow` (stored on the dialog as
-    ``comparison_window``); several may be open at once.
+    project is listed with the current one ticked. Accepting the dialog opens
+    the chosen view; the opened windows are stored on the dialog as
+    ``comparison_windows`` (``comparison_window`` is the first). Several may
+    be open at once. When the concatenated view also adds the joined traces
+    to the project, ``on_data_added`` is called with the new group's name.
     """
     names = project.get_data_names(TraceData)
     current = _current_array_name(project, names, data)
     neuron_ids = sorted({int(i) for i in data.indices}) if data is not None else []
+
+    def _load(name: str) -> TraceData | None:
+        # Imported arrays are read as stored; nothing is written back.
+        if name == current and data is not None:
+            return data
+        return project.get_data(name, TraceData)
+
+    def _dt(name: str) -> float | None:
+        loaded = _load(name)
+        return float(loaded.dt) if loaded is not None else None
+
     dialog = TraceComparisonDialog(
         neuron_ids,
         names,
         checked_neuron_ids=preselected_neuron_ids,
         checked_array_names=[current] if current is not None else [],
         parent=parent,
+        array_dt=_dt,
+        existing_group_names=list(project.experiments),
     )
     dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
     dialog.comparison_window = None  # type: ignore[attr-defined]
+    dialog.comparison_windows = []  # type: ignore[attr-defined]
 
-    def _open_window() -> None:
+    def _open_windows_for_choice() -> None:
         arrays: list[tuple[str, TraceData]] = []
         for name in dialog.selected_array_names:
-            # Imported arrays are read as stored; nothing is written back.
-            if name == current and data is not None:
-                arrays.append((name, data))
-                continue
-            loaded = project.get_data(name, TraceData)
+            loaded = _load(name)
             if loaded is not None:
                 arrays.append((name, loaded))
-        comparison = build_trace_comparison(arrays, dialog.selected_neuron_ids)
-        window = TraceComparisonWindow(comparison, theme=theme, parent=parent)
-        title = "Trace comparison"
-        if title_suffix:
-            title = f"{title} - {title_suffix}"
-        window.setWindowTitle(title)
-        if parent is None:
-            _open_windows.append(window)
-            window.destroyed.connect(
-                lambda *_: _open_windows.remove(window)
-                if window in _open_windows
-                else None
+        neuron_choice = dialog.selected_neuron_ids
+        view = dialog.view
+        windows: list[ComparisonPopup] = []
+        if view is ComparisonView.CONCATENATED:
+            windows.append(_open_concatenation(arrays, neuron_choice))
+        elif view is ComparisonView.SEPARATE_WINDOWS:
+            comparison = build_trace_comparison(arrays, neuron_choice)
+            group = AxisLinkGroup[LinkedArrayWindow]()
+            for label, _ in comparison.legend:
+                window = LinkedArrayWindow(
+                    comparison,
+                    label,
+                    group,
+                    lock_time=dialog.lock_time,
+                    lock_value=dialog.lock_value,
+                    theme=theme,
+                    parent=parent,
+                )
+                window.setWindowTitle(_titled(f"Trace array {label}", title_suffix))
+                windows.append(window)
+        else:
+            comparison = build_trace_comparison(arrays, neuron_choice)
+            window = TraceComparisonWindow(
+                comparison,
+                theme=theme,
+                parent=parent,
+                side_by_side=view is ComparisonView.SIDE_BY_SIDE,
             )
-        window.show()
-        dialog.comparison_window = window  # type: ignore[attr-defined]
+            window.setWindowTitle(_titled("Trace comparison", title_suffix))
+            windows.append(window)
+        for window in windows:
+            _keep_alive(window, parent)
+            window.show()
+        if len(windows) > 1:
+            origin = windows[0].pos()
+            for window, (dx, dy) in zip(
+                windows[1:], cascade_offsets(len(windows))[1:], strict=True
+            ):
+                window.move(origin + QtCore.QPoint(dx, dy))
+        dialog.comparison_windows = windows  # type: ignore[attr-defined]
+        dialog.comparison_window = windows[0] if windows else None  # type: ignore[attr-defined]
 
-    dialog.accepted.connect(_open_window)
+    def _open_concatenation(
+        arrays: list[tuple[str, TraceData]], neuron_choice: list[int]
+    ) -> ConcatenatedTraceWindow:
+        concatenation = build_trace_concatenation(arrays, neuron_choice, dialog.gap_ms)
+        window = ConcatenatedTraceWindow(concatenation, theme=theme, parent=parent)
+        window.setWindowTitle(_titled("Concatenated traces", title_suffix))
+        if dialog.add_to_project and concatenation.rows:
+            group_name = dialog.new_array_name
+            data_name = concatenation_data_name([name for name, _ in arrays])
+            trace = concatenation.to_trace_data(data_name)
+            experiment = Experiment(
+                name=group_name,
+                duration=float(trace.traces.shape[1]) * float(trace.dt),
+                timepoints=[],
+                data=[trace],
+                description="Concatenated from: "
+                + ", ".join(array_labels([name for name, _ in arrays])),
+            )
+            try:
+                project.add_experiment(experiment)
+            except ValueError as error:
+                QtWidgets.QMessageBox.warning(
+                    parent, "Could not add trace array", str(error)
+                )
+            else:
+                window.add_note(
+                    f"Added to the project as '{group_name} :: {data_name}' "
+                    "(Undo removes it)."
+                )
+                if on_data_added is not None:
+                    on_data_added(group_name)
+        return window
+
+    dialog.accepted.connect(_open_windows_for_choice)
     dialog.open()
     return dialog

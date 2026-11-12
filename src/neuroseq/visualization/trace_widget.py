@@ -536,7 +536,7 @@ class TraceWidget(TimeseriesWidget):
         preselected = self._comparison_neuron_ids()
         compare_action = QtWidgets.QAction("Compare traces…", self)
         compare_action.setToolTip(
-            "Overlay chosen neurons' traces from several trace arrays in a new window"
+            "Compare chosen neurons' traces across trace arrays: overlaid, side by side, in linked windows or joined end to end"
         )
         compare_action.setEnabled(isinstance(self.data, TraceData))
         compare_action.triggered.connect(
