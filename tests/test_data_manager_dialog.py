@@ -13,6 +13,7 @@ from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
+from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
 def _answer_question(monkeypatch: pytest.MonkeyPatch, confirmed: bool) -> None:
@@ -55,7 +56,7 @@ def _edit(
     changed: list[bool] = []
     dialog.data_changed.connect(lambda: changed.append(True))
     item.setText(column, text)
-    qtbot.waitUntil(lambda: bool(changed))
+    qtbot.waitUntil(lambda: bool(changed), timeout=WAIT_TIMEOUT_MS)
 
 
 @pytest.mark.parametrize("selected_rows", [[0], [0, 2]])

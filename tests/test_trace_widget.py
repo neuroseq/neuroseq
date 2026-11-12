@@ -2186,7 +2186,7 @@ def test_trace_norm_dialog_enter_in_normalization_box_keeps_settings(
     trace_widget.set_data(make_trace_data())
     dialog = TraceNormDialog(trace_widget)
     qtbot.addWidget(dialog)
-    with qtbot.waitExposed(dialog):
+    with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
         dialog.show()
 
     dialog.chk_clip.click()
