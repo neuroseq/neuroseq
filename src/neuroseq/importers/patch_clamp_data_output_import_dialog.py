@@ -16,6 +16,9 @@ from qtpy.compat import getopenfilename
 from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
 from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
@@ -60,8 +63,11 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
+        self._import_folders = import_folders
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.loaded_wave: IgorWave | None = None
@@ -458,10 +464,11 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select patch-clamp output",
-            "",
+            start_directory(self._import_folders),
             PATCH_CLAMP_FILE_FILTER,
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_file(filename)
 
     def load_file(self, filename: str) -> None:

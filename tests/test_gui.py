@@ -1594,6 +1594,7 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
             self.project.cellpose_data = existing
             self.last_cellpose_import = existing
             self.spatial_footprint_widget = SimpleNamespace()
+            self.import_folders = None
 
         def _append_experimental_data(self, experiment: Experiment) -> None:
             appended.append(experiment)
@@ -3217,6 +3218,8 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
 
 def _bind_import_helpers(fake_gui: Any) -> Any:
     """Give a SimpleNamespace GUI double the real import-completion helpers."""
+    if not hasattr(fake_gui, "import_folders"):
+        fake_gui.import_folders = None
     fake_gui._complete_import = MethodType(ProjectWorkspace._complete_import, fake_gui)
     fake_gui._complete_stimulus_import = MethodType(
         ProjectWorkspace._complete_stimulus_import, fake_gui
@@ -3264,7 +3267,7 @@ def test_stimulus_import_completion(
 
     getattr(ProjectWorkspace, handler)(window, path=path)
 
-    factory.assert_called_once_with(project, parent=window)
+    factory.assert_called_once_with(project, parent=window, import_folders=None)
     dialog.deleteLater.assert_called_once_with()
     expected = [call.load(str(path))] if with_path else []
     expected.append(call.execute())
@@ -3281,7 +3284,9 @@ def test_gui_import_igor2_wave_updates_selected_stim(
     project = Project()
 
     class MockPatchClampDataInputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
@@ -3359,7 +3364,9 @@ def test_gui_import_igor2_trace_updates_selected_trace(
     trace_widget.set_data = _set_trace_data
 
     class MockPatchClampDataOutputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
@@ -3464,7 +3471,9 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     )
 
     class MockPatchClampDataOutputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
@@ -3552,7 +3561,9 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
     monkeypatch: MonkeyPatch,
 ) -> None:
     class MockPatchClampDataInputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
 

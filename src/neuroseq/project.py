@@ -404,12 +404,19 @@ class Project:
         self.syscon2_export_template_text = text
         self.mark_dirty()
 
-    def set_device_folder(self, purpose: str, folder: str) -> None:
-        """Remember the folder this project's ``purpose`` workflow used last."""
+    def set_device_folder(
+        self, purpose: str, folder: str, *, mark_dirty: bool = True
+    ) -> None:
+        """Remember the folder this project's ``purpose`` workflow used last.
+
+        With ``mark_dirty=False`` (a mere convenience, e.g. the start folder of
+        file dialogs) the folder is saved with the project's next save but does
+        not by itself ask to save."""
         if self.device_folders.get(purpose) == folder:
             return
         self.device_folders[purpose] = folder
-        self.mark_dirty()
+        if mark_dirty:
+            self.mark_dirty()
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""

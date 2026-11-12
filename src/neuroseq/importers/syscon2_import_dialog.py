@@ -11,6 +11,9 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_syscon2 import SysconSequence
 from neuroseq.importers.importer_syscon2 import get_timed_objects
 from neuroseq.importers.importer_syscon2 import group_timed_objects_by_neuron_target
@@ -37,8 +40,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
+        self._import_folders = import_folders
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.sequence: SysconSequence | None = None
@@ -229,10 +235,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select SysCon2 .seq file",
-            "",
+            start_directory(self._import_folders),
             "SysCon2 sequence (*.seq);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_file(filename)
 
     def load_file(self, filename: str) -> None:

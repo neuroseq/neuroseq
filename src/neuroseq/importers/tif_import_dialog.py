@@ -28,6 +28,9 @@ from neuroseq.background_jobs import CancellableWorker
 from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.data import Data
 from neuroseq.data import TraceData
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import read_segmentation_file
@@ -300,9 +303,11 @@ class TifImportDialog(QtWidgets.QDialog):
         *,
         cellpose_import: CellposeImportResult | None = None,
         stim_arrays: Mapping[str, StimArray] | None = None,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self._import_folders = import_folders
 
         self.experiment_name: str = "Calcium imaging (.tif)"
         self.experiment_duration: float = 0.0
@@ -723,9 +728,11 @@ class TifImportDialog(QtWidgets.QDialog):
         filenames, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "Select TIFF stacks",
-            "",
+            start_directory(self._import_folders),
             "TIFF files (*.tif *.tiff);;All files (*)",
         )
+        if filenames:
+            remember_folder(self._import_folders, filenames[0])
         self.add_tif_paths([Path(filename) for filename in filenames])
 
     def add_tif_paths(self, paths: list[Path]) -> None:
@@ -803,10 +810,11 @@ class TifImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select Cellpose segmentation file",
-            "",
+            start_directory(self._import_folders),
             "Cellpose segmentation (*_seg.npy *.npy);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._seg_file_path = Path(filename)
             self._seg_path_label.setText(self._seg_file_path.name)
             self._seg_path_label.setStyleSheet("QLabel { color: black; }")

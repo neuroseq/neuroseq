@@ -49,6 +49,11 @@ data group, else 1 ms. `.npy` holds only the array; `.npz` also holds
 **File → Manage Data** lists data groups and their data sets to rename,
 describe or delete them.
 
+The file dialogs of the data imports (cell segmentation, calcium imaging,
+Suite2p, patch clamp, SysCon2) open in the folder that project used last, so
+each open project tab keeps its own folder. A project that has none yet starts
+in the folder used last in any project. The folder is saved with the project.
+
 ### Dropping files
 
 Dropped files open their usual import dialog, prefilled:

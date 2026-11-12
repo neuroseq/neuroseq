@@ -14,6 +14,9 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_cellpose import AOIRole
 from neuroseq.importers.importer_cellpose import AreasOfInterestConfig
 from neuroseq.importers.importer_cellpose import CellPoseImporter
@@ -57,9 +60,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
         existing_data: CellposeImportResult | None = None,
         delete_handler: Callable[[], None] | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self._import_folders = import_folders
         self._imported_data: CellposeImportResult | None = None
         self.image_path: Path | None = None
         self.segmentation_path: Path | None = None
@@ -1316,20 +1322,22 @@ class CellposeImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select image file",
-            "",
+            start_directory(self._import_folders),
             "Image files (*.png *.tif *.tiff);;PNG files (*.png);;TIFF files (*.tif *.tiff);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_image_file(filename)
 
     def _browse_segmentation_file(self) -> None:
         filename, _ = getopenfilename(
             self,
             "Select segmentation file",
-            "",
+            start_directory(self._import_folders),
             "Segmentation files (*.csv *.npy);;CSV files (*.csv);;NumPy files (*.npy);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_segmentation_file(filename)
 
     def _annotate_mean_tiff(self) -> None:
@@ -1339,11 +1347,12 @@ class CellposeImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select image for segmentation",
-            "",
+            start_directory(self._import_folders),
             "Image files (*.tif *.tiff *.png);;TIFF files (*.tif *.tiff);;"
             "PNG files (*.png);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self.segment_file(filename)
 
     def segment_file(self, filename: str, *, auto_brightness: bool = False) -> None:

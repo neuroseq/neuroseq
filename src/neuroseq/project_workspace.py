@@ -50,6 +50,7 @@ from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.icon_manager import icons
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.import_folders import ImportFolders
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import clone_cellpose_result
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
@@ -415,6 +416,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.logger.info("starting ProjectWorkspace")
         self.settings = settings if settings is not None else GuiSettings()
         self.project = Project()
+        # Start folder of the import file dialogs, per project (#646).
+        self.import_folders = ImportFolders(lambda: self.project, self.settings)
         self._unsubscribe_project_history: Callable[[], None] | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
@@ -2171,6 +2174,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             stimulus_to_cellpose_mapping=resolve_stimulus_to_cellpose_mapping(
                 self.project.cellpose_data
             ),
+            import_folders=self.import_folders,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
@@ -2193,6 +2197,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self,
             cellpose_import=self.last_cellpose_import,
             stim_arrays=self.project.stim_arrays,
+            import_folders=self.import_folders,
         )
         if paths:
             dialog.add_tif_paths(paths)
@@ -2228,12 +2233,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             chosen, _ = QtWidgets.QFileDialog.getOpenFileNames(
                 self,
                 "Select raw calcium imaging file(s)",
-                "",
+                self.import_folders.directory(),
                 "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
                 "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
                 "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
             )
             paths = [pathlib.Path(path) for path in chosen]
+            if paths:
+                self.import_folders.remember(paths[0])
         if not paths:
             return
         fps, ok = QtWidgets.QInputDialog.getDouble(
@@ -2430,6 +2437,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self,
             existing_data=self.last_cellpose_import,
             delete_handler=self._delete_cellpose_data,
+            import_folders=self.import_folders,
         )
         if segment is not None:
             if model is not None:
@@ -2495,13 +2503,17 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def btn_import_syscon2_seq_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
-        dialog = Syscon2ImportDialog(self.project, parent=self)
+        dialog = Syscon2ImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         self._complete_stimulus_import(dialog, path)
 
     def btn_import_patch_clamp_input_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
-        dialog = PatchClampDataInputImportDialog(self.project, parent=self)
+        dialog = PatchClampDataInputImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         self._complete_stimulus_import(dialog, path)
 
     def btn_import_patch_clamp_output_clicked(
@@ -2511,7 +2523,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             PatchClampDataOutputImportDialog,
         )
 
-        dialog = PatchClampDataOutputImportDialog(self.project, parent=self)
+        dialog = PatchClampDataOutputImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         if not self._complete_import(dialog, path) or not dialog.selected_trace_name:
             return
         combo_label = (
