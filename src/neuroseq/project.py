@@ -49,6 +49,7 @@ from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import ensure_2d_stim_values
 from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import stim_dt_matches
 from neuroseq.stimulation.stim_timing import validate_stim_dt_seconds
@@ -1442,7 +1443,13 @@ class Project:
                         - n_timestamps,
                     )
                     if only_stim_name is not None
-                    else math.ceil(padding_required_secs / stim_array.dt)
+                    # Ceil within float tolerance: 0.2 s - 0.125 s is a hair
+                    # over 75 ms and must not round up to 76 samples.
+                    else max(
+                        0,
+                        seconds_to_samples_ceil(total_time_seconds, stim_array.dt)
+                        - n_timestamps,
+                    )
                 )
                 self.logger.info(
                     f"Adding {padding_required_secs}s / {n_pad} timestamps of padding to {name}: {stim_array.values.shape}"

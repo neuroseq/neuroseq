@@ -26,8 +26,10 @@ from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
 from neuroseq.stimulation.stim_dialog import EditStimDialog
 from neuroseq.stimulation.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stimulation.stim_loop_dialog import StimLoopDialog
+from neuroseq.stimulation.stim_pad_dialog import StimPadDialog
 from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import padded_length_seconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_seconds
 from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
@@ -96,6 +98,7 @@ class StimEditor(QtWidgets.QWidget):
         self.draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
         self.draw_stim_length = 1  # in samples
         self.pad_stim_array_secs = 5.0
+        self.pad_stim_array_to_end_time = False
         self.trim_stim_array_secs = 5.0
         self.draw_stim_units = ""
         self.stim_type = StimType.Excitation
@@ -322,36 +325,30 @@ class StimEditor(QtWidgets.QWidget):
             return
         stim_array = self.current_stim_modifier.stim_array
         current_length_secs = stim_array.dt * stim_array.values.shape[0]
-        padding_seconds, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Pad input arrays",
-            f"Current duration of '{stim_array.name}': {current_length_secs:g} s "
-            f"({format_milliseconds(current_length_secs * 1000)} ms)\n"
-            "Padding to add to input arrays in seconds",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.pad_stim_array_secs}",
+        dialog = StimPadDialog(
+            stim_array.name,
+            current_length_secs,
+            self.pad_stim_array_secs,
+            to_end_time=self.pad_stim_array_to_end_time,
+            parent=self,
         )
-        if not ok:
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
-            paddings_seconds_as_float = float(padding_seconds)
-        except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse '{padding_seconds}' as a number of seconds.",
+            total_length_secs = padded_length_seconds(
+                current_length_secs,
+                dialog.value_text,
+                to_end_time=dialog.to_end_time,
+                dt_seconds=float(stim_array.dt),
             )
+        except ValueError as exc:
+            QtWidgets.QMessageBox.critical(self, "Invalid input", str(exc))
             return
-        if paddings_seconds_as_float <= 0.0:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                "Padding seconds must be positive.",
-            )
-            return
-        self.pad_stim_array_secs = paddings_seconds_as_float
+        self.pad_stim_array_to_end_time = dialog.to_end_time
+        if not dialog.to_end_time:
+            self.pad_stim_array_secs = total_length_secs - current_length_secs
         try:
-            self._apply_pad(current_length_secs + self.pad_stim_array_secs)
+            self._apply_pad(total_length_secs)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,

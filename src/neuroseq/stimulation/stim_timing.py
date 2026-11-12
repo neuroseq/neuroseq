@@ -169,3 +169,39 @@ def remap_stim_values_to_dt(
     if values.ndim != 2 and not stim_dt_matches(old_dt_seconds, new_dt_seconds):
         raise ValueError("Stimulus arrays must be 2-dimensional to be remapped.")
     return resample_zero_order_hold(values, old_dt_seconds, new_dt_seconds)
+
+
+def padded_length_seconds(
+    current_seconds: float,
+    value_text: str,
+    *,
+    to_end_time: bool,
+    dt_seconds: float,
+) -> float:
+    """Total input length after the Pad action, from the user's entry.
+
+    ``value_text`` is the seconds to add, or with ``to_end_time`` the time
+    point the arrays should end at (#647). Raises ValueError with a message
+    for the user when the entry is not a number, not positive, or an end time
+    that is not after the current end.
+    """
+    try:
+        value = float(value_text)
+    except ValueError:
+        raise ValueError(
+            f"Could not parse '{value_text}' as a number of seconds."
+        ) from None
+    if not math.isfinite(value):
+        raise ValueError(f"Could not parse '{value_text}' as a number of seconds.")
+    if not to_end_time:
+        if value <= 0.0:
+            raise ValueError("Padding seconds must be positive.")
+        return current_seconds + value
+    # Within half a sample of the current end pads nothing.
+    if value <= current_seconds + 0.5 * validate_stim_dt_seconds(dt_seconds):
+        raise ValueError(
+            f"The end time {value:g} s is not after the current end of the input "
+            f"array ({current_seconds:g} s). Enter a later end time, or use Trim "
+            "input array to shorten the arrays."
+        )
+    return value

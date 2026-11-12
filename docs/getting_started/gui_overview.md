@@ -179,7 +179,7 @@ window** is checked. See [analysis and plugins](../data_analysis/analysis.md).
 | Setting                   | Effect                                                                        |
 | ------------------------- | ----------------------------------------------------------------------------- |
 | Brian2 Simulation Backend | `numpy` (default) or `cython` ([simulations](../networks/simulations.md))     |
-| Input Automatic Padding   | default duration (s) for new input arrays and the Pad dialog (default 0)      |
+| Input Automatic Padding   | seconds of empty input added after each run (default 0)                       |
 | LLM Assistant             | provider, model, key and [data scope](chat_assistant.md#data-scope)           |
 | Synapse Matrix RAM Limit  | MB before the synapse heatmap downsamples (default 256, 0 = no limit)         |
 | Trace Plot RAM Limit      | same for trace plots (default 256)                                            |

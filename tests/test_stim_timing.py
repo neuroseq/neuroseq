@@ -7,6 +7,7 @@ from neuroseq.stimulation.stim_timing import ceil_sample_position
 from neuroseq.stimulation.stim_timing import floor_sample_position
 from neuroseq.stimulation.stim_timing import format_milliseconds
 from neuroseq.stimulation.stim_timing import milliseconds_to_samples_nearest
+from neuroseq.stimulation.stim_timing import padded_length_seconds
 from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
 from neuroseq.stimulation.stim_timing import resample_zero_order_hold
 from neuroseq.stimulation.stim_timing import round_sample_position
@@ -216,3 +217,34 @@ def test_resample_zero_order_hold_returns_new_arrays() -> None:
     assert resample_zero_order_hold(np.zeros((0, 2)), 0.001, 0.002).shape == (0, 2)
     with pytest.raises(ValueError, match="2-dimensional"):
         remap_stim_values_to_dt(np.ones(3), 0.001, 0.002)
+
+
+@pytest.mark.parametrize(
+    ("text", "to_end_time", "expected"),
+    [
+        ("2", False, 3.0),
+        ("0.5", False, 1.5),
+        ("4", True, 4.0),
+        ("1.0006", True, 1.0006),
+    ],
+)
+def test_padded_length_seconds(text, to_end_time, expected) -> None:
+    assert padded_length_seconds(
+        1.0, text, to_end_time=to_end_time, dt_seconds=0.001
+    ) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("text", "to_end_time", "message"),
+    [
+        ("abc", False, "Could not parse"),
+        ("nan", True, "Could not parse"),
+        ("0", False, "must be positive"),
+        ("-1", False, "must be positive"),
+        ("0.5", True, "not after the current end"),
+        ("1.0004", True, "not after the current end"),
+    ],
+)
+def test_padded_length_seconds_rejects(text, to_end_time, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        padded_length_seconds(1.0, text, to_end_time=to_end_time, dt_seconds=0.001)
