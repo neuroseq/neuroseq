@@ -345,6 +345,7 @@ class Project:
                 self.experiments.pop(name, None)
             for name, (experiment, saved, data_states) in states.items():
                 experiment.name = saved.name
+                experiment.description = saved.description
                 experiment.duration = saved.duration
                 experiment.timepoints = list(saved.timepoints)
                 experiment.data = list(saved.data)
@@ -412,13 +413,92 @@ class Project:
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
-        names = [name for name in dict.fromkeys(names) if name in self.experiments]
-        if not names:
+        self.remove_data(names)
+
+    def remove_data(
+        self,
+        groups: Sequence[str] = (),
+        datasets: Mapping[str, Sequence[Data]] | None = None,
+    ) -> None:
+        """Delete whole data groups and single data sets as one undoable edit.
+
+        ``groups`` are removed with all their data. ``datasets`` maps a group
+        name to data sets (matched by identity) removed from that group only, so
+        deleting e.g. the calcium traces of a group leaves its other data and
+        the project's input arrays untouched.
+        """
+        groups = [name for name in dict.fromkeys(groups) if name in self.experiments]
+        removals = {
+            name: [id(datum) for datum in data]
+            for name, data in (datasets or {}).items()
+            if name in self.experiments and name not in groups and data
+        }
+        if not groups and not removals:
             return
-        with self.edit_experiments(names, "Delete data groups"):
-            for name in names:
+        label = "Delete data groups" if groups else "Delete data sets"
+        with self.edit_experiments([*groups, *removals], label):
+            for name in groups:
                 del self.experiments[name]
+            for name, ids in removals.items():
+                experiment = self.experiments[name]
+                experiment.data = [d for d in experiment.data if id(d) not in ids]
             self.update_limits()
+            self.mark_dirty()
+
+    def validate_data_name(self, name: str) -> str:
+        """Return ``name`` stripped, or raise ``ValueError`` if it cannot be used
+        as a data group or data set name (it is shown as ``group :: data``)."""
+        name = name.strip()
+        if not name:
+            raise ValueError("The name cannot be empty.")
+        if "::" in name:
+            raise ValueError("The name cannot contain '::'.")
+        return name
+
+    def rename_experiment(self, name: str, new_name: str) -> None:
+        """Rename a data group (keeping its place in the list) as one undoable edit."""
+        new_name = self.validate_data_name(new_name)
+        if new_name == name:
+            return
+        if name not in self.experiments:
+            raise KeyError(f"Data group '{name}' does not exist")
+        if new_name == "Simulation" or new_name in self.experiments:
+            raise ValueError(f"A data group named '{new_name}' already exists.")
+        with self.edit_experiments([name, new_name], "Rename data group"):
+            experiment = self.experiments[name]
+            experiment.name = new_name
+            self.experiments = {
+                (new_name if key == name else key): value
+                for key, value in self.experiments.items()
+            }
+            self.mark_dirty()
+
+    def set_experiment_description(self, name: str, description: str) -> None:
+        """Change a data group's free-text description as one undoable edit."""
+        experiment = self.experiments[name]
+        if experiment.description == description:
+            return
+        with self.edit_experiments([name], "Edit data group description"):
+            experiment.description = description
+            self.mark_dirty()
+
+    def rename_experiment_data(self, name: str, datum: Data, new_name: str) -> None:
+        """Rename one data set of a data group as one undoable edit."""
+        new_name = self.validate_data_name(new_name)
+        if new_name == datum.name:
+            return
+        experiment = self.experiments[name]
+        if not any(d is datum for d in experiment.data):
+            raise KeyError(f"Data set '{datum.name}' is not in data group '{name}'")
+        if any(
+            d is not datum and d.name == new_name and type(d) is type(datum)
+            for d in experiment.data
+        ):
+            raise ValueError(
+                f"Data group '{name}' already has a data set named '{new_name}'."
+            )
+        with self.edit_experiments([name], "Rename data set"):
+            datum.name = new_name
             self.mark_dirty()
 
     @property

@@ -4704,3 +4704,34 @@ def test_file_export_offers_traces_and_spikes_as_numpy_arrays(
     for label in ("Traces as NumPy Array…", "Spikes as NumPy Array…"):
         actions[label].trigger()
     assert opened.call_count == 2
+
+
+def test_renaming_a_data_group_in_manage_data_updates_the_data_selectors(
+    qtbot: QtBot, test_experiments: list[Experiment]
+) -> None:
+    """#654: a rename in Manage Data shows up in the Data toolbar selectors."""
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.project.add_experiment(test_experiments[0])
+    gui.update_project(gui.project)
+    trace_name = test_experiments[0].data[0].name
+    gui.btn_manage_data_clicked()
+    dialog = gui.findChild(DataManagerDialog)
+    assert dialog is not None
+
+    def items(combo: QtWidgets.QComboBox) -> list[str]:
+        return [combo.itemText(i) for i in range(combo.count())]
+
+    dialog.group_item("e1").setText(0, "Calcium")
+    qtbot.waitUntil(
+        lambda: f"Calcium :: {trace_name}" in items(gui.cmb_trace),
+        timeout=WAIT_TIMEOUT_MS,
+    )
+    assert all(not item.startswith("e1 ::") for item in items(gui.cmb_trace))
+    gui.project.history.undo()
+    qtbot.waitUntil(
+        lambda: f"e1 :: {trace_name}" in items(gui.cmb_trace),
+        timeout=WAIT_TIMEOUT_MS,
+    )
+    dialog.close()
+    gui._close_confirmed = True

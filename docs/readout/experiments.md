@@ -7,9 +7,22 @@ the Data toolbar.
 
 ## Manage Data
 
-**File → Manage Data** lists every data group with its duration, data sets and
-details (neurons, spikes, matrix size). **Delete Selected** removes groups and
-all their data.
+**File → Manage Data** lists every data group with its duration, description
+and data sets. Expand a group to see its data sets (traces, spikes, synapses)
+with their details (neurons, spikes, matrix size).
+
+- **Rename** (or double-click a name) renames a data group or a single data
+  set. The new name appears in the Data toolbar selectors as `group :: data
+set`. Names must be unique (data sets: per kind within the group) and
+  cannot contain `::`.
+- **Edit Description** (or double-click the Description column) stores a free
+  note on a data group, for example the slice or field of view.
+- **Delete Selected** removes the selected data sets only, or, for a selected
+  group, the whole group with all its data. Input arrays are never deleted
+  here.
+
+Renames, descriptions and deletions are undoable (`Ctrl+Z`) and saved in the
+project file.
 
 ## Generate synthetic data
 

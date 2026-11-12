@@ -46,7 +46,8 @@ counted per bin; the bin defaults to the frame period of a trace in the same
 data group, else 1 ms. `.npy` holds only the array; `.npz` also holds
 `neuron_ids`, `times` (s) and `units`, with the array as `values`.
 
-**File → Manage Data** lists data groups and deletes them.
+**File → Manage Data** lists data groups and their data sets to rename,
+describe or delete them.
 
 ### Dropping files
 
@@ -71,7 +72,7 @@ Dropped files open their usual import dialog, prefilled:
 - Open and save run in the background with a cancellable progress dialog.
   Cancelling a save leaves the original file untouched.
 - Undo (`Ctrl+Z`) / Redo (`Ctrl+Shift+Z`) cover input-array edits, imports and
-  deletions in Manage Data. History is per tab and not saved in the file.
+  renames, descriptions and deletions in Manage Data. History is per tab and not saved in the file.
 
 ## Data toolbar
 
