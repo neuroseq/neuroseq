@@ -1,10 +1,15 @@
-"""Start folder of the data import file dialogs, remembered per project (#646).
+"""Start folder and file lists of the data import dialogs, remembered per
+project (#646, #643).
 
 Each project keeps the folder its import dialogs used last (in
 ``Project.device_folders``, so it is saved in the ``.nseq`` file). A project
 without one starts from the folder used last in any project
 (``GuiSettings.import_directory``). Without this, every file dialog started in
 Qt's process-wide "last visited" folder, which all open project tabs share.
+
+Dialogs that list several files (the raw calcium TIFF import) also keep that
+list per project (``Project.import_file_lists``), so files added once are
+offered again without browsing for them.
 """
 
 from __future__ import annotations
@@ -19,6 +24,8 @@ if TYPE_CHECKING:
 
 #: Key of the import folder in ``Project.device_folders``.
 IMPORT_FOLDER = "data_import"
+#: Key of the raw calcium TIFF list in ``Project.import_file_lists``.
+CALCIUM_TIFF_FILES = "calcium_tiffs"
 
 
 class ImportFolders:
@@ -55,6 +62,25 @@ class ImportFolders:
             project.set_device_folder(IMPORT_FOLDER, folder, mark_dirty=False)
         if self._settings is not None and self._settings.import_directory != folder:
             self._settings.import_directory = folder
+
+    def files(self, purpose: str) -> list[pathlib.Path]:
+        """The files ``purpose``'s dialog listed last in this project, without
+        those that no longer exist."""
+        project = self._project()
+        if project is None:
+            return []
+        paths = [
+            pathlib.Path(path) for path in project.import_file_lists.get(purpose, [])
+        ]
+        return [path for path in paths if path.is_file()]
+
+    def remember_files(
+        self, purpose: str, paths: list[pathlib.Path] | list[str]
+    ) -> None:
+        """Keep ``paths`` as ``purpose``'s file list in this project."""
+        project = self._project()
+        if project is not None:
+            project.set_import_files(purpose, [str(path) for path in paths])
 
 
 def start_directory(folders: ImportFolders | None) -> str:

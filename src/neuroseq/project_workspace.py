@@ -108,6 +108,7 @@ if TYPE_CHECKING:
     from neuroseq.importers.patch_clamp_data_output_import_dialog import (
         PatchClampDataOutputImportDialog,
     )
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
 
 class DetachedPanelWindow(QtWidgets.QWidget):
@@ -2219,7 +2220,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         )
         if paths:
             dialog.add_tif_paths(paths)
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        if dialog.batch_imports:
+            self._add_batch_tif_imports(dialog)
+        else:
             self._append_experimental_data(
                 Experiment(
                     dialog.experiment_name,
@@ -2228,21 +2233,43 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                     dialog.imported_data,
                 )
             )
-            if dialog.new_cellpose_result is not None:
-                self._apply_cellpose_import_result(dialog.new_cellpose_result)
-                if hasattr(self, "_auto_show_widget"):
-                    self._auto_show_widget(self.spatial_footprint_widget)
-            if dialog.imported_tif_paths:
-                self.project.add_calcium_video(
-                    dialog.imported_tif_paths,
-                    dialog.imported_fps,
-                    name=dialog.experiment_name,
-                    channels=dialog.imported_channels,
-                    shown_channel=dialog.imported_functional_channel,
-                )
-                self._refresh_calcium_video_widgets()
-                if hasattr(self, "_auto_show_widget"):
-                    self._auto_show_widget(self.calcium_video_widget)
+        if dialog.new_cellpose_result is not None:
+            self._apply_cellpose_import_result(dialog.new_cellpose_result)
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.spatial_footprint_widget)
+        if dialog.imported_tif_paths and not dialog.batch_imports:
+            self.project.add_calcium_video(
+                dialog.imported_tif_paths,
+                dialog.imported_fps,
+                name=dialog.experiment_name,
+                channels=dialog.imported_channels,
+                shown_channel=dialog.imported_functional_channel,
+            )
+        if dialog.imported_tif_paths or dialog.batch_imports:
+            self._refresh_calcium_video_widgets()
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.calcium_video_widget)
+
+    def _add_batch_tif_imports(self, dialog: TifImportDialog) -> None:
+        """Add each file of a batch TIFF import (#643) as its own data group,
+        named after the file, with its movie in the Imaging tab."""
+        added: list[str] = []
+        for item in dialog.batch_imports:
+            if item.status != "imported":
+                continue
+            name = self.project.unique_experiment_name(item.path.stem)
+            self.project.add_experiment(Experiment(name, item.duration, [], item.data))
+            self.project.add_calcium_video(
+                [item.path],
+                dialog.imported_fps,
+                name=name,
+                channels=dialog.imported_channels,
+                shown_channel=dialog.imported_functional_channel,
+            )
+            added.append(name)
+        if added:
+            self.update_project(self.project, preserve_dynamic_input=True)
+            self._select_experiment_data(added[-1])
 
     def _on_calcium_video_import_requested(
         self, *, paths: list[pathlib.Path] | None = None

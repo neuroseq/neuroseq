@@ -331,8 +331,7 @@ def test_start_pipeline_passes_diameter_param(qtbot, mocker, tmp_path):
     qtbot.addWidget(dialog)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
     dialog._auto_detect_radio.setChecked(True)
     dialog._diameter_spin.setValue(24.5)
 
@@ -377,8 +376,7 @@ def test_auto_detect_pipeline_run_prompts_before_proceeding(qtbot, mocker, tmp_p
     qtbot.addWidget(dialog)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
     dialog._auto_detect_radio.setChecked(True)
     question = mocker.patch(
         "neuroseq.importers.tif_import_dialog.QtWidgets.QMessageBox.question",
@@ -428,8 +426,7 @@ def test_dialog_runs_mocked_pipeline_and_produces_imported_data(
     # Stage one TIFF (file does not need to actually exist — pipeline is mocked).
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
 
     result = _make_pipeline_result()
     mock_run = mocker.patch(
@@ -790,8 +787,7 @@ def test_remove_selected_tifs_clears_list_and_paths(qtbot, tmp_path):
 
     a = tmp_path / "a.tif"
     a.write_bytes(b"")
-    dialog._tif_paths.append(a)
-    dialog._tif_list.addItem(str(a))
+    dialog.add_tif_paths([a])
     dialog._tif_list.item(0).setSelected(True)
 
     dialog._remove_selected_tifs()
@@ -849,8 +845,7 @@ def test_launch_fiji_runs_qprocess_with_selected_tif(qtbot, mocker, tmp_path):
     fake_fiji.write_text("")
     a = tmp_path / "a.tif"
     a.write_bytes(b"")
-    dialog._tif_paths.append(a)
-    dialog._tif_list.addItem(str(a))
+    dialog.add_tif_paths([a])
     dialog._tif_list.item(0).setSelected(True)
 
     mocker.patch("neuroseq.fiji.resolve_fiji_path", return_value=str(fake_fiji))
@@ -919,8 +914,7 @@ def test_pipeline_failed_signal_re_enables_run_button(qtbot, mocker, tmp_path):
     dialog._pipeline_combo.setCurrentIndex(0)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
 
     mocker.patch(
         "neuroseq.importers.importer_tif.run_suite2p_pipeline",
@@ -974,8 +968,7 @@ def test_cancelling_running_pipeline_keeps_dialog_alive_until_thread_exits(
     dialog._pipeline_combo.setCurrentIndex(0)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
 
     started = threading.Event()
     release = threading.Event()
@@ -1034,8 +1027,7 @@ def test_running_pipeline_reports_progress_to_progress_dialog(qtbot, mocker, tmp
     dialog._pipeline_combo.setCurrentIndex(0)
     tif = tmp_path / "fake.tif"
     tif.write_bytes(b"")
-    dialog._tif_paths.append(tif)
-    dialog._tif_list.addItem(str(tif))
+    dialog.add_tif_paths([tif])
     release = threading.Event()
 
     def slow_pipeline(*_args, progress, **_kwargs):
@@ -1255,3 +1247,287 @@ def test_import_message_reports_frames_replaced_by_suppression(qtbot, mocker):
     dialog._tif_paths = [Path("movie.tif")]
     dialog._finalize_import(result)
     assert "replaced 36 of 100 frames" in info.call_args.args[2]
+
+
+def _batch_dialog(qtbot, tmp_path, names, **kwargs):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    cellpose_import = MagicMock()
+    cellpose_import.segmentation_array = np.zeros((16, 16), dtype=np.int32) - 1
+    cellpose_import.stimulus_to_cellpose_mapping = {}
+    dialog = TifImportDialog(parent=None, cellpose_import=cellpose_import, **kwargs)
+    qtbot.addWidget(dialog)
+    dialog._pipeline_combo.setCurrentIndex(0)
+    paths = []
+    for name in names:
+        path = tmp_path / name
+        path.write_bytes(b"")
+        paths.append(path)
+    dialog.add_tif_paths(paths)
+    return dialog, paths
+
+
+def test_batch_runs_each_file_in_turn_and_keeps_going_after_a_failure(
+    qtbot, mocker, tmp_path, qmessagebox_calls
+):
+    """#643: every ticked file gets its own pipeline run, one at a time, and a
+    failing file is reported without stopping the others."""
+    import threading
+
+    dialog, paths = _batch_dialog(qtbot, tmp_path, ["a.tif", "b.tif", "c.tif"])
+    assert not dialog._files_mode_widget.isHidden()
+    assert dialog._batch_mode()
+    running = threading.Lock()
+    calls = []
+
+    def pipeline(tif_paths, *_args, progress, **_kwargs):
+        assert running.acquire(blocking=False), "two pipeline runs at once"
+        try:
+            calls.append(list(tif_paths))
+            progress("working", 0.5)
+            if tif_paths[0].name == "b.tif":
+                raise RuntimeError("frame size does not match the masks")
+            return _make_pipeline_result()
+        finally:
+            running.release()
+
+    mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline", side_effect=pipeline
+    )
+    accepted = MagicMock()
+    mocker.patch.object(QtWidgets.QDialog, "accept", accepted)
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(lambda: accepted.called, timeout=WAIT_TIMEOUT_MS)
+
+    assert calls == [[path] for path in paths]
+    assert [item.status for item in dialog.batch_imports] == [
+        "imported",
+        "failed",
+        "imported",
+    ]
+    assert dialog.batch_imports[0].duration == pytest.approx(100 / 30.0)
+    assert len(dialog.batch_imports[0].data) == 2
+    assert dialog.imported_data == []  # nothing for the single-import path
+    summaries = [
+        call for call in qmessagebox_calls if "Imported 2 of 3" in call["text"]
+    ]
+    assert len(summaries) == 1
+    assert summaries[0]["name"] == "warning"
+    assert "b.tif: frame size does not match the masks" in summaries[0]["text"]
+    assert dialog._run_button.isEnabled()
+
+
+def test_batch_progress_names_the_file(qtbot, mocker, tmp_path):
+    import threading
+
+    dialog, _paths = _batch_dialog(qtbot, tmp_path, ["a.tif", "b.tif"])
+    release = threading.Event()
+
+    def pipeline(tif_paths, *_args, progress, **_kwargs):
+        progress("halfway", 0.5)
+        release.wait(timeout=WAIT_TIMEOUT_MS / 1000)
+        raise RuntimeError("stop")
+
+    mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline", side_effect=pipeline
+    )
+    dialog._start_pipeline()
+    progress_dialog = dialog._progress_dialog
+    try:
+        qtbot.waitUntil(
+            lambda: progress_dialog._bar.value() == 25, timeout=WAIT_TIMEOUT_MS
+        )
+        assert progress_dialog._label.text() == "File 1 of 2 (a.tif): halfway"
+    finally:
+        release.set()
+    qtbot.waitUntil(lambda: not dialog._job.busy, timeout=WAIT_TIMEOUT_MS)
+    qtbot.waitUntil(lambda: len(dialog.batch_imports) == 2, timeout=WAIT_TIMEOUT_MS)
+
+
+def test_batch_cancel_stops_after_the_current_file(
+    qtbot, mocker, tmp_path, qmessagebox_calls
+):
+    import threading
+
+    dialog, paths = _batch_dialog(qtbot, tmp_path, ["a.tif", "b.tif", "c.tif"])
+    started = threading.Event()
+    release = threading.Event()
+
+    def pipeline(tif_paths, *_args, progress, **_kwargs):
+        progress("start", 0.0)
+        started.set()
+        release.wait(timeout=WAIT_TIMEOUT_MS / 1000)
+        progress("end", 1.0)
+        return _make_pipeline_result()
+
+    mock_run = mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline", side_effect=pipeline
+    )
+    accepted = MagicMock()
+    mocker.patch.object(QtWidgets.QDialog, "accept", accepted)
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(started.is_set, timeout=WAIT_TIMEOUT_MS)
+    progress_dialog = dialog._progress_dialog
+    dialog._cancel_pipeline()  # first press: finish this file, start no other
+    assert progress_dialog._cancel_button.isEnabled()
+    assert progress_dialog._cancel_button.text() == "Abort this file too"
+    release.set()
+    qtbot.waitUntil(lambda: accepted.called, timeout=WAIT_TIMEOUT_MS)
+
+    assert mock_run.call_count == 1
+    assert [item.status for item in dialog.batch_imports] == [
+        "imported",
+        "not run",
+        "not run",
+    ]
+    assert "Not run (stopped):" in qmessagebox_calls[-1]["text"]
+
+
+def test_batch_second_cancel_aborts_the_current_file(qtbot, mocker, tmp_path):
+    import threading
+
+    dialog, _paths = _batch_dialog(qtbot, tmp_path, ["a.tif", "b.tif"])
+    started = threading.Event()
+    release = threading.Event()
+
+    def pipeline(tif_paths, *_args, progress, **_kwargs):
+        started.set()
+        release.wait(timeout=WAIT_TIMEOUT_MS / 1000)
+        progress("next", 0.5)  # raises PipelineCancelled once cancelled
+        raise AssertionError("pipeline kept running after cancel")
+
+    mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline", side_effect=pipeline
+    )
+    accepted = MagicMock()
+    mocker.patch.object(QtWidgets.QDialog, "accept", accepted)
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(started.is_set, timeout=WAIT_TIMEOUT_MS)
+    dialog._cancel_pipeline()
+    dialog._cancel_pipeline()
+    release.set()
+    qtbot.waitUntil(lambda: len(dialog.batch_imports) == 2, timeout=WAIT_TIMEOUT_MS)
+    assert [item.status for item in dialog.batch_imports] == ["cancelled", "not run"]
+    accepted.assert_not_called()  # nothing to import
+
+
+def test_joined_files_run_once_as_one_recording(qtbot, mocker, tmp_path):
+    dialog, paths = _batch_dialog(qtbot, tmp_path, ["rec_00001.tif", "rec_00002.tif"])
+    dialog._join_files_radio.setChecked(True)
+    assert not dialog._batch_mode()
+    mock_run = mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        return_value=_make_pipeline_result(),
+    )
+    mocker.patch.object(QtWidgets.QDialog, "accept", lambda self_: None)
+
+    dialog._start_pipeline()
+    qtbot.waitUntil(
+        lambda: dialog._pipeline_result is not None, timeout=WAIT_TIMEOUT_MS
+    )
+    assert mock_run.call_args.args[0] == paths
+    assert dialog.batch_imports == []
+    assert dialog.imported_tif_paths == paths
+
+
+def test_only_ticked_files_are_imported(qtbot, mocker, tmp_path):
+    dialog, paths = _batch_dialog(qtbot, tmp_path, ["a.tif", "b.tif"])
+    dialog._tif_list.item(0).setCheckState(QtCore.Qt.CheckState.Unchecked)
+    assert dialog.checked_tif_paths() == [paths[1]]
+    assert dialog._files_mode_widget.isHidden()  # one file: nothing to choose
+    mock_run = mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        return_value=_make_pipeline_result(),
+    )
+    mocker.patch.object(QtWidgets.QDialog, "accept", lambda self_: None)
+    dialog._start_pipeline()
+    qtbot.waitUntil(
+        lambda: dialog._pipeline_result is not None, timeout=WAIT_TIMEOUT_MS
+    )
+    assert mock_run.call_args.args[0] == [paths[1]]
+
+
+def test_batch_with_new_segmentation_keeps_the_first_files_masks(
+    qtbot, mocker, tmp_path
+):
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+
+    dialog = TifImportDialog(parent=None, cellpose_import=None)
+    qtbot.addWidget(dialog)
+    dialog._auto_detect_radio.setChecked(True)
+    a, b = tmp_path / "a.tif", tmp_path / "b.tif"
+    a.write_bytes(b"")
+    b.write_bytes(b"")
+    dialog.add_tif_paths([a, b])
+    mocker.patch.object(
+        QtWidgets.QMessageBox,
+        "question",
+        return_value=QtWidgets.QMessageBox.StandardButton.Yes,
+    )
+    mocker.patch(
+        "neuroseq.importers.importer_tif.run_suite2p_pipeline",
+        side_effect=lambda *_a, **_k: _make_pipeline_result_with_masks(),
+    )
+    accepted = MagicMock()
+    mocker.patch.object(QtWidgets.QDialog, "accept", accepted)
+    dialog._start_pipeline()
+    qtbot.waitUntil(lambda: accepted.called, timeout=WAIT_TIMEOUT_MS)
+    assert dialog.new_cellpose_result is not None
+    assert dialog.new_cellpose_result.image_path == a
+
+
+def test_listed_files_are_remembered_per_project(qtbot, tmp_path):
+    from neuroseq.importers.import_folders import CALCIUM_TIFF_FILES
+    from neuroseq.importers.import_folders import ImportFolders
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
+    from neuroseq.project import Project
+    from neuroseq.save_load_options import SaveLoadOptions
+
+    project = Project()
+    folders = ImportFolders(lambda: project)
+    first, paths = _batch_dialog(
+        qtbot, tmp_path, ["a.tif", "b.tif", "c.tif"], import_folders=folders
+    )
+    assert project.import_file_lists[CALCIUM_TIFF_FILES] == [str(p) for p in paths]
+    assert not project.dirty  # a convenience, not an edit
+    first.close()
+
+    saved = tmp_path / "project.nseq"
+    project.save(saved, SaveLoadOptions(True, True, False, True))
+    reloaded = Project(saved)
+    assert reloaded.import_file_lists[CALCIUM_TIFF_FILES] == [str(p) for p in paths]
+
+    paths[1].unlink()  # files that no longer exist are dropped
+    second = TifImportDialog(
+        parent=None, import_folders=ImportFolders(lambda: reloaded)
+    )
+    qtbot.addWidget(second)
+    assert second._tif_paths == [paths[0], paths[2]]
+    # Offered, not imported, until ticked again.
+    assert second.checked_tif_paths() == []
+    second.add_tif_paths([paths[2]])  # e.g. dropped again: ticked
+    assert second.checked_tif_paths() == [paths[2]]
+
+    second._clear_tifs()
+    assert second._tif_list.count() == 0
+    assert CALCIUM_TIFF_FILES not in reloaded.import_file_lists
+
+
+def test_batch_summary_lists_every_file():
+    from neuroseq.importers.tif_import_dialog import TifBatchImport
+    from neuroseq.importers.tif_import_dialog import batch_summary
+
+    text = batch_summary(
+        [
+            TifBatchImport(Path("a.tif"), "imported", message="4 neurons"),
+            TifBatchImport(Path("b.tif"), "failed", message="bad file"),
+            TifBatchImport(Path("c.tif"), "cancelled"),
+            TifBatchImport(Path("d.tif"), "not run"),
+        ]
+    )
+    assert text.startswith("Imported 1 of 4 files.")
+    for line in ("a.tif: 4 neurons", "b.tif: bad file", "Cancelled:", "  d.tif"):
+        assert line in text

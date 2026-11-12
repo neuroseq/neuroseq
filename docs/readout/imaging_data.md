@@ -55,10 +55,34 @@ The segmentation is saved in the project. **Delete Cellpose Data** removes it.
 **File → Import data → Output → Calcium Imaging (raw .tif)** extracts traces
 from one or more 2-photon TIFF stacks in the background.
 
-1. **Add TIFF…** the stack(s).
+1. **Add TIFF…** the stack(s) and tick the ones to import.
 2. Pick **Cellpose masks**: those loaded in the project (with mapping), a
    `_seg.npy` file, or Suite2p auto-detection (set **Cell diameter**).
 3. Set the parameters and click **Run pipeline**.
+
+The file list is saved with the project: when the dialog opens again, files
+added before are listed (unticked; files that no longer exist are dropped), so
+another one can be imported without browsing for it. **Clear list** empties it.
+
+**Several ticked files** are, by default, **separate recordings**: each runs
+through the pipeline in turn (never two at once) with the same settings and
+becomes its own data group, named after the file (`rec1`, `rec1 (2)` if the
+name is taken), with its movie in the Imaging tab. The progress window names
+the file being processed. One summary at the end lists the imported files and
+the failed ones with the reason; a failed file does not stop the others.
+**Stop after this file** lets the running file finish and imports what is
+done; pressing it again (**Abort this file too**) also stops the running file.
+Undo removes the data groups one at a time.
+
+The same Cellpose masks, input array and **Imaging started at** apply to every
+file, so the files must show the same field of view (frame size) and start at
+the same time on the input array. With Suite2p auto-detection the ROIs are
+found per file, and the first imported file's ROIs become the project's cell
+segmentation.
+
+Choose **Parts of one recording** instead for a recording split over several
+files (e.g. ScanImage's `_00001`, `_00002`, … parts): they are joined, in list
+order, into one data group.
 
 Raw stacks over ~1 GB crash Cellpose. Segment a projection instead: **Open
 Fiji**, **Image → Stacks → Z Project…** (Max for sparse, Mean for dense

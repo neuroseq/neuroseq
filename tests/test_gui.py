@@ -1541,6 +1541,7 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
         new_cellpose_result = imported
         imported_tif_paths: list[Any] = []
         imported_fps = 30.0
+        batch_imports: list[Any] = []
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1577,6 +1578,7 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         new_cellpose_result = None
         imported_tif_paths: list[Any] = []
         imported_fps = 30.0
+        batch_imports: list[Any] = []
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1617,6 +1619,62 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         1: 1,
         2: 0,
     }
+
+
+def test_batch_tif_import_adds_one_data_group_per_file(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """#643: each imported file becomes its own data group (named after the
+    file, made unique) with its own movie; failed files add nothing."""
+    from neuroseq.importers.tif_import_dialog import TifBatchImport
+
+    def _trace() -> TraceData:
+        return TraceData(
+            "Simply averaged ROI traces",
+            np.zeros((2, 30), dtype=np.float32),
+            np.arange(2, dtype=np.uint32),
+            "fluorescence",
+            1 / 30.0,
+        )
+
+    class _FakeDialog:
+        experiment_name = "unused"
+        experiment_duration = 0.0
+        imported_data: list[Any] = []
+        new_cellpose_result = None
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
+        imported_channels = 1
+        imported_functional_channel = 1
+        batch_imports = [
+            TifBatchImport(tmp_path / "a.tif", "imported", [_trace()], 1.0),
+            TifBatchImport(tmp_path / "b.tif", "failed", message="bad"),
+            TifBatchImport(tmp_path / "sub" / "a.tif", "imported", [_trace()], 1.0),
+        ]
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    before = set(gui.project.experiments)
+
+    gui.btn_import_tif_clicked()
+
+    added = set(gui.project.experiments) - before
+    assert added == {"a", "a (2)"}
+    videos = {video["name"]: video["paths"] for video in gui.project.calcium_videos}
+    assert videos["a"] == [str(tmp_path / "a.tif")]
+    assert videos["a (2)"] == [str(tmp_path / "sub" / "a.tif")]
+    assert gui.cmb_trace.currentText().startswith("a (2) ::")
+    gui.project.history.undo()
+    assert set(gui.project.experiments) - before == {"a"}
 
 
 def test_spatial_footprint_empty_button_opens_cellpose_import(

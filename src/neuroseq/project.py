@@ -184,6 +184,9 @@ class Project:
         # Folders last used by this project's device workflows, by purpose
         # ("syscon_export", "scanimage_recording"); open projects do not share them.
         self.device_folders: dict[str, str] = {}
+        # Files listed in an import dialog, by purpose (e.g. the raw calcium
+        # TIFFs, #643), so reopening the dialog offers them again.
+        self.import_file_lists: dict[str, list[str]] = {}
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_ram_trace_plot_matrix = 256
@@ -243,6 +246,10 @@ class Project:
                             _meta["syscon_export_settings"]
                         )
                     self.device_folders = dict(_meta.get("device_folders", {}))
+                    self.import_file_lists = {
+                        str(purpose): [str(path) for path in paths]
+                        for purpose, paths in _meta.get("import_file_lists", {}).items()
+                    }
                     self.syscon2_export_template_text = _meta.get(
                         "syscon2_export_template_text"
                     )
@@ -418,6 +425,25 @@ class Project:
         self.device_folders[purpose] = folder
         if mark_dirty:
             self.mark_dirty()
+
+    def set_import_files(self, purpose: str, paths: Sequence[str]) -> None:
+        """Remember the files listed in ``purpose``'s import dialog.
+
+        A convenience like the import folder: saved with the project's next
+        save, but not by itself a reason to ask to save."""
+        files = [str(path) for path in paths]
+        if files:
+            self.import_file_lists[purpose] = files
+        else:
+            self.import_file_lists.pop(purpose, None)
+
+    def unique_experiment_name(self, base: str) -> str:
+        """``base``, or ``base (2)``, ``base (3)``, ... if a data group of that
+        name already exists."""
+        unique, suffix = base, 2
+        while unique in self.experiments:
+            unique, suffix = f"{base} ({suffix})", suffix + 1
+        return unique
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
@@ -1907,6 +1933,8 @@ class Project:
                 )
             if self.device_folders:
                 metadata["device_folders"] = self.device_folders
+            if self.import_file_lists:
+                metadata["import_file_lists"] = self.import_file_lists
             if self.syscon2_export_template_text is not None:
                 metadata["syscon2_export_template_text"] = (
                     self.syscon2_export_template_text
