@@ -186,6 +186,9 @@ class TraceWidget(TimeseriesWidget):
     vector_export_requested = QtCore.Signal()
     # TraceData shown, neuron ids to preselect - see _request_trace_comparison().
     compare_traces_requested = QtCore.Signal(object, object)
+    # The user switched this view's input overlay on/off from its context
+    # menu (not emitted by set_stim_overlay_enabled()).
+    stim_overlay_toggled = QtCore.Signal(bool)
 
     # Line thickness is expressed in screen pixels. Below this fraction of a
     # neuron's pixel band, adjacent traces' strokes start to touch; above the
@@ -543,6 +546,15 @@ class TraceWidget(TimeseriesWidget):
             lambda: self.compare_traces_requested.emit(self.data, preselected)
         )
         self.context_menu.insertAction(self.context_menu.actions()[0], compare_action)
+        overlay_action = QtWidgets.QAction("Overlay input on traces", self)
+        overlay_action.setToolTip(
+            "Show the selected input array behind this view's traces, "
+            "each neuron's input on its own trace row"
+        )
+        overlay_action.setCheckable(True)
+        overlay_action.setChecked(self._stim_overlay_enabled)
+        overlay_action.toggled.connect(self._on_stim_overlay_action_toggled)
+        self.context_menu.insertAction(self.context_menu.actions()[0], overlay_action)
 
     def _comparison_neuron_ids(self) -> list[int]:
         """Neurons to preselect for a comparison: the selected neuron range
@@ -866,6 +878,14 @@ class TraceWidget(TimeseriesWidget):
             return
         self._stim_overlay_enabled = enabled
         self._rebuild_stim_overlay()
+
+    @property
+    def stim_overlay_enabled(self) -> bool:
+        return self._stim_overlay_enabled
+
+    def _on_stim_overlay_action_toggled(self, enabled: bool) -> None:
+        self.set_stim_overlay_enabled(enabled)
+        self.stim_overlay_toggled.emit(enabled)
 
     def set_stim_overlay_data(self, stim_array: StimArray | None) -> None:
         self._stim_overlay_array = stim_array

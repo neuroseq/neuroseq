@@ -52,6 +52,8 @@ from neuroseq.utils import InteractMode
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.visualization.data_widget import DataWidget
+from neuroseq.visualization.trace_widget import TraceWidget
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
@@ -1461,6 +1463,151 @@ def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> 
     gui.cmb_stim.setCurrentText("stim2")
 
     assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
+
+
+def _overlay_values(widget) -> np.ndarray:
+    assert widget._stim_overlay_graphic is not None
+    return np.asarray(widget._stim_overlay_graphic.data.value)
+
+
+def _all_data_trace_overlay_gui(qtbot: QtBot) -> tuple[ProjectWorkspace, Project]:
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    project.stim_arrays["stim"].values[2:4, 1] = 3.0
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui.cmb_data.setCurrentText("Experiment :: traces [trace]")
+    gui._view_actions[gui.data_widget].trigger()  # show the All data panel
+    assert gui.data_widget.trace_widget.n_neurons == 3
+    return gui, project
+
+
+def test_all_data_trace_overlay_toggles_independently(qtbot: QtBot) -> None:
+    """Issue #663: the All data panel's traces get their own input overlay."""
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    data_traces = gui.data_widget.trace_widget
+    assert data_traces._stim_overlay_graphic is None
+
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    assert data_traces._stim_overlay_array is project.stim_arrays["stim"]
+    rendered = _overlay_values(data_traces)
+    assert rendered.shape == (3, 10)
+    assert np.all(rendered[1, 2:4] == 3.0)
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert not gui.action_overlay_stim_on_traces.isChecked()
+    # Unlike the Neuron data toggle, the Stimuli panel stays put.
+    assert gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert data_traces._stim_overlay_graphic is None
+
+
+def test_trace_view_context_menu_toggles_overlay_and_syncs_toolbar(
+    qtbot: QtBot,
+) -> None:
+    gui, _ = _all_data_trace_overlay_gui(qtbot)
+    data_traces = gui.data_widget.trace_widget
+
+    data_traces._rebuild_custom_analysis_menu()
+    overlay_action = next(
+        a
+        for a in data_traces.context_menu.actions()
+        if a.text() == "Overlay input on traces"
+    )
+    assert not overlay_action.isChecked()
+    overlay_action.trigger()
+
+    assert data_traces.stim_overlay_enabled
+    assert data_traces._stim_overlay_graphic is not None
+    assert gui.action_overlay_stim_on_data_traces.isChecked()
+    assert not gui.action_overlay_stim_on_traces.isChecked()
+
+    gui.trace_widget._rebuild_custom_analysis_menu()
+    main_action = next(
+        a
+        for a in gui.trace_widget.context_menu.actions()
+        if a.text() == "Overlay input on traces"
+    )
+    main_action.trigger()
+    assert gui.action_overlay_stim_on_traces.isChecked()
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert not gui.stim_editor.isVisible()
+
+
+def test_all_data_trace_overlay_follows_stim_edits_and_undo(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+
+    new_values = np.zeros((10, 3), dtype=np.float32)
+    new_values[5:7, 0] = 2.0
+    project.replace_stim_values("stim", new_values)
+
+    rendered = _overlay_values(data_traces)
+    assert np.all(rendered[0, 5:7] == 2.0)
+    assert np.all(rendered[1] == 0.0)
+
+    project.history.undo()
+
+    rendered = _overlay_values(data_traces)
+    assert np.all(rendered[0] == 0.0)
+    assert np.all(rendered[1, 2:4] == 3.0)
+
+
+def test_all_data_trace_overlay_follows_selected_stim(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    project.add_stim_array(
+        StimArray(
+            "stim2",
+            StimType.Excitation,
+            np.full((10, 3), 5.0, dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    gui.update_project(project)
+    gui.cmb_data.setCurrentText("Experiment :: traces [trace]")
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert (
+        gui.data_widget.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
+    )
+    assert np.all(_overlay_values(gui.data_widget.trace_widget) == 5.0)
+
+
+def test_detached_trace_views_keep_their_own_input_overlay(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    gui.detach_panel(gui.data_widget, keep_original=True)
+    data_copy = gui._detached_panel_windows[-1].panel_widget
+    assert isinstance(data_copy, DataWidget)
+    assert data_copy.trace_widget.stim_overlay_enabled
+    assert data_copy.trace_widget._stim_overlay_graphic is not None
+
+    gui.detach_panel(gui.trace_widget, keep_original=True)
+    trace_copy = gui._detached_panel_windows[-1].panel_widget
+    assert isinstance(trace_copy, TraceWidget)
+    assert not trace_copy.stim_overlay_enabled
+
+    trace_copy.set_stim_overlay_enabled(True)
+    data_copy.trace_widget.set_stim_overlay_enabled(False)
+    assert trace_copy._stim_overlay_graphic is not None
+    assert data_copy.trace_widget._stim_overlay_graphic is None
+    assert gui.data_widget.trace_widget._stim_overlay_graphic is not None
+
+    new_values = np.zeros((10, 3), dtype=np.float32)
+    new_values[0:2, 2] = 4.0
+    project.replace_stim_values("stim", new_values)
+
+    assert np.all(_overlay_values(trace_copy)[2, 0:2] == 4.0)
 
 
 def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(

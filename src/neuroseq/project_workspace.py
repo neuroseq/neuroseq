@@ -137,6 +137,10 @@ class DetachedPanelWindow(QtWidgets.QWidget):
         scroll_area.setWidget(widget)
         layout.addWidget(scroll_area)
 
+    @property
+    def panel_widget(self) -> QtWidgets.QWidget:
+        return self._widget
+
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         self._widget.close()
         if self._on_close is not None:
@@ -731,6 +735,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.trace_widget.compare_traces_requested.connect(self._compare_traces)
         self.data_widget.trace_widget.compare_traces_requested.connect(
             self._compare_traces
+        )
+        self.trace_widget.stim_overlay_toggled.connect(
+            self._on_trace_view_stim_overlay_toggled
+        )
+        self.data_widget.trace_widget.stim_overlay_toggled.connect(
+            self.action_overlay_stim_on_data_traces.setChecked
         )
         self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.spike_widget.custom_analysis_requested.connect(
@@ -1345,6 +1355,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             # The stim editor rebuilds itself from its own history listener.
             self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
+        # Any edit, undo or redo may have changed the input values that the
+        # trace views overlay (issue #663).
+        self._refresh_stim_overlays(self._current_stim_array())
 
     def _warn_if_cellpose_model_mismatch(self) -> None:
         """Warn when Cellpose data is present but its cell count differs from the
@@ -1589,9 +1602,28 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         return modifier.stim_array if modifier is not None else None
 
     def _on_current_stim_changed(self, stim_array: StimArray | None) -> None:
-        if self.action_overlay_stim_on_traces.isChecked():
-            self.trace_widget.set_stim_overlay_data(stim_array)
+        self._refresh_stim_overlays(stim_array)
         self._on_time_changed(self.time_slider.t_ms)
+
+    def _stim_overlay_trace_widgets(self) -> list[TraceWidget]:
+        """Every trace view that can overlay the selected input: the Neuron
+        data panel, the All data panel's trace view and any detached copies
+        of either (issue #663). Each keeps its own on/off setting."""
+        widgets = [self.trace_widget, self.data_widget.trace_widget]
+        for window in self._detached_panel_windows:
+            widget = window.panel_widget
+            if isinstance(widget, DataWidget):
+                widgets.append(widget.trace_widget)
+            elif isinstance(widget, TraceWidget):
+                widgets.append(widget)
+        return widgets
+
+    def _refresh_stim_overlays(self, stim_array: StimArray | None) -> None:
+        """Point every trace view's input overlay at the selected input
+        array (re-reading its values, e.g. after an edit or undo). Views
+        with the overlay switched off only store the array."""
+        for widget in self._stim_overlay_trace_widgets():
+            widget.set_stim_overlay_data(stim_array)
 
     def _on_time_changed(self, time_ms: int) -> None:
         """Highlight, with a red cross in the Spatial Footprints panel,
@@ -1618,8 +1650,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         row for now - overlaying a different neuron's stim/trace pair is
         deferred."""
         enabled = self.action_overlay_stim_on_traces.isChecked()
-        self.trace_widget.set_stim_overlay_enabled(enabled)
         self.trace_widget.set_stim_overlay_data(self._current_stim_array())
+        self.trace_widget.set_stim_overlay_enabled(enabled)
         stim_panel_action = self._view_actions[self.stim_editor]
         if enabled:
             self._stim_panel_visible_before_overlay = stim_panel_action.isChecked()
@@ -1630,6 +1662,21 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             and not stim_panel_action.isChecked()
         ):
             stim_panel_action.trigger()
+
+    def _on_trace_view_stim_overlay_toggled(self, enabled: bool) -> None:
+        """Keep the toolbar toggle in step with the Neuron data panel's own
+        context-menu toggle (it also hides/restores the Stimuli panel)."""
+        if self.action_overlay_stim_on_traces.isChecked() != enabled:
+            self.action_overlay_stim_on_traces.trigger()
+
+    def _toggle_data_stim_trace_overlay(self) -> None:
+        """Overlay the selected input on the All data panel's traces,
+        independently of the Neuron data panel (issue #663)."""
+        trace_widget = self.data_widget.trace_widget
+        trace_widget.set_stim_overlay_data(self._current_stim_array())
+        trace_widget.set_stim_overlay_enabled(
+            self.action_overlay_stim_on_data_traces.isChecked()
+        )
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
@@ -3527,7 +3574,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
         widget.compare_traces_requested.connect(self._compare_traces)
+        self._copy_stim_overlay_setting(self.trace_widget, widget)
         return widget
+
+    def _copy_stim_overlay_setting(
+        self, source: TraceWidget, target: TraceWidget
+    ) -> None:
+        """A detached trace view starts with its source's input overlay
+        setting, then toggles on its own (context menu)."""
+        target.set_stim_overlay_data(self._current_stim_array())
+        target.set_stim_overlay_enabled(source.stim_overlay_enabled)
 
     def _build_fresh_spike_widget(self) -> SpikeWidget:
         widget = SpikeWidget(
@@ -3549,6 +3605,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.trace_widget.compare_traces_requested.connect(self._compare_traces)
         widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self._copy_stim_overlay_setting(
+            self.data_widget.trace_widget, widget.trace_widget
+        )
         return widget
 
     def _build_fresh_heatmap_widget(self) -> HeatmapWidget:
@@ -3718,6 +3777,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
+        self.action_overlay_stim_on_data_traces = add_action(
+            "Overlay input on All data traces",
+            self._toggle_data_stim_trace_overlay,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.layers-outline",
+            checkable=True,
+            is_checked=False,
+        )
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None

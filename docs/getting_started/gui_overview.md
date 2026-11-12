@@ -85,7 +85,15 @@ Comboboxes select what each panel shows: **Input data**, **Neuron data**,
 **Spike data**, **Synapse data** and **All data** (a universal panel for any
 traces or spikes). The button next to Input data opens array operations:
 create, edit, delete, clear, Trim to Mapped Neurons…, pad, trim, loop.
-**Overlay input on traces** draws the input on the trace panel.
+**Overlay input on traces** draws the selected input array behind the Neuron
+data traces (each neuron's input on its own trace row) and hides the input
+editor. **Overlay input on All data traces**, next to the All data selector,
+does the same for the All data panel when it shows traces, for example a second
+calcium trace array, and leaves the input editor where it is. Each trace view,
+including detached panels, switches its overlay on and off on its own:
+right-click the traces and choose **Overlay input on traces**. A detached copy
+starts with the setting of the panel it was copied from. Every overlay follows
+the Input data selector and redraws after input edits, undo and redo.
 
 The View toolbar also holds **Design static input**, **Design dynamic input**
 ([input design](../input_design/overview.md)), **Image acquisition** (ScanImage
@@ -104,7 +112,8 @@ controls) and the Imaging tab's data selector.
 - **Toggle Grid** shows a time/neuron grid on the input editor, spaced by the
   array's `dt`.
 - Right-click the traces for **Normalization…** (percent scale, Center median,
-  Clip values, Auto-extend vertical space) and **Preview vector graphic…**.
+  Clip values, Auto-extend vertical space), **Overlay input on traces** and
+  **Preview vector graphic…**.
   The synapse heatmap has its own **Normalization…**.
 
 ### Comparing trace arrays
