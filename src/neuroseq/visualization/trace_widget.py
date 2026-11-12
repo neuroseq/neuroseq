@@ -93,16 +93,63 @@ class TraceNormDialog(SelfRaisingDialog):
         self.btn_close.clicked.connect(self.close)
         self.content_layout.addWidget(self.btn_close)
 
+        # A QDialog presses its default button on Enter, and every push
+        # button is an auto-default one: Enter in the Normalization box
+        # clicked "Reset to defaults", resetting normalization to 100% and
+        # re-enabling clipping (#660). The settings apply live, so Enter
+        # only has to commit the typed value - no button is the default.
+        for button in (self.btn_reset_defaults, self.btn_close):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+
+    def showEvent(self, event) -> None:
+        # The dialog is reused, and the trace widget's settings may have
+        # changed while it was hidden: show what is actually applied.
+        self.sync_from_trace_widget()
+        super().showEvent(event)
+
+    def sync_from_trace_widget(self) -> None:
+        """Set every control (and this dialog's copy) from the trace widget."""
+        widget = self.trace_widget
+        self._set_controls(
+            widget.trace_norm_percent,
+            widget.offset_by_median,
+            widget.clip,
+            widget.auto_extend_vertical_space,
+        )
+
+    def _set_controls(
+        self, norm_percent: int, offset_by_median: bool, clip: bool, auto_extend: bool
+    ) -> None:
+        self.trace_norm_percent = norm_percent
+        self.offset_by_median = offset_by_median
+        self.clip = clip
+        self.auto_extend_vertical_space = auto_extend
+        controls = (
+            self.slider_norm,
+            self.spin_norm,
+            self.chk_offset,
+            self.chk_clip,
+            self.chk_auto_extend,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        try:
+            self.label_norm.setText(f"Normalization: {norm_percent}%")
+            self.slider_norm.setValue(norm_percent)
+            self.spin_norm.setValue(norm_percent)
+            self.chk_offset.setChecked(offset_by_median)
+            self.chk_clip.setChecked(clip)
+            self.chk_auto_extend.setChecked(auto_extend)
+        finally:
+            for control in controls:
+                control.blockSignals(False)
+
     def reset_defaults(self) -> None:
-        self.slider_norm.setValue(100)
-        self.spin_norm.setValue(100)
-        self.offset_by_median = True
-        self.clip = True
-        self.auto_extend_vertical_space = False
-        self.chk_offset.setChecked(self.offset_by_median)
-        self.chk_clip.setChecked(self.clip)
-        self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
-        self.update_norm_input(self.slider_norm.value())
+        # Set every control first and apply once, so no intermediate state
+        # (new normalization with the old clip setting) is ever plotted.
+        self._set_controls(100, True, True, False)
+        self.update_trace_widget()
 
     def chk_offset_clicked(self, checked: bool) -> None:
         self.offset_by_median = checked

@@ -2116,3 +2116,85 @@ def test_auto_extend_vertical_space_survives_set_limits(qtbot: QtBot) -> None:
     # the refreshed neuron count, not the one from before, comes back
     trace_widget.set_data(None)
     assert controller.max_height == pytest.approx(6.0)
+
+
+def test_trace_norm_dialog_enter_in_normalization_box_keeps_settings(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """#660: Enter in the Normalization box clicked the auto-default "Reset
+    to defaults" button, resetting normalization and re-enabling clipping."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+    with qtbot.waitExposed(dialog):
+        dialog.show()
+
+    dialog.chk_clip.click()
+    assert trace_widget.clip is False
+    dialog.spin_norm.setFocus()
+    dialog.spin_norm.lineEdit().selectAll()
+    qtbot.keyClicks(dialog.spin_norm, "300")
+    qtbot.keyClick(dialog.spin_norm, QtCore.Qt.Key.Key_Return)
+
+    assert trace_widget.trace_norm_percent == 300
+    assert trace_widget.clip is False
+    assert dialog.chk_clip.isChecked() is False
+    assert dialog.slider_norm.value() == 300
+    assert dialog.btn_reset_defaults.isDefault() is False
+
+
+def test_trace_norm_dialog_shows_applied_settings_when_reopened(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    trace_widget.trace_norm_dialog()
+    dialog = trace_widget._trace_norm_dialog
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    dialog.close()
+
+    trace_widget.clip = False
+    trace_widget.trace_norm_percent = 250
+    trace_widget.trace_norm_dialog()
+
+    assert dialog.chk_clip.isChecked() is False
+    assert dialog.clip is False
+    assert dialog.spin_norm.value() == 250
+    assert dialog.label_norm.text() == "Normalization: 250%"
+
+
+def test_trace_norm_dialog_reset_defaults_applies_all_at_once(
+    qtbot: QtBot, make_trace_data, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+    dialog.update_norm_input(400)
+    dialog.chk_clip.click()
+    dialog.chk_offset.click()
+    applied: list[tuple[int, bool, bool]] = []
+    replot = trace_widget.replot_traces
+
+    def record_replot() -> None:
+        applied.append(
+            (
+                trace_widget.trace_norm_percent,
+                trace_widget.clip,
+                trace_widget.offset_by_median,
+            )
+        )
+        replot()
+
+    monkeypatch.setattr(trace_widget, "replot_traces", record_replot)
+
+    dialog.btn_reset_defaults.click()
+
+    assert applied == [(100, True, True)]
+    assert dialog.chk_clip.isChecked() and dialog.chk_offset.isChecked()
+    assert dialog.spin_norm.value() == 100 == dialog.slider_norm.value()
