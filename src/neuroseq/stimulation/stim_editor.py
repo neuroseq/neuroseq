@@ -611,6 +611,12 @@ class StimEditor(QtWidgets.QWidget):
         ahead of the point where they are appending blocks, so the live
         view has room to show upcoming inserts without resizing - and
         therefore moving the camera - on every single block.
+
+        Only the current array grows: the routine's end-of-run trim
+        (:meth:`reset_stim_array` / :meth:`trim_stim_array_after`) trims only
+        that array, so padding the others too left them - and the project
+        timeline - long after the run while the routine's own array ended
+        early, and drawing past its end did nothing (#656).
         """
         if self.current_stim_modifier is None or self.project is None:
             return
@@ -618,7 +624,7 @@ class StimEditor(QtWidgets.QWidget):
         current_secs = float(stim.dt) * stim.values.shape[0]
         if total_length_secs <= current_secs + float(stim.dt) * 0.5:
             return
-        self._apply_pad(total_length_secs)
+        self._apply_pad(total_length_secs, only_stim_name=stim.name)
 
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction

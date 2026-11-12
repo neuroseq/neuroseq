@@ -2095,3 +2095,37 @@ def test_add_empty_stim_array_like_current_selects_a_fresh_copy(qtbot: QtBot) ->
     assert not np.any(fresh.values)
     assert (fresh.units, fresh.dt) == ("mV", 0.001)
     assert project.stim_arrays["a"].values[3, 1] == 2.0
+
+
+def test_routine_padding_is_fully_removed_by_the_end_of_run_trim(qtbot) -> None:
+    """#656: a dynamic routine pads the array ahead of its blocks and trims the
+    padding off when it ends. The pad used to grow every array but the trim
+    only the routine's own, so the other arrays kept the routine's padding:
+    the timeline stayed artificially long while the routine's array (the one
+    drawn in) ended early, so drawing only worked in its first part."""
+    stim_editor, project = _make_ramp_editor(qtbot)
+    project.add_stim_array(
+        StimArray(
+            "b",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((200, 4)),
+            "mV",
+            0.001,
+        )
+    )
+    stim_editor.set_project(project, stim_to_select="a")
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.stim_array.name == "a"
+
+    stim_editor.pad_stim_array_to(1.0)
+    assert project.stim_arrays["a"].values.shape[0] == 1000
+    assert project.stim_arrays["b"].values.shape[0] == 200
+
+    stim_editor.trim_stim_array_after(0.3)
+    assert project.stim_arrays["a"].values.shape[0] == 300
+    assert project.stim_arrays["b"].values.shape[0] == 200
+    assert project.max_time_secs == pytest.approx(0.3)
+    # The whole visible timeline can be drawn in.
+    assert stim_editor.stim_widget.n_timestamps == 300
+    stim_editor.draw_stim_region(slice(0, 1), slice(290, 294))
+    assert np.any(project.stim_arrays["a"].values[290:294, 0])
