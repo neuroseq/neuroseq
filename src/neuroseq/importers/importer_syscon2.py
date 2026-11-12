@@ -184,7 +184,7 @@ def _validate_object_properties(props: dict[str, str], block_index: int) -> None
 def _check_allocation(n_timepoints: int, n_neurons: int, itemsize: int = 4) -> None:
     if n_timepoints * n_neurons * itemsize > _MAX_IMPORT_BYTES:
         raise ValueError(
-            "Sequence would require more than 512 MiB for its stimulus array. Reduce duration or target channel count before importing."
+            "Sequence would require more than 512 MiB for its input array. Reduce duration or target channel count before importing."
         )
 
 

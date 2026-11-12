@@ -302,7 +302,7 @@ def test_stim_widget_hover_uses_background_values_in_show_all_mode(
     stim_widget.set_background_data(background)
     captured: dict[str, str] = {}
 
-    def capture_text(pos: np.ndarray, additional_text: str) -> None:
+    def capture_text(pos: np.ndarray, additional_text: str, *_: str) -> None:
         captured["additional_text"] = additional_text
 
     monkeypatch.setattr(stim_widget.text, "set_pos", capture_text)
@@ -446,7 +446,9 @@ def test_stim_widget_hover_shows_real_neuron_id_when_only_one_visible(
 
     captured: dict[str, str] = {}
     monkeypatch.setattr(
-        stim_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+        stim_widget.text,
+        "set_pos",
+        lambda pos, text, *_: captured.__setitem__("t", text),
     )
     monkeypatch.setattr(
         stim_widget.subplot,
@@ -1063,7 +1065,9 @@ def test_stim_widget_hover_shows_start_and_end_of_stimulus(
 
     captured: dict[str, str] = {}
     monkeypatch.setattr(
-        stim_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+        stim_widget.text,
+        "set_pos",
+        lambda pos, text, *_: captured.__setitem__("t", text),
     )
     world = {"pos": np.array([8.0, 1.0, 0.0])}  # 2 ms samples -> time index 4
     monkeypatch.setattr(
@@ -1157,7 +1161,7 @@ def test_stim_widget_hover_ignores_background_without_hovered_neuron(
     )
     captured: list[str] = []
     monkeypatch.setattr(
-        stim_widget.text, "set_pos", lambda pos, text: captured.append(text)
+        stim_widget.text, "set_pos", lambda pos, text, *_: captured.append(text)
     )
     monkeypatch.setattr(
         stim_widget.subplot, "map_screen_to_world", lambda ev: np.array([1.0, 2.0, 0])

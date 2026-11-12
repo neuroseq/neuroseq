@@ -2645,7 +2645,7 @@ class B2Model:
             except (TypeError, ValueError):
                 self.logger.debug(
                     f"neurongroup {name} has a non-integer neuronnumber "
-                    f"{group.get('neuronnumber')!r}; skipping for stim-array sizing"
+                    f"{group.get('neuronnumber')!r}; skipping for input-array sizing"
                 )
         return max_neurons
 

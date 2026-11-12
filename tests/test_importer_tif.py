@@ -1124,3 +1124,47 @@ def test_cellpose_result_to_masks_round_trip(seg, expected):
     fake_result = MagicMock()
     fake_result.segmentation_array = seg
     np.testing.assert_array_equal(cellpose_result_to_masks(fake_result), expected)
+
+
+def _patch_clamp_current(units: str):
+    """A recorded patch-clamp current: noisy, so non-zero in every sample, and
+    1.2 s long (shorter than the calcium recording)."""
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+
+    values = np.random.default_rng(1).normal(-20.0, 2.0, (1200, 1))
+    return StimArray("patch", StimType.External, values, units, 0.001)
+
+
+def test_continuous_input_would_flatten_the_traces_it_covers() -> None:
+    """The mechanism of #567: suppressing against a continuously non-zero input
+    replaces every frame it covers with one clean value."""
+    from neuroseq.importers.importer_tif import impute_contaminated_frames
+    from neuroseq.importers.importer_tif import stimulation_contaminated_frames
+
+    traces = np.random.default_rng(2).random((2, 90)).astype(np.float32)
+    frames = stimulation_contaminated_frames(_patch_clamp_current(""), 30.0, 90)
+    assert frames.tolist() == list(range(36))  # the first 1200 ms
+    impute_contaminated_frames(traces, frames)
+    assert np.all(traces[:, :36] == traces[:, [36]])
+
+
+@pytest.mark.parametrize(
+    ("values", "units", "expected"),
+    [
+        ([[0.0], [1.0], [0.0], [0.0]], "mW", True),  # pulsed light
+        ([[0.0], [1.0], [0.0], [0.0]], "pA", False),  # electrophysiology
+        ([[0.0], [1.0], [0.0], [0.0]], " mV ", False),
+        ([[1.0], [1.0], [1.0], [1.0]], "mW", False),  # active all along
+        ([[0.0], [0.0]], "nS", False),  # nothing to suppress
+        (np.zeros((0, 2)), "mW", False),
+    ],
+)
+def test_suits_artefact_suppression(values, units: str, expected: bool) -> None:
+    from neuroseq.importers.importer_tif import suits_artefact_suppression
+    from neuroseq.stimulation.stim import StimArray
+    from neuroseq.stimulation.stim import StimType
+
+    stim = StimArray("s", StimType.Excitation, np.asarray(values), units, 0.01)
+    assert suits_artefact_suppression(stim) is expected
+    assert suits_artefact_suppression(_patch_clamp_current("")) is False

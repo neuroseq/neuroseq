@@ -50,6 +50,7 @@ from neuroseq.export.stimulus_export_dialog import show_stimulus_export_dialog
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.icon_manager import icons
 from neuroseq.importers.cellpose_import_dialog import CellposeImportDialog
+from neuroseq.importers.import_folders import ImportFolders
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import clone_cellpose_result
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
@@ -66,6 +67,7 @@ from neuroseq.main_scroll import WorkspaceZoom
 from neuroseq.main_scroll import ZoomControl
 from neuroseq.main_scroll import make_main_scroll_area
 from neuroseq.model_editor import ModelEditorDialog
+from neuroseq.project import CalciumVideoSpec
 from neuroseq.project import ImportedComponents
 from neuroseq.project import Project
 from neuroseq.save_load_options import SaveLoadOptions
@@ -93,6 +95,7 @@ from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidg
 from neuroseq.visualization.spike_widget import SpikeWidget
 from neuroseq.visualization.time_slider_widget import TimeSliderWidget
 from neuroseq.visualization.timeseries_widget import TimeseriesWidget
+from neuroseq.visualization.trace_comparison_window import open_trace_comparison
 from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
@@ -106,6 +109,7 @@ if TYPE_CHECKING:
     from neuroseq.importers.patch_clamp_data_output_import_dialog import (
         PatchClampDataOutputImportDialog,
     )
+    from neuroseq.importers.tif_import_dialog import TifImportDialog
 
 
 class DetachedPanelWindow(QtWidgets.QWidget):
@@ -133,6 +137,10 @@ class DetachedPanelWindow(QtWidgets.QWidget):
         scroll_area.setWidgetResizable(True)
         scroll_area.setWidget(widget)
         layout.addWidget(scroll_area)
+
+    @property
+    def panel_widget(self) -> QtWidgets.QWidget:
+        return self._widget
 
     def closeEvent(self, event: QtGui.QCloseEvent | None) -> None:
         self._widget.close()
@@ -408,6 +416,12 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self._owns_devices = devices is None
         self.devices = devices if devices is not None else WorkspaceDevices(self)
         self._disposed = False
+        # Movies the Imaging views were last refreshed for (see
+        # _project_history_changed).
+        self._calcium_videos_shown: tuple = ()
+        # The input array (identity, values buffer, dt) the trace overlays
+        # last showed (see _refresh_stim_overlays).
+        self._stim_overlay_token: tuple | None = None
         self._background_job = BackgroundJob(self)
         self._background_job_label = ""
         self._close_gate = WorkspaceCloseGate(self)
@@ -415,6 +429,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.logger.info("starting ProjectWorkspace")
         self.settings = settings if settings is not None else GuiSettings()
         self.project = Project()
+        # Start folder of the import file dialogs, per project (#646).
+        self.import_folders = ImportFolders(lambda: self.project, self.settings)
         self._unsubscribe_project_history: Callable[[], None] | None = None
         self.setWindowTitle("NeuroSeq")
         self.cmb_trace = QtWidgets.QComboBox()
@@ -723,6 +739,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self.data_widget.trace_widget.custom_analysis_requested.connect(
             self._custom_analysis
         )
+        self.trace_widget.compare_traces_requested.connect(self._compare_traces)
+        self.data_widget.trace_widget.compare_traces_requested.connect(
+            self._compare_traces
+        )
+        self.trace_widget.stim_overlay_toggled.connect(
+            self._on_trace_view_stim_overlay_toggled
+        )
+        self.data_widget.trace_widget.stim_overlay_toggled.connect(
+            self.action_overlay_stim_on_data_traces.setChecked
+        )
         self.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
         self.data_widget.spike_widget.custom_analysis_requested.connect(
             self._custom_analysis
@@ -848,6 +874,25 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self.custom_analysis_widget.set_data(
                 data, analysis_type, neuron_slice, time_slice
             )
+
+    def _compare_traces(
+        self, data: TraceData | None, neuron_ids: Sequence[int]
+    ) -> QtWidgets.QDialog:
+        """Open the "Compare traces" dialog and its popup(s) (#662)."""
+        return open_trace_comparison(
+            self.project,
+            data,
+            neuron_ids,
+            theme=self.settings.theme,
+            parent=self,
+            title_suffix=self._tab_label_for(self.project),
+            on_data_added=lambda _name: self._refresh_after_data_added(),
+        )
+
+    def _refresh_after_data_added(self) -> None:
+        """List a trace array added outside an importer (as undo/redo do)."""
+        self._update_data(keep_undo_history=True, refresh_stim_editor=False)
+        self._update_window_title()
 
     def _update_data(
         self, keep_undo_history: bool = False, refresh_stim_editor: bool = True
@@ -1314,9 +1359,20 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         if self._disposed:
             return
         if event in ("undo", "redo"):
+            videos_before = self._calcium_videos_shown
             # The stim editor rebuilds itself from its own history listener.
             self._update_data(keep_undo_history=True, refresh_stim_editor=False)
             self._update_window_title()
+            if self._calcium_videos_state() != videos_before:
+                # Imported data and its movies are undone/redone together.
+                self._refresh_calcium_video_widgets()
+        # An edit, undo or redo of an input array may have changed the
+        # values the trace views overlay (issue #663); other edits (data
+        # groups) and clearing the history cannot.
+        command = self.project.history.last_command
+        if event != "clear" and command is not None and command.affects_inputs:
+            # Forced: slice edits change the values in place.
+            self._refresh_stim_overlays(self._current_stim_array(), force=True)
 
     def _warn_if_cellpose_model_mismatch(self) -> None:
         """Warn when Cellpose data is present but its cell count differs from the
@@ -1561,9 +1617,42 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         return modifier.stim_array if modifier is not None else None
 
     def _on_current_stim_changed(self, stim_array: StimArray | None) -> None:
-        if self.action_overlay_stim_on_traces.isChecked():
-            self.trace_widget.set_stim_overlay_data(stim_array)
+        self._refresh_stim_overlays(stim_array)
         self._on_time_changed(self.time_slider.t_ms)
+
+    def _stim_overlay_trace_widgets(self) -> list[TraceWidget]:
+        """Every trace view that can overlay the selected input: the Neuron
+        data panel, the All data panel's trace view and any detached copies
+        of either (issue #663). Each keeps its own on/off setting."""
+        widgets = [self.trace_widget, self.data_widget.trace_widget]
+        for window in self._detached_panel_windows:
+            widget = window.panel_widget
+            if isinstance(widget, DataWidget):
+                widgets.append(widget.trace_widget)
+            elif isinstance(widget, TraceWidget):
+                widgets.append(widget)
+        return widgets
+
+    def _refresh_stim_overlays(
+        self, stim_array: StimArray | None, *, force: bool = False
+    ) -> None:
+        """Point every trace view's input overlay at the selected input
+        array (re-reading its values, e.g. after an edit or undo). Views
+        with the overlay switched off only store the array.
+
+        Skipped when the same array, values buffer and dt are already shown
+        (the stim editor re-announces its selection after every undo/redo),
+        unless ``force``d after an input edit."""
+        token = (
+            None
+            if stim_array is None
+            else (id(stim_array), id(stim_array.values), float(stim_array.dt))
+        )
+        if not force and token == self._stim_overlay_token:
+            return
+        self._stim_overlay_token = token
+        for widget in self._stim_overlay_trace_widgets():
+            widget.set_stim_overlay_data(stim_array)
 
     def _on_time_changed(self, time_ms: int) -> None:
         """Highlight, with a red cross in the Spatial Footprints panel,
@@ -1590,8 +1679,8 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         row for now - overlaying a different neuron's stim/trace pair is
         deferred."""
         enabled = self.action_overlay_stim_on_traces.isChecked()
-        self.trace_widget.set_stim_overlay_enabled(enabled)
         self.trace_widget.set_stim_overlay_data(self._current_stim_array())
+        self.trace_widget.set_stim_overlay_enabled(enabled)
         stim_panel_action = self._view_actions[self.stim_editor]
         if enabled:
             self._stim_panel_visible_before_overlay = stim_panel_action.isChecked()
@@ -1602,6 +1691,21 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             and not stim_panel_action.isChecked()
         ):
             stim_panel_action.trigger()
+
+    def _on_trace_view_stim_overlay_toggled(self, enabled: bool) -> None:
+        """Keep the toolbar toggle in step with the Neuron data panel's own
+        context-menu toggle (it also hides/restores the Stimuli panel)."""
+        if self.action_overlay_stim_on_traces.isChecked() != enabled:
+            self.action_overlay_stim_on_traces.trigger()
+
+    def _toggle_data_stim_trace_overlay(self) -> None:
+        """Overlay the selected input on the All data panel's traces,
+        independently of the Neuron data panel (issue #663)."""
+        trace_widget = self.data_widget.trace_widget
+        trace_widget.set_stim_overlay_data(self._current_stim_array())
+        trace_widget.set_stim_overlay_enabled(
+            self.action_overlay_stim_on_data_traces.isChecked()
+        )
 
     def _apply_spike_selection(self, cmb_name: str) -> None:
         data = self.project.get_data(cmb_name, SpikeData)
@@ -1699,7 +1803,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             return
         self._do_brian2_simulation_threaded(simulation_time)
 
-    def _append_experimental_data(self, experiment: Experiment) -> None:
+    def _append_experimental_data(
+        self,
+        experiment: Experiment,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
+    ) -> None:
+        """Ask whether to add ``experiment`` as a new data group or append it
+        to one, then do so as one undoable step together with its
+        ``calcium_videos`` (nothing is added if the user cancels)."""
         try:
             dialog = AddExperimentDataDialog(experiment, self.project, parent=self)
             if not dialog.exec():
@@ -1710,9 +1821,10 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                     dialog.experiment.duration,
                     dialog.experiment.data,
                     dialog.offset,
+                    calcium_videos=calcium_videos,
                 )
             else:
-                self.project.add_experiment(experiment)
+                self.project.add_experiment(experiment, calcium_videos)
             self.update_project(self.project, preserve_dynamic_input=True)
             self._select_experiment_data(experiment.name)
         except Exception as e:
@@ -2171,6 +2283,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             stimulus_to_cellpose_mapping=resolve_stimulus_to_cellpose_mapping(
                 self.project.cellpose_data
             ),
+            import_folders=self.import_folders,
         )
         if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
             self._append_experimental_data(
@@ -2193,33 +2306,75 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             self,
             cellpose_import=self.last_cellpose_import,
             stim_arrays=self.project.stim_arrays,
+            import_folders=self.import_folders,
         )
         if paths:
             dialog.add_tif_paths(paths)
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
+            return
+        if dialog.batch_imports:
+            self._add_batch_tif_imports(dialog)
+        else:
+            # The movie is added with the data, in the same undo step.
+            videos = (
+                [
+                    CalciumVideoSpec(
+                        list(dialog.imported_tif_paths),
+                        dialog.imported_fps,
+                        name=dialog.experiment_name,
+                        channels=dialog.imported_channels,
+                        shown_channel=dialog.imported_functional_channel,
+                    )
+                ]
+                if dialog.imported_tif_paths
+                else []
+            )
             self._append_experimental_data(
                 Experiment(
                     dialog.experiment_name,
                     dialog.experiment_duration,
                     [],
                     dialog.imported_data,
-                )
+                ),
+                videos,
             )
-            if dialog.new_cellpose_result is not None:
-                self._apply_cellpose_import_result(dialog.new_cellpose_result)
-                if hasattr(self, "_auto_show_widget"):
-                    self._auto_show_widget(self.spatial_footprint_widget)
-            if dialog.imported_tif_paths:
-                self.project.add_calcium_video(
-                    dialog.imported_tif_paths,
+        if dialog.new_cellpose_result is not None:
+            self._apply_cellpose_import_result(dialog.new_cellpose_result)
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.spatial_footprint_widget)
+        if dialog.imported_tif_paths or dialog.batch_imports:
+            self._refresh_calcium_video_widgets()
+            if hasattr(self, "_auto_show_widget"):
+                self._auto_show_widget(self.calcium_video_widget)
+
+    def _add_batch_tif_imports(self, dialog: TifImportDialog) -> None:
+        """Add each file of a batch TIFF import (#643) as its own data group,
+        named after the file, with its movie in the Imaging tab - all as one
+        undoable step."""
+        experiments: list[Experiment] = []
+        videos: list[CalciumVideoSpec] = []
+        for item in dialog.batch_imports:
+            if item.status != "imported":
+                continue
+            name = self.project.unique_experiment_name(
+                item.path.stem, also_taken=[e.name for e in experiments]
+            )
+            experiments.append(Experiment(name, item.duration, [], item.data))
+            videos.append(
+                CalciumVideoSpec(
+                    [item.path],
                     dialog.imported_fps,
-                    name=dialog.experiment_name,
+                    name=name,
                     channels=dialog.imported_channels,
                     shown_channel=dialog.imported_functional_channel,
                 )
-                self._refresh_calcium_video_widgets()
-                if hasattr(self, "_auto_show_widget"):
-                    self._auto_show_widget(self.calcium_video_widget)
+            )
+        if experiments:
+            self.project.add_experiments(
+                experiments, videos, label="Import calcium imaging files"
+            )
+            self.update_project(self.project, preserve_dynamic_input=True)
+            self._select_experiment_data(experiments[-1].name)
 
     def _on_calcium_video_import_requested(
         self, *, paths: list[pathlib.Path] | None = None
@@ -2228,12 +2383,14 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             chosen, _ = QtWidgets.QFileDialog.getOpenFileNames(
                 self,
                 "Select raw calcium imaging file(s)",
-                "",
+                self.import_folders.directory(),
                 "Imaging files (*.tif *.tiff *.gif *.mp4 *.avi *.mov *.mkv *.webm);;"
                 "TIFF files (*.tif *.tiff);;GIF files (*.gif);;"
                 "Movie files (*.mp4 *.avi *.mov *.mkv *.webm);;All files (*)",
             )
             paths = [pathlib.Path(path) for path in chosen]
+            if paths:
+                self.import_folders.remember(paths[0])
         if not paths:
             return
         fps, ok = QtWidgets.QInputDialog.getDouble(
@@ -2297,7 +2454,15 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_channels(channels, shown_channel)
 
+    def _calcium_videos_state(self) -> tuple:
+        """Which movies the project lists and which one is selected."""
+        return (
+            tuple(video["id"] for video in self.project.calcium_videos),
+            self.project.selected_calcium_video_id,
+        )
+
     def _refresh_calcium_video_widgets(self) -> None:
+        self._calcium_videos_shown = self._calcium_videos_state()
         self._refresh_video_selector()
         for widget in self.findChildren(CalciumVideoWidget):
             widget.set_cellpose_data(self.project.cellpose_data)
@@ -2420,20 +2585,22 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         self,
         *,
         segment: pathlib.Path | None = None,
-        model: str | None = None,
         auto_brightness: bool = False,
+        prefill: pathlib.Path | None = None,
     ) -> None:
         """Open the cell segmentation dialog; with ``segment``, it segments
-        that image with ``model`` right away, after automatic brightness/contrast
-        (Fiji's Enhance Contrast) if ``auto_brightness``."""
+        that image right away, after automatic brightness/contrast (Fiji's
+        Enhance Contrast) if ``auto_brightness``; with ``prefill`` the image
+        waits there to be segmented with the options the user picks."""
         dialog = CellposeImportDialog(
             self,
             existing_data=self.last_cellpose_import,
             delete_handler=self._delete_cellpose_data,
+            import_folders=self.import_folders,
         )
+        if prefill is not None:
+            dialog.prefill_segmentation_file(str(prefill))
         if segment is not None:
-            if model is not None:
-                dialog.cellpose_model_combo.setCurrentText(model)
             # Once the dialog is shown, so it is there while Cellpose runs.
             QtCore.QTimer.singleShot(
                 0,
@@ -2495,13 +2662,17 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
     def btn_import_syscon2_seq_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
-        dialog = Syscon2ImportDialog(self.project, parent=self)
+        dialog = Syscon2ImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         self._complete_stimulus_import(dialog, path)
 
     def btn_import_patch_clamp_input_clicked(
         self, *, path: pathlib.Path | None = None
     ) -> None:
-        dialog = PatchClampDataInputImportDialog(self.project, parent=self)
+        dialog = PatchClampDataInputImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         self._complete_stimulus_import(dialog, path)
 
     def btn_import_patch_clamp_output_clicked(
@@ -2511,7 +2682,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             PatchClampDataOutputImportDialog,
         )
 
-        dialog = PatchClampDataOutputImportDialog(self.project, parent=self)
+        dialog = PatchClampDataOutputImportDialog(
+            self.project, parent=self, import_folders=self.import_folders
+        )
         if not self._complete_import(dialog, path) or not dialog.selected_trace_name:
             return
         combo_label = (
@@ -2704,9 +2877,7 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 f"Could not parse padding '{new_padding_secs}' as a number",
             )
             return
-        self.logger.info(
-            f"Setting stimulus padding to {self.settings.stim_padding_secs}s"
-        )
+        self.logger.info(f"Setting input padding to {self.settings.stim_padding_secs}s")
 
     def apply_theme(self, theme: str) -> None:
         """Apply a light/dark/retro theme to the whole application and all plots."""
@@ -3460,7 +3631,17 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.set_limits(*self._plot_limits())
         widget.custom_analysis_requested.connect(self._custom_analysis)
         widget.neuron_hovered.connect(self._spatial_footprint_state.set_hovered_stim_id)
+        widget.compare_traces_requested.connect(self._compare_traces)
+        self._copy_stim_overlay_setting(self.trace_widget, widget)
         return widget
+
+    def _copy_stim_overlay_setting(
+        self, source: TraceWidget, target: TraceWidget
+    ) -> None:
+        """A detached trace view starts with its source's input overlay
+        setting, then toggles on its own (context menu)."""
+        target.set_stim_overlay_data(self._current_stim_array())
+        target.set_stim_overlay_enabled(source.stim_overlay_enabled)
 
     def _build_fresh_spike_widget(self) -> SpikeWidget:
         widget = SpikeWidget(
@@ -3480,7 +3661,11 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         widget.set_limits(*self._plot_limits())
         widget.set_data(self._current_data_selection())
         widget.trace_widget.custom_analysis_requested.connect(self._custom_analysis)
+        widget.trace_widget.compare_traces_requested.connect(self._compare_traces)
         widget.spike_widget.custom_analysis_requested.connect(self._custom_analysis)
+        self._copy_stim_overlay_setting(
+            self.data_widget.trace_widget, widget.trace_widget
+        )
         return widget
 
     def _build_fresh_heatmap_widget(self) -> HeatmapWidget:
@@ -3650,6 +3835,16 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         toolbar.addSeparator()
         toolbar.addWidget(QtWidgets.QLabel("  All data: "))
         toolbar.addWidget(self.cmb_data)
+        self.action_overlay_stim_on_data_traces = add_action(
+            "Overlay input on All data traces",
+            self._toggle_data_stim_trace_overlay,
+            menu,
+            toolbar,
+            shortcut=None,
+            icon="mdi6.layers-outline",
+            checkable=True,
+            is_checked=False,
+        )
 
     def _create_action_experiment(
         self, menu: QtWidgets.QMenu, toolbar: QtWidgets.QToolBar | None
@@ -4005,20 +4200,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             if not ok:
                 return
         if action == DROP_SEGMENT:
-            from neuroseq.cellpose_annotation import CELLPOSE_MODEL_NAMES
-
-            model, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                "Segment cells",
-                f"Cellpose model for {segmentable[0].name}:",
-                list(CELLPOSE_MODEL_NAMES),
-                0,
-                False,
-            )
-            if ok:
-                self.btn_import_cellpose_data_clicked(
-                    segment=segmentable[0], model=model
-                )
+            # The usual dialog with the file waiting, so its model and
+            # brightness options apply (issue #658).
+            self.btn_import_cellpose_data_clicked(prefill=segmentable[0])
         elif action == DROP_TRACES:
             self.btn_import_tif_clicked(paths=tiffs)
         else:

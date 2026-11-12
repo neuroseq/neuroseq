@@ -15,6 +15,9 @@ from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
 from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
@@ -92,8 +95,11 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
+        self._import_folders = import_folders
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.loaded_wave: IgorWave | None = None
@@ -378,10 +384,11 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select patch-clamp input",
-            "",
+            start_directory(self._import_folders),
             PATCH_CLAMP_FILE_FILTER,
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_file(filename)
 
     def load_file(self, filename: str) -> None:
@@ -649,7 +656,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
                     raise ValueError("Input name cannot be empty")
                 if stim_name in self.project.stim_arrays:
                     raise ValueError(
-                        f"An input data entity named '{stim_name}' already exists"
+                        f"An input array named '{stim_name}' already exists"
                     )
                 stim_array = create_stim_array_from_igor_wave(
                     prepared_wave,
@@ -676,7 +683,7 @@ class PatchClampDataInputImportDialog(QtWidgets.QDialog):
             else:
                 target_stim = self._selected_stim_array()
                 if target_stim is None:
-                    raise ValueError("No target input data entity selected")
+                    raise ValueError("No target input array selected")
                 remapped_target_dt = False
                 resampled_wave = False
                 if not stim_dt_matches(float(target_stim.dt), prepared_wave.target_dt):

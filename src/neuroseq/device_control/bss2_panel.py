@@ -49,11 +49,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _INPUT_MODES = [
-    ("Constant current (stim array)", bp.INPUT_CONSTANT_CURRENT),
+    ("Constant current (input array)", bp.INPUT_CONSTANT_CURRENT),
     ("Spike input", bp.INPUT_SPIKES),
 ]
 _SPIKE_SOURCES = [
-    ("From stim array (threshold)", bp.SPIKE_SOURCE_STIM),
+    ("From input array (threshold)", bp.SPIKE_SOURCE_STIM),
     ("From project spike data", bp.SPIKE_SOURCE_EXPERIMENT),
 ]
 _STARTING_STATES = (STATE_STARTING, STATE_CONNECTING)
@@ -276,9 +276,9 @@ class Bss2Panel(QtWidgets.QWidget):
         form.addRow("Input mode", self.mode_combo)
 
         self.neurons_spin = self._spin(0, 4096)
-        self.neurons_spin.setSpecialValueText("auto (stim channels)")
+        self.neurons_spin.setSpecialValueText("auto (input channels)")
         self.neurons_spin.setToolTip(
-            "Stim channel i drives hardware neuron i. Extra channels are dropped, "
+            "Input channel i drives hardware neuron i. Extra channels are dropped, "
             "missing ones receive no input."
         )
         form.addRow("Neurons", self.neurons_spin)
@@ -290,13 +290,13 @@ class Bss2Panel(QtWidgets.QWidget):
         current_form.setContentsMargins(0, 0, 0, 0)
         self.i_offset_spin = self._spin(0, bp.I_OFFSET_LIMIT, 500)
         self.i_offset_spin.setToolTip(
-            "constant_current_i_offset (hardware units) at the maximum stim value."
+            "constant_current_i_offset (hardware units) at the maximum input value."
         )
         current_form.addRow("Max i_offset", self.i_offset_spin)
         self.value_at_max_spin = self._double_spin(0.0, 1e9, 4)
         self.value_at_max_spin.setSpecialValueText("array maximum")
-        self.value_at_max_spin.setToolTip("Stim value mapped to the maximum i_offset.")
-        current_form.addRow("Stim value at max", self.value_at_max_spin)
+        self.value_at_max_spin.setToolTip("Input value mapped to the maximum i_offset.")
+        current_form.addRow("Input value at max", self.value_at_max_spin)
         form.addRow(self.current_box)
 
         self.spike_box = QtWidgets.QWidget()
@@ -312,7 +312,7 @@ class Bss2Panel(QtWidgets.QWidget):
         self.event_ms_spin = self._double_spin(0.01, 1e6, 2)
         self.event_ms_spin.setSuffix(" ms")
         self.event_ms_spin.setToolTip(
-            "Biological spacing of the grid on which the stim array is sampled."
+            "Biological spacing of the grid on which the input array is sampled."
         )
         spike_form.addRow("Event interval", self.event_ms_spin)
         self.experiment_combo = QtWidgets.QComboBox()
@@ -333,7 +333,7 @@ class Bss2Panel(QtWidgets.QWidget):
         self.speedup_spin.setSuffix(" x")
         self.speedup_spin.setToolTip(
             "Biological time / hardware time. BSS-2 runs ~1000x faster than "
-            "biology: with 1000, 1 s of stimulus is a 1 ms hardware run."
+            "biology: with 1000, 1 s of input is a 1 ms hardware run."
         )
         form.addRow("Speed-up", self.speedup_spin)
         return group
@@ -342,7 +342,7 @@ class Bss2Panel(QtWidgets.QWidget):
         group = QtWidgets.QGroupBox("Delivery")
         layout = QtWidgets.QVBoxLayout(group)
         row = QtWidgets.QHBoxLayout()
-        self.btn_deliver = QtWidgets.QPushButton("Deliver current stim array")
+        self.btn_deliver = QtWidgets.QPushButton("Deliver current input array")
         self.btn_deliver.clicked.connect(self.deliver)
         self.btn_stop = QtWidgets.QPushButton("Stop")
         self.btn_stop.setToolTip(
@@ -729,7 +729,7 @@ class Bss2Panel(QtWidgets.QWidget):
             return plan, f"{experiment.name} {dataset.name}"
         stim = self._current_stim_provider() if self._current_stim_provider else None
         if stim is None:
-            raise ValueError("There is no current stim array to deliver.")
+            raise ValueError("There is no current input array to deliver.")
         if settings.input_mode == bp.INPUT_SPIKES:
             return bp.plan_spikes_from_stim(stim.values, stim.dt, settings), stim.name
         return bp.plan_constant_current(stim.values, stim.dt, settings), stim.name

@@ -72,7 +72,7 @@ def show_stimulus_export_dialog(
             raise ValueError("SysCon2 export needs the SysCon2 panel's generator")
         open_syscon2_generator()
     else:
-        raise ValueError(f"Unknown stimulus export format: {export_format}")
+        raise ValueError(f"Unknown input export format: {export_format}")
 
 
 def _export_single_wave(
@@ -82,7 +82,7 @@ def _export_single_wave(
         QtWidgets.QMessageBox.information(
             parent,
             "No input entities",
-            "No input data entities available. Create one before exporting.",
+            "No input arrays available. Create one before exporting.",
         )
         return
 
@@ -191,7 +191,7 @@ def _export_pxp(project: Project, parent: QtWidgets.QWidget | None) -> None:
         QtWidgets.QMessageBox.information(
             parent,
             "No input entities",
-            "No input data entities available. Create one before exporting.",
+            "No input arrays available. Create one before exporting.",
         )
         return
 

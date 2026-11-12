@@ -36,5 +36,6 @@ current segmentation stays.
    input arrays.
 4. Select a region and run the same [analysis](analysis.md) on each.
 
-Use **File → Manage Data** to inspect or delete data groups (see
+Use **File → Manage Data** to inspect, rename, describe or delete data groups
+and data sets (see
 [Experiments](../readout/experiments.md)).

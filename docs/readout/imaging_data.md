@@ -13,7 +13,9 @@ Patch-clamp recordings are covered in [Patch-clamp data](patch_clamp_data.md).
 ## Cell segmentation
 
 Open **File → Cell segmentation**, or drop a TIFF or PNG on the Cell
-segmentation tab (this segments it right away).
+segmentation tab. A dropped file opens the same dialog with the file waiting:
+choose the model and **Adjust brightness first** as below, then click
+**Segment _file_**.
 
 **Segment an image**: choose a **Model** (`cpsam`, `cpsam_v2`, `cpdino`,
 `cpdino-vitb`; `cpsam_v2` is more sensitive on low-SNR fields) and click
@@ -53,10 +55,36 @@ The segmentation is saved in the project. **Delete Cellpose Data** removes it.
 **File → Import data → Output → Calcium Imaging (raw .tif)** extracts traces
 from one or more 2-photon TIFF stacks in the background.
 
-1. **Add TIFF…** the stack(s).
+1. **Add TIFF…** the stack(s) and tick the ones to import.
 2. Pick **Cellpose masks**: those loaded in the project (with mapping), a
    `_seg.npy` file, or Suite2p auto-detection (set **Cell diameter**).
 3. Set the parameters and click **Run pipeline**.
+
+The file list is saved with the project: when the dialog opens again, files
+added before are listed (unticked; files that no longer exist are dropped), so
+another one can be imported without browsing for it. **Clear list** empties it.
+
+**Several ticked files** are, by default, **separate recordings**: each runs
+through the pipeline in turn (never two at once) with the same settings and
+becomes its own data group, named after the file (`rec1`, `rec1 (2)` if the
+name is taken; `Simulation` is reserved and `::` becomes `_`), with its movie
+in the Imaging tab. The progress window names
+the file being processed. One summary at the end lists the imported files and
+the failed ones with the reason; a failed file does not stop the others.
+**Stop after this file** lets the running file finish and imports what is
+done; pressing it again (**Abort this file too**) also stops the running file.
+One Undo removes the whole batch, data groups and movies; Redo adds it back.
+Undoing a single-file import likewise removes its movie too.
+
+The same Cellpose masks, input array and **Imaging started at** apply to every
+file, so the files must show the same field of view (frame size) and start at
+the same time on the input array. With Suite2p auto-detection the ROIs are
+found per file, and the first imported file's ROIs become the project's cell
+segmentation.
+
+Choose **Parts of one recording** instead for a recording split over several
+files (e.g. ScanImage's `_00001`, `_00002`, … parts): they are joined, in list
+order, into one data group.
 
 Raw stacks over ~1 GB crash Cellpose. Segment a projection instead: **Open
 Fiji**, **Image → Stacks → Z Project…** (Max for sparse, Mean for dense
@@ -81,10 +109,16 @@ activity), save it, segment it with **Open Cellpose**, then load the
 - **Compute ΔF/F and deconvolve spikes**: ΔF/F against Suite2p's sliding
   maximin baseline (30 s) of the raw fluorescence; OASIS spikes counted above
   **Spike threshold (ΔF/F)** (default 0.1).
-- **Input artefact suppression**: replaces frames lit by an input array's
+- **Stimulation artefact suppression**: replaces frames lit by an input array's
   stimulation with the mean of the neighbouring clean frames. **Imaging
   started at** is the first frame's time on that array's axis (0 if both
-  started together, positive if imaging started later).
+  started together, positive if imaging started later). It is on by default
+  only when an input array looks like pulsed light stimulation, and that array
+  is preselected. Electrophysiology inputs (units A, pA, nA, V, mV, ...; e.g.
+  an imported patch-clamp wave) and inputs non-zero in more than 90% of their
+  samples are not preselected: every frame they overlap would be replaced,
+  flattening that stretch of the traces. The import message reports how many
+  frames were replaced.
 
 ## Precomputed traces
 

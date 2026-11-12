@@ -26,8 +26,10 @@ from neuroseq.stimulation.stim_array_modifier import TrimReversibleAction
 from neuroseq.stimulation.stim_dialog import EditStimDialog
 from neuroseq.stimulation.stim_intensity_dialog import StimIntensityDialog
 from neuroseq.stimulation.stim_loop_dialog import StimLoopDialog
+from neuroseq.stimulation.stim_pad_dialog import StimPadDialog
 from neuroseq.stimulation.stim_timing import DEFAULT_STIM_DT_SECONDS
 from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.stimulation.stim_timing import padded_length_seconds
 from neuroseq.stimulation.stim_timing import samples_to_milliseconds
 from neuroseq.stimulation.stim_timing import samples_to_seconds
 from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
@@ -96,6 +98,7 @@ class StimEditor(QtWidgets.QWidget):
         self.draw_stim = DrawStim(DrawStimType.Constant, 1.0, 1.0)
         self.draw_stim_length = 1  # in samples
         self.pad_stim_array_secs = 5.0
+        self.pad_stim_array_to_end_time = False
         self.trim_stim_array_secs = 5.0
         self.draw_stim_units = ""
         self.stim_type = StimType.Excitation
@@ -243,7 +246,7 @@ class StimEditor(QtWidgets.QWidget):
             for k in self.stims_dict:
                 if k in self.project.stim_arrays:
                     self.logger.debug(
-                        f"Updating StimArray for stim '{k}' without clearing undo history"
+                        f"Updating input array '{k}' without clearing undo history"
                     )
                     self.stims_dict[k].stim_array = self.project.stim_arrays[k]
             self.current_stim_modifier = None
@@ -284,7 +287,7 @@ class StimEditor(QtWidgets.QWidget):
     ) -> None:
         """Replace one stim array content via the undoable modifier pathway."""
         if stim_name not in self.stims_dict:
-            raise ValueError(f"Input '{stim_name}' not found in stim editor.")
+            raise ValueError(f"Input '{stim_name}' not found in input editor.")
         if self.project is None or stim_name not in self.project.stim_arrays:
             raise ValueError(f"Input '{stim_name}' not found in project.")
 
@@ -322,36 +325,30 @@ class StimEditor(QtWidgets.QWidget):
             return
         stim_array = self.current_stim_modifier.stim_array
         current_length_secs = stim_array.dt * stim_array.values.shape[0]
-        padding_seconds, ok = QtWidgets.QInputDialog.getText(
-            self,
-            "Pad input arrays",
-            f"Current duration of '{stim_array.name}': {current_length_secs:g} s "
-            f"({format_milliseconds(current_length_secs * 1000)} ms)\n"
-            "Padding to add to input arrays in seconds",
-            QtWidgets.QLineEdit.EchoMode.Normal,
-            f"{self.pad_stim_array_secs}",
+        dialog = StimPadDialog(
+            stim_array.name,
+            current_length_secs,
+            self.pad_stim_array_secs,
+            to_end_time=self.pad_stim_array_to_end_time,
+            parent=self,
         )
-        if not ok:
+        if dialog.exec() != QtWidgets.QDialog.DialogCode.Accepted:
             return
         try:
-            paddings_seconds_as_float = float(padding_seconds)
-        except ValueError:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                f"Could not parse '{padding_seconds}' as a number of seconds.",
+            total_length_secs = padded_length_seconds(
+                current_length_secs,
+                dialog.value_text,
+                to_end_time=dialog.to_end_time,
+                dt_seconds=float(stim_array.dt),
             )
+        except ValueError as exc:
+            QtWidgets.QMessageBox.critical(self, "Invalid input", str(exc))
             return
-        if paddings_seconds_as_float <= 0.0:
-            QtWidgets.QMessageBox.critical(
-                self,
-                "Invalid input",
-                "Padding seconds must be positive.",
-            )
-            return
-        self.pad_stim_array_secs = paddings_seconds_as_float
+        self.pad_stim_array_to_end_time = dialog.to_end_time
+        if not dialog.to_end_time:
+            self.pad_stim_array_secs = total_length_secs - current_length_secs
         try:
-            self._apply_pad(current_length_secs + self.pad_stim_array_secs)
+            self._apply_pad(total_length_secs)
         except Exception as e:
             QtWidgets.QMessageBox.critical(
                 self,
@@ -611,6 +608,12 @@ class StimEditor(QtWidgets.QWidget):
         ahead of the point where they are appending blocks, so the live
         view has room to show upcoming inserts without resizing - and
         therefore moving the camera - on every single block.
+
+        Only the current array grows: the routine's end-of-run trim
+        (:meth:`reset_stim_array` / :meth:`trim_stim_array_after`) trims only
+        that array, so padding the others too left them - and the project
+        timeline - long after the run while the routine's own array ended
+        early, and drawing past its end did nothing (#656).
         """
         if self.current_stim_modifier is None or self.project is None:
             return
@@ -618,7 +621,7 @@ class StimEditor(QtWidgets.QWidget):
         current_secs = float(stim.dt) * stim.values.shape[0]
         if total_length_secs <= current_secs + float(stim.dt) * 0.5:
             return
-        self._apply_pad(total_length_secs)
+        self._apply_pad(total_length_secs, only_stim_name=stim.name)
 
     def _push_timeline_action(
         self, action: TrimReversibleAction | PadReversibleAction
@@ -678,7 +681,7 @@ class StimEditor(QtWidgets.QWidget):
         self._stim_values_updated()
 
     def select_stim(self, stim_name: str) -> None:
-        self.logger.debug(f"Selected stim: {stim_name}")
+        self.logger.debug(f"Selected input array: {stim_name}")
         target_modifier = self.stims_dict.get(stim_name)
         # Project.replace_stim_values (e.g. the SysCon2 "Check Input Sanity"
         # resample/clear fixes) swaps in a new buffer, possibly of another
@@ -866,7 +869,7 @@ class StimEditor(QtWidgets.QWidget):
                 or self.select_mode == SelectMode.PASTE_INVERTED
             ):
                 self.logger.debug(
-                    f"Paste stim at neuron {neuron_index}, time {time_index}"
+                    f"Paste input at neuron {neuron_index}, time {time_index}"
                 )
                 self.paste_selected_stim(neuron_index, time_index)
             else:
@@ -1009,7 +1012,7 @@ class StimEditor(QtWidgets.QWidget):
         new_time_slice = slice(time_index, time_index + self.copy_values.shape[0])
         new_neuron_slice = slice(neuron_index, neuron_index + self.copy_values.shape[1])
         self.logger.debug(
-            f"Paste stim with shape {self.copy_values.shape} at neuron {neuron_index}, time {time_index}"
+            f"Paste input with shape {self.copy_values.shape} at neuron {neuron_index}, time {time_index}"
         )
         if not self._is_valid_slice(new_neuron_slice, new_time_slice):
             return
@@ -1068,11 +1071,11 @@ class StimEditor(QtWidgets.QWidget):
         arr = self.current_stim_modifier.stim_array.values[
             self.stim_widget.selected_time_slice, self.stim_widget.selected_neuron_slice
         ]
-        self.logger.info(f"Saving {arr.shape} stim selection to file {filename}")
+        self.logger.info(f"Saving {arr.shape} input selection to file {filename}")
         try:
             np.save(filename, arr, allow_pickle=False)
         except Exception as e:
-            msg = f"Error saving stim selection to file: {e}"
+            msg = f"Error saving input selection to file: {e}"
             self.logger.error(msg)
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
@@ -1089,7 +1092,7 @@ class StimEditor(QtWidgets.QWidget):
             return
         try:
             arr = np.load(filename, allow_pickle=False, fix_imports=False)
-            self.logger.info(f"Loaded {arr.shape} stim selection from file {filename}")
+            self.logger.info(f"Loaded {arr.shape} input selection from file {filename}")
             if arr.ndim > 2:
                 raise ValueError("Loaded array has wrong shape")
             if arr.shape[0] > self.current_stim_modifier.stim_array.values.shape[0]:
@@ -1103,7 +1106,7 @@ class StimEditor(QtWidgets.QWidget):
             self.init_paste_selected_stim()
 
         except Exception as e:
-            msg = f"Error loading stim selection from file: {e}"
+            msg = f"Error loading input selection from file: {e}"
             self.logger.error(msg)
             QtWidgets.QMessageBox.critical(self, "Error", msg)
 
@@ -1177,7 +1180,7 @@ class StimEditor(QtWidgets.QWidget):
             self.draw_stim = dialog.draw_stim
             self.draw_stim_length = dialog.draw_stim_length
             self.logger.debug(
-                "Setting draw stim length to %s samples (%sms)",
+                "Setting draw input length to %s samples (%sms)",
                 self.draw_stim_length,
                 format_milliseconds(self._draw_stim_length_milliseconds()),
             )

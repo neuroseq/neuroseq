@@ -19,18 +19,27 @@ if TYPE_CHECKING:
     from neuroseq.stimulation.stim_editor import StimEditor
 
 
+# What a newly selected input array starts from (#648); the controller keeps
+# each array's own values for when it is selected again.
 _DEFAULT_STATE: dict[str, float | int | str | bool] = {
     "scope_specific": False,
     "neuron_indices": "",
+    "pattern": "sequential",
     "pulse_ms": 100.0,
     "ipi_ms": 18.0,
     "magnitude": 1.0,
     "value1": 1.0,
     "value2": 2.0,
+    "duration_gradient": False,
+    "last_pulse_ms": 100.0,
     "repeats": 1,
     "pulse_repetitions": 1,
     "start_time_ms": 0.0,
 }
+
+# A single-neuron scope shows "Simultaneous" as "Constant" (#659) but stores
+# it as "simultaneous"; "constant" is read back as the same pattern.
+_PATTERN_ALIASES = {"constant": "simultaneous"}
 
 
 @dataclass(slots=True)
@@ -118,6 +127,19 @@ class StimPatternDialog(SelfRaisingDialog):
             self.radio_ramp,
             self.radio_fuer_elise,
         ]
+        self._buttons_by_pattern = {
+            "sequential": self.radio_sequential,
+            "simultaneous": self.radio_simultaneous,
+            "linear": self.radio_linear,
+            "ramp": self.radio_ramp,
+            "fuer_elise": self.radio_fuer_elise,
+        }
+        # A one-neuron scope hides Sequential (#659); remember that it was
+        # chosen so widening the scope again (e.g. typing "2" then ", 5")
+        # brings it back instead of leaving Constant/Simultaneous selected.
+        self._single_neuron = False
+        self._sequential_hidden_by_scope = False
+        self._updating_scope = False
         for widget in self._pattern_buttons:
             pattern_layout.addWidget(widget)
         layout.addWidget(pattern_group)
@@ -126,6 +148,14 @@ class StimPatternDialog(SelfRaisingDialog):
         self.spin_pulse_ms = self._make_double_spin(100.0)
         self.spin_ipi_ms = self._make_double_spin(18.0)
         self.spin_magnitude = self._make_double_spin(1.0)
+        self.chk_duration_gradient = QtWidgets.QCheckBox(
+            "Step from first to last pulse", self
+        )
+        self.chk_duration_gradient.setToolTip(
+            "Also step the pulse duration linearly, from the first pulse "
+            "duration to the last; the inter-pulse interval stays the same."
+        )
+        self.spin_last_pulse_ms = self._make_double_spin(100.0)
         self.spin_value1 = self._make_double_spin(1.0)
         self.spin_value2 = self._make_double_spin(2.0)
         self.spin_repeats = QtWidgets.QSpinBox(self)
@@ -140,12 +170,18 @@ class StimPatternDialog(SelfRaisingDialog):
         self.lbl_pulse_ms = QtWidgets.QLabel(self)
         self.lbl_ipi_ms = QtWidgets.QLabel(self)
         self.lbl_magnitude = QtWidgets.QLabel("Magnitude:", self)
+        self.lbl_duration_gradient = QtWidgets.QLabel("Pulse duration:", self)
+        self.lbl_last_pulse_ms = QtWidgets.QLabel("Last pulse duration (ms):", self)
         self.lbl_value1 = QtWidgets.QLabel(self)
         self.lbl_value2 = QtWidgets.QLabel(self)
         self.lbl_repeats = QtWidgets.QLabel(self)
         self.lbl_pulse_repetitions = QtWidgets.QLabel(self)
 
         self.parameters_form.addRow(self.lbl_pulse_ms, self.spin_pulse_ms)
+        self.parameters_form.addRow(
+            self.lbl_duration_gradient, self.chk_duration_gradient
+        )
+        self.parameters_form.addRow(self.lbl_last_pulse_ms, self.spin_last_pulse_ms)
         self.parameters_form.addRow(self.lbl_ipi_ms, self.spin_ipi_ms)
         self.parameters_form.addRow(self.lbl_magnitude, self.spin_magnitude)
         self.parameters_form.addRow(self.lbl_value1, self.spin_value1)
@@ -171,8 +207,10 @@ class StimPatternDialog(SelfRaisingDialog):
 
         self.radio_scope_all.toggled.connect(self._scope_changed)
         self.radio_scope_specific.toggled.connect(self._scope_changed)
+        self.edit_neuron_indices.textChanged.connect(self._scope_changed)
         for button in self._pattern_buttons:
             button.toggled.connect(self._pattern_changed)
+        self.chk_duration_gradient.toggled.connect(self._pattern_changed)
         self.btn_apply.clicked.connect(self.apply_pattern)
         self.btn_reset_start.clicked.connect(self.reset_start_time)
         self.btn_clear.clicked.connect(self.editor.clear_stim_array)
@@ -202,29 +240,136 @@ class StimPatternDialog(SelfRaisingDialog):
             "Comma-separated indices and ranges (e.g. 0, 2, 5-8); "
             f"valid range 0–{max(0, context.n_neurons - 1)}."
         )
-        if self.radio_scope_specific.isChecked():
-            self.radio_simultaneous.setChecked(True)
-        else:
-            self.radio_sequential.setChecked(True)
+        self._scope_changed()
+
+    def selected_pattern(self) -> str:
+        """The chosen pattern's key ("simultaneous" also when shown as Constant)."""
+        for pattern, button in self._buttons_by_pattern.items():
+            if button.isChecked():
+                return pattern
+        return str(_DEFAULT_STATE["pattern"])
+
+    def state(self) -> dict[str, float | int | str | bool]:
+        """The values entered, to restore them with :meth:`restore_state`."""
+        pattern = self.selected_pattern()
+        if pattern == "simultaneous" and self._sequential_hidden_by_scope:
+            pattern = "sequential"
+        return {
+            "scope_specific": self.radio_scope_specific.isChecked(),
+            "neuron_indices": self.edit_neuron_indices.text(),
+            "pattern": pattern,
+            "pulse_ms": float(self.spin_pulse_ms.value()),
+            "ipi_ms": float(self.spin_ipi_ms.value()),
+            "magnitude": float(self.spin_magnitude.value()),
+            "value1": float(self.spin_value1.value()),
+            "value2": float(self.spin_value2.value()),
+            "duration_gradient": self.chk_duration_gradient.isChecked(),
+            "last_pulse_ms": float(self.spin_last_pulse_ms.value()),
+            "repeats": int(self.spin_repeats.value()),
+            "pulse_repetitions": int(self.spin_pulse_repetitions.value()),
+            "start_time_ms": float(self.spin_start_time_ms.value()),
+        }
+
+    def restore_state(
+        self, state: dict[str, float | int | str | bool] | None = None
+    ) -> None:
+        """Show ``state``'s values, or the defaults (missing keys too)."""
+        values = {**_DEFAULT_STATE, **(state or {})}
+        self._updating_scope = True
+        try:
+            (
+                self.radio_scope_specific
+                if values["scope_specific"]
+                else self.radio_scope_all
+            ).setChecked(True)
+            self.edit_neuron_indices.setText(str(values["neuron_indices"]))
+            pattern = str(values["pattern"]).lower()
+            pattern = _PATTERN_ALIASES.get(pattern, pattern)
+            button = self._buttons_by_pattern.get(
+                pattern, self._buttons_by_pattern[str(_DEFAULT_STATE["pattern"])]
+            )
+            self._sequential_hidden_by_scope = False
+            button.setChecked(True)
+            self.spin_pulse_ms.setValue(float(values["pulse_ms"]))
+            self.spin_ipi_ms.setValue(float(values["ipi_ms"]))
+            self.spin_magnitude.setValue(float(values["magnitude"]))
+            self.spin_value1.setValue(float(values["value1"]))
+            self.spin_value2.setValue(float(values["value2"]))
+            self.chk_duration_gradient.setChecked(bool(values["duration_gradient"]))
+            self.spin_last_pulse_ms.setValue(float(values["last_pulse_ms"]))
+            self.spin_repeats.setValue(int(values["repeats"]))
+            self.spin_pulse_repetitions.setValue(int(values["pulse_repetitions"]))
+            self.spin_start_time_ms.setValue(float(values["start_time_ms"]))
+        finally:
+            self._updating_scope = False
         self._scope_changed()
 
     def reset_start_time(self) -> None:
         self.spin_start_time_ms.setValue(0.0)
 
+    def _scope_is_single_neuron(self) -> bool:
+        """Does the scope resolve to exactly one neuron (#659)?"""
+        if self._context is None:
+            return False
+        if self.radio_scope_all.isChecked():
+            return self._context.n_neurons == 1
+        try:
+            indices = parse_neuron_indices(
+                self.edit_neuron_indices.text(), self._context.n_neurons
+            )
+        except ValueError:
+            return False
+        return len(indices) == 1
+
     def _scope_changed(self) -> None:
         is_all = self.radio_scope_all.isChecked()
         self.edit_neuron_indices.setVisible(not is_all)
         self.lbl_neuron_hint.setVisible(not is_all)
-        # Every pattern but Für Elise, whose notes are fixed neurons, exists
-        # in both scopes (#582, #613).
-        self.radio_fuer_elise.setVisible(is_all)
-        if not is_all and self.radio_fuer_elise.isChecked():
-            self.radio_simultaneous.setChecked(True)
-        if not any(button.isChecked() for button in self._pattern_buttons):
-            (self.radio_sequential if is_all else self.radio_simultaneous).setChecked(
-                True
+        self._updating_scope = True
+        try:
+            # Every pattern but Für Elise, whose notes are fixed neurons,
+            # exists in both scopes (#582, #613).
+            self.radio_fuer_elise.setVisible(is_all)
+            if not is_all and self.radio_fuer_elise.isChecked():
+                self.radio_simultaneous.setChecked(True)
+            # For one neuron, Sequential and Simultaneous are the same
+            # pattern: offer it once, as "Constant" (#659).
+            self._single_neuron = self._scope_is_single_neuron()
+            self.radio_sequential.setVisible(not self._single_neuron)
+            if self._single_neuron:
+                self.radio_simultaneous.setText("Constant")
+                self.radio_simultaneous.setToolTip(
+                    "The neuron fires its pulses with the same magnitude every pulse."
+                )
+                if self.radio_sequential.isChecked():
+                    self._sequential_hidden_by_scope = True
+                    self.radio_simultaneous.setChecked(True)
+            else:
+                self.radio_simultaneous.setText("Simultaneous")
+                self.radio_simultaneous.setToolTip(
+                    "All neurons of the scope fire together, with the same "
+                    "magnitude every pulse."
+                )
+                if (
+                    self._sequential_hidden_by_scope
+                    and self.radio_simultaneous.isChecked()
+                ):
+                    self.radio_sequential.setChecked(True)
+                self._sequential_hidden_by_scope = False
+            self.radio_linear.setToolTip(
+                f"Like {self.radio_simultaneous.text()}, but the magnitude (and "
+                "optionally the pulse duration) steps linearly from the first "
+                "pulse to the last."
             )
-        self._pattern_changed()
+            if not any(button.isChecked() for button in self._pattern_buttons):
+                (
+                    self.radio_sequential
+                    if is_all and not self._single_neuron
+                    else self.radio_simultaneous
+                ).setChecked(True)
+            self._pattern_changed()
+        finally:
+            self._updating_scope = False
 
     def _set_row_visible(
         self,
@@ -236,6 +381,10 @@ class StimPatternDialog(SelfRaisingDialog):
         field_widget.setVisible(visible)
 
     def _pattern_changed(self) -> None:
+        if not self._updating_scope:
+            # The user picked a pattern; a scope change no longer restores
+            # Sequential.
+            self._sequential_hidden_by_scope = False
         is_ramp = self.radio_ramp.isChecked()
         is_gradient = self.radio_linear.isChecked()
         is_sequential = self.radio_sequential.isChecked()
@@ -248,9 +397,13 @@ class StimPatternDialog(SelfRaisingDialog):
         uses_pulse_repetitions = is_sequential or is_fuer_elise
 
         # Name each value for what it means in the chosen pattern (#613).
-        self.lbl_pulse_ms.setText(
-            "Ramp duration (ms):" if is_ramp else "Pulse duration (ms):"
-        )
+        steps_duration = is_gradient and self.chk_duration_gradient.isChecked()
+        if is_ramp:
+            self.lbl_pulse_ms.setText("Ramp duration (ms):")
+        elif steps_duration:
+            self.lbl_pulse_ms.setText("First pulse duration (ms):")
+        else:
+            self.lbl_pulse_ms.setText("Pulse duration (ms):")
         self.lbl_ipi_ms.setText(
             "Interval between ramps (ms):" if is_ramp else "Inter-pulse interval (ms):"
         )
@@ -274,6 +427,12 @@ class StimPatternDialog(SelfRaisingDialog):
 
         self._set_row_visible(
             self.lbl_magnitude, self.spin_magnitude, uses_single_magnitude
+        )
+        self._set_row_visible(
+            self.lbl_duration_gradient, self.chk_duration_gradient, is_gradient
+        )
+        self._set_row_visible(
+            self.lbl_last_pulse_ms, self.spin_last_pulse_ms, steps_duration
         )
         self._set_row_visible(self.lbl_value1, self.spin_value1, uses_value_pair)
         self._set_row_visible(self.lbl_value2, self.spin_value2, uses_value_pair)
@@ -299,6 +458,15 @@ class StimPatternDialog(SelfRaisingDialog):
                 self,
                 "Invalid pattern",
                 "Pulse duration must be positive.",
+            )
+            return False
+        if self.lbl_last_pulse_ms.isVisibleTo(self) and (
+            float(self.spin_last_pulse_ms.value()) <= 0.0
+        ):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Invalid pattern",
+                "Last pulse duration must be positive.",
             )
             return False
         if ipi_ms < 0.0:
@@ -412,6 +580,9 @@ class StimPatternDialog(SelfRaisingDialog):
                     value2=float(self.spin_value2.value()) if gradient else 0.0,
                     repeats=repeats,
                     dt_seconds=dt_seconds,
+                    end_pulse_ms=float(self.spin_last_pulse_ms.value())
+                    if gradient and self.chk_duration_gradient.isChecked()
+                    else None,
                 )
         except ValueError as exc:
             QtWidgets.QMessageBox.warning(self, "Invalid pattern", str(exc))

@@ -120,6 +120,7 @@ def _json_encoder_factory(zf: zipfile.ZipFile):
                         "duration": obj.duration,
                         "timepoints": obj.timepoints,
                         "data": obj.data,
+                        "description": obj.description,
                     }
                 case SynapseData():
                     return {
@@ -488,6 +489,7 @@ def _object_hook_factory(zf: zipfile.ZipFile):
                     _to_seconds(duration),
                     [_to_seconds(t) for t in timepoints],
                     data,
+                    str(dct.get("description", "")),
                 )
             case _:
                 return dct

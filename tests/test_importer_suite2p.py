@@ -268,3 +268,16 @@ def test_prepare_suite2p_rows_follow_given_raw_cellpose_ids() -> None:
         prepare_suite2p_traces(
             f_data, None, max_neurons=3, raw_cellpose_ids=np.array([0])
         )
+
+
+def test_cellpose_to_stimulus_permutation_is_the_importers_resolution() -> None:
+    from neuroseq.importers.importer_suite2p import cellpose_to_stimulus_permutation
+
+    mapping = {0: 5, 1: 6, 2: 7}
+    permutation = cellpose_to_stimulus_permutation(mapping)
+    assert permutation == {5: 0, 6: 1, 7: 2, 0: 5, 1: 6, 2: 7}
+    resolved = remap_raw_cellpose_ids(np.arange(9), mapping).tolist()
+    assert resolved == [permutation.get(cell, cell) for cell in range(9)]
+    assert cellpose_to_stimulus_permutation(None) == {}
+    with pytest.raises(ValueError, match="duplicate Cellpose IDs"):
+        cellpose_to_stimulus_permutation({0: 1, 1: 1})

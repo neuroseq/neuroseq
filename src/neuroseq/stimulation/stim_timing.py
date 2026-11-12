@@ -40,14 +40,14 @@ def ensure_2d_stim_values(values: np.ndarray) -> np.ndarray:
     if values.ndim == 1:
         return values[:, np.newaxis]
     if values.ndim != 2:
-        raise ValueError("Stimulus arrays must be 2-dimensional.")
+        raise ValueError("Input arrays must be 2-dimensional.")
     return values
 
 
 def validate_stim_dt_seconds(dt_seconds: float | int) -> float:
     dt = float(dt_seconds)
     if not math.isfinite(dt) or dt <= 0.0:
-        raise ValueError("Stimulus timestep must be a positive finite number.")
+        raise ValueError("Input timestep must be a positive finite number.")
     return dt
 
 
@@ -167,5 +167,49 @@ def remap_stim_values_to_dt(
 ) -> np.ndarray:
     values = np.asarray(values)
     if values.ndim != 2 and not stim_dt_matches(old_dt_seconds, new_dt_seconds):
-        raise ValueError("Stimulus arrays must be 2-dimensional to be remapped.")
+        raise ValueError("Input arrays must be 2-dimensional to be remapped.")
     return resample_zero_order_hold(values, old_dt_seconds, new_dt_seconds)
+
+
+def padded_length_seconds(
+    current_seconds: float,
+    value_text: str,
+    *,
+    to_end_time: bool,
+    dt_seconds: float,
+) -> float:
+    """Total input length after the Pad action, from the user's entry.
+
+    ``value_text`` is the seconds to add, or with ``to_end_time`` the time
+    point the arrays should end at (#647). Raises ValueError with a message
+    for the user when the entry is not a number, not positive, or would pad
+    nothing: seconds to add, or an end time past the current end, of at most
+    half a sample.
+    """
+    try:
+        value = float(value_text)
+    except ValueError:
+        raise ValueError(
+            f"Could not parse '{value_text}' as a number of seconds."
+        ) from None
+    if not math.isfinite(value):
+        raise ValueError(f"Could not parse '{value_text}' as a number of seconds.")
+    # Less than half a sample pads nothing (it rounds to zero samples).
+    half_sample = 0.5 * validate_stim_dt_seconds(dt_seconds)
+    if not to_end_time:
+        if value <= 0.0:
+            raise ValueError("Padding seconds must be positive.")
+        if value <= half_sample:
+            raise ValueError(
+                f"Padding {value:g} s adds no sample: the input arrays' sampling "
+                f"interval is {2 * half_sample:g} s. Enter more than "
+                f"{half_sample:g} s."
+            )
+        return current_seconds + value
+    if value <= current_seconds + half_sample:
+        raise ValueError(
+            f"The end time {value:g} s is not after the current end of the input "
+            f"array ({current_seconds:g} s). Enter a later end time, or use Trim "
+            "input array to shorten the arrays."
+        )
+    return value

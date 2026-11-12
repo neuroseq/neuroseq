@@ -11,15 +11,15 @@ editor tools and the static input designer.
 Array actions are in the **Input array operations** button next to the
 **Input data** selector (Data toolbar) and in the editor's right-click menu.
 
-| Action                  | Effect                                                                                                                                                 |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Create input array      | Name, type (Excitatory, Inhibitory, External), number of neurons, units, timestep. Presets: SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, 30 Hz imaging. |
-| Edit input array        | Same fields plus duration. Changing neurons or timestep resizes or resamples the data.                                                                 |
-| Delete / Clear          | Remove the array, or set all its values to zero (keeps its shape).                                                                                     |
-| Pad input array         | Add time (seconds, prefilled 5 s, then the last value) to the end of all input arrays.                                                                 |
-| Trim input array        | Remove time from the end of all input arrays.                                                                                                          |
-| Loop input array        | Repeat all input arrays end to end a chosen number of times. Clears the undo history.                                                                  |
-| Trim to Mapped Neurons… | Keep only neurons with a mapped Cellpose cell, in every input array and experiment. Permanent.                                                         |
+| Action                  | Effect                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create input array      | Name, type (Excitatory, Inhibitory, External), number of neurons, units, timestep. Presets: SysCon2 (520.8125 µs), 1 ms, 0.1 ms, 50 µs, 30 Hz imaging.                                                                                                                                                                                  |
+| Edit input array        | Same fields plus duration. Changing neurons or timestep resizes or resamples the data.                                                                                                                                                                                                                                                  |
+| Delete / Clear          | Remove the array, or set all its values to zero (keeps its shape).                                                                                                                                                                                                                                                                      |
+| Pad input array         | Add time to the end of all input arrays: either **Seconds to add** (prefilled 5 s, then the last value) or **Pad to end time**, the time point (s) the arrays should end at; the difference is added. An end time before the current end is refused (use Trim), and so is an amount that adds less than half a sample (nothing to pad). |
+| Trim input array        | Remove time from the end of all input arrays.                                                                                                                                                                                                                                                                                           |
+| Loop input array        | Repeat all input arrays end to end a chosen number of times. Clears the undo history.                                                                                                                                                                                                                                                   |
+| Trim to Mapped Neurons… | Keep only neurons with a mapped Cellpose cell, in every input array and experiment. Permanent.                                                                                                                                                                                                                                          |
 
 **Settings → Input Automatic Padding** sets how many seconds of empty input are
 added beyond the simulated time after each run (default 0).
@@ -55,24 +55,37 @@ project.stim_arrays["stimulus"].values[::10, ::2] = 1
 **Design static input** (View toolbar or the editor's right-click menu) writes
 a generated pattern into the selected input array.
 
-| Pattern         | Description                                                               |
-| --------------- | ------------------------------------------------------------------------- |
-| Sequential      | One neuron after another, each firing **Pulses per neuron** pulses.       |
-| Simultaneous    | All neurons in scope fire together with the same magnitude.               |
-| Linear gradient | Like Simultaneous, but magnitude steps linearly from first to last pulse. |
-| Ramp            | A continuous linear ramp of the magnitude, repeated.                      |
-| Für Elise       | Opening notes of Für Elise on neurons 0-5 (**All neurons** scope only).   |
+| Pattern         | Description                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------ |
+| Sequential      | One neuron after another, each firing **Pulses per neuron** pulses.                              |
+| Simultaneous    | All neurons in scope fire together with the same magnitude.                                      |
+| Constant        | Shown instead of Sequential and Simultaneous when the scope is a single neuron (see below).      |
+| Linear gradient | Like Simultaneous, but magnitude (and optionally pulse duration) steps from first to last pulse. |
+| Ramp            | A continuous linear ramp of the magnitude, repeated.                                             |
+| Für Elise       | Opening notes of Für Elise on neurons 0-5 (**All neurons** scope only).                          |
 
 - **Scope**: **All neurons**, or **Specific neurons** given as indices and
-  ranges (`0, 2, 5-8`). Other neurons are left untouched.
+  ranges (`0, 2, 5-8`). Other neurons are left untouched. When the scope is a
+  single neuron (one index, or **All neurons** of a one-neuron network),
+  Sequential and Simultaneous would write the same pulses, so the two are
+  replaced by one **Constant** pattern. The list updates while you type the
+  indices; widening the scope again brings Sequential back if it was chosen.
 - **Pulse duration** and **Inter-pulse interval** (ms), or **Ramp duration**
   and **Interval between ramps** for Ramp.
 - **Magnitude**, **First/Last pulse magnitude** (Linear gradient) or
   **Start/End magnitude** (Ramp).
+- **Pulse duration: Step from first to last pulse** (Linear gradient): the
+  pulse duration also steps linearly, from **First pulse duration** to **Last
+  pulse duration** (ms), each rounded to whole samples. The inter-pulse
+  interval stays the same.
 - Repeat count (named per pattern) and **Start time (ms)**.
 
 **Apply** writes the pattern and moves **Start time** to its end, so repeated
 clicks append patterns one after another. **Reset start time** returns to 0.
 The window stays open until **Close**.
+
+The designer keeps its values per input array: a newly created (or newly
+selected) array starts from the default values, and an array you return to
+shows the values last entered for it, including its start time.
 
 For closed-loop input, see [Dynamic input](dynamic_input.md).

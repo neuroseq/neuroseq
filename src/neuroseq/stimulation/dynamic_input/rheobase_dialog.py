@@ -18,6 +18,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.data_names import split_data_name
 from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.export.exporter_syscon2 import SYSCON2_WINDOW_MS
@@ -1207,7 +1208,7 @@ class RheobaseDialog(SelfRaisingDialog):
             if prepare_seconds > 0.0:
                 self._append_log(
                     f"Simulating {duration:.3f} s to catch up to the "
-                    "existing stimuli before the search starts."
+                    "existing input before the search starts."
                 )
             else:
                 self._append_log(
@@ -1448,7 +1449,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self._append_log(
             "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
             f"tab's i_offset max ({self._bss2_settings.i_offset_max}). Each probe runs as its own "
-            "constant-current block on the chip, starting from rest; stim neuron i is "
+            "constant-current block on the chip, starting from rest; input channel i is "
             "hardware neuron i, and its spikes after the pulse are counted."
         )
         self._begin_search(clear_log=False)
@@ -1828,7 +1829,7 @@ class RheobaseDialog(SelfRaisingDialog):
             trace = self.project.get_data(trace_name, TraceData)
             if trace is not None:
                 return float(trace.dt)
-        experiment_name = spikes_name.split(" :: ", 1)[0]
+        experiment_name = split_data_name(spikes_name)[0]
         experiment = getattr(self.project, "experiments", {}).get(experiment_name)
         for datum in experiment.data if experiment is not None else ():
             if isinstance(datum, TraceData):

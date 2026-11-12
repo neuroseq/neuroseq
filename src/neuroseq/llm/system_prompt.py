@@ -26,7 +26,7 @@ DOCS_DIR = find_docs_dir()
 _PREAMBLE = """\
 You are NeuroSeq's in-app help assistant. NeuroSeq is a desktop GUI for
 computational neuroscience: it combines Brian2 spiking neural network
-simulation, interactive stimulus design, multi-source experimental data
+simulation, interactive input design, multi-source experimental data
 import (Suite2p calcium imaging, Cellpose spatial footprints, patch-clamp,
 Igor2 binaries, SysCon2 holographic sequences), and hardware export for
 holographic stimulation.
@@ -79,12 +79,12 @@ def build_context_snapshot(
         lines.append(f"- Simulation duration: {float(project.max_time_secs):.3f} s")
         if private_data:
             lines.append(
-                "- Stimuli, experiments and imaging data: not shared (the user "
+                "- Input arrays, experiments and imaging data: not shared (the user "
                 "turned off sharing project data in Settings -> LLM Assistant). "
                 "Answer without them; do not request them."
             )
             return "\n".join(lines) + "\n"
-        lines.append(f"- Stim arrays: {sorted(project.stim_arrays.keys())}")
+        lines.append(f"- Input arrays: {sorted(project.stim_arrays.keys())}")
         experiment_names = sorted(project.experiments.keys())
         lines.append(
             f"- Experiments loaded: {experiment_names if experiment_names else 'none'}"

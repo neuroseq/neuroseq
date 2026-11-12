@@ -1073,7 +1073,7 @@ def _normalize_overlapping_window_segments(
                     _SanityFix(
                         code="align_overlap_start_left",
                         message=(
-                            f"Aligned overlapping stimulus for neuron "
+                            f"Aligned overlapping input for neuron "
                             f"{segment.neuron_index} to window {new_start}."
                         ),
                         value=str(new_start - segment.start_win),
@@ -1086,7 +1086,7 @@ def _normalize_overlapping_window_segments(
                     _SanityFix(
                         code="trim_overlap_duration_to_shortest",
                         message=(
-                            f"Trimmed overlapping stimulus for neuron "
+                            f"Trimmed overlapping input for neuron "
                             f"{segment.neuron_index} to {new_count} window(s)."
                         ),
                         value=str(new_count - segment.win_count),

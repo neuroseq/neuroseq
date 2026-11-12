@@ -215,7 +215,7 @@ def test_deliver_declined_or_invalid(qtbot, panel, mocker, qmessagebox_calls) ->
 
     panel.set_current_stim_provider(lambda: None)
     panel.deliver()
-    assert "no current stim array" in qmessagebox_calls[-1]["text"]
+    assert "no current input array" in qmessagebox_calls[-1]["text"]
 
     panel.set_current_stim_provider(_stim)
     panel.madc_spin.setValue(10)

@@ -1,7 +1,7 @@
 # Custom simulators
 
 Any network (a simulator, a neuromorphic chip, a remote rig) can act as a
-NeuroSeq backend: it receives the stimulus arrays and returns an `Experiment`.
+NeuroSeq backend: it receives the input arrays and returns an `Experiment`.
 Write it as a standalone Python file so it needs no core changes. Using one from
 the GUI is described in [Run external simulators](../networks/external_simulators.md).
 
@@ -36,16 +36,16 @@ For backends with parameters and state that persists between runs, subclass
 `NN` from `neuroseq.example_models.NN`. It stores the editable parameter schema
 and cumulative time; the subclass owns the runtime objects.
 
-| Member                                                    | Role                                                    |
-| --------------------------------------------------------- | ------------------------------------------------------- |
-| `__init__(schema)`                                        | Copies the schema and initialises flat values and time  |
-| `default_params_schema()`                                 | Schema for the GUI parameter editor                     |
-| `flat_default_params()`                                   | `{name: default}` from the schema                       |
-| `update_params(params)`                                   | Merges overrides; calls `reset()` if anything changed   |
-| `simulated_time_seconds`                                  | Time simulated so far (`self._simulated_time_s`)        |
-| `reset()`                                                 | Subclass: clear runtime state                           |
-| `simulate(stims_dict, simulation_time, params, progress)` | Subclass: run one chunk and return an `Experiment`      |
-| `migrate_project(project)` (optional)                     | Upgrades legacy stimulus formats after an archive loads |
+| Member                                                    | Role                                                   |
+| --------------------------------------------------------- | ------------------------------------------------------ |
+| `__init__(schema)`                                        | Copies the schema and initialises flat values and time |
+| `default_params_schema()`                                 | Schema for the GUI parameter editor                    |
+| `flat_default_params()`                                   | `{name: default}` from the schema                      |
+| `update_params(params)`                                   | Merges overrides; calls `reset()` if anything changed  |
+| `simulated_time_seconds`                                  | Time simulated so far (`self._simulated_time_s`)       |
+| `reset()`                                                 | Subclass: clear runtime state                          |
+| `simulate(stims_dict, simulation_time, params, progress)` | Subclass: run one chunk and return an `Experiment`     |
+| `migrate_project(project)` (optional)                     | Upgrades legacy input formats after an archive loads   |
 
 The defaults raise `NotImplementedError` (no `abc`). Keep schema keys and value
 types simple: the parameter editor reads them. Stateful backends should continue

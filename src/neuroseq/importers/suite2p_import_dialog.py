@@ -8,6 +8,9 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.data import Data
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_spikes
 from neuroseq.importers.importer_suite2p import compute_normalized_suite2p_traces
 from neuroseq.importers.importer_suite2p import prepare_suite2p_spikes
@@ -22,11 +25,13 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
         *,
         stimulus_to_cellpose_mapping: dict[int, int] | None = None,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         """``stimulus_to_cellpose_mapping`` is the project's resolved Cellpose
         mapping: rows (Cellpose ID k = row k) are mapped to input neurons at
         import, exactly as ``Project.remap_cellpose_indices`` does later."""
         super().__init__(parent)
+        self._import_folders = import_folders
         self._stimulus_to_cellpose_mapping = stimulus_to_cellpose_mapping
 
         self.experiment_name: str = "Suite2p Import"
@@ -202,47 +207,52 @@ class Suite2pImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select Suite2p F file",
-            "",
+            start_directory(self._import_folders),
             "NumPy/CSV files (*.npy *.csv);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self.load_f_file(filename)
 
     def browse_fneu_file(self) -> None:
         filename, _ = getopenfilename(
             self,
             "Select Suite2p Fneu file",
-            "",
+            start_directory(self._import_folders),
             "NumPy/CSV files (*.npy *.csv);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self.load_fneu_file(filename)
 
     def browse_spks_file(self) -> None:
         filename, _ = getopenfilename(
             self,
             "Select Suite2p spks file (optional)",
-            "",
+            start_directory(self._import_folders),
             "NumPy/CSV files (*.npy *.csv);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self.load_spks_file(filename)
 
     def browse_stat_file(self) -> None:
         filename, _ = getopenfilename(
             self,
             "Select Suite2p stat.npy file (optional)",
-            "",
+            start_directory(self._import_folders),
             "NumPy files (*.npy);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self.load_stat_file(filename)
 
     def browse_data_folder(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Suite2p folder", ""
+            self, "Select Suite2p folder", start_directory(self._import_folders)
         )
         if directory:
+            remember_folder(self._import_folders, directory)
             self.load_data_directory(Path(directory))
 
     def load_data_directory(self, directory: Path) -> list[str]:

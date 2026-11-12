@@ -293,7 +293,7 @@ class WorkspaceAcquisitionController(QtCore.QObject):
             try:
                 np.save(samples_path, np.ascontiguousarray(stim.values))
             except OSError as exc:
-                self.controls.show_message(f"Could not save the stimulus: {exc}")
+                self.controls.show_message(f"Could not save the input array: {exc}")
                 return False
             record["stimulus"]["samples_file"] = samples_path.name
         if block is not None:

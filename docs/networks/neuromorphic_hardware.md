@@ -61,7 +61,7 @@ Settings except the token are remembered.
 Row `i` drives hardware neuron `i`; extra rows are dropped and missing ones get
 no input, with a warning. A single-row array drives every neuron.
 
-**Constant current (stim array)** (default). The array is split into segments
+**Constant current (input array)** (default). The array is split into segments
 where any row changes value. Each segment is a separate hardware run starting
 from rest (chained runs did not work on the chip), with
 
@@ -74,7 +74,7 @@ and the current enabled where the value is above 0. **Max i_offset**: 500
 **Spike input.** A `SpikeSourceArray` (one source per neuron) with one-to-one
 excitatory synapses of **Weight** 63 (0-63). **Spike source**:
 
-- **From stim array (threshold)**: sample the array every **Event interval**
+- **From input array (threshold)**: sample the array every **Event interval**
   (20 ms biological) and spike where it exceeds **Threshold** (0).
 - **From project spike data**: a spike dataset from a data group; neuron `i`
   drives hardware neuron `i`.
@@ -88,7 +88,7 @@ BSS-2 runs about 1000x faster than biology. **Speed-up** (default 1000):
 
 ## Delivery and readback
 
-**Deliver current stim array** shows a summary and asks for confirmation.
+**Deliver current input array** shows a summary and asks for confirmation.
 Neurons are `HXNeuron`s with the chip's nightly calibration. The result is a
 data group `BSS-2 <stim name> <date time>` (undoable) with:
 

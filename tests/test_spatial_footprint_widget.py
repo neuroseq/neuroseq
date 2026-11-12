@@ -19,6 +19,8 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import CircleAOI
 from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
+from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
+from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
 from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import neuron_indices_to_colors
@@ -27,15 +29,18 @@ from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_GREY
 from neuroseq.visualization.cell_overlay_widget import STRIPED_CELL_WHITE
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
 from neuroseq.visualization.cell_overlay_widget import OverlayView
-from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.visualization.spatial_footprint_widget import ACTIVE_STIM_BRIGHTNESS_BOOST
 from neuroseq.visualization.spatial_footprint_widget import (
     HOVERED_CELL_BRIGHTNESS_BOOST,
 )
+from neuroseq.visualization.spatial_footprint_widget import OVERLAY_CELL_OPACITY
 from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_BLACK
 from neuroseq.visualization.spatial_footprint_widget import SELECTION_OUTLINE_RED
 from neuroseq.visualization.spatial_footprint_widget import UNSELECTED_CELL_BRIGHTNESS
 from neuroseq.visualization.spatial_footprint_widget import SpatialFootprintWidget
+from neuroseq.visualization_support.footprint_colors import compose_footprint_overlay
+from neuroseq.visualization_support.footprint_colors import footprint_legend
+from neuroseq.visualization_support.footprint_colors import footprint_neuron_ids
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
@@ -78,6 +83,17 @@ def _cellpose_result(
         original_cellpose_ids=np.array([0, 1, 2], dtype=np.int32),
         stimulus_to_cellpose_mapping=mapping,
         aoi_config=aoi_config,
+    )
+
+
+def _recoloured_overlay(
+    background: np.ndarray, segmentation: np.ndarray, result: CellposeImportResult
+) -> np.ndarray:
+    return compose_footprint_overlay(
+        background,
+        segmentation,
+        footprint_legend(segmentation, result),
+        OVERLAY_CELL_OPACITY,
     )
 
 
@@ -238,7 +254,11 @@ def test_show_segmentation_checkbox_reveals_the_stored_background_image(
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
     assert image_graphic is not None
     before_image = np.asarray(image_graphic.data.value).copy()
-    np.testing.assert_array_equal(before_image, overlay_image)
+    # The stored overlay is re-blended over the background with the cells'
+    # trace colours (#649).
+    np.testing.assert_array_equal(
+        before_image, _recoloured_overlay(background_image, segmentation, result)
+    )
 
     widget.show_segmentation_checkbox.setChecked(False)
 
@@ -284,13 +304,16 @@ def test_show_segmentation_checkbox_reloads_background_from_disk_when_missing(
 
     image_graphic = widget.overlay_widget.overlay_view._image_graphic
     assert image_graphic is not None
-    np.testing.assert_array_equal(np.asarray(image_graphic.data.value), overlay_image)
+    before_image = np.asarray(image_graphic.data.value).copy()
+    np.testing.assert_array_equal(
+        before_image, _recoloured_overlay(background_image, segmentation, result)
+    )
 
     widget.show_segmentation_checkbox.setChecked(False)
 
     after_image = np.asarray(image_graphic.data.value)
     np.testing.assert_array_equal(after_image, result.background_image)
-    assert not np.array_equal(after_image, overlay_image)
+    assert not np.array_equal(after_image, before_image)
 
 
 def test_set_data_leaves_background_image_none_when_file_unreachable(
@@ -681,17 +704,64 @@ def test_selecting_a_previously_hidden_cell_shows_it_again(qtbot: QtBot) -> None
     assert emitted == [[1, False]]
 
 
-def test_cellpose_to_stim_id_returns_none_for_unmapped_cell() -> None:
+def test_unmapped_cells_link_to_their_fallback_trace_ids() -> None:
+    """A cell a partial mapping leaves out links to the fallback neuron id
+    its traces and footprint colour get, and never aliases a mapped neuron."""
+    result = _cellpose_result_with_unmapped_cells()
     state = SpatialFootprintState()
-    state.set_data(_cellpose_result_with_unmapped_cells())
+    state.set_data(result)
 
     # 5, 6, 7 are the real mapped cells (-> neurons 0, 1, 2)
     assert state._cellpose_to_stim_id(5) == 0
     assert state._cellpose_to_stim_id(6) == 1
     assert state._cellpose_to_stim_id(7) == 2
-    # 0, 1, 2, 3, 4 are unmapped strays - must not alias onto neuron 0/1/2
-    for unmapped_id in range(5):
-        assert state._cellpose_to_stim_id(unmapped_id) is None
+    linked = [state._cellpose_to_stim_id(cell) for cell in range(8)]
+    trace_ids = remap_raw_cellpose_ids(
+        np.arange(8), resolve_stimulus_to_cellpose_mapping(result)
+    ).tolist()
+    assert linked == trace_ids == footprint_neuron_ids(np.arange(8), result).tolist()
+    # 0..4 are unmapped strays: their ids must not alias onto neuron 0/1/2
+    assert linked[:5] == [5, 6, 7, 3, 4]
+    assert len(set(linked)) == len(linked)
+    assert state._cellpose_to_stim_id(-1) is None
+    for cell, neuron in enumerate(linked):
+        assert state._stim_id_to_cellpose_id(neuron) == cell
+
+
+def test_custom_mapping_links_unmapped_cells_like_their_colours() -> None:
+    """Custom mapping {0: 5} on cells 0..5: cell 1 is coloured as neuron 1,
+    so hovering neuron 1 must find cell 1 (it used to resolve to nothing)."""
+    result = _cellpose_result(mapping={0: 5})
+    result.segmentation_array = np.repeat(np.arange(6, dtype=np.int32), 2)[None, :]
+    result.original_cellpose_ids = np.arange(6, dtype=np.int32)
+    state = SpatialFootprintState()
+    state.set_data(result)
+
+    colours = footprint_neuron_ids(np.arange(6), result).tolist()
+    assert colours == [5, 1, 2, 3, 4, 0]
+    assert [state._cellpose_to_stim_id(cell) for cell in range(6)] == colours
+    state.set_hovered_stim_id(0)
+    assert state.hovered_cellpose_id == 5
+    state.set_hovered_stim_id(1)
+    assert state.hovered_cellpose_id == 1
+
+
+def test_linking_honours_a_linear_offset_mapping() -> None:
+    """A Linear mapping is stored as an offset, never as a dict: hover and
+    selection must still link a cell to the neuron its traces and colour use."""
+    result = _cellpose_result()
+    result.mapping_strategy = "Linear"
+    result.linear_offset = 1  # cell 1 -> neuron 0, cell 2 -> 1, cell 0 -> 2
+    state = SpatialFootprintState()
+    state.set_data(result)
+
+    neuron_ids = footprint_neuron_ids(np.arange(3), result).tolist()
+    assert neuron_ids == [2, 0, 1]
+    assert [state._cellpose_to_stim_id(cell) for cell in range(3)] == neuron_ids
+    state.set_hovered_stim_id(0)
+    assert state.hovered_cellpose_id == 1
+    state.set_active_stim_ids({2})
+    assert state.active_cellpose_ids == {0}
 
 
 def test_hovered_cellpose_id_resolves_via_mapping() -> None:
@@ -734,13 +804,16 @@ def test_active_cellpose_ids_resolves_via_mapping() -> None:
     assert state.active_cellpose_ids == {2, 1}
 
 
-def test_active_cellpose_ids_skips_stim_ids_with_no_mapping_entry() -> None:
+def test_active_cellpose_ids_resolve_unmapped_stim_ids_to_their_fallback_cells() -> (
+    None
+):
     state = SpatialFootprintState()
     state.set_data(_cellpose_result_with_unmapped_cells())
 
-    state.set_active_stim_ids({0, 99})  # 99 has no mapping entry at all
+    # neuron 0 is mapped cell 5; neuron 5 is the fallback id of stray cell 0
+    state.set_active_stim_ids({0, 5})
 
-    assert state.active_cellpose_ids == {5}
+    assert state.active_cellpose_ids == {5, 0}
 
 
 def test_set_active_stim_ids_is_a_noop_when_unchanged() -> None:
@@ -1856,7 +1929,7 @@ def test_segmentation_legend_colors_match_trace_widget_for_non_zero_ids() -> Non
     neuron_ids = np.array([5, 8, 12], dtype=np.int32)
     segmentation = np.array([[5, 8], [12, -1]], dtype=np.int32)
 
-    legend = dict(compute_segmentation_legend(segmentation))
+    legend = dict(footprint_legend(segmentation))
     expected = neuron_indices_to_colors(neuron_ids)
 
     for neuron_id, expected_rgb in zip(neuron_ids, expected, strict=False):
@@ -1963,3 +2036,74 @@ def test_hover_shows_the_cursor_pixel_coordinates(
     position[0] = np.array([0.0, 2.0, 0.0])
     view.pointer_move(SimpleNamespace(x=0, y=0, buttons=()))
     assert view.text.text == "x 0, y 2"  # background
+
+
+def test_footprint_colors_match_trace_colors_when_cellpose_ids_have_gaps(
+    qtbot: QtBot,
+) -> None:
+    """#649: cells removed (by an area of interest or deleted) leave gaps in
+    the Cellpose ids, which the Linear mapping compacts into consecutive
+    neuron ids for the traces. Footprints were coloured by Cellpose id and
+    traces by neuron id, so every cell after a gap had another colour."""
+    segmentation = -1 * np.ones((4, 6), dtype=np.int32)
+    segmentation[:, 0:2] = 0
+    segmentation[:, 2:4] = 3
+    segmentation[:, 4:6] = 7
+    background = np.full((4, 6, 3), 100, dtype=np.uint8)
+    result = CellposeImportResult(
+        image_path=Path("cellpose.png"),
+        segmentation_array=segmentation,
+        overlay_image=background.copy(),
+        background_image=background,
+        trace_data=None,
+        spike_data=None,
+        original_cellpose_ids=np.array([0, 3, 7], dtype=np.int32),
+        mapping_strategy="Linear",
+        linear_offset=0,
+    )
+    # What the trace importers give these cells' rows.
+    trace_ids = remap_raw_cellpose_ids(
+        np.array([0, 3, 7]), resolve_stimulus_to_cellpose_mapping(result)
+    )
+    assert trace_ids.tolist() == [0, 1, 2]
+    trace_colors = neuron_indices_to_colors(trace_ids)[:, :3]
+
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(result)
+
+    legend = dict(widget._base_legend)
+    for cellpose_id, color in zip([0, 3, 7], trace_colors, strict=True):
+        assert np.allclose(np.array(legend[cellpose_id]) / 255, color, atol=1 / 255)
+    image = widget._composed_overlay_image()
+    for column, color in zip([0, 2, 4], trace_colors, strict=True):
+        expected = 0.5 * 100 + 0.5 * np.floor(color * 255)
+        assert np.allclose(image[0, column], expected, atol=1)
+
+
+def test_footprint_colors_follow_custom_mapping(qtbot: QtBot) -> None:
+    result = _cellpose_result(mapping={0: 2, 1: 0, 2: 1})
+    widget = SpatialFootprintWidget()
+    qtbot.addWidget(widget)
+    widget.set_data(result)
+
+    legend = dict(widget._base_legend)
+    expected = neuron_indices_to_colors(np.array([1, 2, 0]))[:, :3]
+    for cellpose_id in range(3):
+        assert np.allclose(
+            np.array(legend[cellpose_id]) / 255, expected[cellpose_id], atol=1 / 255
+        )
+
+
+def test_linking_falls_back_to_identity_for_an_unresolvable_mapping() -> None:
+    """A mapping with duplicate Cellpose ids cannot be applied to traces or
+    colours either; linking then treats Cellpose ids as neuron ids, like them."""
+    from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_ids
+    from neuroseq.visualization_support.cellpose_ids import stim_id_to_cellpose_id
+
+    result = _cellpose_result(mapping={0: 1, 1: 1})
+    assert cellpose_to_stim_ids([0, 1, 2, -1], result) == {0: 0, 1: 1, 2: 2}
+    assert footprint_neuron_ids(np.arange(3), result).tolist() == [0, 1, 2]
+    assert stim_id_to_cellpose_id(2, result) == 2
+    assert stim_id_to_cellpose_id(-1, result) is None
+    assert stim_id_to_cellpose_id(None, result) is None

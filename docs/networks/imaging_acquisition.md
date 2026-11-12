@@ -68,10 +68,10 @@ data** act on the list).
 
 Files beside each TIFF, written before the hardware command:
 
-- `<date>_<number>.json`: request, stimulus (name, `dt`, shape, SHA-256),
+- `<date>_<number>.json`: request, input array (name, `dt`, shape, SHA-256),
   routine block (`.seq` path, SysCon2 entry) and export settings. It records the
   request, not proof of completion.
-- `<date>_<number>_stimulus.npy`: the stimulus samples.
+- `<date>_<number>_stimulus.npy`: the input array samples.
 
 The `.nseq` stores only metadata and a frame index; keep the TIFFs at their
 paths. **Save imaging data…** exports a rendered copy, not the original. GIF
@@ -101,7 +101,7 @@ ScanImage**, rheobase and STDP window blocks run without manual steps:
 2. Arm ScanImage to wait for the external trigger, for the block plus
    **Record after block** (default 3 s).
 3. Run the sequence (start condition _auto_); its TTL must trigger ScanImage.
-4. Extract ΔF/F per Cellpose ROI (F0 = mean before the block's first stimulus)
+4. Extract ΔF/F per Cellpose ROI (F0 = mean before the block's first input)
    and deconvolve it with OASIS (jGCaMP8m, 0.5 s decay; events of at least
    **Spike threshold** are spikes). Options:
    - **Remove stimulation artefact** (default on): frames lit by the laser are

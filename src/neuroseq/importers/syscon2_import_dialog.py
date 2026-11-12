@@ -11,6 +11,9 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.export.exporter_syscon2 import _SYSCON2_TTL_PULSE_QUANTUM_S
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_syscon2 import SysconSequence
 from neuroseq.importers.importer_syscon2 import get_timed_objects
 from neuroseq.importers.importer_syscon2 import group_timed_objects_by_neuron_target
@@ -37,8 +40,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
+        self._import_folders = import_folders
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.sequence: SysconSequence | None = None
@@ -56,7 +62,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
 
         intro = QtWidgets.QLabel(
             "Select a SysCon2 .seq file, preview parsed content, and import timing/intensity "
-            "information into a selected input data entity. Channels are assigned by target order, "
+            "information into a selected input array. Channels are assigned by target order, "
             "not matched to your project neuron IDs. Intensities are file values (zero uses a "
             "nominal 1), not measured optical power. Hardware latency is not reconstructed."
         )
@@ -108,7 +114,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         options_layout.addRow(self.import_existing_radio)
         self.target_combo = QtWidgets.QComboBox()
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
-        options_layout.addRow("    Target input data entity:", self.target_combo)
+        options_layout.addRow("    Target input array:", self.target_combo)
 
         self.neuron_offset_spin = QtWidgets.QSpinBox()
         self.neuron_offset_spin.setRange(0, 0)
@@ -229,10 +235,11 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select SysCon2 .seq file",
-            "",
+            start_directory(self._import_folders),
             "SysCon2 sequence (*.seq);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_file(filename)
 
     def load_file(self, filename: str) -> None:
@@ -306,7 +313,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
             "Runs is not expanded; one sequence pass is imported.",
             *(
                 [
-                    "Original stim array found next to the file: its exact timings "
+                    "Original input array found next to the file: its exact timings "
                     "and neuron rows are restored on import."
                 ]
                 if sequence.original_values is not None
@@ -370,7 +377,7 @@ class Syscon2ImportDialog(QtWidgets.QDialog):
                 QtWidgets.QMessageBox.warning(
                     self,
                     "Name already in use",
-                    f"An input data entity named '{new_name}' already exists.",
+                    f"An input array named '{new_name}' already exists.",
                 )
                 return
 

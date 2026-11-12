@@ -120,9 +120,12 @@ class Experiment:
         duration (float): The total duration of the experiment in seconds.
         timepoints (list[float]): A list of timepoints at which data was appended
         data (list[Data]): A list of data objects (TraceData, SpikeData, SynapseData) associated with the experiment.
+        description (str): Free-text note about the recording or run, edited in
+            File -> Manage Data.
     """
 
     name: str
     duration: float
     timepoints: list[float]
     data: list[Data]
+    description: str = ""

@@ -402,3 +402,23 @@ def test_edit_experiments_redo_also_checks_the_current_group() -> None:
     project.history.redo()
     assert project.experiments["Rec"] is newer
     assert not project.history.can_redo()
+
+
+def test_last_command_tracks_the_applied_command() -> None:
+    history = ProjectHistory()
+    first = ProjectCommand("first", lambda: None, lambda: None)
+    second = ProjectCommand("second", lambda: None, lambda: None, affects_inputs=False)
+    assert history.last_command is None
+    history.record_applied(first)
+    assert history.last_command is first
+    history.record_applied(second)
+    assert history.last_command is second
+    assert not history.last_command.affects_inputs
+    history.undo()
+    assert history.last_command is second
+    history.undo()
+    assert history.last_command is first
+    history.redo()
+    assert history.last_command is first
+    history.clear()
+    assert history.last_command is None

@@ -11,7 +11,7 @@ Three levels, from manual to closed-loop:
 
 | Level                                                        | What it does                                                                                                                         |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| [Manual input designer](static_input.md)                     | Draw, copy, paste and load input in the stimulation editor, or script it in the embedded console.                                    |
+| [Manual input designer](static_input.md)                     | Draw, copy, paste and load input in the input editor, or script it in the embedded console.                                          |
 | [Static input designer](static_input.md#design-static-input) | Ready-made routines that generate whole patterns (sequential, simultaneous, gradient, ramp).                                         |
 | [Dynamic input designer](dynamic_input.md)                   | Step-wise experiments: deliver input, read the response, choose the next input (rheobase search, STDP window, STDP synaptic tuning). |
 

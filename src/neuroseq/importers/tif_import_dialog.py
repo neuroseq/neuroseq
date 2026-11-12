@@ -2,6 +2,8 @@
 
 Drives `importer_tif.run_suite2p_pipeline` in a `BackgroundJob` and feeds the
 resulting fluorescence / spike arrays into the existing Suite2p import path.
+Several ticked files are either joined as parts of one recording or, by
+default, extracted one after another into one data group each (#643).
 """
 
 from __future__ import annotations
@@ -12,6 +14,8 @@ import subprocess
 import sys
 from collections.abc import Callable
 from collections.abc import Mapping
+from dataclasses import dataclass
+from dataclasses import field
 from pathlib import Path
 from typing import Any
 from typing import cast
@@ -28,6 +32,10 @@ from neuroseq.background_jobs import CancellableWorker
 from neuroseq.background_jobs import returns_to_main_thread
 from neuroseq.data import Data
 from neuroseq.data import TraceData
+from neuroseq.importers.import_folders import CALCIUM_TIFF_FILES
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_cellpose import CellPoseImporter
 from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import read_segmentation_file
@@ -42,6 +50,7 @@ from neuroseq.importers.importer_tif import PipelineCancelled
 from neuroseq.importers.importer_tif import TifPipelineParams
 from neuroseq.importers.importer_tif import TifPipelineResult
 from neuroseq.importers.importer_tif import cellpose_result_to_masks
+from neuroseq.importers.importer_tif import suits_artefact_suppression
 from neuroseq.importers.roi_traces import NEUROPIL_INNER_RADIUS_PX
 from neuroseq.importers.roi_traces import NEUROPIL_MIN_PIXELS
 from neuroseq.stimulation.stim import StimArray
@@ -129,6 +138,41 @@ def _build_cellpose_result_from_pipeline(
         image_path=image_path,
         segmentation_path=segmentation_path,
     )
+
+
+@dataclass
+class TifBatchImport:
+    """One file of a batch import (#643): its data, or why it has none.
+
+    ``status`` is "imported", "failed", "cancelled" (stopped while it ran) or
+    "not run" (the batch was stopped before it)."""
+
+    path: Path
+    status: str
+    data: list[Data] = field(default_factory=list)
+    duration: float = 0.0
+    message: str = ""
+
+
+def batch_summary(imports: list[TifBatchImport]) -> str:
+    """One message on every file of a batch: what was imported and why the
+    others were not."""
+    imported = [item for item in imports if item.status == "imported"]
+    lines = [f"Imported {len(imported)} of {len(imports)} files."]
+    for title, status in (
+        ("Imported", "imported"),
+        ("Failed", "failed"),
+        ("Cancelled", "cancelled"),
+        ("Not run (stopped)", "not run"),
+    ):
+        items = [item for item in imports if item.status == status]
+        if items:
+            lines.append(f"\n{title}:")
+            lines.extend(
+                f"  {item.path.name}" + (f": {item.message}" if item.message else "")
+                for item in items
+            )
+    return "\n".join(lines)
 
 
 class _QtLogHandler(logging.Handler):
@@ -284,6 +328,9 @@ class _PipelineProgressDialog(QtWidgets.QDialog):
     def setCancelEnabled(self, enabled: bool) -> None:
         self._cancel_button.setEnabled(enabled)
 
+    def setCancelText(self, text: str) -> None:
+        self._cancel_button.setText(text)
+
     def setValue(self, value: int) -> None:
         self._bar.setValue(value)
 
@@ -300,9 +347,11 @@ class TifImportDialog(QtWidgets.QDialog):
         *,
         cellpose_import: CellposeImportResult | None = None,
         stim_arrays: Mapping[str, StimArray] | None = None,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
+        self._import_folders = import_folders
 
         self.experiment_name: str = "Calcium imaging (.tif)"
         self.experiment_duration: float = 0.0
@@ -321,6 +370,14 @@ class TifImportDialog(QtWidgets.QDialog):
         self.imported_functional_channel = 1
         self._propagate_new_segmentation: bool = False
         self._new_segmentation_path: Path | None = None
+        #: Files ticked in the list are imported; the rest are only listed.
+        self._unchecked_tif_paths: set[Path] = set()
+        #: Batch import (#643): one pipeline run per file, one after another.
+        self.batch_imports: list[TifBatchImport] = []
+        self._run_queue: list[list[Path]] = []
+        self._run_index = 0
+        self._run_masks: npt.NDArray[Any] | None = None
+        self._stop_after_current = False
 
         # The dialog's own job, separate from the workspace's BackgroundJob.
         self._job = BackgroundJob(self)
@@ -376,16 +433,28 @@ class TifImportDialog(QtWidgets.QDialog):
         # TIFF selection
         tif_group = QtWidgets.QGroupBox("TIFF file(s)")
         tif_layout = QtWidgets.QVBoxLayout(tif_group)
+        tif_hint = QtWidgets.QLabel(
+            "Ticked files are imported. The list is kept with the project, so "
+            "files added before can be ticked again."
+        )
+        tif_hint.setWordWrap(True)
+        tif_layout.addWidget(tif_hint)
         self._tif_list = QtWidgets.QListWidget()
         self._tif_list.setSelectionMode(
             QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self._tif_list.itemChanged.connect(self._on_tif_item_changed)
         tif_layout.addWidget(self._tif_list)
         tif_buttons = QtWidgets.QHBoxLayout()
         add_btn = QtWidgets.QPushButton("Add TIFF…")
         add_btn.clicked.connect(self._browse_tifs)
         remove_btn = QtWidgets.QPushButton("Remove selected")
         remove_btn.clicked.connect(self._remove_selected_tifs)
+        self._clear_tifs_button = QtWidgets.QPushButton("Clear list")
+        self._clear_tifs_button.setToolTip(
+            "Remove every file from the list (the files themselves are kept)."
+        )
+        self._clear_tifs_button.clicked.connect(self._clear_tifs)
         self._run_fiji_button = QtWidgets.QPushButton("Open Fiji")
         self._run_fiji_button.setToolTip(
             "Launch Fiji/ImageJ; if a TIFF is selected, open it for inspection."
@@ -393,9 +462,47 @@ class TifImportDialog(QtWidgets.QDialog):
         self._run_fiji_button.clicked.connect(self._launch_fiji)
         tif_buttons.addWidget(add_btn)
         tif_buttons.addWidget(remove_btn)
+        tif_buttons.addWidget(self._clear_tifs_button)
         tif_buttons.addWidget(self._run_fiji_button)
         tif_buttons.addStretch(1)
         tif_layout.addLayout(tif_buttons)
+
+        # Several ticked files: separate recordings (default) or one split one.
+        self._separate_files_radio = QtWidgets.QRadioButton(
+            "Separate recordings: one data group per file"
+        )
+        self._join_files_radio = QtWidgets.QRadioButton(
+            "Parts of one recording: join them into one data group"
+        )
+        self._join_files_radio.setToolTip(
+            "For a recording split over several files (e.g. ScanImage's "
+            "_00001, _00002, ... parts), in list order."
+        )
+        self._separate_files_radio.setChecked(True)
+        self._files_mode_buttons = QtWidgets.QButtonGroup(self)
+        self._files_mode_buttons.addButton(self._separate_files_radio)
+        self._files_mode_buttons.addButton(self._join_files_radio)
+        self._files_mode_widget = QtWidgets.QWidget()
+        files_mode_layout = QtWidgets.QVBoxLayout(self._files_mode_widget)
+        files_mode_layout.setContentsMargins(0, 0, 0, 0)
+        files_mode_layout.addWidget(QtWidgets.QLabel("Several ticked files are:"))
+        files_mode_layout.addWidget(self._separate_files_radio)
+        files_mode_layout.addWidget(self._join_files_radio)
+        self._batch_note = QtWidgets.QLabel(
+            "Each file runs through the pipeline in turn with the settings "
+            "below and becomes its own data group, named after the file. "
+            "The same Cellpose masks, input array and imaging start time are "
+            "used for every file, so the files must show the same field of "
+            "view (frame size) and start at the same time on the input array. "
+            "A file that fails is reported and the others are still imported. "
+            "With Suite2p auto-detection, ROIs are found per file and the first "
+            "file's become the project's cell segmentation."
+        )
+        self._batch_note.setWordWrap(True)
+        self._batch_note.setStyleSheet("QLabel { color: gray; }")
+        files_mode_layout.addWidget(self._batch_note)
+        self._separate_files_radio.toggled.connect(self._update_files_mode)
+        tif_layout.addWidget(self._files_mode_widget)
         content_layout.addWidget(tif_group)
 
         # Cellpose mask source
@@ -540,7 +647,7 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Spike threshold (ΔF/F):", self._dff_spike_threshold_spin)
 
         self._suppress_stimulation_artefact_checkbox = QtWidgets.QCheckBox(
-            "Input artefact suppression"
+            "Stimulation artefact suppression"
         )
         self._suppress_stimulation_artefact_checkbox.setChecked(True)
         self._suppress_stimulation_artefact_checkbox.setToolTip(
@@ -552,6 +659,15 @@ class TifImportDialog(QtWidgets.QDialog):
         self._stim_array_combo = QtWidgets.QComboBox()
         for name, stim_array in self._stim_arrays.items():
             self._stim_array_combo.addItem(name, stim_array)
+        # Default to pulsed stimulation, never to e.g. a patch-clamp input wave
+        # that is non-zero all along and would flatten the traces (#567).
+        suitable = [
+            index
+            for index, stim_array in enumerate(self._stim_arrays.values())
+            if suits_artefact_suppression(stim_array)
+        ]
+        if suitable:
+            self._stim_array_combo.setCurrentIndex(suitable[0])
         params_layout.addRow("Input array:", self._stim_array_combo)
         self._imaging_start_spin = QtWidgets.QDoubleSpinBox()
         self._imaging_start_spin.setRange(-86400.0, 86400.0)
@@ -565,6 +681,8 @@ class TifImportDialog(QtWidgets.QDialog):
         params_layout.addRow("Imaging started at:", self._imaging_start_spin)
         has_stim_arrays = bool(self._stim_arrays)
         self._suppress_stimulation_artefact_checkbox.setEnabled(has_stim_arrays)
+        # Off by default unless an input looks like pulsed light stimulation.
+        self._suppress_stimulation_artefact_checkbox.setChecked(bool(suitable))
         if not has_stim_arrays:
             # Disabled-but-still-checked reads as "suppression is on and you
             # can't turn it off", which isn't true (there's no input array to
@@ -614,6 +732,11 @@ class TifImportDialog(QtWidgets.QDialog):
             ]
         )
         self._on_pipeline_changed()
+        if self._import_folders is not None:
+            # Offered again, but only files ticked in this session are imported.
+            remembered = self._import_folders.files(CALCIUM_TIFF_FILES)
+            self.add_tif_paths(remembered, checked=False)
+        self._update_files_mode()
 
     def _install_wheel_scroll_passthrough(
         self, widgets: list[QtWidgets.QWidget]
@@ -723,24 +846,83 @@ class TifImportDialog(QtWidgets.QDialog):
         filenames, _ = QtWidgets.QFileDialog.getOpenFileNames(
             self,
             "Select TIFF stacks",
-            "",
+            start_directory(self._import_folders),
             "TIFF files (*.tif *.tiff);;All files (*)",
         )
+        if filenames:
+            remember_folder(self._import_folders, filenames[0])
         self.add_tif_paths([Path(filename) for filename in filenames])
 
-    def add_tif_paths(self, paths: list[Path]) -> None:
+    def add_tif_paths(self, paths: list[Path], *, checked: bool = True) -> None:
         """Add TIFF stacks to the list, e.g. files dropped onto the main
-        window (issue #597)."""
+        window (issue #597); ``checked`` ones are imported on Run. A listed
+        file added again is ticked."""
         for path in paths:
-            if path not in self._tif_paths:
-                self._tif_paths.append(path)
-                self._tif_list.addItem(str(path))
+            path = Path(path)
+            if path in self._tif_paths:
+                if checked:
+                    row = self._tif_paths.index(path)
+                    item = self._tif_list.item(row)
+                    if item is not None:
+                        item.setCheckState(QtCore.Qt.CheckState.Checked)
+                continue
+            self._tif_paths.append(path)
+            if not checked:
+                self._unchecked_tif_paths.add(path)
+            item = QtWidgets.QListWidgetItem(str(path))
+            item.setFlags(item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(
+                QtCore.Qt.CheckState.Checked
+                if checked
+                else QtCore.Qt.CheckState.Unchecked
+            )
+            self._tif_list.addItem(item)
+        self._tif_paths_changed()
+
+    def checked_tif_paths(self) -> list[Path]:
+        """The listed files to import, in list order."""
+        return [p for p in self._tif_paths if p not in self._unchecked_tif_paths]
+
+    def _on_tif_item_changed(self, item: QtWidgets.QListWidgetItem) -> None:
+        row = self._tif_list.row(item)
+        if not 0 <= row < len(self._tif_paths):
+            return
+        path = self._tif_paths[row]
+        if item.checkState() == QtCore.Qt.CheckState.Checked:
+            self._unchecked_tif_paths.discard(path)
+        else:
+            self._unchecked_tif_paths.add(path)
+        self._update_files_mode()
 
     def _remove_selected_tifs(self) -> None:
         for item in self._tif_list.selectedItems():
             row = self._tif_list.row(item)
             self._tif_list.takeItem(row)
-            del self._tif_paths[row]
+            self._unchecked_tif_paths.discard(self._tif_paths.pop(row))
+        self._tif_paths_changed()
+
+    def _clear_tifs(self) -> None:
+        self._tif_list.clear()
+        self._tif_paths.clear()
+        self._unchecked_tif_paths.clear()
+        self._tif_paths_changed()
+
+    def _tif_paths_changed(self) -> None:
+        if self._import_folders is not None:
+            self._import_folders.remember_files(CALCIUM_TIFF_FILES, self._tif_paths)
+        self._update_files_mode()
+
+    def _batch_mode(self) -> bool:
+        """Whether Run imports each ticked file into its own data group."""
+        return (
+            self._separate_files_radio.isChecked() and len(self.checked_tif_paths()) > 1
+        )
+
+    def _update_files_mode(self) -> None:
+        if not hasattr(self, "_files_mode_widget"):
+            return
+        self._files_mode_widget.setVisible(len(self.checked_tif_paths()) > 1)
+        self._batch_note.setVisible(self._separate_files_radio.isChecked())
 
     def _launch_fiji(self) -> None:
         """Launch Fiji/ImageJ, opening the first selected TIFF if one is available."""
@@ -803,10 +985,11 @@ class TifImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select Cellpose segmentation file",
-            "",
+            start_directory(self._import_folders),
             "Cellpose segmentation (*_seg.npy *.npy);;All files (*)",
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._seg_file_path = Path(filename)
             self._seg_path_label.setText(self._seg_file_path.name)
             self._seg_path_label.setStyleSheet("QLabel { color: black; }")
@@ -835,9 +1018,12 @@ class TifImportDialog(QtWidgets.QDialog):
 
     # -- Pipeline launch ----------------------------------------------------
     def _start_pipeline(self) -> None:
-        if not self._tif_paths:
+        tif_paths = self.checked_tif_paths()
+        if not tif_paths:
             QtWidgets.QMessageBox.warning(
-                self, "No TIFFs", "Add at least one TIFF stack before running."
+                self,
+                "No TIFFs",
+                "Add (or tick) at least one TIFF stack before running.",
             )
             return
         self.new_cellpose_result = None
@@ -870,15 +1056,34 @@ class TifImportDialog(QtWidgets.QDialog):
         if self._propagate_new_segmentation and self._use_seg_radio.isChecked():
             self._new_segmentation_path = self._seg_file_path
 
-        params = self._pipeline_params()
+        # One run per file in a batch, else one run over all files (#643).
+        if self._batch_mode():
+            self._run_queue = [[path] for path in tif_paths]
+        else:
+            self._run_queue = [tif_paths]
+        self._run_index = 0
+        self._run_masks = masks
+        self._stop_after_current = False
+        self.batch_imports = []
 
         self._run_button.setEnabled(False)
         self._progress_dialog = _PipelineProgressDialog(
-            "Starting trace extraction…", "Cancel", 0, 100, self
+            "Starting trace extraction…",
+            "Stop after this file" if self._is_batch else "Cancel",
+            0,
+            100,
+            self,
         )
         self._progress_dialog.canceled.connect(self._cancel_pipeline)
         self._progress_dialog.show()
+        self._start_next_run()
 
+    @property
+    def _is_batch(self) -> bool:
+        return len(self._run_queue) > 1
+
+    def _start_next_run(self) -> None:
+        """Run the pipeline on the next queued file(s); never two at once."""
         pipeline = str(self._pipeline_combo.currentData())
         stim_array = None
         if (
@@ -886,15 +1091,23 @@ class TifImportDialog(QtWidgets.QDialog):
             and self._suppress_stimulation_artefact_checkbox.isChecked()
         ):
             stim_array = self._stim_array_combo.currentData()
+        paths = self._run_queue[self._run_index]
+        if self._is_batch and self._progress_dialog is not None:
+            self._progress_dialog.setLabelText(self._batch_label("Starting"))
+            self._progress_dialog.appendLog(
+                f"--- File {self._run_index + 1} of {len(self._run_queue)}: "
+                f"{paths[0]} ---"
+            )
         worker = _PipelineWorker(
-            list(self._tif_paths),
-            masks,
-            params,
+            list(paths),
+            self._run_masks,
+            self._pipeline_params(),
             pipeline,
             stim_array,
             neuropil=pipeline == "roi_average" and self._neuropil_checkbox.isChecked(),
             imaging_start_s=self._imaging_start_spin.value(),
         )
+        assert self._progress_dialog is not None
         worker.log.connect(self._progress_dialog.appendLog)
         self._job.start(
             worker,
@@ -905,15 +1118,29 @@ class TifImportDialog(QtWidgets.QDialog):
             cancel=worker.cancel,
         )
 
+    def _batch_label(self, message: str) -> str:
+        path = self._run_queue[self._run_index][0]
+        return (
+            f"File {self._run_index + 1} of {len(self._run_queue)} "
+            f"({path.name}): {message}"
+        )
+
     def _on_progress(self, update: tuple[str, float]) -> None:
         if self._progress_dialog is None:
             return
         message, fraction = update
+        fraction = max(0.0, min(1.0, fraction))
+        if self._is_batch:
+            message = self._batch_label(message)
+            fraction = (self._run_index + fraction) / len(self._run_queue)
         self._progress_dialog.setLabelText(message)
-        self._progress_dialog.setValue(int(max(0.0, min(1.0, fraction)) * 100))
+        self._progress_dialog.setValue(int(fraction * 100))
 
     def _on_finished(self, result: TifPipelineResult) -> None:
         self._pipeline_result = result
+        if self._is_batch:
+            self._batch_file_finished(result)
+            return
         if self._progress_dialog is not None:
             self._progress_dialog.close()
         try:
@@ -926,6 +1153,10 @@ class TifImportDialog(QtWidgets.QDialog):
             self._run_button.setEnabled(True)
 
     def _on_failed(self, message: str) -> None:
+        if self._is_batch:
+            self._record_batch_file("failed", message=message)
+            self._advance_batch()
+            return
         if self._progress_dialog is not None:
             self._progress_dialog.close()
         QtWidgets.QMessageBox.critical(self, "Pipeline failed", message)
@@ -940,6 +1171,17 @@ class TifImportDialog(QtWidgets.QDialog):
                 self._progress_dialog.close()
             self.reject()
             return
+        if self._is_batch and not self._stop_after_current:
+            # First press: let the current file finish, start no further one.
+            # A second press aborts the current file as well.
+            self._stop_after_current = True
+            self.logger.info("Batch stop requested after the current file")
+            if self._progress_dialog is not None:
+                self._progress_dialog.setCancelText("Abort this file too")
+                self._progress_dialog.setLabelText(
+                    self._batch_label("stopping after this file…")
+                )
+            return
         self.logger.info("Pipeline cancel requested")
         self._job.cancel()
         if self._progress_dialog is not None:
@@ -947,6 +1189,10 @@ class TifImportDialog(QtWidgets.QDialog):
             self._progress_dialog.setLabelText("Cancelling… finishing current step")
 
     def _on_cancelled(self) -> None:
+        if self._is_batch:
+            self._record_batch_file("cancelled")
+            self._finish_batch()
+            return
         # BackgroundJob delivers outcomes after the worker thread has exited,
         # so the dialog can close right away.
         if self._progress_dialog is not None:
@@ -961,29 +1207,109 @@ class TifImportDialog(QtWidgets.QDialog):
             return
         super().reject()
 
-    # -- Finalisation -------------------------------------------------------
-    def _finalize_import(self, result: TifPipelineResult) -> None:
-        fs = self._fs_spin.value()
-        dt = 1.0 / fs
-        n_neurons, n_timepoints = result.F.shape
-        self.experiment_duration = n_timepoints * dt
-        self.imported_tif_paths = list(self._tif_paths)
-        self.imported_fps = fs
+    # -- Batch import (#643) ------------------------------------------------
+    def _record_batch_file(
+        self,
+        status: str,
+        *,
+        message: str = "",
+        data: list[Data] | None = None,
+        duration: float = 0.0,
+    ) -> None:
+        self.batch_imports.append(
+            TifBatchImport(
+                self._run_queue[self._run_index][0],
+                status,
+                data or [],
+                duration,
+                message,
+            )
+        )
+
+    def _batch_file_finished(self, result: TifPipelineResult) -> None:
+        path = self._run_queue[self._run_index][0]
+        try:
+            data = self._import_data(result)
+            if self._propagate_new_segmentation and self.new_cellpose_result is None:
+                # One project segmentation: the shared mask, or with Suite2p
+                # detection the first imported file's ROIs.
+                self.new_cellpose_result = _build_cellpose_result_from_pipeline(
+                    result,
+                    path,
+                    segmentation_path=self._new_segmentation_path,
+                    background_image=self._seg_file_background_image,
+                )
+        except Exception as exc:
+            self.logger.exception("Error finalising TIFF import of %s", path)
+            self._record_batch_file("failed", message=str(exc))
+        else:
+            n_neurons, n_timepoints = result.F.shape
+            duration = n_timepoints / self._fs_spin.value()
+            self._record_batch_file(
+                "imported",
+                message=f"{n_neurons} neurons × {n_timepoints} frames "
+                f"({duration:.2f} s)"
+                + self._no_spikes_note(result, data, short=True)
+                + artefact_suppression_summary(result, short=True),
+                data=data,
+                duration=duration,
+            )
+        self._advance_batch()
+
+    def _advance_batch(self) -> None:
+        self._run_index += 1
+        if self._stop_after_current or self._run_index >= len(self._run_queue):
+            self._finish_batch()
+        else:
+            self._start_next_run()
+
+    def _finish_batch(self) -> None:
+        """Mark files never started, show one summary, and accept the dialog
+        if any file was imported."""
+        for paths in self._run_queue[len(self.batch_imports) :]:
+            self.batch_imports.append(TifBatchImport(paths[0], "not run"))
+        if self._progress_dialog is not None:
+            self._progress_dialog.close()
+        self._run_button.setEnabled(True)
+        self.imported_fps = self._fs_spin.value()
         self.imported_channels = self._nchannels_spin.value()
         self.imported_functional_channel = self._functional_chan_spin.value()
-
-        if self._propagate_new_segmentation:
-            self.new_cellpose_result = _build_cellpose_result_from_pipeline(
-                result,
-                self._tif_paths[0],
-                segmentation_path=self._new_segmentation_path,
-                background_image=self._seg_file_background_image,
+        imported = [item for item in self.batch_imports if item.status == "imported"]
+        summary = batch_summary(self.batch_imports)
+        if len(imported) == len(self.batch_imports):
+            QtWidgets.QMessageBox.information(self, "Import successful", summary)
+        else:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Import finished with problems" if imported else "Nothing imported",
+                summary,
             )
+        if imported:
+            self.accept()
 
+    # -- Finalisation -------------------------------------------------------
+    def _no_spikes_note(
+        self, result: TifPipelineResult, data: list[Data], *, short: bool = False
+    ) -> str:
+        if not (
+            result.extra.get("pipeline") == "roi_average"
+            and self._dff_checkbox.isChecked()
+            and len(data) == 1
+        ):
+            return ""
+        if short:
+            return "; spikes not deconvolved (Suite2p not installed)"
+        return "\n\nSpikes were not deconvolved: Suite2p (for OASIS) is not installed."
+
+    def _import_data(self, result: TifPipelineResult) -> list[Data]:
+        """The trace (and spike) data to import from one pipeline result."""
+        fs = self._fs_spin.value()
+        dt = 1.0 / fs
+        n_neurons = result.F.shape[0]
         raw_cellpose_ids = pipeline_row_cellpose_ids(result)
         if result.extra.get("pipeline") == "roi_average":
             indices = remap_raw_cellpose_ids(raw_cellpose_ids, self._selected_mapping())
-            self.imported_data = roi_average_import_data(
+            return roi_average_import_data(
                 result,
                 indices,
                 raw_cellpose_ids,
@@ -992,22 +1318,6 @@ class TifImportDialog(QtWidgets.QDialog):
                 dff=self._dff_checkbox.isChecked(),
                 spike_threshold=self._dff_spike_threshold_spin.value(),
             )
-            no_spikes = self._dff_checkbox.isChecked() and len(self.imported_data) == 1
-            QtWidgets.QMessageBox.information(
-                self,
-                "Import successful",
-                f"Imported {n_neurons} neurons × {n_timepoints} frames "
-                f"({self.experiment_duration:.2f} s at {fs:.1f} Hz)."
-                + (
-                    "\n\nSpikes were not deconvolved: Suite2p (for OASIS) is not "
-                    "installed."
-                    if no_spikes
-                    else ""
-                ),
-            )
-            self.accept()
-            return
-
         traces = prepare_suite2p_traces(
             result.F,
             result.Fneu,
@@ -1027,14 +1337,57 @@ class TifImportDialog(QtWidgets.QDialog):
             raw_cellpose_ids=raw_cellpose_ids,
         )
 
-        self.imported_data = [traces, spike_data]
+        return [traces, spike_data]
+
+    def _finalize_import(self, result: TifPipelineResult) -> None:
+        """Import one pipeline result (a single file, or files joined as one
+        recording) and accept the dialog."""
+        fs = self._fs_spin.value()
+        n_neurons, n_timepoints = result.F.shape
+        self.experiment_duration = n_timepoints / fs
+        tif_paths = self._run_queue[0] if self._run_queue else self.checked_tif_paths()
+        self.imported_tif_paths = list(tif_paths)
+        self.imported_fps = fs
+        self.imported_channels = self._nchannels_spin.value()
+        self.imported_functional_channel = self._functional_chan_spin.value()
+
+        if self._propagate_new_segmentation:
+            self.new_cellpose_result = _build_cellpose_result_from_pipeline(
+                result,
+                tif_paths[0],
+                segmentation_path=self._new_segmentation_path,
+                background_image=self._seg_file_background_image,
+            )
+
+        self.imported_data = self._import_data(result)
         QtWidgets.QMessageBox.information(
             self,
             "Import successful",
             f"Imported {n_neurons} neurons × {n_timepoints} frames "
-            f"({self.experiment_duration:.2f} s at {fs:.1f} Hz).",
+            f"({self.experiment_duration:.2f} s at {fs:.1f} Hz)."
+            + self._no_spikes_note(result, self.imported_data)
+            + artefact_suppression_summary(result),
         )
         self.accept()
+
+
+def artefact_suppression_summary(
+    result: TifPipelineResult, *, short: bool = False
+) -> str:
+    """A note on how many frames input artefact suppression replaced ("" if it
+    was off), so a flattened stretch of the traces is never a silent surprise.
+    ``short`` gives a clause for one line of a batch summary."""
+    if not result.extra.get("stimulation_artefact_suppression"):
+        return ""
+    n_frames = int(np.shape(result.F)[1])
+    replaced = len(result.extra.get("contaminated_frames", ()))
+    share = 100.0 * replaced / n_frames if n_frames else 0.0
+    if short:
+        return f"; {replaced} frames ({share:.0f}%) replaced by artefact suppression"
+    return (
+        f"\n\nStimulation artefact suppression replaced {replaced} of {n_frames} "
+        f"frames ({share:.0f}%) with neighbouring clean values."
+    )
 
 
 def pipeline_row_cellpose_ids(result: TifPipelineResult) -> npt.NDArray[Any]:

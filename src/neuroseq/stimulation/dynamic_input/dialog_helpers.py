@@ -60,10 +60,10 @@ def confirm_start_routine(
     box = QtWidgets.QMessageBox(QtWidgets.QApplication.activeWindow() or dialog)
     box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
     box.setWindowTitle("Existing input")
-    box.setText(f"'{name}' already contains stimuli.")
+    box.setText(f"'{name}' already contains input.")
     box.setInformativeText(
         "Clear the array and start from the beginning, continue after the "
-        "last existing stimulus (keeping progress from a previous run), "
+        "last existing input (keeping progress from a previous run), "
         + (
             "start in a new input array with new trace and spike data (keeping "
             "the previous run's), "
@@ -76,7 +76,7 @@ def confirm_start_routine(
         "Clear and start over", QtWidgets.QMessageBox.ButtonRole.DestructiveRole
     )
     continue_button = box.addButton(
-        "Continue after last stimulus", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        "Continue after last input", QtWidgets.QMessageBox.ButtonRole.AcceptRole
     )
     new_button = (
         box.addButton(

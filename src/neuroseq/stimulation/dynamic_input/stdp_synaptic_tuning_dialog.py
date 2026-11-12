@@ -751,7 +751,7 @@ class StdpSynapticTuningDialog(SelfRaisingDialog):
             if prepare_seconds > 0.0:
                 self._append_log(
                     f"Simulating {duration:.3f} s to catch up to the "
-                    "existing stimuli before the protocol starts."
+                    "existing input before the protocol starts."
                 )
             else:
                 self._append_log(

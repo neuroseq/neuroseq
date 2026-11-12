@@ -93,16 +93,63 @@ class TraceNormDialog(SelfRaisingDialog):
         self.btn_close.clicked.connect(self.close)
         self.content_layout.addWidget(self.btn_close)
 
+        # A QDialog presses its default button on Enter, and every push
+        # button is an auto-default one: Enter in the Normalization box
+        # clicked "Reset to defaults", resetting normalization to 100% and
+        # re-enabling clipping (#660). The settings apply live, so Enter
+        # only has to commit the typed value - no button is the default.
+        for button in (self.btn_reset_defaults, self.btn_close):
+            button.setAutoDefault(False)
+            button.setDefault(False)
+
+    def showEvent(self, event) -> None:
+        # The dialog is reused, and the trace widget's settings may have
+        # changed while it was hidden: show what is actually applied.
+        self.sync_from_trace_widget()
+        super().showEvent(event)
+
+    def sync_from_trace_widget(self) -> None:
+        """Set every control (and this dialog's copy) from the trace widget."""
+        widget = self.trace_widget
+        self._set_controls(
+            widget.trace_norm_percent,
+            widget.offset_by_median,
+            widget.clip,
+            widget.auto_extend_vertical_space,
+        )
+
+    def _set_controls(
+        self, norm_percent: int, offset_by_median: bool, clip: bool, auto_extend: bool
+    ) -> None:
+        self.trace_norm_percent = norm_percent
+        self.offset_by_median = offset_by_median
+        self.clip = clip
+        self.auto_extend_vertical_space = auto_extend
+        controls = (
+            self.slider_norm,
+            self.spin_norm,
+            self.chk_offset,
+            self.chk_clip,
+            self.chk_auto_extend,
+        )
+        for control in controls:
+            control.blockSignals(True)
+        try:
+            self.label_norm.setText(f"Normalization: {norm_percent}%")
+            self.slider_norm.setValue(norm_percent)
+            self.spin_norm.setValue(norm_percent)
+            self.chk_offset.setChecked(offset_by_median)
+            self.chk_clip.setChecked(clip)
+            self.chk_auto_extend.setChecked(auto_extend)
+        finally:
+            for control in controls:
+                control.blockSignals(False)
+
     def reset_defaults(self) -> None:
-        self.slider_norm.setValue(100)
-        self.spin_norm.setValue(100)
-        self.offset_by_median = True
-        self.clip = True
-        self.auto_extend_vertical_space = False
-        self.chk_offset.setChecked(self.offset_by_median)
-        self.chk_clip.setChecked(self.clip)
-        self.chk_auto_extend.setChecked(self.auto_extend_vertical_space)
-        self.update_norm_input(self.slider_norm.value())
+        # Set every control first and apply once, so no intermediate state
+        # (new normalization with the old clip setting) is ever plotted.
+        self._set_controls(100, True, True, False)
+        self.update_trace_widget()
 
     def chk_offset_clicked(self, checked: bool) -> None:
         self.offset_by_median = checked
@@ -137,6 +184,11 @@ class TraceWidget(TimeseriesWidget):
     """
 
     vector_export_requested = QtCore.Signal()
+    # TraceData shown, neuron ids to preselect - see _request_trace_comparison().
+    compare_traces_requested = QtCore.Signal(object, object)
+    # The user switched this view's input overlay on/off from its context
+    # menu (not emitted by set_stim_overlay_enabled()).
+    stim_overlay_toggled = QtCore.Signal(bool)
 
     # Line thickness is expressed in screen pixels. Below this fraction of a
     # neuron's pixel band, adjacent traces' strokes start to touch; above the
@@ -412,6 +464,18 @@ class TraceWidget(TimeseriesWidget):
             return self._row_centers[display_row]
         return float(display_row)
 
+    def _hover_time_index(self, x_ms: float, n_samples: int) -> int:
+        # Samples are line vertices at i * dt, so read the vertex nearest the
+        # pointer. Flooring (right for image cells) reported the previous
+        # sample for the whole interval left of each vertex, so once zoomed
+        # in the pointer resting on a transient's peak showed the sample
+        # before it (#576).
+        return int(np.clip(math.floor(x_ms / self.dt_ms + 0.5), 0, n_samples - 1))
+
+    def _hover_time_ms(self, x_ms: float, time_index: int) -> float:
+        # Show the time of the sample whose value is shown, not the pointer's.
+        return time_index * self.dt_ms
+
     def set_limits(self, max_time_secs: float, max_neurons: int) -> None:
         super().set_limits(max_time_secs, max_neurons)
         if (
@@ -471,6 +535,43 @@ class TraceWidget(TimeseriesWidget):
         norm_action = QtWidgets.QAction("Normalization…", self)
         norm_action.triggered.connect(self.trace_norm_dialog)
         self.context_menu.insertAction(self.context_menu.actions()[0], norm_action)
+        # Captured now: the pointer leaves the plot once the menu opens.
+        preselected = self._comparison_neuron_ids()
+        compare_action = QtWidgets.QAction("Compare traces…", self)
+        compare_action.setToolTip(
+            "Compare chosen neurons' traces across trace arrays: overlaid, side by side, in linked windows or joined end to end"
+        )
+        compare_action.setEnabled(isinstance(self.data, TraceData))
+        compare_action.triggered.connect(
+            lambda: self.compare_traces_requested.emit(self.data, preselected)
+        )
+        self.context_menu.insertAction(self.context_menu.actions()[0], compare_action)
+        overlay_action = QtWidgets.QAction("Overlay input on traces", self)
+        overlay_action.setToolTip(
+            "Show the selected input array behind this view's traces, "
+            "each neuron's input on its own trace row"
+        )
+        overlay_action.setCheckable(True)
+        overlay_action.setChecked(self._stim_overlay_enabled)
+        overlay_action.toggled.connect(self._on_stim_overlay_action_toggled)
+        self.context_menu.insertAction(self.context_menu.actions()[0], overlay_action)
+
+    def _comparison_neuron_ids(self) -> list[int]:
+        """Neurons to preselect for a comparison: the selected neuron range
+        (visible neurons only), else the hovered neuron, else none."""
+        selection = self.selected_neuron_slice
+        if selection is not None:
+            ids = [
+                neuron_id
+                for neuron_id in self._visible_neuron_ids
+                if (selection.start is None or neuron_id >= selection.start)
+                and (selection.stop is None or neuron_id < selection.stop)
+            ]
+            if ids:
+                return ids
+        if self._last_hovered_neuron_id is not None:
+            return [int(self._last_hovered_neuron_id)]
+        return []
 
     def preview_traces(self) -> QtWidgets.QDialog | None:
         """Preview the selected region, or the current view when nothing is selected."""
@@ -778,9 +879,27 @@ class TraceWidget(TimeseriesWidget):
         self._stim_overlay_enabled = enabled
         self._rebuild_stim_overlay()
 
+    @property
+    def stim_overlay_enabled(self) -> bool:
+        return self._stim_overlay_enabled
+
+    def _on_stim_overlay_action_toggled(self, enabled: bool) -> None:
+        self.set_stim_overlay_enabled(enabled)
+        self.stim_overlay_toggled.emit(enabled)
+
     def set_stim_overlay_data(self, stim_array: StimArray | None) -> None:
+        """Overlay ``stim_array`` (re-reading its values). With the overlay
+        off it is only stored, for when the overlay is switched on."""
         self._stim_overlay_array = stim_array
-        self._rebuild_stim_overlay()
+        if self._stim_overlay_enabled or self._has_stim_overlay_graphics():
+            self._rebuild_stim_overlay()
+
+    def _has_stim_overlay_graphics(self) -> bool:
+        return (
+            self._stim_overlay_graphic is not None
+            or self._stim_onset_graphic is not None
+            or bool(self._stim_overlay_row_graphics)
+        )
 
     def _rebuild_stim_overlay(self) -> None:
         for graphic in (

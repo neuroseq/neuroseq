@@ -7,11 +7,11 @@ biological and neuromorphic networks. Contributions are welcome.
 
 Extend NeuroSeq without touching the core whenever possible:
 
-| Extension                    | Mechanism                                                   |
-| ---------------------------- | ----------------------------------------------------------- |
-| Network backend or substrate | [Custom simulator](custom_simulators.md) file               |
-| Analysis pipeline            | [Analysis plugin](analysis_plugins.md) file                 |
-| Stimulation protocol         | Script in the embedded console that writes a stimulus array |
+| Extension                    | Mechanism                                                 |
+| ---------------------------- | --------------------------------------------------------- |
+| Network backend or substrate | [Custom simulator](custom_simulators.md) file             |
+| Analysis pipeline            | [Analysis plugin](analysis_plugins.md) file               |
+| Input protocol               | Script in the embedded console that writes an input array |
 
 There is no plugin interface for closed-loop routines yet; they live in
 `stimulation/dynamic_input/`. Changes to core code (anything under

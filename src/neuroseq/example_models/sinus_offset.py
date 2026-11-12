@@ -54,8 +54,8 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "value": 1.0,
         "default": 1.0,
         "type": "float",
-        "group": "Stimulus",
-        "description": "Multiplier applied to summed stimulation offsets.",
+        "group": "Input",
+        "description": "Multiplier applied to summed input offsets.",
     },
 }
 
@@ -81,7 +81,7 @@ def _stim_as_unit_time_series(
         values = values[:, None]
     if values.ndim != 2 or values.shape[0] == 0:
         raise ValueError(
-            "Each stim array must be 1D or 2D with non-zero time dimension; "
+            "Each input array must be 1D or 2D with non-zero time dimension; "
             f"got shape {values.shape}."
         )
 
@@ -151,7 +151,7 @@ class SinusOffset(NN):
         for stim_info in stims_dict.values():
             stim_dt_s = float(stim_info["dt"])
             if stim_dt_s <= 0:
-                raise ValueError("Stim dt must be > 0")
+                raise ValueError("Input dt must be > 0")
 
             stim_values = np.asarray(stim_info["array"], dtype=np.float32)
             stim_indices = np.minimum(
@@ -181,7 +181,7 @@ class SinusOffset(NN):
             ),
         ]
         experiment = Experiment(
-            name="5-unit sinusoid with stimulation offset",
+            name="5-unit sinusoid with input offset",
             duration=simulation_time,
             timepoints=[],
             data=data,

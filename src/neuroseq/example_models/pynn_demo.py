@@ -97,7 +97,7 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "default": 0.04,
         "type": "float",
         "group": "Network",
-        "description": "Stim->neuron synaptic weight. Units depend on backend: "
+        "description": "Input->neuron synaptic weight. Units depend on backend: "
         "brian2 conductance in microsiemens; brainscales2 6-bit integer [0, 63].",
     },
     "recurrent_weight": {
@@ -119,16 +119,16 @@ DEFAULT_PARAMS: dict[str, dict[str, ParamValue | str]] = {
         "value": 0.0,
         "default": 0.0,
         "type": "float",
-        "group": "Stimulus",
-        "description": "A stimulation spike is emitted where the summed stim "
+        "group": "Input",
+        "description": "An input spike is emitted where the summed input "
         "value for a neuron exceeds this threshold.",
     },
     "stim_event_ms": {
         "value": 20.0,
         "default": 20.0,
         "type": "float",
-        "group": "Stimulus",
-        "description": "Stimulation grid: spacing in ms at which the stim array "
+        "group": "Input",
+        "description": "Input grid: spacing in ms at which the input array "
         "is sampled for evoked drive spikes.",
     },
     "seed": {

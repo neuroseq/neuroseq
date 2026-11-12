@@ -30,6 +30,7 @@ from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim_editor import DrawMode
 from neuroseq.stimulation.stim_editor import SelectMode
 from neuroseq.stimulation.stim_editor import StimEditor
+from neuroseq.stimulation.stim_pad_dialog import StimPadDialog
 from neuroseq.utils import InteractMode
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
     ConstrainedPanZoomController,
@@ -530,6 +531,22 @@ def test_stim_editor_zoom_pan(qtbot: QtBot) -> None:
         qtbot.wait(delay)
 
 
+def _answer_pad_dialog(
+    monkeypatch: MonkeyPatch, text: str, *, to_end_time: bool = False
+) -> list[StimPadDialog]:
+    """Make the next Pad dialogs accept ``text`` in the chosen mode."""
+    shown: list[StimPadDialog] = []
+
+    def fake_exec(dialog: StimPadDialog) -> QtWidgets.QDialog.DialogCode:
+        shown.append(dialog)
+        (dialog.radio_end_time if to_end_time else dialog.radio_add).setChecked(True)
+        (dialog.edit_end_time if to_end_time else dialog.edit_add).setText(text)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(StimPadDialog, "exec", fake_exec)
+    return shown
+
+
 def test_stim_editor_pad_and_trim(
     monkeypatch: MonkeyPatch, qtbot: QtBot, qmessagebox_calls: list
 ):
@@ -552,23 +569,21 @@ def test_stim_editor_pad_and_trim(
     qtbot.waitUntil(lambda: stim_editor.isVisible(), timeout=WAIT_TIMEOUT_MS)
     stim_editor.set_project(project)
     # pad with invalid number of seconds
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getText", lambda *args: ("notanumber", True)
-    )
+    _answer_pad_dialog(monkeypatch, "notanumber")
     assert len(qmessagebox_calls) == 0
     stim_editor.pad_stim_array()
     assert len(qmessagebox_calls) == 1
     assert qmessagebox_calls[0]["name"] == "critical"
     assert "parse" in qmessagebox_calls[0]["text"].lower()
     # pad with negative number of seconds
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("-2", True))
+    _answer_pad_dialog(monkeypatch, "-2")
     assert len(qmessagebox_calls) == 1
     stim_editor.pad_stim_array()
     assert len(qmessagebox_calls) == 2
     assert qmessagebox_calls[1]["name"] == "critical"
     assert "positive" in qmessagebox_calls[1]["text"].lower()
     # pad with 1 second
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("1", True))
+    _answer_pad_dialog(monkeypatch, "1")
     assert len(qmessagebox_calls) == 2
     stim_editor.pad_stim_array()
     assert len(qmessagebox_calls) == 2
@@ -933,7 +948,7 @@ def test_stim_editor_pad_is_undoable(monkeypatch: MonkeyPatch, qtbot: QtBot):
     stim_editor.set_project(project)
 
     # Pad 0.5 s (500 samples) onto the 1 s array.
-    monkeypatch.setattr(QtWidgets.QInputDialog, "getText", lambda *args: ("0.5", True))
+    _answer_pad_dialog(monkeypatch, "0.5")
     stim_editor.pad_stim_array()
     modifier = stim_editor.current_stim_modifier
     assert modifier is not None
@@ -2044,9 +2059,8 @@ def test_edit_stim_duration_requires_confirmation(
     np.testing.assert_array_equal(other.values, values)
 
 
-@pytest.mark.parametrize("action", ["pad_stim_array", "trim_stim_array"])
-def test_pad_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
-    qtbot, monkeypatch, action
+def test_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
+    qtbot, monkeypatch
 ):
     project = Project()
     project.add_stim_array(
@@ -2070,8 +2084,101 @@ def test_pad_trim_dialog_displays_current_duration_in_seconds_and_milliseconds(
         return "", False
 
     monkeypatch.setattr(QtWidgets.QInputDialog, "getText", get_text)
-    getattr(editor, action)()
+    editor.trim_stim_array()
     assert "0.125 s (125 ms)" in labels[0]
+
+
+def _pad_test_editor(qtbot: QtBot) -> tuple[StimEditor, Project]:
+    project = Project()
+    for name in ("a", "b"):
+        project.add_stim_array(
+            StimArray(
+                name,
+                neuroseq.stimulation.stim.StimType.Excitation,
+                np.zeros((125, 1)),
+                "mV",
+                0.001,
+            )
+        )
+    editor = StimEditor(
+        ConstrainedPanZoomController(), QtWidgets.QComboBox(), QtWidgets.QToolBar()
+    )
+    qtbot.addWidget(editor)
+    editor.set_project(project, stim_to_select="a")
+    return editor, project
+
+
+def test_pad_dialog_displays_current_duration_and_remembers_mode(
+    qtbot, monkeypatch
+) -> None:
+    editor, project = _pad_test_editor(qtbot)
+    shown = _answer_pad_dialog(monkeypatch, "0.2", to_end_time=True)
+    editor.pad_stim_array()
+    dialog = shown[0]
+    assert "0.125 s (125 ms)" in dialog.status_label.text()
+    assert project.stim_arrays["a"].values.shape[0] == 200
+    assert project.stim_arrays["b"].values.shape[0] == 200
+
+    # The next Pad dialog opens in the end-time mode used last.
+    monkeypatch.setattr(
+        StimPadDialog, "exec", lambda dialog: QtWidgets.QDialog.DialogCode.Rejected
+    )
+    seen: list[StimPadDialog] = []
+    original_init = StimPadDialog.__init__
+
+    def record_init(dialog, *args, **kwargs):
+        original_init(dialog, *args, **kwargs)
+        seen.append(dialog)
+
+    monkeypatch.setattr(StimPadDialog, "__init__", record_init)
+    editor.pad_stim_array()
+    assert seen[0].to_end_time
+    # Prefilled with the current end plus the seconds-to-add default.
+    assert "0.2 s (200 ms)" in seen[0].status_label.text()
+    assert seen[0].edit_end_time.text() == "5.2"
+    assert seen[0].edit_add.text() == "5.0"
+    assert not seen[0].edit_add.isEnabled()
+    assert seen[0].edit_end_time.isEnabled()
+    assert project.stim_arrays["a"].values.shape[0] == 200
+
+
+@pytest.mark.parametrize("end_time", ["0.1", "0.125"])
+def test_pad_to_end_time_before_current_end_is_rejected(
+    qtbot, monkeypatch, qmessagebox_calls, end_time
+) -> None:
+    editor, project = _pad_test_editor(qtbot)
+    _answer_pad_dialog(monkeypatch, end_time, to_end_time=True)
+    editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 1
+    assert "not after the current end" in qmessagebox_calls[0]["text"]
+    assert "Trim input array" in qmessagebox_calls[0]["text"]
+    assert project.stim_arrays["a"].values.shape[0] == 125
+    assert editor.pad_stim_array_to_end_time is False
+
+
+def test_pad_by_less_than_half_a_sample_is_rejected_without_an_undo_step(
+    qtbot, monkeypatch, qmessagebox_calls
+) -> None:
+    editor, project = _pad_test_editor(qtbot)
+    history_length = len(project.history)
+    _answer_pad_dialog(monkeypatch, "0.0004", to_end_time=False)
+    editor.pad_stim_array()
+    assert len(qmessagebox_calls) == 1
+    assert "adds no sample" in qmessagebox_calls[0]["text"]
+    assert project.stim_arrays["a"].values.shape[0] == 125
+    assert len(project.history) == history_length
+
+
+def test_pad_to_end_time_is_one_undoable_step(qtbot, monkeypatch) -> None:
+    editor, project = _pad_test_editor(qtbot)
+    _answer_pad_dialog(monkeypatch, "1.5", to_end_time=True)
+    editor.pad_stim_array()
+    assert project.stim_arrays["a"].values.shape[0] == 1500
+    # The seconds-to-add default is kept for the add mode.
+    assert editor.pad_stim_array_secs == 5.0
+    editor.undo()
+    assert project.stim_arrays["a"].values.shape[0] == 125
+    assert project.stim_arrays["b"].values.shape[0] == 125
 
 
 def test_add_empty_stim_array_like_current_selects_a_fresh_copy(qtbot: QtBot) -> None:
@@ -2095,3 +2202,37 @@ def test_add_empty_stim_array_like_current_selects_a_fresh_copy(qtbot: QtBot) ->
     assert not np.any(fresh.values)
     assert (fresh.units, fresh.dt) == ("mV", 0.001)
     assert project.stim_arrays["a"].values[3, 1] == 2.0
+
+
+def test_routine_padding_is_fully_removed_by_the_end_of_run_trim(qtbot) -> None:
+    """#656: a dynamic routine pads the array ahead of its blocks and trims the
+    padding off when it ends. The pad used to grow every array but the trim
+    only the routine's own, so the other arrays kept the routine's padding:
+    the timeline stayed artificially long while the routine's array (the one
+    drawn in) ended early, so drawing only worked in its first part."""
+    stim_editor, project = _make_ramp_editor(qtbot)
+    project.add_stim_array(
+        StimArray(
+            "b",
+            neuroseq.stimulation.stim.StimType.Excitation,
+            np.zeros((200, 4)),
+            "mV",
+            0.001,
+        )
+    )
+    stim_editor.set_project(project, stim_to_select="a")
+    assert stim_editor.current_stim_modifier is not None
+    assert stim_editor.current_stim_modifier.stim_array.name == "a"
+
+    stim_editor.pad_stim_array_to(1.0)
+    assert project.stim_arrays["a"].values.shape[0] == 1000
+    assert project.stim_arrays["b"].values.shape[0] == 200
+
+    stim_editor.trim_stim_array_after(0.3)
+    assert project.stim_arrays["a"].values.shape[0] == 300
+    assert project.stim_arrays["b"].values.shape[0] == 200
+    assert project.max_time_secs == pytest.approx(0.3)
+    # The whole visible timeline can be drawn in.
+    assert stim_editor.stim_widget.n_timestamps == 300
+    stim_editor.draw_stim_region(slice(0, 1), slice(290, 294))
+    assert np.any(project.stim_arrays["a"].values[290:294, 0])

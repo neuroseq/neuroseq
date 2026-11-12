@@ -52,6 +52,8 @@ from neuroseq.utils import InteractMode
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWindow
+from neuroseq.visualization.data_widget import DataWidget
+from neuroseq.visualization.trace_widget import TraceWidget
 from tests.wait_timeout import WAIT_TIMEOUT_MS
 
 
@@ -1463,6 +1465,199 @@ def test_stim_trace_overlay_updates_when_selected_stim_changes(qtbot: QtBot) -> 
     assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
 
 
+def _overlay_values(widget) -> np.ndarray:
+    assert widget._stim_overlay_graphic is not None
+    return np.asarray(widget._stim_overlay_graphic.data.value)
+
+
+def _all_data_trace_overlay_gui(qtbot: QtBot) -> tuple[ProjectWorkspace, Project]:
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    project, _ = _stim_trace_overlay_project()
+    project.stim_arrays["stim"].values[2:4, 1] = 3.0
+    gui.update_project(project)
+    gui._apply_trace_selection("Experiment :: traces")
+    gui.cmb_data.setCurrentText("Experiment :: traces [trace]")
+    gui._view_actions[gui.data_widget].trigger()  # show the All data panel
+    assert gui.data_widget.trace_widget.n_neurons == 3
+    return gui, project
+
+
+def test_all_data_trace_overlay_toggles_independently(qtbot: QtBot) -> None:
+    """Issue #663: the All data panel's traces get their own input overlay."""
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    data_traces = gui.data_widget.trace_widget
+    assert data_traces._stim_overlay_graphic is None
+
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    assert data_traces._stim_overlay_array is project.stim_arrays["stim"]
+    rendered = _overlay_values(data_traces)
+    assert rendered.shape == (3, 10)
+    assert np.all(rendered[1, 2:4] == 3.0)
+    assert gui.trace_widget._stim_overlay_graphic is None
+    assert not gui.action_overlay_stim_on_traces.isChecked()
+    # Unlike the Neuron data toggle, the Stimuli panel stays put.
+    assert gui.stim_editor.isVisible()
+
+    gui.action_overlay_stim_on_traces.trigger()
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert data_traces._stim_overlay_graphic is None
+
+
+def test_trace_view_context_menu_toggles_overlay_and_syncs_toolbar(
+    qtbot: QtBot,
+) -> None:
+    gui, _ = _all_data_trace_overlay_gui(qtbot)
+    data_traces = gui.data_widget.trace_widget
+
+    data_traces._rebuild_custom_analysis_menu()
+    overlay_action = next(
+        a
+        for a in data_traces.context_menu.actions()
+        if a.text() == "Overlay input on traces"
+    )
+    assert not overlay_action.isChecked()
+    overlay_action.trigger()
+
+    assert data_traces.stim_overlay_enabled
+    assert data_traces._stim_overlay_graphic is not None
+    assert gui.action_overlay_stim_on_data_traces.isChecked()
+    assert not gui.action_overlay_stim_on_traces.isChecked()
+
+    gui.trace_widget._rebuild_custom_analysis_menu()
+    main_action = next(
+        a
+        for a in gui.trace_widget.context_menu.actions()
+        if a.text() == "Overlay input on traces"
+    )
+    main_action.trigger()
+    assert gui.action_overlay_stim_on_traces.isChecked()
+    assert gui.trace_widget._stim_overlay_graphic is not None
+    assert not gui.stim_editor.isVisible()
+
+
+def test_all_data_trace_overlay_follows_stim_edits_and_undo(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+
+    new_values = np.zeros((10, 3), dtype=np.float32)
+    new_values[5:7, 0] = 2.0
+    project.replace_stim_values("stim", new_values)
+
+    rendered = _overlay_values(data_traces)
+    assert np.all(rendered[0, 5:7] == 2.0)
+    assert np.all(rendered[1] == 0.0)
+
+    project.history.undo()
+
+    rendered = _overlay_values(data_traces)
+    assert np.all(rendered[0] == 0.0)
+    assert np.all(rendered[1, 2:4] == 3.0)
+
+
+def test_overlays_are_rebuilt_only_for_input_edits_in_shown_overlays(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Data group edits (and their undo/redo) and clearing the history do not
+    re-point the input overlays; an input edit does, and only views showing
+    the overlay rebuild their graphics."""
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+    refreshes: list[object] = []
+    for widget in (gui.trace_widget, data_traces):
+        original_set = widget.set_stim_overlay_data
+
+        def _counted_set(stim_array, original_set=original_set) -> None:
+            refreshes.append(stim_array)
+            original_set(stim_array)
+
+        monkeypatch.setattr(widget, "set_stim_overlay_data", _counted_set)
+
+    project.add_experiment(Experiment("Other", 1.0, [], []))
+    project.history.undo()
+    project.history.redo()
+    project.history.clear()
+    assert refreshes == []
+
+    rebuilt: list[object] = []
+    for widget in (gui.trace_widget, data_traces):
+        original = widget._rebuild_stim_overlay
+
+        def _counted(widget=widget, original=original) -> None:
+            rebuilt.append(widget)
+            original()
+
+        monkeypatch.setattr(widget, "_rebuild_stim_overlay", _counted)
+    project.replace_stim_values("stim", np.zeros((10, 3), dtype=np.float32))
+    assert refreshes == [project.stim_arrays["stim"]] * 2
+    # Only the view showing the overlay is rebuilt; the other just stores it.
+    assert rebuilt == [data_traces]
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim"]
+
+    # Undoing it re-points each view once, though the stim editor also
+    # re-announces its selection.
+    refreshes.clear()
+    project.history.undo()
+    assert len(refreshes) == 2
+    assert np.all(_overlay_values(data_traces)[1, 2:4] == 3.0)
+
+
+def test_all_data_trace_overlay_follows_selected_stim(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    project.add_stim_array(
+        StimArray(
+            "stim2",
+            StimType.Excitation,
+            np.full((10, 3), 5.0, dtype=np.float32),
+            "mV",
+            0.001,
+        )
+    )
+    gui.update_project(project)
+    gui.cmb_data.setCurrentText("Experiment :: traces [trace]")
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    gui.cmb_stim.setCurrentText("stim2")
+
+    assert (
+        gui.data_widget.trace_widget._stim_overlay_array is project.stim_arrays["stim2"]
+    )
+    assert np.all(_overlay_values(gui.data_widget.trace_widget) == 5.0)
+
+
+def test_detached_trace_views_keep_their_own_input_overlay(qtbot: QtBot) -> None:
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+
+    gui.detach_panel(gui.data_widget, keep_original=True)
+    data_copy = gui._detached_panel_windows[-1].panel_widget
+    assert isinstance(data_copy, DataWidget)
+    assert data_copy.trace_widget.stim_overlay_enabled
+    assert data_copy.trace_widget._stim_overlay_graphic is not None
+
+    gui.detach_panel(gui.trace_widget, keep_original=True)
+    trace_copy = gui._detached_panel_windows[-1].panel_widget
+    assert isinstance(trace_copy, TraceWidget)
+    assert not trace_copy.stim_overlay_enabled
+
+    trace_copy.set_stim_overlay_enabled(True)
+    data_copy.trace_widget.set_stim_overlay_enabled(False)
+    assert trace_copy._stim_overlay_graphic is not None
+    assert data_copy.trace_widget._stim_overlay_graphic is None
+    assert gui.data_widget.trace_widget._stim_overlay_graphic is not None
+
+    new_values = np.zeros((10, 3), dtype=np.float32)
+    new_values[0:2, 2] = 4.0
+    project.replace_stim_values("stim", new_values)
+
+    assert np.all(_overlay_values(trace_copy)[2, 0:2] == 4.0)
+
+
 def test_time_slider_highlights_stimulated_neurons_in_spatial_footprints(
     qtbot: QtBot,
 ) -> None:
@@ -1541,6 +1736,7 @@ def test_import_tif_with_new_segmentation_populates_spatial_footprint_panel(
         new_cellpose_result = imported
         imported_tif_paths: list[Any] = []
         imported_fps = 30.0
+        batch_imports: list[Any] = []
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1577,6 +1773,7 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         new_cellpose_result = None
         imported_tif_paths: list[Any] = []
         imported_fps = 30.0
+        batch_imports: list[Any] = []
 
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             return
@@ -1594,8 +1791,11 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
             self.project.cellpose_data = existing
             self.last_cellpose_import = existing
             self.spatial_footprint_widget = SimpleNamespace()
+            self.import_folders = None
 
-        def _append_experimental_data(self, experiment: Experiment) -> None:
+        def _append_experimental_data(
+            self, experiment: Experiment, *_videos: Any
+        ) -> None:
             appended.append(experiment)
 
         def _apply_cellpose_import_result(
@@ -1616,6 +1816,156 @@ def test_import_tif_reusing_loaded_segmentation_does_not_reset_spatial_footprint
         1: 1,
         2: 0,
     }
+
+
+def test_batch_tif_import_adds_one_data_group_per_file(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """#643: each imported file becomes its own data group (named after the
+    file, made unique and valid) with its own movie; failed files add
+    nothing. The whole batch, movies included, is one undo step."""
+    from neuroseq.importers.tif_import_dialog import TifBatchImport
+
+    def _trace() -> TraceData:
+        return TraceData(
+            "Simply averaged ROI traces",
+            np.zeros((2, 30), dtype=np.float32),
+            np.arange(2, dtype=np.uint32),
+            "fluorescence",
+            1 / 30.0,
+        )
+
+    class _FakeDialog:
+        experiment_name = "unused"
+        experiment_duration = 0.0
+        imported_data: list[Any] = []
+        new_cellpose_result = None
+        imported_tif_paths: list[Any] = []
+        imported_fps = 30.0
+        imported_channels = 1
+        imported_functional_channel = 1
+        batch_imports = [
+            TifBatchImport(tmp_path / "a.tif", "imported", [_trace()], 1.0),
+            TifBatchImport(tmp_path / "b.tif", "failed", message="bad"),
+            TifBatchImport(tmp_path / "sub" / "a.tif", "imported", [_trace()], 1.0),
+            # "Simulation" is reserved. ("::" in a file name is covered in
+            # test_data_names.py: Windows file names cannot contain ":".)
+            TifBatchImport(tmp_path / "Simulation.tif", "imported", [_trace()], 1.0),
+        ]
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    before = set(gui.project.experiments)
+
+    gui.btn_import_tif_clicked()
+
+    added = set(gui.project.experiments) - before
+    assert added == {"a", "a (2)", "Simulation (2)"}
+    videos = {video["name"]: video["paths"] for video in gui.project.calcium_videos}
+    assert videos["a"] == [str(tmp_path / "a.tif")]
+    assert videos["a (2)"] == [str(tmp_path / "sub" / "a.tif")]
+    assert gui.cmb_trace.currentText().startswith("Simulation (2) ::")
+    assert gui.project.get_data(
+        "Simulation (2) :: Simply averaged ROI traces", TraceData
+    )
+    assert gui.cmb_video.count() == 3
+
+    gui.project.history.undo()
+    assert set(gui.project.experiments) == before
+    assert gui.project.calcium_videos == []
+    assert gui.project.selected_calcium_video_id is None
+    assert gui.cmb_video.itemData(0) is None  # "No imaging data"
+
+    gui.project.history.redo()
+    assert set(gui.project.experiments) - before == added
+    assert [video["name"] for video in gui.project.calcium_videos] == [
+        "a",
+        "a (2)",
+        "Simulation (2)",
+    ]
+    assert gui.cmb_video.count() == 3
+    assert gui.cmb_video.currentData() == gui.project.calcium_videos[-1]["id"]
+
+
+def test_single_tif_import_adds_its_movie_in_the_same_undo_step(
+    qtbot: QtBot, monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    """Undoing a TIFF import also removes its movie; redo brings it back.
+    Cancelling the add-data dialog adds neither."""
+    trace = TraceData(
+        "Simply averaged ROI traces",
+        np.zeros((2, 30), dtype=np.float32),
+        np.arange(2, dtype=np.uint32),
+        "fluorescence",
+        1 / 30.0,
+    )
+
+    class _FakeDialog:
+        experiment_name = "rec"
+        experiment_duration = 1.0
+        imported_data = [trace]
+        new_cellpose_result = None
+        imported_tif_paths = [tmp_path / "rec.tif"]
+        imported_fps = 30.0
+        imported_channels = 1
+        imported_functional_channel = 1
+        batch_imports: list[Any] = []
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            return
+
+        def exec(self) -> QtWidgets.QDialog.DialogCode:
+            return QtWidgets.QDialog.DialogCode.Accepted
+
+    accept = {"value": True}
+
+    class _FakeAddDialog:
+        append_to_experiment = False
+
+        def __init__(self, experiment: Experiment, *args: Any, **kwargs: Any) -> None:
+            self.experiment = experiment
+
+        def exec(self) -> bool:
+            return accept["value"]
+
+    monkeypatch.setattr(
+        "neuroseq.importers.tif_import_dialog.TifImportDialog", _FakeDialog
+    )
+    monkeypatch.setattr(
+        "neuroseq.project_workspace.AddExperimentDataDialog", _FakeAddDialog
+    )
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+
+    accept["value"] = False
+    gui.btn_import_tif_clicked()
+    assert "rec" not in gui.project.experiments
+    assert gui.project.calcium_videos == []
+
+    accept["value"] = True
+    gui.btn_import_tif_clicked()
+    assert "rec" in gui.project.experiments
+    assert [video["name"] for video in gui.project.calcium_videos] == ["rec"]
+    assert gui.project.history.undo_label == "Add data group"
+
+    gui.project.history.undo()
+    assert "rec" not in gui.project.experiments
+    assert gui.project.calcium_videos == []
+    assert gui.cmb_video.itemData(0) is None
+
+    gui.project.history.redo()
+    assert "rec" in gui.project.experiments
+    assert [video["name"] for video in gui.project.calcium_videos] == ["rec"]
+    assert gui.cmb_video.currentData() == gui.project.calcium_videos[0]["id"]
 
 
 def test_spatial_footprint_empty_button_opens_cellpose_import(
@@ -3217,6 +3567,8 @@ def test_gui_export_igor2_pxp_stim_passes_unit_and_scaling(
 
 def _bind_import_helpers(fake_gui: Any) -> Any:
     """Give a SimpleNamespace GUI double the real import-completion helpers."""
+    if not hasattr(fake_gui, "import_folders"):
+        fake_gui.import_folders = None
     fake_gui._complete_import = MethodType(ProjectWorkspace._complete_import, fake_gui)
     fake_gui._complete_stimulus_import = MethodType(
         ProjectWorkspace._complete_stimulus_import, fake_gui
@@ -3264,7 +3616,7 @@ def test_stimulus_import_completion(
 
     getattr(ProjectWorkspace, handler)(window, path=path)
 
-    factory.assert_called_once_with(project, parent=window)
+    factory.assert_called_once_with(project, parent=window, import_folders=None)
     dialog.deleteLater.assert_called_once_with()
     expected = [call.load(str(path))] if with_path else []
     expected.append(call.execute())
@@ -3281,7 +3633,9 @@ def test_gui_import_igor2_wave_updates_selected_stim(
     project = Project()
 
     class MockPatchClampDataInputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
@@ -3359,7 +3713,9 @@ def test_gui_import_igor2_trace_updates_selected_trace(
     trace_widget.set_data = _set_trace_data
 
     class MockPatchClampDataOutputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
@@ -3464,7 +3820,9 @@ def test_gui_import_igor2_trace_refreshes_existing_selected_trace_plot(
     )
 
     class MockPatchClampDataOutputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             assert dialog_project is project
             self.project = dialog_project
             self.selected_experiment_name = "Experiment A"
@@ -3552,7 +3910,9 @@ def test_gui_imported_igor_stim_can_be_edited_by_click(
     monkeypatch: MonkeyPatch,
 ) -> None:
     class MockPatchClampDataInputImportDialog:
-        def __init__(self, dialog_project: Project, parent=None) -> None:
+        def __init__(
+            self, dialog_project: Project, parent=None, import_folders=None
+        ) -> None:
             self.project = dialog_project
             self.selected_stim_name = "igor_wave"
 
@@ -4704,3 +5064,56 @@ def test_file_export_offers_traces_and_spikes_as_numpy_arrays(
     for label in ("Traces as NumPy Array…", "Spikes as NumPy Array…"):
         actions[label].trigger()
     assert opened.call_count == 2
+
+
+def test_renaming_a_data_group_in_manage_data_updates_the_data_selectors(
+    qtbot: QtBot, test_experiments: list[Experiment]
+) -> None:
+    """#654: a rename in Manage Data shows up in the Data toolbar selectors."""
+    gui = ProjectWorkspace()
+    qtbot.addWidget(gui)
+    gui.project.add_experiment(test_experiments[0])
+    gui.update_project(gui.project)
+    trace_name = test_experiments[0].data[0].name
+    gui.btn_manage_data_clicked()
+    dialog = gui.findChild(DataManagerDialog)
+    assert dialog is not None
+
+    def items(combo: QtWidgets.QComboBox) -> list[str]:
+        return [combo.itemText(i) for i in range(combo.count())]
+
+    dialog.group_item("e1").setText(0, "Calcium")
+    qtbot.waitUntil(
+        lambda: f"Calcium :: {trace_name}" in items(gui.cmb_trace),
+        timeout=WAIT_TIMEOUT_MS,
+    )
+    assert all(not item.startswith("e1 ::") for item in items(gui.cmb_trace))
+    gui.project.history.undo()
+    qtbot.waitUntil(
+        lambda: f"e1 :: {trace_name}" in items(gui.cmb_trace),
+        timeout=WAIT_TIMEOUT_MS,
+    )
+    dialog.close()
+    gui._close_confirmed = True
+
+
+def test_overlay_follows_in_place_input_edits(qtbot: QtBot) -> None:
+    """Slice edits write into the same values buffer: the overlay must still
+    re-read them (the identity token alone would not notice)."""
+    from neuroseq.project_history import ProjectCommand
+
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+    values = project.stim_arrays["stim"].values
+
+    def _set(value: float) -> None:
+        values[0:2, 2] = value
+
+    project.history.execute(
+        ProjectCommand("Draw", lambda: _set(4.0), lambda: _set(0.0))
+    )
+    assert project.stim_arrays["stim"].values is values
+    assert np.all(_overlay_values(data_traces)[2, 0:2] == 4.0)
+    project.history.undo()
+    assert np.all(_overlay_values(data_traces)[2, 0:2] == 0.0)

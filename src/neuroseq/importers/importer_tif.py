@@ -228,6 +228,33 @@ def run_roi_average_pipeline(
     )
 
 
+#: Units of electrophysiology inputs (e.g. an imported patch-clamp wave):
+#: injected current or voltage does not light the imaging detectors.
+ELECTRICAL_UNITS = frozenset({"a", "ma", "ua", "µa", "na", "pa", "v", "mv", "uv", "µv"})
+#: An input non-zero in more than this fraction of its samples (e.g. a recorded,
+#: noisy current) is not pulsed light stimulation; suppressing against it would
+#: replace its whole length of the recording.
+MAX_ARTEFACT_ACTIVE_FRACTION = 0.9
+
+
+def suits_artefact_suppression(stim_array: StimArray) -> bool:
+    """Whether ``stim_array`` looks like pulsed (light) stimulation whose frames
+    artefact suppression should replace (#567).
+
+    False for electrophysiology inputs (current/voltage units, e.g. a
+    patch-clamp input wave) and for inputs that are active most of the time:
+    suppressing against those flattens long stretches of the calcium traces,
+    for example the whole length of a continuously non-zero recorded current.
+    """
+    if str(stim_array.units).strip().lower() in ELECTRICAL_UNITS:
+        return False
+    values = np.asarray(stim_array.values)
+    if values.size == 0:
+        return False
+    active = np.any(values.reshape(values.shape[0], -1) != 0, axis=1)
+    return bool(active.any()) and float(active.mean()) <= MAX_ARTEFACT_ACTIVE_FRACTION
+
+
 def stimulation_contaminated_frames(
     stim_array: StimArray,
     fs: float,

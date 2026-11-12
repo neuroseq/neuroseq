@@ -657,7 +657,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                     "Please redraw your inputs.",
                 )
                 self._log_status(
-                    "Set dt of '%s' to %s s and cleared all stimuli — please redraw.",
+                    "Set dt of '%s' to %s s and cleared all input values — please redraw.",
                     stim_name,
                     _SYSCON2_TTL_PULSE_QUANTUM_S,
                 )
@@ -688,7 +688,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             if stim_editor is not None and hasattr(stim_editor, "select_stim"):
                 stim_editor.select_stim(stim_name)
             self._log_status(
-                "Resampled stim '%s' from dt=%s s (%d samples) to dt=%s s "
+                "Resampled input array '%s' from dt=%s s (%d samples) to dt=%s s "
                 "(%d samples) via nearest-neighbor.",
                 stim_name,
                 old_dt,
@@ -714,7 +714,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             stim_array = self.project.stim_arrays[stim_name]
             self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
-                "Shifted stim '%s' right for initial SLM load-up.", stim_name
+                "Shifted input array '%s' right for initial SLM load-up.", stim_name
             )
 
         # 2. SLM gap: new neuron appears without enough gap for hologram reload.
@@ -731,7 +731,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             stim_array = self.project.stim_arrays[stim_name]
             self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
-                "Spaced out stim '%s' to resolve SLM gap violations.", stim_name
+                "Spaced out input array '%s' to resolve SLM gap violations.", stim_name
             )
 
         # 3. SLM off/on overlap: new-phase OFF window overlaps another neuron's ON.
@@ -750,7 +750,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             stim_array = self.project.stim_arrays[stim_name]
             self._warn_input_extended(stim_name, extended_samples, stim_array.dt)
             self._log_status(
-                "Spaced out stim '%s' to resolve SLM off/on overlap.", stim_name
+                "Spaced out input array '%s' to resolve SLM off/on overlap.", stim_name
             )
 
         # 4. Simultaneous duration mismatch: neurons fired together with unequal durations.
@@ -766,7 +766,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 return
             stim_array = self.project.stim_arrays[stim_name]
             self._log_status(
-                "Equalized simultaneous durations in stim '%s'.", stim_name
+                "Equalized simultaneous durations in input array '%s'.", stim_name
             )
 
         # 4b. Review overlap alignment before changing the project timeline.
@@ -781,7 +781,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
                 return
             stim_array = self.project.stim_arrays[stim_name]
             self._log_status(
-                "Aligned overlapping pulse groups in stim '%s'.", stim_name
+                "Aligned overlapping pulse groups in input array '%s'.", stim_name
             )
 
         sanity_report = self._input_sanity_report(stim_array)
@@ -977,7 +977,7 @@ class StimulationGeneratorDialog(QtWidgets.QDialog):
             f"Got {current_dt} s ({current_dt * 1e6:.4f} µs per tick).",
             "",
             "Choose how to resolve:",
-            "1) Clear array: set dt and blank all stimuli — you redraw from scratch.",
+            "1) Clear array: set dt and blank all input values — you redraw from scratch.",
             "2) Resample: nearest-neighbor resample the existing pattern onto the new "
             "tick grid, preserving it as closely as the new grid allows (undoable).",
             "3) Cancel",

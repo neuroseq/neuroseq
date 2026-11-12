@@ -11,12 +11,13 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.qt_helpers import StableSizeTabWidget
 from neuroseq.visualization.calcium_video_widget import CalciumVideoWidget
 from neuroseq.visualization.cell_overlay_widget import CellOverlayWidget
-from neuroseq.visualization.cell_overlay_widget import compute_segmentation_legend
 from neuroseq.visualization.fpl_widget import FPLWidget
 from neuroseq.visualization_support.brightness_contrast import BrightnessContrastDialog
 from neuroseq.visualization_support.brightness_contrast import DisplayRange
 from neuroseq.visualization_support.brightness_contrast import adjust_fov_and_overlay
 from neuroseq.visualization_support.cellpose_ids import cellpose_to_stim_id
+from neuroseq.visualization_support.footprint_colors import compose_footprint_overlay
+from neuroseq.visualization_support.footprint_colors import footprint_legend
 from neuroseq.visualization_support.spatial_footprint_state import SpatialFootprintState
 
 SELECTION_OUTLINE_RED = (0.9, 0.15, 0.15)
@@ -248,6 +249,8 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         layout.addWidget(self.checkbox_container)
 
         self._base_legend: list[tuple[int, tuple[int, int, int]]] = []
+        # cellpose_data.overlay_image recoloured with _base_legend.
+        self._footprint_overlay: np.ndarray | None = None
         self._brightness_contrast_dialog: BrightnessContrastDialog | None = None
         self._adjusted_cache: tuple[tuple, np.ndarray | None, np.ndarray] | None = None
         # Keep the connection handles (not just the callables) so close() can
@@ -334,6 +337,7 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         cellpose_data = self._state.cellpose_data
         if cellpose_data is None:
             self._base_legend = []
+            self._footprint_overlay = None
             self.overlay_widget.set_empty_message("No cell spatial footprints loaded.")
             self._update_overlay_visibility()
             self._update_empty_state_visibility()
@@ -351,9 +355,15 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         self._update_empty_state_visibility()
         self._update_overlay_visibility()
         self._update_checkbox_visibility()
-        self._base_legend = compute_segmentation_legend(
-            cellpose_data.segmentation_array
+        # Colour each cell like its neuron's traces (keyed by the neuron id
+        # the Cellpose mapping gives it, not its raw Cellpose id - #649), and
+        # re-blend the overlay with those colours: the stored overlay has
+        # colours keyed by Cellpose id baked in.
+        self._base_legend = footprint_legend(
+            cellpose_data.segmentation_array, cellpose_data
         )
+        self._footprint_overlay = self._compose_footprint_overlay(cellpose_data)
+        self._adjusted_cache = None
         self._refresh_overlay()
         aoi_config = cellpose_data.aoi_config
         self.show_shapes_checkbox.setEnabled(aoi_config is not None)
@@ -491,7 +501,11 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
         cellpose_data = self._cellpose_data
         assert cellpose_data is not None
         background = cellpose_data.background_image
-        overlay = cellpose_data.overlay_image
+        overlay = (
+            self._footprint_overlay
+            if self._footprint_overlay is not None
+            else cellpose_data.overlay_image
+        )
         key = (id(background), id(overlay), self._display_range)
         if self._adjusted_cache is not None and self._adjusted_cache[0] == key:
             return self._adjusted_cache[1], self._adjusted_cache[2]
@@ -506,6 +520,27 @@ class SpatialFootprintWidget(QtWidgets.QWidget):
             assert adjusted_background is not None
             self._adjusted_cache = (key, adjusted_background, adjusted_overlay)
         return adjusted_background, adjusted_overlay
+
+    def _compose_footprint_overlay(
+        self, cellpose_data: CellposeImportResult
+    ) -> np.ndarray | None:
+        """The stored overlay recoloured with ``_base_legend``, or None to
+        keep the stored one (no raw FOV to blend over, or a different shape)."""
+        background = cellpose_data.background_image
+        overlay = cellpose_data.overlay_image
+        if (
+            background is None
+            or background.dtype != np.uint8
+            or background.ndim != 3
+            or background.shape != overlay.shape
+        ):
+            return None
+        return compose_footprint_overlay(
+            background,
+            cellpose_data.segmentation_array,
+            self._base_legend,
+            OVERLAY_CELL_OPACITY,
+        )
 
     def _composed_overlay_image(self) -> np.ndarray:
         cellpose_data = self._cellpose_data

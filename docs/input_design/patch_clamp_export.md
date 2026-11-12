@@ -1,4 +1,4 @@
-# Export stimuli for patch clamp
+# Export input for patch clamp
 
 **File → Export → Patch Clamp Input** writes input arrays for acquisition
 software. First choose the format:
@@ -16,7 +16,7 @@ scaling factor accepts forms like `1e-12` or `2.5*10^(-12)`.
 
 ## Loading a template in the amplifier software
 
-SutterPatch runs Sutter amplifiers inside Igor Pro. Stimuli are built in the
+SutterPatch runs Sutter amplifiers inside Igor Pro. Input waveforms are built in the
 **Routine Editor**: one segment of type **Template** is enough.
 
 1. Export the neuron's waveform as `.ibw` (or `.csv`).
