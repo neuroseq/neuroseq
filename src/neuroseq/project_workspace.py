@@ -419,6 +419,9 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
         # Movies the Imaging views were last refreshed for (see
         # _project_history_changed).
         self._calcium_videos_shown: tuple = ()
+        # The input array (identity, values buffer, dt) the trace overlays
+        # last showed (see _refresh_stim_overlays).
+        self._stim_overlay_token: tuple | None = None
         self._background_job = BackgroundJob(self)
         self._background_job_label = ""
         self._close_gate = WorkspaceCloseGate(self)
@@ -1363,9 +1366,13 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
             if self._calcium_videos_state() != videos_before:
                 # Imported data and its movies are undone/redone together.
                 self._refresh_calcium_video_widgets()
-        # Any edit, undo or redo may have changed the input values that the
-        # trace views overlay (issue #663).
-        self._refresh_stim_overlays(self._current_stim_array())
+        # An edit, undo or redo of an input array may have changed the
+        # values the trace views overlay (issue #663); other edits (data
+        # groups) and clearing the history cannot.
+        command = self.project.history.last_command
+        if event != "clear" and command is not None and command.affects_inputs:
+            # Forced: slice edits change the values in place.
+            self._refresh_stim_overlays(self._current_stim_array(), force=True)
 
     def _warn_if_cellpose_model_mismatch(self) -> None:
         """Warn when Cellpose data is present but its cell count differs from the
@@ -1626,10 +1633,24 @@ class ProjectWorkspace(QtWidgets.QMainWindow):
                 widgets.append(widget)
         return widgets
 
-    def _refresh_stim_overlays(self, stim_array: StimArray | None) -> None:
+    def _refresh_stim_overlays(
+        self, stim_array: StimArray | None, *, force: bool = False
+    ) -> None:
         """Point every trace view's input overlay at the selected input
         array (re-reading its values, e.g. after an edit or undo). Views
-        with the overlay switched off only store the array."""
+        with the overlay switched off only store the array.
+
+        Skipped when the same array, values buffer and dt are already shown
+        (the stim editor re-announces its selection after every undo/redo),
+        unless ``force``d after an input edit."""
+        token = (
+            None
+            if stim_array is None
+            else (id(stim_array), id(stim_array.values), float(stim_array.dt))
+        )
+        if not force and token == self._stim_overlay_token:
+            return
+        self._stim_overlay_token = token
         for widget in self._stim_overlay_trace_widgets():
             widget.set_stim_overlay_data(stim_array)
 

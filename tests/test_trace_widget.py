@@ -2309,3 +2309,29 @@ def test_trace_widget_time_readouts_follow_visible_span(
     # Without a camera the whole recording is the visible span.
     widget.controller = None
     assert widget.visible_time_span_ms() == pytest.approx(100 * widget.dt_ms)
+
+
+def test_stim_overlay_data_is_only_stored_while_the_overlay_is_off(
+    qtbot: QtBot, make_trace_data, monkeypatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    rebuilds: list[int] = []
+    original = trace_widget._rebuild_stim_overlay
+
+    def _counted() -> None:
+        rebuilds.append(1)
+        original()
+
+    monkeypatch.setattr(trace_widget, "_rebuild_stim_overlay", _counted)
+    stim = _stim_array()
+
+    trace_widget.set_stim_overlay_data(stim)
+    assert rebuilds == []
+    assert trace_widget._stim_overlay_array is stim
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_stim_overlay_data(stim)
+    assert len(rebuilds) == 2
+    assert trace_widget._stim_overlay_graphic is not None

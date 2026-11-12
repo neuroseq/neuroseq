@@ -888,8 +888,18 @@ class TraceWidget(TimeseriesWidget):
         self.stim_overlay_toggled.emit(enabled)
 
     def set_stim_overlay_data(self, stim_array: StimArray | None) -> None:
+        """Overlay ``stim_array`` (re-reading its values). With the overlay
+        off it is only stored, for when the overlay is switched on."""
         self._stim_overlay_array = stim_array
-        self._rebuild_stim_overlay()
+        if self._stim_overlay_enabled or self._has_stim_overlay_graphics():
+            self._rebuild_stim_overlay()
+
+    def _has_stim_overlay_graphics(self) -> bool:
+        return (
+            self._stim_overlay_graphic is not None
+            or self._stim_onset_graphic is not None
+            or bool(self._stim_overlay_row_graphics)
+        )
 
     def _rebuild_stim_overlay(self) -> None:
         for graphic in (

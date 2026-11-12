@@ -1559,6 +1559,54 @@ def test_all_data_trace_overlay_follows_stim_edits_and_undo(qtbot: QtBot) -> Non
     assert np.all(rendered[1, 2:4] == 3.0)
 
 
+def test_overlays_are_rebuilt_only_for_input_edits_in_shown_overlays(
+    qtbot: QtBot, monkeypatch: MonkeyPatch
+) -> None:
+    """Data group edits (and their undo/redo) and clearing the history do not
+    re-point the input overlays; an input edit does, and only views showing
+    the overlay rebuild their graphics."""
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+    refreshes: list[object] = []
+    for widget in (gui.trace_widget, data_traces):
+        original_set = widget.set_stim_overlay_data
+
+        def _counted_set(stim_array, original_set=original_set) -> None:
+            refreshes.append(stim_array)
+            original_set(stim_array)
+
+        monkeypatch.setattr(widget, "set_stim_overlay_data", _counted_set)
+
+    project.add_experiment(Experiment("Other", 1.0, [], []))
+    project.history.undo()
+    project.history.redo()
+    project.history.clear()
+    assert refreshes == []
+
+    rebuilt: list[object] = []
+    for widget in (gui.trace_widget, data_traces):
+        original = widget._rebuild_stim_overlay
+
+        def _counted(widget=widget, original=original) -> None:
+            rebuilt.append(widget)
+            original()
+
+        monkeypatch.setattr(widget, "_rebuild_stim_overlay", _counted)
+    project.replace_stim_values("stim", np.zeros((10, 3), dtype=np.float32))
+    assert refreshes == [project.stim_arrays["stim"]] * 2
+    # Only the view showing the overlay is rebuilt; the other just stores it.
+    assert rebuilt == [data_traces]
+    assert gui.trace_widget._stim_overlay_array is project.stim_arrays["stim"]
+
+    # Undoing it re-points each view once, though the stim editor also
+    # re-announces its selection.
+    refreshes.clear()
+    project.history.undo()
+    assert len(refreshes) == 2
+    assert np.all(_overlay_values(data_traces)[1, 2:4] == 3.0)
+
+
 def test_all_data_trace_overlay_follows_selected_stim(qtbot: QtBot) -> None:
     gui, project = _all_data_trace_overlay_gui(qtbot)
     project.add_stim_array(
@@ -5048,3 +5096,25 @@ def test_renaming_a_data_group_in_manage_data_updates_the_data_selectors(
     )
     dialog.close()
     gui._close_confirmed = True
+
+
+def test_overlay_follows_in_place_input_edits(qtbot: QtBot) -> None:
+    """Slice edits write into the same values buffer: the overlay must still
+    re-read them (the identity token alone would not notice)."""
+    from neuroseq.project_history import ProjectCommand
+
+    gui, project = _all_data_trace_overlay_gui(qtbot)
+    gui.action_overlay_stim_on_data_traces.trigger()
+    data_traces = gui.data_widget.trace_widget
+    values = project.stim_arrays["stim"].values
+
+    def _set(value: float) -> None:
+        values[0:2, 2] = value
+
+    project.history.execute(
+        ProjectCommand("Draw", lambda: _set(4.0), lambda: _set(0.0))
+    )
+    assert project.stim_arrays["stim"].values is values
+    assert np.all(_overlay_values(data_traces)[2, 0:2] == 4.0)
+    project.history.undo()
+    assert np.all(_overlay_values(data_traces)[2, 0:2] == 0.0)

@@ -474,7 +474,10 @@ class Project:
                 if remove_videos is not None:
                     remove_videos()
 
-            self.history.record_applied(ProjectCommand(label, do, undo_command))
+            # Data groups and movies only: input arrays are untouched.
+            self.history.record_applied(
+                ProjectCommand(label, do, undo_command, affects_inputs=False)
+            )
 
     def set_syscon_export_settings(self, settings: SysconExportSettings | None) -> None:
         """Store the holographic export options used by the SysCon2 panel and routines."""
