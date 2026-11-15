@@ -708,13 +708,11 @@ def test_empty_imaging_experiment_is_safe_in_gui_and_import_selector(qtbot):
         assert all("Imaging" not in combo.itemText(i) for i in range(combo.count()))
     manager = DataManagerDialog(gui.project)
     qtbot.addWidget(manager)
-    row = next(
-        i
-        for i in range(manager.table.rowCount())
-        if manager.table.item(i, 0).text() == "Imaging"
-    )
-    manager.table.selectRow(row)
-    assert manager.table.item(row, 2).text() == "0"
+    item = manager.group_item("Imaging")
+    assert item is not None
+    item.setSelected(True)
+    assert item.childCount() == 0
+    assert item.text(3) == "0 data set(s)"
     dialog = AddExperimentDataDialog(Experiment("Import", 1, [], []), gui.project)
     qtbot.addWidget(dialog)
     dialog.cmb_experiments.setCurrentText("Imaging")

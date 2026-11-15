@@ -16,6 +16,16 @@ class _FakeSettings:
         self.llm_openai_base_url = ""
         self.llm_codex_executable = ""
         self.llm_claude_executable = ""
+        self.llm_private_project_data: dict[str, bool] = {}
+
+    def llm_project_data_private(self, provider: str) -> bool:
+        return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
+
+    def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        self.llm_private_project_data = {
+            **self.llm_private_project_data,
+            provider: private,
+        }
 
 
 def _make_dialog(qtbot: QtBot, monkeypatch) -> LLMSettingsDialog:
@@ -175,3 +185,46 @@ def test_test_connection_button_calls_is_available(
     dialog.test_button.click()
 
     assert "no server" in dialog.status_label.text()
+
+
+def test_private_data_checkbox_defaults_per_provider_and_persists(
+    qtbot: QtBot, monkeypatch
+) -> None:
+    settings = _FakeSettings()
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog = LLMSettingsDialog()
+    qtbot.addWidget(dialog)
+    changed = []
+    dialog.settings_changed.connect(lambda: changed.append(True))
+
+    # Local Ollama shares data by default, hosted providers do not.
+    assert not dialog.private_data_check.isChecked()
+    dialog.provider_combo.setCurrentText("Anthropic")
+    assert dialog.private_data_check.isChecked()
+
+    dialog.private_data_check.setChecked(False)
+    assert settings.llm_private_project_data == {"anthropic": False}
+    assert changed
+
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert dialog.private_data_check.isChecked()
+    dialog.provider_combo.setCurrentText("Anthropic")
+    assert not dialog.private_data_check.isChecked()
+
+
+def test_codex_privacy_warning_shows_only_for_codex(qtbot: QtBot, monkeypatch) -> None:
+    settings = _FakeSettings()
+    monkeypatch.setattr(
+        "neuroseq.llm.llm_settings_dialog.GuiSettings", lambda: settings
+    )
+    dialog = LLMSettingsDialog()
+    qtbot.addWidget(dialog)
+
+    assert dialog.codex_privacy_label.isHidden()
+    dialog.provider_combo.setCurrentText("Codex (local sign-in)")
+    assert not dialog.codex_privacy_label.isHidden()
+    assert "OpenAI" in dialog.codex_privacy_label.text()
+    dialog.provider_combo.setCurrentText("Anthropic")
+    assert dialog.codex_privacy_label.isHidden()

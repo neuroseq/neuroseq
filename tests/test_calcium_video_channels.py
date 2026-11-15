@@ -105,13 +105,15 @@ def test_gui_keeps_the_channel_choice_per_video(
 
 
 def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) -> None:
-    """Issue #596: the video shows each mapped cell's neuron id."""
+    """Issue #596: the video labels each cell with the neuron id its traces
+    get; a cell the mapping leaves out shows its fallback id (2 here, which
+    no mapped cell uses), as its footprint colour does."""
     from neuroseq.importers.importer_cellpose import CellposeImportResult
 
     segmentation = -np.ones((4, 4), dtype=np.int32)
     segmentation[0:2, 0:2] = 0
     segmentation[2:4, 2:4] = 1
-    segmentation[0, 3] = 2  # not mapped to a neuron
+    segmentation[0, 3] = 2  # not in the mapping: keeps its own id 2
     cellpose = CellposeImportResult(
         image_path=tmp_path / "cells.png",
         segmentation_array=segmentation,
@@ -129,8 +131,8 @@ def test_video_labels_cells_with_their_neuron_ids(qtbot: QtBot, tmp_path: Path) 
     widget.set_video_paths([path], 10.0, warn_if_missing_cellpose=False)
 
     labels = {g.text: tuple(g.offset[:2]) for g in widget._id_label_graphics}
-    assert labels == {"7": (0.5, 0.5), "3": (2.5, 2.5)}
+    assert labels == {"7": (0.5, 0.5), "3": (2.5, 2.5), "2": (3.0, 0.0)}
     widget.ids_checkbox.setChecked(False)
     assert widget._id_label_graphics == []
     widget.ids_checkbox.setChecked(True)
-    assert len(widget._id_label_graphics) == 2
+    assert len(widget._id_label_graphics) == 3

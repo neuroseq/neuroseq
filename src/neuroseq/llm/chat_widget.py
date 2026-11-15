@@ -163,6 +163,26 @@ class _ChatWorker(QtCore.QThread):
             self.error.emit(f"Internal error: {e!r}")
 
 
+class _SettingsBroadcast(QtCore.QObject):
+    changed = QtCore.Signal()
+
+
+_broadcast: _SettingsBroadcast | None = None
+
+
+def _settings_broadcast() -> _SettingsBroadcast:
+    global _broadcast
+    if _broadcast is None:
+        _broadcast = _SettingsBroadcast()
+    return _broadcast
+
+
+def notify_llm_settings_changed() -> None:
+    """Tell every open chat panel (docked, detached, in any project tab) to
+    pick up the current LLM settings, so none shows a stale provider."""
+    _settings_broadcast().changed.emit()
+
+
 class ChatWidget(QtWidgets.QWidget):
     request_settings_dialog = QtCore.Signal()
 
@@ -177,11 +197,16 @@ class ChatWidget(QtWidgets.QWidget):
         self._backend: LLMBackend | None = None
         self._backend_name = ""
         self._backend_model = ""
+        self._private_data = True
+        self._settings_key: tuple[object, ...] = ()
+        self._destination: tuple[str, str] | None = None
+        self._notice_html = ""
         self._current_assistant_buffer = ""
         self._transient_assistant_html: str | None = None
         self._static_prompt = build_static_prompt()
         self._build_ui()
         self.reload_backend()
+        _settings_broadcast().changed.connect(self._refresh_settings)
 
     def _build_ui(self) -> None:
         layout = QtWidgets.QVBoxLayout(self)
@@ -238,10 +263,71 @@ class ChatWidget(QtWidgets.QWidget):
     ) -> bool:
         return confirm_plugin_write(target, content, previous, parent=self)
 
-    def reload_backend(self) -> None:
+    @staticmethod
+    def _settings_key_of(settings: GuiSettings) -> tuple[object, ...]:
+        return (
+            settings.llm_provider,
+            settings.llm_model,
+            settings.llm_ollama_base_url,
+            settings.llm_openai_base_url,
+            settings.llm_codex_executable,
+            settings.llm_claude_executable,
+            settings.llm_project_data_private(settings.llm_provider),
+        )
+
+    def _refresh_settings(self) -> None:
+        """Pick up settings changed elsewhere (another tab, a detached panel)."""
         settings = GuiSettings()
+        if self._settings_key_of(settings) != self._settings_key:
+            self.reload_backend(settings)
+
+    @staticmethod
+    def _destination_of(settings: GuiSettings) -> tuple[str, str]:
+        endpoint = {
+            "ollama": settings.llm_ollama_base_url,
+            "openai": settings.llm_openai_base_url,
+        }.get(settings.llm_provider, "")
+        return settings.llm_provider, endpoint
+
+    def copy_conversation_from(self, source: ChatWidget) -> None:
+        """Continue ``source``'s chat, applying the history rule of ``reload_backend``."""
+        self._history = list(source._history)
+        self._destination = source._destination
+        self._private_data = source._private_data
+        self.reload_backend()
+        self._render_history()
+
+    def _clear_history_note(self, settings: GuiSettings) -> str:
+        if not self._history:
+            return ""
+        if self._destination and self._destination != self._destination_of(settings):
+            return "Chat history cleared: the LLM provider changed."
+        if not self._private_data and settings.llm_project_data_private(
+            settings.llm_provider
+        ):
+            return "Chat history cleared: project data is no longer shared."
+        return ""
+
+    def reload_backend(self, settings: GuiSettings | None = None) -> None:
+        if self._worker is not None:
+            # Applied when the stream finishes, so its reply is not orphaned.
+            return
+        settings = settings or GuiSettings()
+        # Earlier answers may contain project data; never resend them to a
+        # different provider or after sharing was turned off.
+        note = self._clear_history_note(settings)
+        if note:
+            self._history.clear()
+            self._transient_assistant_html = None
+            self._notice_html = (
+                f"<div class='msg notice'><pre>{html.escape(note)}</pre></div>"
+            )
+            self._render_history()
+        self._destination = self._destination_of(settings)
+        self._settings_key = self._settings_key_of(settings)
         self._backend_name = settings.llm_provider
         self._backend_model = settings.llm_model
+        self._private_data = settings.llm_project_data_private(settings.llm_provider)
         try:
             self._backend = self._make_backend(settings)
             ok, reason = self._backend.is_available()
@@ -272,7 +358,20 @@ class ChatWidget(QtWidgets.QWidget):
         label = self._backend_name.capitalize() if self._backend_name else "LLM"
         if self._backend_name == "ollama":
             label = "Ollama"
-        self.badge_label.setText(f"{label} · {self._backend_model}")
+        suffix = ""
+        tooltip = ""
+        if self._private_data and self._backend_name == "codex":
+            # Codex's own tools can still read files, so promise less.
+            suffix = " · NeuroSeq data not shared"
+            tooltip = (
+                "NeuroSeq does not send project data, but Codex can still read "
+                "files on disk with its own tools. Use OpenAI, Claude Code or "
+                "Ollama to keep project data private."
+            )
+        elif self._private_data:
+            suffix = " · data not shared"
+        self.badge_label.setText(f"{label} · {self._backend_model}{suffix}")
+        self.badge_label.setToolTip(tooltip)
 
     def _update_input_enabled(self) -> None:
         enabled = self._backend is not None and self._worker is None
@@ -287,7 +386,12 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_send_clicked(self) -> None:
         text = self.input_edit.toPlainText().strip()
-        if not text or self._worker is not None or self._backend is None:
+        if not text or self._worker is not None:
+            return
+        # Every chat panel re-reads the settings before sending, so detached
+        # panels and other tabs never use a stale provider or privacy flag.
+        self._refresh_settings()
+        if self._backend is None:
             return
         self.input_edit.clear()
         self._history.append(Message(Role.USER, text))
@@ -304,7 +408,7 @@ class ChatWidget(QtWidgets.QWidget):
             + "\n"
             + READ_INSTRUCTIONS
             + "\n"
-            + build_context_snapshot(self._project)
+            + build_context_snapshot(self._project, private_data=self._private_data)
         )
         messages = [Message(Role.SYSTEM, system_content), *self._history]
         self._worker = _ChatWorker(
@@ -316,6 +420,7 @@ class ChatWidget(QtWidgets.QWidget):
             self._project,
             confirm_write=self._confirm_plugin_write,
             is_busy=self._busy_check,
+            private_data=self._private_data,
         )
         self._worker.read_requested.connect(self._on_read_requested)
         self._worker.token.connect(self._on_token)
@@ -358,12 +463,18 @@ class ChatWidget(QtWidgets.QWidget):
             self._worker = None
 
     def _on_worker_finished(self) -> None:
-        self._history.append(Message(Role.ASSISTANT, self._current_assistant_buffer))
+        # Stop before the first token leaves nothing to keep; an empty
+        # assistant message would be rejected by later Anthropic requests.
+        if self._current_assistant_buffer.strip():
+            self._history.append(
+                Message(Role.ASSISTANT, self._current_assistant_buffer)
+            )
         self._transient_assistant_html = None
         self._current_assistant_buffer = ""
         self._cleanup_worker()
         self._set_status("Idle")
         self._render_history()
+        self._refresh_settings()
         self._update_input_enabled()
 
     def _on_worker_error(self, message: str) -> None:
@@ -395,6 +506,7 @@ class ChatWidget(QtWidgets.QWidget):
     def _on_clear_clicked(self) -> None:
         self._history.clear()
         self._transient_assistant_html = None
+        self._notice_html = ""
         self.history_view.clear()
         self._set_status("Idle")
 
@@ -417,8 +529,10 @@ class ChatWidget(QtWidgets.QWidget):
             .error { color: #b42318; }
             .title { font-weight: 600; margin-bottom: 4px; }
             pre { white-space: pre-wrap; margin: 0; font-family: inherit; }
+            .notice { color: #667085; font-style: italic; }
             </style>
-            """
+            """,
+            self._notice_html,
         ]
         for message in self._history:
             parts.append(self._render_message_html(message.role, message.content))

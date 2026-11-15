@@ -184,7 +184,7 @@ def _validate_object_properties(props: dict[str, str], block_index: int) -> None
 def _check_allocation(n_timepoints: int, n_neurons: int, itemsize: int = 4) -> None:
     if n_timepoints * n_neurons * itemsize > _MAX_IMPORT_BYTES:
         raise ValueError(
-            "Sequence would require more than 512 MiB for its stimulus array. Reduce duration or target channel count before importing."
+            "Sequence would require more than 512 MiB for its input array. Reduce duration or target channel count before importing."
         )
 
 
@@ -439,10 +439,6 @@ def _ttl_pulse_duration_us(
     _ = tick_resolution_us  # TTLPulse duration is always in 520.8125 µs quanta
     duration_ticks = max(1, obj.repeats + 1)
     return float(duration_ticks) * _SYSCON2_TTL_PULSE_QUANTUM_US
-
-
-def _time_us_to_tick(time_us: float) -> int:
-    return int(np.rint(time_us / _SYSCON2_TTL_PULSE_QUANTUM_US))
 
 
 def _shape_object_duration_us(

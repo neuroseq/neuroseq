@@ -867,7 +867,7 @@ def test_modeldialog_accept_declines_simulation_data_removal(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    b2_model_nmda.checkpoints.append("Existing checkpoint")
+    b2_model_nmda.store("Existing checkpoint")
     diag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(diag)
 
@@ -895,7 +895,7 @@ def test_modeldialog_accept_confirms_simulation_data_removal(
     qtbot: QtBot,
     monkeypatch: MonkeyPatch,
 ) -> None:
-    b2_model_nmda.checkpoints.append("Existing checkpoint")
+    b2_model_nmda.store("Existing checkpoint")
     diag = ModelEditorDialog(b2_model_nmda)
     qtbot.addWidget(diag)
 
@@ -1072,3 +1072,17 @@ def test_model_editor_is_tabbed_with_description_column(qtbot: QtBot) -> None:
     # a model parameter is described from the shared registry
     params = mdiag.trees["Parameters"]
     assert "trace" in _find(params, "taupre").text(2).lower()
+
+
+def test_model_editor_copy_does_not_share_stored_state(
+    b2_model_nmda: B2Model,
+    qtbot: QtBot,
+) -> None:
+    b2_model_nmda.network.store("checkpoint")
+    mdiag = ModelEditorDialog(b2_model_nmda)
+    qtbot.addWidget(mdiag)
+
+    edited_state = mdiag.b2model.network._stored_state
+    assert edited_state is not b2_model_nmda.network._stored_state
+    edited_state["only in copy"] = {}
+    assert "only in copy" not in b2_model_nmda.network._stored_state

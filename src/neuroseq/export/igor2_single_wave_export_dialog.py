@@ -5,6 +5,7 @@ from qtpy import QtCore
 from qtpy import QtWidgets
 
 from neuroseq.stimulation.stim import StimArray
+from neuroseq.stimulation.stim import StimType
 from neuroseq.utils import detect_period
 from neuroseq.utils import parse_number
 
@@ -34,6 +35,11 @@ class Igor2SingleWaveExportDialog(QtWidgets.QDialog):
             QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
         )
         form.addRow("Input array:", stim_name_label)
+        if self.stim_array.stim_type == StimType.Inhibition:
+            form.addRow(
+                "",
+                QtWidgets.QLabel("Inhibitory array: values are negated (x -1)."),
+            )
 
         self.neuron_combo = QtWidgets.QComboBox()
         for neuron_index in range(int(self.stim_array.values.shape[1])):

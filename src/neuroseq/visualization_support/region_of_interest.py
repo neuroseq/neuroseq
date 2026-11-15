@@ -4,7 +4,7 @@ import pygfx
 from fastplotlib import Graphic
 from fastplotlib.utils import mesh_masks
 
-from neuroseq.stimulation.stim_timing import format_milliseconds
+from neuroseq.visualization_support.time_format import format_time_ms
 
 
 class RegionOfInterest(Graphic):
@@ -53,6 +53,7 @@ class RegionOfInterest(Graphic):
         time_index_slice: slice,
         dt_ms: float,
         label_neuron_range: tuple[int, int] | None = None,
+        span_ms: float | None = None,
     ):
         label_start, label_stop = (
             label_neuron_range
@@ -64,10 +65,14 @@ class RegionOfInterest(Graphic):
             if label_stop > label_start + 1
             else f"Neuron {label_start}"
         )
+        # Precision follows the visible range (the selection's own width
+        # when unknown) - see format_time_ms().
+        start_ms = time_index_slice.start * dt_ms
+        stop_ms = time_index_slice.stop * dt_ms
+        span = span_ms if span_ms is not None else stop_ms - start_ms
         self.text.set_text(
             f"{neuron_text}\n"
-            f"{format_milliseconds(time_index_slice.start * dt_ms)}ms-"
-            f"{format_milliseconds(time_index_slice.stop * dt_ms)}ms"
+            f"{format_time_ms(start_ms, span)} - {format_time_ms(stop_ms, span)}"
         )
         self.text.world.position = (
             dt_ms * (time_index_slice.stop + time_index_slice.start) / 2,

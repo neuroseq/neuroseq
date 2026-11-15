@@ -122,7 +122,7 @@ def test_pynn_helpers_and_stim_to_spike_times() -> None:
     assert np.array_equal(spikes[0], np.array([150.0, 350.0]))
     assert np.array_equal(spikes[1], np.array([150.0, 350.0]))
 
-    with pytest.raises(ValueError, match="Stim dt must be > 0"):
+    with pytest.raises(ValueError, match="Input dt must be > 0"):
         simulator._stim_to_spike_times(
             stims_dict={"opsin": {"array": np.array([1.0]), "dt": 0.0}},
             simulation_time=0.1,

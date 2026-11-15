@@ -12,6 +12,7 @@ from neuroseq.stimulation.static_input.stim_patterns import generate_ramp
 from neuroseq.stimulation.static_input.stim_patterns import generate_sequential
 from neuroseq.stimulation.static_input.stim_patterns import generate_simultaneous
 from neuroseq.stimulation.static_input.stim_patterns import parse_neuron_indices
+from neuroseq.stimulation.static_input.stim_patterns import pattern_total_samples
 from neuroseq.stimulation.stim import DrawStimType
 
 
@@ -453,3 +454,91 @@ def test_elise_model_reuses_stim_pattern_note_sequence() -> None:
     from neuroseq.stimulation.static_input import stim_patterns
 
     assert elise_model._FUER_ELISE_INTRO is stim_patterns.FUER_ELISE_INTRO
+
+
+@pytest.mark.parametrize(
+    "generate",
+    [
+        lambda: generate_simultaneous(2, 5.0, 10.0, 1.0, 1, 0.0166),
+        lambda: generate_ramp(2, 5.0, 0.0, 0.0, 1.0, 1, 0.0166),
+        lambda: generate_sequential(2, 5.0, 10.0, 1.0, 0.0166),
+    ],
+)
+def test_pulse_shorter_than_one_sample_is_rejected(generate) -> None:
+    """A pulse that rounds to 0 samples would write an all-zero block over
+    existing stimuli (or an empty ramp): refuse it with a message the pattern
+    dialog shows."""
+    with pytest.raises(ValueError, match="shorter than one sample"):
+        generate()
+
+
+def test_pattern_durations_round_half_up_like_the_rest_of_neuroseq() -> None:
+    """Python's round() rounds 0.5 and 2.5 to even (0 and 2 samples); the stim
+    timing helpers round half up, so a 2.5 ms pulse at 1 ms dt is 3 samples."""
+    assert (
+        pattern_total_samples(pulse_ms=2.5, ipi_ms=0.5, repeats=1, dt_seconds=0.001)
+        == 4
+    )
+
+
+def test_too_short_pulse_message_suggests_one_full_sample() -> None:
+    with pytest.raises(ValueError, match=r"use at least 16\.6 ms"):
+        generate_sequential(2, 5.0, 10.0, 1.0, 0.0166)
+
+
+def test_per_neuron_duration_gradient_steps_pulse_length() -> None:
+    values = generate_per_neuron(
+        neuron_index=[0, 2],
+        n_neurons=3,
+        pulse_ms=2.0,
+        ipi_ms=1.0,
+        profile=DrawStimType.Linear,
+        value1=1.0,
+        value2=3.0,
+        repeats=3,
+        dt_seconds=0.001,
+        end_pulse_ms=6.0,
+    )
+    # Pulses of 2, 4 and 6 samples, each followed by one sample of interval.
+    assert values.shape == (2 + 1 + 4 + 1 + 6 + 1, 3)
+    column = values[:, 0].tolist()
+    assert column == [1, 1, 0, 2, 2, 2, 2, 0, 3, 3, 3, 3, 3, 3, 0]
+    np.testing.assert_array_equal(values[:, 2], values[:, 0])
+    assert not values[:, 1].any()
+
+
+def test_per_neuron_duration_gradient_can_shorten_pulses() -> None:
+    values = generate_per_neuron(
+        neuron_index=0,
+        n_neurons=1,
+        pulse_ms=3.0,
+        ipi_ms=0.0,
+        profile=DrawStimType.Constant,
+        value1=1.0,
+        value2=0.0,
+        repeats=2,
+        dt_seconds=0.001,
+        end_pulse_ms=1.0,
+    )
+    assert values.shape == (4, 1)
+
+
+@pytest.mark.parametrize(
+    ("end_pulse_ms", "message"), [(0.0, "must be positive"), (0.2, "shorter than one")]
+)
+def test_per_neuron_duration_gradient_rejects_too_short_last_pulse(
+    end_pulse_ms: float, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        generate_per_neuron(
+            neuron_index=0,
+            n_neurons=1,
+            pulse_ms=3.0,
+            ipi_ms=0.0,
+            profile=DrawStimType.Linear,
+            value1=1.0,
+            value2=2.0,
+            repeats=2,
+            dt_seconds=0.001,
+            end_pulse_ms=end_pulse_ms,
+        )

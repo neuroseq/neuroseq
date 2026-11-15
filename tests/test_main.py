@@ -27,7 +27,11 @@ class FakeGui:
 
 
 class FakeQApplication:
+    instances: list[FakeQApplication] = []
+
     def __init__(self, *args: Any) -> None:
+        FakeQApplication.instances.append(self)
+        self.window_icon: Any = None
         self.quit_called = False
         self.exec_called = False
 
@@ -39,6 +43,9 @@ class FakeQApplication:
 
     def processEvents(self) -> None:
         pass
+
+    def setWindowIcon(self, icon: Any) -> None:
+        self.window_icon = icon
 
 
 class FakeSplash:
@@ -253,6 +260,23 @@ assert 'neuroseq.gui' not in sys.modules
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_main_sets_the_bundled_app_icon(
+    qapp: Any, cli_runner_fake_gui: CliRunner
+) -> None:
+    from qtpy import QtGui
+
+    from neuroseq import console_art
+
+    FakeQApplication.instances.clear()
+    result = cli_runner_fake_gui.invoke(main, [])
+    assert result.exit_code == 0, result.output
+
+    icon = FakeQApplication.instances[-1].window_icon
+    assert isinstance(icon, QtGui.QIcon) and not icon.isNull()
+    expected = QtGui.QIcon(str(console_art.app_icon_path()))
+    assert icon.pixmap(32, 32).toImage() == expected.pixmap(32, 32).toImage()
 
 
 @pytest.mark.parametrize("log_level", ["INVALIDLEVEL", "Warn"])

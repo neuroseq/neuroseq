@@ -776,3 +776,60 @@ def test_segmenting_a_new_fov_keeps_a_linear_mapping_and_its_offset(
     assert dialog.image_path == fov
     assert dialog._get_mapping_strategy() == "Linear"
     assert dialog._get_linear_offset() == 5
+
+
+def test_prefilled_file_is_segmented_with_the_chosen_options(
+    tmp_path, qtbot: QtBot, mocker
+) -> None:
+    """A dropped file waits until "Segment" and then uses the model and
+    "Adjust brightness first" chosen in the dialog (issue #658)."""
+    from neuroseq.visualization_support.segmentation_brightness_dialog import (
+        SegmentationBrightnessDialog,
+    )
+
+    dialog = CellposeImportDialog()
+    qtbot.addWidget(dialog)
+    fov, _pixels = _fov_with_segmentation(tmp_path, mocker)
+    from neuroseq import cellpose_annotation
+
+    annotate = mocker.spy(cellpose_annotation, "annotate_mean_fluorescence_tiff")
+    shown: list[SegmentationBrightnessDialog] = []
+
+    def _exec(brightness: SegmentationBrightnessDialog) -> int:
+        shown.append(brightness)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    mocker.patch.object(SegmentationBrightnessDialog, "exec", _exec)
+
+    assert dialog.segment_prefilled_button.isHidden()
+    dialog.prefill_segmentation_file(str(fov))
+    assert not dialog.segment_prefilled_button.isHidden()
+    assert fov.name in dialog.prefilled_file_label.text()
+    annotate.assert_not_called()
+
+    dialog.cellpose_model_combo.setCurrentText("cpsam_v2")
+    dialog.adjust_brightness_checkbox.setChecked(True)
+    dialog.segment_prefilled_button.click()
+
+    assert len(shown) == 1
+    annotate.assert_called_once()
+    assert annotate.call_args.kwargs["model_name"] == "cpsam_v2"
+    assert dialog.image_path == fov
+
+
+def test_prefilling_over_existing_data_returns_to_file_selection(
+    tmp_path, qtbot: QtBot
+) -> None:
+    old = _make_cellpose_dialog(tmp_path, qtbot)
+    assert old.image_path is not None
+    existing = old.importer.create_result(old.image_path, {0: 1})
+    dialog = CellposeImportDialog(existing_data=existing)
+    qtbot.addWidget(dialog)
+    assert dialog.file_selection_container is not None
+    assert dialog.file_selection_container.isHidden()
+
+    dialog.prefill_segmentation_file(str(tmp_path / "new_fov.png"))
+
+    assert not dialog.file_selection_container.isHidden()
+    assert dialog.image_path is None
+    assert dialog.existing_data is not None  # stored data kept until an import

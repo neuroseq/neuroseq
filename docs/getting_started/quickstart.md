@@ -1,15 +1,15 @@
 # Quickstart
 
-After installing, you should be able to run the following command to launch the GUI:
+![Welcome to NeuroSeq dialog](../images/startup.png)
 
-```bash
-neuroseq
-```
+1. Run `neuroseq`. In the **Welcome to NeuroSeq** dialog, click
+   **Open example project**. This opens the _Getting Started Project_: a
+   10-neuron Brian2 network with an input array and a 2-photon field of view
+   whose Cellpose cells are mapped to the neurons.
+2. Click **Simulate → Run Simulation** (rocket icon, `Ctrl+R`). The suggested
+   duration is the length of the longest input array. Click **OK**.
+3. Voltage traces and spikes appear in their panels when the run finishes.
 
-The GUI contains many buttons and widgets, the meaning of which will be clarified in the next sections. Once the NeuroSeq GUI is opened, try to quickly run an example project. The defualt example project will contain a basic stimulus pattern, brian2 implementation of a small network, and a pre-simulated field-of-view from a microscope with annotaited cell segmentation.
-
-By clicking "Simulate -> Run simulaiton" (icon with a rocket; shortcut: Ctrl + R), you can start a simulation. You will be then asked about the prefered duration of simulation (default is 1.0 second). Click ok and wait once the simulation is completed.
-
-The results of a simulation, voltage traces and spikes should appear in the additional widgets. Congratulations with the first launch of NeuroSeq!
-
-Let's use this example to give an overview of GUI and its functionality, described in [GUI Overview](gui_overview.md) section.
+The welcome dialog also offers **Load Project…**, **New Project** and recent
+projects. More examples are under **File → Open example project**
+(see [Examples](../examples.md)). Next: [GUI Overview](gui_overview.md).

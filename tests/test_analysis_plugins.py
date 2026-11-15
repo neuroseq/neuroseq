@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import numpy as np
+import pytest
 from pytestqt.qtbot import QtBot
 
 from neuroseq.analysis_plugins import discover_analysis_plugins
+from neuroseq.data import SpikeData
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
 from neuroseq.visualization.trace_widget import TraceWidget
 from neuroseq.visualization_support.constrained_pan_zoom_controller import (
@@ -135,3 +138,61 @@ def test_user_plugins_directory_env_override_and_default(monkeypatch, tmp_path):
     default = analysis_plugins.user_plugins_directory()
     assert default.parts[-2:] == ("neuroseq", "analysis_plugins")
     assert not default.is_relative_to(analysis_plugins._plugins_directory())
+
+
+def test_discover_reuses_loaded_plugins_until_a_file_changes(
+    isolate_user_plugin_dir, monkeypatch
+) -> None:
+    import os
+
+    from neuroseq import analysis_plugins
+
+    isolate_user_plugin_dir.mkdir(parents=True, exist_ok=True)
+    plugin_file = isolate_user_plugin_dir / "cached_plugin.py"
+    plugin_file.write_text(USER_PLUGIN.format(plugin_id="v1"), encoding="utf-8")
+    loads: list[str] = []
+    original_load = analysis_plugins._load_plugin_module
+
+    def counting_load(path, namespace="neuroseq.analysis_plugin"):
+        loads.append(path.stem)
+        return original_load(path, namespace)
+
+    monkeypatch.setattr(analysis_plugins, "_load_plugin_module", counting_load)
+
+    first = analysis_plugins.discover_analysis_plugins()
+    assert "cached_plugin" in loads
+    loads.clear()
+    # Opening the context menu again must not re-execute every plugin file.
+    assert analysis_plugins.discover_analysis_plugins() == first
+    assert loads == []
+
+    plugin_file.write_text(USER_PLUGIN.format(plugin_id="v2"), encoding="utf-8")
+    stat = plugin_file.stat()
+    os.utime(plugin_file, ns=(stat.st_atime_ns, stat.st_mtime_ns + 10**9))
+    ids = [plugin.id for plugin in analysis_plugins.discover_analysis_plugins()]
+    assert "v2" in ids and "v1" not in ids
+    assert "cached_plugin" in loads
+
+
+def test_mean_activity_plugin_bins_spikes_by_millisecond(qtbot: QtBot) -> None:
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "mean_activity")
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+
+    # A lone spike at t=0 used to ask matplotlib for 0 bins.
+    at_zero = SpikeData(
+        name="s", spike_indices=np.array([0]), spike_times=np.array([0.0])
+    )
+    widget.set_data(at_zero, plugin, None, None)
+    assert len(widget.subplot.patches) == 1
+
+    # Spikes over 100-110 ms: ten 1 ms bins, not ceil(110) narrower ones.
+    late = SpikeData(
+        name="s",
+        spike_indices=np.zeros(3, dtype=int),
+        spike_times=np.array([0.100, 0.105, 0.110]),
+    )
+    widget.set_data(late, plugin, None, None)
+    widths = [patch.get_width() for patch in widget.subplot.patches]
+    assert len(widths) == 10
+    assert widths == pytest.approx([1.0] * 10)

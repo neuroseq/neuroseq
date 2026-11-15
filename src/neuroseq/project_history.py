@@ -18,6 +18,9 @@ class ProjectCommand:
     label: str
     redo: Callable[[], None]
     undo: Callable[[], None]
+    # Whether the command can change input (stim) arrays; listeners that
+    # only redraw inputs skip the others (e.g. data group edits).
+    affects_inputs: bool = True
 
 
 class StaleCommandError(RuntimeError):
@@ -49,6 +52,8 @@ class ProjectHistory:
         self.current_index = -1
         self._replaying = False
         self._listeners: list[Callable[[str], None] | weakref.WeakMethod] = []
+        # The command the latest "execute"/"undo"/"redo" event applied.
+        self.last_command: ProjectCommand | None = None
 
     def __len__(self) -> int:
         return len(self.action_stack)
@@ -97,6 +102,7 @@ class ProjectHistory:
         if overflow > 0:
             del self.action_stack[:overflow]
             self.current_index -= overflow
+        self.last_command = command
         self._notify("execute")
 
     def can_undo(self) -> bool:
@@ -122,13 +128,15 @@ class ProjectHistory:
             return
         self._replaying = True
         try:
-            self.action_stack[self.current_index].undo()
+            command = self.action_stack[self.current_index]
+            command.undo()
             self.current_index -= 1
         except StaleCommandError:
             self._discard_stale("undo")
             return
         finally:
             self._replaying = False
+        self.last_command = command
         self._notify("undo")
 
     def redo(self) -> None:
@@ -138,13 +146,15 @@ class ProjectHistory:
             return
         self._replaying = True
         try:
-            self.action_stack[self.current_index + 1].redo()
+            command = self.action_stack[self.current_index + 1]
+            command.redo()
             self.current_index += 1
         except StaleCommandError:
             self._discard_stale("redo")
             return
         finally:
             self._replaying = False
+        self.last_command = command
         self._notify("redo")
 
     def _discard_stale(self, operation: str) -> None:
@@ -163,4 +173,5 @@ class ProjectHistory:
             raise RuntimeError("Cannot clear history while a command is running")
         self.action_stack.clear()
         self.current_index = -1
+        self.last_command = None
         self._notify("clear")

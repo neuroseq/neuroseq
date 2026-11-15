@@ -213,3 +213,21 @@ def test_heatmap_tick_step_from_scale(scale_factor: float, expected_step: int) -
 def test_heatmap_tick_positions_include_last_index() -> None:
     ticks = HeatmapWidget._tick_positions(size=106, step=100)
     assert np.array_equal(ticks, np.array([0, 100, 105]))
+
+
+def test_heatmap_axis_timer_only_runs_while_shown(qtbot: QtBot) -> None:
+    heatmap_widget = HeatmapWidget()
+    qtbot.addWidget(heatmap_widget)
+    assert not heatmap_widget._axis_update_timer.isActive()
+
+    with qtbot.waitExposed(heatmap_widget):
+        heatmap_widget.show()
+    assert heatmap_widget._axis_update_timer.isActive()
+
+    heatmap_widget.hide()
+    assert not heatmap_widget._axis_update_timer.isActive()
+
+    heatmap_widget.show()
+    assert heatmap_widget._axis_update_timer.isActive()
+    heatmap_widget.close()
+    assert not heatmap_widget._axis_update_timer.isActive()

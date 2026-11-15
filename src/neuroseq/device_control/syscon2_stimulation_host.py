@@ -542,6 +542,9 @@ class SysCon2StimulationHost(QtCore.QObject):
         block = self._block
         if block is None:
             return
+        # A task still queued or running on the SysCon2 worker (e.g. a
+        # re-upload before RunSequence) must not start the sequence now.
+        block.cancel.set()
         if block.run_id is not None and self._acquisition is not None:
             self._acquisition.abort_block(block.run_id)
         if block.run_submitted:

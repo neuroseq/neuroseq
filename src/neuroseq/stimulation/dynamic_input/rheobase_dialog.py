@@ -18,6 +18,7 @@ from qtpy import QtWidgets
 from neuroseq import theme as theme_module
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.data_names import split_data_name
 from neuroseq.device_control.bss2_protocol import Bss2Settings
 from neuroseq.device_control.syscon2_stimulation_host import routine_run_name
 from neuroseq.export.exporter_syscon2 import SYSCON2_WINDOW_MS
@@ -26,6 +27,7 @@ from neuroseq.qt_helpers import WheelToScrollFilter
 from neuroseq.qt_helpers import set_native_minimized_position
 from neuroseq.qt_helpers import wrap_in_scroll_area
 from neuroseq.stimulation.dynamic_input.dialog_helpers import confirm_start_routine
+from neuroseq.stimulation.dynamic_input.dialog_helpers import routine_start_blocked
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import RoutineArrayCursor
 from neuroseq.stimulation.dynamic_input.dynamic_input_blocks import run_to_sample
 from neuroseq.stimulation.dynamic_input.dynamic_input_measurement import (
@@ -550,6 +552,8 @@ class RheobaseDialog(SelfRaisingDialog):
     """Closed-loop search for the smallest direct stimulus that evokes a spike."""
 
     simulation_requested = QtCore.Signal(float)
+    #: Emitted when a run starts or ends (the controller locks the editor).
+    running_changed = QtCore.Signal(bool)
     AMPLITUDE_AND_DURATION_STRATEGY = "Amplitude and duration"
     FIXED_AMPLITUDE_VARYING_DURATION_STRATEGY = "Fixed amplitude, varying duration"
     FIXED_DURATION_VARYING_AMPLITUDE_STRATEGY = "Fixed duration, varying amplitude"
@@ -585,6 +589,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self.editor = editor
         self.project = editor.project
         self._backend = RheobaseBackend(self)
+        self._backend.on_running_changed = self.running_changed.emit
         self._backend.on_advance = self._advance_domain
         self._backend.on_summarize = self._final_summary
         self._backend.on_summarize_fixed_amplitude = self._final_fixed_amplitude_summary
@@ -1117,8 +1122,18 @@ class RheobaseDialog(SelfRaisingDialog):
 
     def start(self) -> None:
         self.refresh()
+        blocked = routine_start_blocked(self.editor)
+        if blocked is not None:
+            self._append_log(blocked)
+            return
         if self.project is None or self.editor.current_stim_modifier is None:
             self._append_log("No input array is selected.")
+            return
+        # Checked before anything changes the array (clear, a new array, the
+        # minimized dialog): a refused start leaves everything as it was.
+        problem = self._settings_problem()
+        if problem is not None:
+            self._append_log(problem)
             return
         hardware = self._target_is_syscon2() or self._target_is_bss2()
         choice = confirm_start_routine(self, self.editor, offer_new=hardware)
@@ -1193,7 +1208,7 @@ class RheobaseDialog(SelfRaisingDialog):
             if prepare_seconds > 0.0:
                 self._append_log(
                     f"Simulating {duration:.3f} s to catch up to the "
-                    "existing stimuli before the search starts."
+                    "existing input before the search starts."
                 )
             else:
                 self._append_log(
@@ -1376,12 +1391,6 @@ class RheobaseDialog(SelfRaisingDialog):
             if reason is not None:
                 self._append_log(reason)
                 return
-        # Checked before "Start in new arrays" adds an array the run never uses.
-        problem = self._settings_problem()
-        if problem is not None:
-            # Nothing has started: only say why (finishing would trim the array).
-            self._append_log(problem)
-            return
         self._run_name = routine_run_name("rheobase")
         self._append_start_sample = self._hardware_start_sample(choice, self._run_name)
         # Nothing delivered yet: ending now keeps the array up to here.
@@ -1428,11 +1437,6 @@ class RheobaseDialog(SelfRaisingDialog):
         if reason is not None:
             self._append_log(reason)
             return
-        problem = self._settings_problem()
-        if problem is not None:
-            # Nothing has started: only say why (finishing would trim the array).
-            self._append_log(problem)
-            return
         self._bss2_group = f"BSS-2 rheobase {datetime.now():%Y-%m-%d %H-%M-%S}"
         self._append_start_sample = self._hardware_start_sample(
             choice, self._bss2_group
@@ -1445,7 +1449,7 @@ class RheobaseDialog(SelfRaisingDialog):
         self._append_log(
             "BrainScaleS-2 target: amplitudes are fractions (0-1) of the BrainScaleS-2 "
             f"tab's i_offset max ({self._bss2_settings.i_offset_max}). Each probe runs as its own "
-            "constant-current block on the chip, starting from rest; stim neuron i is "
+            "constant-current block on the chip, starting from rest; input channel i is "
             "hardware neuron i, and its spikes after the pulse are counted."
         )
         self._begin_search(clear_log=False)
@@ -1825,7 +1829,7 @@ class RheobaseDialog(SelfRaisingDialog):
             trace = self.project.get_data(trace_name, TraceData)
             if trace is not None:
                 return float(trace.dt)
-        experiment_name = spikes_name.split(" :: ", 1)[0]
+        experiment_name = split_data_name(spikes_name)[0]
         experiment = getattr(self.project, "experiments", {}).get(experiment_name)
         for datum in experiment.data if experiment is not None else ():
             if isinstance(datum, TraceData):

@@ -3,15 +3,46 @@ from __future__ import annotations
 from qtpy import QtCore
 from qtpy import QtWidgets
 
-from neuroseq.data import Experiment
+from neuroseq.data import Data
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
 from neuroseq.project import Project
 
+NAME_COLUMN = 0
+KIND_COLUMN = 1
+DURATION_COLUMN = 2
+DETAILS_COLUMN = 3
+DESCRIPTION_COLUMN = 4
+
+_DATA_ROLE = QtCore.Qt.ItemDataRole.UserRole
+_DATUM_ROLE = QtCore.Qt.ItemDataRole.UserRole + 1
+
+
+def _data_kind(datum: Data) -> str:
+    if isinstance(datum, TraceData):
+        return "Traces"
+    if isinstance(datum, SpikeData):
+        return "Spikes"
+    return "Synapses"
+
+
+def _data_details(datum: Data) -> str:
+    if isinstance(datum, TraceData):
+        return f"{datum.traces.shape[0]} neurons, {datum.units}"
+    if isinstance(datum, SpikeData):
+        return f"{len(datum.spike_indices)} spikes"
+    if isinstance(datum, SynapseData):
+        return f"{datum.values.shape[0]}x{datum.values.shape[1]} matrix"
+    return ""
+
 
 class DataManagerDialog(QtWidgets.QDialog):
-    """View and manage project data grouped by simulation run or recording."""
+    """View, rename, describe and delete data groups and their data sets.
+
+    Every change goes through a :class:`Project` method, so it is undoable and
+    saved with the project.
+    """
 
     data_changed = QtCore.Signal()
 
@@ -24,13 +55,11 @@ class DataManagerDialog(QtWidgets.QDialog):
         self.project = project
         self.setWindowTitle("Manage Data")
         self.setModal(True)
-        self.resize(800, 600)
+        self.resize(900, 600)
 
-        # Main layout
         layout = QtWidgets.QVBoxLayout()
         self.setLayout(layout)
 
-        # Title
         title = QtWidgets.QLabel("Data in Project")
         title_font = title.font()
         title_font.setPointSize(12)
@@ -38,129 +67,188 @@ class DataManagerDialog(QtWidgets.QDialog):
         title.setFont(title_font)
         layout.addWidget(title)
 
-        # Table widget to display data groups
-        self.table = QtWidgets.QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(
-            ["Name", "Duration (s)", "Data Sets", "Details"]
+        hint = QtWidgets.QLabel(
+            "Double-click a name or a group description to edit it. Expand a "
+            "group to delete single data sets instead of the whole group."
         )
-        self.table.horizontalHeader().setStretchLastSection(True)
-        self.table.setSelectionBehavior(
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self.tree = QtWidgets.QTreeWidget()
+        self.tree.setColumnCount(5)
+        self.tree.setHeaderLabels(
+            ["Name", "Kind", "Duration (s)", "Details", "Description"]
+        )
+        self.tree.header().setStretchLastSection(True)
+        self.tree.setSelectionBehavior(
             QtWidgets.QAbstractItemView.SelectionBehavior.SelectRows
         )
-        self.table.setSelectionMode(
-            QtWidgets.QAbstractItemView.SelectionMode.MultiSelection
+        self.tree.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection
         )
-        layout.addWidget(self.table)
+        # Editors are opened by _on_item_double_clicked, only on editable columns.
+        self.tree.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        layout.addWidget(self.tree)
 
-        # Populate the table
-        self._populate_table()
-
-        # Information label
         self.info_label = QtWidgets.QLabel()
         self.info_label.setStyleSheet("color: gray; font-style: italic;")
-        self.info_label.setText(f"Total: {len(self.project.experiments)} data group(s)")
         layout.addWidget(self.info_label)
 
-        # Button layout
         button_layout = QtWidgets.QHBoxLayout()
-
+        self.rename_button = QtWidgets.QPushButton("Rename")
+        self.rename_button.clicked.connect(self._on_rename_clicked)
+        button_layout.addWidget(self.rename_button)
+        self.description_button = QtWidgets.QPushButton("Edit Description")
+        self.description_button.clicked.connect(self._on_description_clicked)
+        button_layout.addWidget(self.description_button)
         self.delete_button = QtWidgets.QPushButton("Delete Selected")
         self.delete_button.clicked.connect(self._on_delete_clicked)
         button_layout.addWidget(self.delete_button)
-
         button_layout.addStretch()
-
         self.close_button = QtWidgets.QPushButton("Close")
         self.close_button.clicked.connect(self.accept)
         button_layout.addWidget(self.close_button)
-
         layout.addLayout(button_layout)
 
-        # Connect signals
-        self.table.itemSelectionChanged.connect(self._on_selection_changed)
+        self._populate()
+        self.tree.itemSelectionChanged.connect(self._on_selection_changed)
+        self.tree.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.tree.itemChanged.connect(self._on_item_changed)
         self._on_selection_changed()
 
-    def _populate_table(self) -> None:
-        """Populate the table with project data groups."""
-        self.table.setRowCount(len(self.project.experiments))
-
-        for row, (exp_name, experiment) in enumerate(self.project.experiments.items()):
-            # Name
-            name_item = QtWidgets.QTableWidgetItem(experiment.name)
-            name_item.setData(QtCore.Qt.ItemDataRole.UserRole, exp_name)
-            self.table.setItem(row, 0, name_item)
-
-            # Duration
-            duration_item = QtWidgets.QTableWidgetItem(f"{experiment.duration:.3f}")
-            duration_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 1, duration_item)
-
-            # Data sets count
-            data_count = len(experiment.data)
-            data_item = QtWidgets.QTableWidgetItem(str(data_count))
-            data_item.setTextAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row, 2, data_item)
-
-            # Details
-            details = self._get_data_details(experiment)
-            details_item = QtWidgets.QTableWidgetItem(details)
-            self.table.setItem(row, 3, details_item)
-
-        # Resize columns to content
-        self.table.resizeColumnsToContents()
-
-    def _get_data_details(self, experiment: Experiment) -> str:
-        """Describe the data in a simulation run or recording."""
-        details_parts = []
-        for datum in experiment.data:
-            if isinstance(datum, TraceData):
-                details_parts.append(
-                    f"Trace '{datum.name}' ({datum.traces.shape[0]} neurons)"
+    # ------------------------------------------------------------------ view
+    def _populate(self) -> None:
+        """Rebuild the tree from the project, keeping expanded groups open."""
+        expanded = {
+            self.tree.topLevelItem(i).data(NAME_COLUMN, _DATA_ROLE)
+            for i in range(self.tree.topLevelItemCount())
+            if self.tree.topLevelItem(i).isExpanded()
+        }
+        self.tree.blockSignals(True)
+        try:
+            self.tree.clear()
+            for key, experiment in self.project.experiments.items():
+                group = QtWidgets.QTreeWidgetItem(
+                    [
+                        key,
+                        "Data group",
+                        f"{experiment.duration:.3f}",
+                        f"{len(experiment.data)} data set(s)",
+                        experiment.description,
+                    ]
                 )
-            elif isinstance(datum, SpikeData):
-                details_parts.append(
-                    f"Spike '{datum.name}' ({len(datum.spike_indices)} spikes)"
-                )
-            elif isinstance(datum, SynapseData):
-                details_parts.append(
-                    f"Synapse '{datum.name}' ({datum.values.shape[0]}x{datum.values.shape[1]})"
-                )
-        return "; ".join(details_parts)
+                group.setData(NAME_COLUMN, _DATA_ROLE, key)
+                group.setFlags(group.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+                group.setToolTip(DESCRIPTION_COLUMN, experiment.description)
+                for datum in experiment.data:
+                    child = QtWidgets.QTreeWidgetItem(
+                        [datum.name, _data_kind(datum), "", _data_details(datum), ""]
+                    )
+                    child.setData(NAME_COLUMN, _DATA_ROLE, key)
+                    child.setData(NAME_COLUMN, _DATUM_ROLE, datum)
+                    child.setFlags(child.flags() | QtCore.Qt.ItemFlag.ItemIsEditable)
+                    group.addChild(child)
+                self.tree.addTopLevelItem(group)
+                group.setExpanded(key in expanded)
+            for column in range(DESCRIPTION_COLUMN):
+                self.tree.resizeColumnToContents(column)
+        finally:
+            self.tree.blockSignals(False)
+        self.info_label.setText(f"Total: {len(self.project.experiments)} data group(s)")
+        self._on_selection_changed()
 
-    def _get_selected_row_indices(self) -> list[int]:
-        """Get the indices of selected rows."""
-        selected_indexes = self.table.selectionModel().selectedRows()
-        return sorted([index.row() for index in selected_indexes])
+    def group_item(self, key: str) -> QtWidgets.QTreeWidgetItem | None:
+        """The tree item of data group ``key`` (for tests and scripting)."""
+        for i in range(self.tree.topLevelItemCount()):
+            item = self.tree.topLevelItem(i)
+            if item.data(NAME_COLUMN, _DATA_ROLE) == key:
+                return item
+        return None
+
+    @staticmethod
+    def _is_group(item: QtWidgets.QTreeWidgetItem) -> bool:
+        return item.parent() is None
+
+    def _selected_items(self) -> list[QtWidgets.QTreeWidgetItem]:
+        return list(self.tree.selectedItems())
 
     def _on_selection_changed(self) -> None:
-        """Update button state based on selection."""
-        has_selection = len(self._get_selected_row_indices()) > 0
-        self.delete_button.setEnabled(has_selection)
+        selected = self._selected_items()
+        self.delete_button.setEnabled(bool(selected))
+        self.rename_button.setEnabled(len(selected) == 1)
+        self.description_button.setEnabled(
+            len(selected) == 1 and self._is_group(selected[0])
+        )
 
-    def _on_delete_clicked(self) -> None:
-        """Handle delete button click."""
-        selected_rows = self._get_selected_row_indices()
-        if not selected_rows:
+    # --------------------------------------------------------------- editing
+    def _editable_column(self, item: QtWidgets.QTreeWidgetItem, column: int) -> bool:
+        return column == NAME_COLUMN or (
+            column == DESCRIPTION_COLUMN and self._is_group(item)
+        )
+
+    def _on_item_double_clicked(
+        self, item: QtWidgets.QTreeWidgetItem, column: int
+    ) -> None:
+        if self._editable_column(item, column):
+            self.tree.editItem(item, column)
+
+    def _on_rename_clicked(self) -> None:
+        selected = self._selected_items()
+        if len(selected) == 1:
+            self.tree.editItem(selected[0], NAME_COLUMN)
+
+    def _on_description_clicked(self) -> None:
+        selected = self._selected_items()
+        if len(selected) == 1 and self._is_group(selected[0]):
+            self.tree.editItem(selected[0], DESCRIPTION_COLUMN)
+
+    def _on_item_changed(self, item: QtWidgets.QTreeWidgetItem, column: int) -> None:
+        if not self._editable_column(item, column):
             return
+        key = item.data(NAME_COLUMN, _DATA_ROLE)
+        text = item.text(column)
+        try:
+            if column == DESCRIPTION_COLUMN:
+                self.project.set_experiment_description(key, text)
+            elif self._is_group(item):
+                self.project.rename_experiment(key, text)
+            else:
+                datum = item.data(NAME_COLUMN, _DATUM_ROLE)
+                self.project.rename_experiment_data(key, datum, text)
+        except (KeyError, ValueError) as error:
+            QtWidgets.QMessageBox.warning(self, "Cannot rename", str(error))
+        # Deferred: rebuilding the tree inside itemChanged would delete the
+        # item whose editor is still closing.
+        QtCore.QTimer.singleShot(0, self._refresh_after_edit)
 
-        # Get the data group names to delete
-        data_groups_to_delete = []
-        for row in selected_rows:
-            name_item = self.table.item(row, 0)
-            group_key = name_item.data(QtCore.Qt.ItemDataRole.UserRole)
-            data_groups_to_delete.append((row, group_key, name_item.text()))
+    def _refresh_after_edit(self) -> None:
+        self._populate()
+        self.data_changed.emit()
 
-        # Show confirmation dialog
-        group_names = ", ".join([name for _, _, name in data_groups_to_delete])
-        if len(data_groups_to_delete) == 1:
-            message = f"Are you sure you want to delete the data group '{group_names}'?"
-        else:
-            message = (
-                f"Are you sure you want to delete {len(data_groups_to_delete)} "
-                f"data groups?\n\n{group_names}"
-            )
+    # -------------------------------------------------------------- deleting
+    def _on_delete_clicked(self) -> None:
+        selected = self._selected_items()
+        if not selected:
+            return
+        groups = [
+            item.data(NAME_COLUMN, _DATA_ROLE)
+            for item in selected
+            if self._is_group(item)
+        ]
+        datasets: dict[str, list[Data]] = {}
+        labels = [f"data group '{key}'" for key in groups]
+        for item in selected:
+            key = item.data(NAME_COLUMN, _DATA_ROLE)
+            if self._is_group(item) or key in groups:
+                continue
+            datasets.setdefault(key, []).append(item.data(NAME_COLUMN, _DATUM_ROLE))
+            labels.append(f"{item.text(KIND_COLUMN).lower()} '{key} :: {item.text(0)}'")
 
+        message = "Are you sure you want to delete:\n\n" + "\n".join(labels)
+        if groups:
+            message += "\n\nDeleting a data group deletes all of its data sets."
         reply = QtWidgets.QMessageBox.question(
             self,
             "Confirm Deletion",
@@ -169,29 +257,8 @@ class DataManagerDialog(QtWidgets.QDialog):
             | QtWidgets.QMessageBox.StandardButton.No,
             QtWidgets.QMessageBox.StandardButton.No,
         )
-
-        if reply == QtWidgets.QMessageBox.StandardButton.Yes:
-            self.project.remove_experiments(
-                [group_key for _, group_key, _ in data_groups_to_delete]
-            )
-
-            # Refresh the table
-            self._populate_table()
-            self.info_label.setText(
-                f"Total: {len(self.project.experiments)} data group(s)"
-            )
-            self.data_changed.emit()
-
-            # Show success message
-            if len(data_groups_to_delete) == 1:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Data Deleted",
-                    f"Data group '{group_names}' has been deleted successfully.",
-                )
-            else:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Data Deleted",
-                    f"{len(data_groups_to_delete)} data groups have been deleted successfully.",
-                )
+        if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        self.project.remove_data(groups, datasets)
+        self._populate()
+        self.data_changed.emit()

@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import brian2.numpy_ as np
 
-PLUGIN_ID = "elise_learning_curves"
+from neuroseq.elise_support.plugin_keys import CURVES_ATTR
+from neuroseq.elise_support.plugin_keys import LEARNING_CURVES_PLUGIN_ID
+
+PLUGIN_ID = LEARNING_CURVES_PLUGIN_ID
 PLUGIN_NAME = "ELiSe learning curves (train + replay)"
 PLUGIN_ICON = "mdi6.chart-line"
-
-# Attribute the toolbar action sets on the widget to hand over the curves.
-CURVES_ATTR = "_elise_protocol_curves"
 
 
 def _show_message(widget, message: str) -> None:

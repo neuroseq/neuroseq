@@ -161,6 +161,36 @@ def test_parse_binary_wave_keeps_one_d_unchanged() -> None:
     assert wave.samples_per_sweep == 4
 
 
+@pytest.mark.parametrize(
+    ("axis_units", "expected_dt"),
+    [("s", 0.5), ("ms", 0.5e-3), ("us", 0.5e-6), ("\u00b5s", 0.5e-6), ("", 0.5)],
+)
+def test_parse_binary_wave_scales_dt_by_x_units(
+    axis_units: str, expected_dt: float
+) -> None:
+    payload = _fake_ibw_payload(np.zeros(4, dtype=np.float32), dt=0.5)
+    wave_header = payload["wave"]["wave_header"]  # type: ignore[index]
+    # Igor writes units in a single-byte encoding (micro sign = 0xB5).
+    wave_header["dimUnits"] = [axis_units.encode("latin-1") + b"\x00"]
+
+    wave = parse_igor_binary_wave_data(payload)
+
+    assert wave.source_dt == pytest.approx(expected_dt)
+
+
+def test_parse_binary_wave_reads_x_units_from_igor2_dim_units_array() -> None:
+    """igor2 returns v5 ``dimUnits`` as a (4 x 4) bytes array, not a list."""
+    payload = _fake_ibw_payload(np.zeros(4, dtype=np.float32), dt=2.0)
+    dim_units = np.zeros((4, 4), dtype="|S1")
+    dim_units[0, :2] = [b"m", b"s"]
+    payload["wave"]["wave_header"]["dimUnits"] = dim_units  # type: ignore[index]
+
+    wave = parse_igor_binary_wave_data(payload)
+
+    assert wave.axis_units == "ms"
+    assert wave.source_dt == pytest.approx(2e-3)
+
+
 @pytest.mark.skipif(not REAL_SUTTERPATCH_IBW.exists(), reason="real IBW not present")
 def test_real_sutterpatch_file_imports() -> None:
     pytest.importorskip("igor2")
@@ -354,6 +384,30 @@ def test_import_igor_wave_into_trace_data_appends_new_neuron() -> None:
     assert trace_data.traces.shape == (2, 2)
     np.testing.assert_array_equal(trace_data.indices, np.array([0, 5], dtype=np.uint32))
     np.testing.assert_allclose(trace_data.traces[1], np.array([5.0, 6.0]))
+
+
+def test_import_igor_wave_into_trace_data_keeps_raw_cellpose_ids_aligned() -> None:
+    """Appending a patch-clamp row to Cellpose-derived traces must not leave
+    raw_cellpose_ids one row short (a later Cellpose remap would misalign)."""
+    trace_data = TraceData(
+        "s2p",
+        np.zeros((3, 10), dtype=np.float32),
+        np.arange(3, dtype=np.uint32),
+        "u",
+        0.1,
+        np.arange(3, dtype=np.uint32),
+    )
+    prepared = prepare_igor_wave_for_neuroseq(
+        IgorWave("w", np.ones(10, dtype=np.float32), 0.1, None, None, "csv")
+    )
+
+    import_igor_wave_into_trace_data(trace_data, prepared, neuron_id=7)
+
+    np.testing.assert_array_equal(trace_data.indices, [0, 1, 2, 7])
+    assert (
+        trace_data.raw_cellpose_ids is None
+        or trace_data.raw_cellpose_ids.shape[0] == trace_data.traces.shape[0]
+    )
 
 
 def test_import_igor_wave_into_trace_data_replaces_existing_neuron_when_allowed() -> (

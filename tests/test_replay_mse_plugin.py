@@ -224,3 +224,19 @@ def test_widget_shows_helpful_message_on_too_short_selection(
 
     texts = [t.get_text() for t in widget.subplot.texts]
     assert any("at least 2 full cycles" in t for t in texts)
+
+
+def test_message_after_plot_removes_twin_axis(qtbot: QtBot) -> None:
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "replay_mse")
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    data = _make_periodic_trace(n_neurons=4, cycle_samples=1920, n_cycles=3, dt=0.001)
+    widget.set_data(data, plugin, slice(0, 4), slice(0, 1920 * 3))
+    assert len(widget.getFigure().axes) == 2  # bars + correlation twin axis
+
+    bar = widget._replay_mse_controls
+    bar._spin_cycle.setValue(100_000.0)  # longer than half the selection
+    bar._update_btn.click()
+
+    assert widget.getFigure().axes == [widget.subplot]
+    assert any("at least 2 full cycles" in t.get_text() for t in widget.subplot.texts)

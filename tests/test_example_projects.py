@@ -16,6 +16,16 @@ project_generators = [
     pytest.param(project_generator, id=f"{section}/{name}")
     for section, section_projects in example_projects.example_projects.items()
     for name, project_generator in section_projects.items()
+] + [
+    # Public factories deliberately kept out of the example menu (since
+    # 85d9cc5, "test all example models, not just the ones ... exposed in the
+    # gui"); the registry-driven list above silently stopped covering them.
+    pytest.param(project_generator, id=f"unlisted/{project_generator.__name__}")
+    for project_generator in (
+        example_projects.hh_neurons_ei_model,
+        example_projects.single_lif_neuron,
+        example_projects.single_lif_neuron_without_stim,
+    )
 ]
 
 

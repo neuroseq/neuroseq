@@ -32,7 +32,7 @@ def _answer(monkeypatch, label: str | None, seen: list[list[str]]) -> None:
     [
         ("Start in new arrays", "new"),
         ("Clear and start over", "clear"),
-        ("Continue after last stimulus", "continue"),
+        ("Continue after last input", "continue"),
     ],
 )
 def test_new_arrays_are_offered_next_to_clear_and_continue(
@@ -55,4 +55,4 @@ def test_new_arrays_are_not_offered_by_default(qtbot, monkeypatch) -> None:
     editor: Any = _editor_with_stimuli()
     assert confirm_start_routine(parent, editor) == "cancel"
     assert "Start in new arrays" not in seen[0]
-    assert {"Clear and start over", "Continue after last stimulus"} <= set(seen[0])
+    assert {"Clear and start over", "Continue after last input"} <= set(seen[0])

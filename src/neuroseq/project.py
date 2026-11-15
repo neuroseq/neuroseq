@@ -4,17 +4,22 @@ import importlib
 import json
 import logging
 import math
+import os
 import pathlib
 import pickle
 import runpy
+import shutil
+import tempfile
 import uuid
 import zipfile
 from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Mapping
 from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import copy
+from dataclasses import dataclass
 from typing import Protocol
 from typing import overload
 
@@ -26,6 +31,12 @@ from neuroseq.data import Experiment
 from neuroseq.data import SpikeData
 from neuroseq.data import SynapseData
 from neuroseq.data import TraceData
+from neuroseq.data_names import SIMULATION_GROUP
+from neuroseq.data_names import data_name_problem
+from neuroseq.data_names import group_name_problem
+from neuroseq.data_names import split_data_name
+from neuroseq.data_names import unique_group_name
+from neuroseq.data_names import unique_name
 from neuroseq.export.power_lut import PowerLut
 from neuroseq.export.syscon2_export_service import SysconExportSettings
 from neuroseq.export.syscon2_export_service import export_settings_from_dict
@@ -34,6 +45,7 @@ from neuroseq.importers.importer_cellpose import CellposeImportResult
 from neuroseq.importers.importer_cellpose import resolve_stimulus_to_cellpose_mapping
 from neuroseq.importers.importer_scanimage import compact_index
 from neuroseq.importers.importer_suite2p import remap_raw_cellpose_ids
+from neuroseq.io import _to_seconds
 from neuroseq.io import append_to_zip
 from neuroseq.io import load_from_zip
 from neuroseq.project_history import ProjectCommand
@@ -44,12 +56,27 @@ from neuroseq.stimulation.stim import StimArray
 from neuroseq.stimulation.stim import StimType
 from neuroseq.stimulation.stim_timing import ensure_2d_stim_values
 from neuroseq.stimulation.stim_timing import remap_stim_values_to_dt
+from neuroseq.stimulation.stim_timing import seconds_to_samples_ceil
 from neuroseq.stimulation.stim_timing import seconds_to_samples_nearest
 from neuroseq.stimulation.stim_timing import stim_dt_matches
 from neuroseq.stimulation.stim_timing import validate_stim_dt_seconds
 from neuroseq.utils import append_data
 from neuroseq.utils import find_by_name_and_type
 from neuroseq.utils import save_store_name
+
+
+@dataclass(frozen=True)
+class CalciumVideoSpec:
+    """A calcium imaging movie to add with imported data (see
+    :meth:`Project.add_experiments`); the fields are those of
+    :meth:`Project.add_calcium_video`."""
+
+    paths: Sequence[pathlib.Path]
+    fps: float | None
+    name: str | None = None
+    run_id: str | None = None
+    channels: int = 1
+    shown_channel: int = 1
 
 
 class ExternalSimulateFn(Protocol):
@@ -67,8 +94,13 @@ class ExternalSimulateFn(Protocol):
 _TIMELINE_CLIP_EPS_SECONDS = 1e-9
 
 
-def _to_seconds(value: float | int) -> float:
-    return float(value)
+def _metadata_json_default(obj: object) -> object:
+    """Convert numpy scalars/arrays in project metadata to plain JSON values."""
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 
 def _trace_data_neuron_count(data: TraceData) -> int:
@@ -125,6 +157,16 @@ def _cellpose_neuron_count(cellpose_data: CellposeImportResult | None) -> int:
     return int(np.sum(unique_ids >= 0))
 
 
+@dataclass
+class ImportedComponents:
+    """Parts read from another project file; ``None`` means not imported."""
+
+    b2_model: B2Model | None = None
+    experiments: dict[str, Experiment] | None = None
+    cellpose_data: CellposeImportResult | None = None
+    stim_arrays: dict[str, StimArray] | None = None
+
+
 class Project:
     def __init__(
         self,
@@ -138,6 +180,9 @@ class Project:
         # (see mark_dirty()'s docstring); cleared by save() and, defensively,
         # at the very end of this constructor regardless of how it got here.
         self.dirty = False
+        # Bumped by mark_dirty(), so save() only clears ``dirty`` when nothing
+        # changed while it was writing.
+        self._change_count = 0
         self.history = ProjectHistory()
         self.history.subscribe(self._history_changed)
         self.filepath = None
@@ -160,6 +205,9 @@ class Project:
         # Folders last used by this project's device workflows, by purpose
         # ("syscon_export", "scanimage_recording"); open projects do not share them.
         self.device_folders: dict[str, str] = {}
+        # Files listed in an import dialog, by purpose (e.g. the raw calcium
+        # TIFFs, #643), so reopening the dialog offers them again.
+        self.import_file_lists: dict[str, list[str]] = {}
 
         self.max_ram_synapse_plot_matrix = 256
         self.max_ram_trace_plot_matrix = 256
@@ -219,6 +267,13 @@ class Project:
                             _meta["syscon_export_settings"]
                         )
                     self.device_folders = dict(_meta.get("device_folders", {}))
+                    self.import_file_lists = {
+                        str(purpose): [str(path) for path in paths]
+                        for purpose, paths in _meta.get("import_file_lists", {}).items()
+                    }
+                    self.syscon2_export_template_text = _meta.get(
+                        "syscon2_export_template_text"
+                    )
                     self.imaging_acquisitions = _meta.get("imaging_acquisitions", [])
                     for acquisition in self.imaging_acquisitions:
                         if "recording" in acquisition:
@@ -257,12 +312,6 @@ class Project:
                                 f"External simulation backend migration failed "
                                 f"for {self.external_simulate_path!r}"
                             )
-            for experiment in self.experiments.values():
-                self.max_time_secs = max(self.max_time_secs, experiment.duration)
-            for stim_array in self.stim_arrays.values():
-                self.max_time_secs = max(
-                    self.max_time_secs, stim_array.dt * stim_array.values.shape[0]
-                )
 
         self.update_limits()
         # Constructing a Project (fresh or loaded from filepath) always
@@ -278,6 +327,7 @@ class Project:
         ``project.b2_model`` or ``project.cellpose_data`` after a dialog
         accepts new state).
         """
+        self._change_count += 1
         self.dirty = True
 
     def _history_changed(self, event: str) -> None:
@@ -324,6 +374,7 @@ class Project:
                 self.experiments.pop(name, None)
             for name, (experiment, saved, data_states) in states.items():
                 experiment.name = saved.name
+                experiment.description = saved.description
                 experiment.duration = saved.duration
                 experiment.timepoints = list(saved.timepoints)
                 experiment.data = list(saved.data)
@@ -338,29 +389,94 @@ class Project:
 
         return restore
 
+    def _calcium_video_additions_restorer(
+        self,
+    ) -> Callable[[], tuple[Callable[[], None], Callable[[], None]]]:
+        """Track calcium videos added from now on, for undo/redo.
+
+        Call the result after the additions; it returns ``(remove, re_add)``:
+        ``remove`` takes the added videos out again (selecting what was
+        selected before, if still there), ``re_add`` puts the same entries
+        back and selects what was selected after. Videos added or removed
+        by other means in between are left alone.
+        """
+        ids_before = {video["id"] for video in self.calcium_videos}
+        selected_before = self.selected_calcium_video_id
+
+        def finish() -> tuple[Callable[[], None], Callable[[], None]]:
+            added = [v for v in self.calcium_videos if v["id"] not in ids_before]
+            added_ids = {video["id"] for video in added}
+            selected_after = self.selected_calcium_video_id
+
+            def remove() -> None:
+                self.calcium_videos = [
+                    v for v in self.calcium_videos if v["id"] not in added_ids
+                ]
+                ids = {video["id"] for video in self.calcium_videos}
+                if self.selected_calcium_video_id not in ids:
+                    self.selected_calcium_video_id = (
+                        selected_before
+                        if selected_before in ids
+                        else (self.calcium_videos[-1]["id"] if ids else None)
+                    )
+
+            def re_add() -> None:
+                present = {video["id"] for video in self.calcium_videos}
+                self.calcium_videos.extend(v for v in added if v["id"] not in present)
+                if selected_after in {v["id"] for v in self.calcium_videos}:
+                    self.selected_calcium_video_id = selected_after
+
+            return remove, re_add
+
+        return finish
+
     @contextmanager
-    def edit_experiments(self, names: Sequence[str], label: str) -> Iterator[None]:
+    def edit_experiments(
+        self, names: Sequence[str], label: str, *, calcium_videos: bool = False
+    ) -> Iterator[None]:
         """Record the edits made to the named data groups as one undoable command.
 
         Edits inside the block must replace array buffers instead of writing
         into them (see :meth:`_experiment_restorer`). An exception rolls the
-        groups back and records nothing.
+        groups back and records nothing. With ``calcium_videos``, calcium
+        videos added inside the block are part of the same command: removed
+        on undo and restored on redo.
         """
         names = list(dict.fromkeys(names))
         undo = self._experiment_restorer(names)
         before = {name: self.experiments.get(name) for name in names}
         was_dirty = self.dirty
+        finish_videos = (
+            self._calcium_video_additions_restorer() if calcium_videos else None
+        )
         try:
             yield
         except Exception:
             undo(None)
+            if finish_videos is not None:
+                finish_videos()[0]()
             self.dirty = was_dirty
             raise
         else:
             redo = self._experiment_restorer(names)
             after = {name: self.experiments.get(name) for name in names}
+            remove_videos, re_add_videos = (
+                finish_videos() if finish_videos is not None else (None, None)
+            )
+
+            def do() -> None:
+                redo(before)
+                if re_add_videos is not None:
+                    re_add_videos()
+
+            def undo_command() -> None:
+                undo(after)
+                if remove_videos is not None:
+                    remove_videos()
+
+            # Data groups and movies only: input arrays are untouched.
             self.history.record_applied(
-                ProjectCommand(label, lambda: redo(before), lambda: undo(after))
+                ProjectCommand(label, do, undo_command, affects_inputs=False)
             )
 
     def set_syscon_export_settings(self, settings: SysconExportSettings | None) -> None:
@@ -370,22 +486,137 @@ class Project:
         self.syscon_export_settings = settings
         self.mark_dirty()
 
-    def set_device_folder(self, purpose: str, folder: str) -> None:
-        """Remember the folder this project's ``purpose`` workflow used last."""
+    def set_power_lut(self, wavelength_nm: int, lut: PowerLut) -> None:
+        """Store the SysCon2 power LUT used for ``wavelength_nm`` exports."""
+        self.power_luts[int(wavelength_nm)] = lut
+        self.mark_dirty()
+
+    def set_syscon2_export_template_text(self, text: str | None) -> None:
+        """Store the .seq header template SysCon2 exports start from."""
+        if text == self.syscon2_export_template_text:
+            return
+        self.syscon2_export_template_text = text
+        self.mark_dirty()
+
+    def set_device_folder(
+        self, purpose: str, folder: str, *, mark_dirty: bool = True
+    ) -> None:
+        """Remember the folder this project's ``purpose`` workflow used last.
+
+        With ``mark_dirty=False`` (a mere convenience, e.g. the start folder of
+        file dialogs) the folder is saved with the project's next save but does
+        not by itself ask to save."""
         if self.device_folders.get(purpose) == folder:
             return
         self.device_folders[purpose] = folder
-        self.mark_dirty()
+        if mark_dirty:
+            self.mark_dirty()
+
+    def set_import_files(self, purpose: str, paths: Sequence[str]) -> None:
+        """Remember the files listed in ``purpose``'s import dialog.
+
+        A convenience like the import folder: saved with the project's next
+        save, but not by itself a reason to ask to save."""
+        files = [str(path) for path in paths]
+        if files:
+            self.import_file_lists[purpose] = files
+        else:
+            self.import_file_lists.pop(purpose, None)
+
+    def unique_experiment_name(self, base: str, also_taken: Iterable[str] = ()) -> str:
+        """A valid, unused data group name made from ``base``: ``base``, or
+        ``base (2)``, ``base (3)``, ... if taken by a data group or in
+        ``also_taken`` (``"Simulation"`` always is), with ``'::'`` replaced
+        (see ``data_names.unique_group_name``)."""
+        return unique_group_name(base, [*self.experiments, *also_taken])
 
     def remove_experiments(self, names: Sequence[str]) -> None:
         """Delete a selection of data groups as one undoable edit."""
-        names = [name for name in dict.fromkeys(names) if name in self.experiments]
-        if not names:
+        self.remove_data(names)
+
+    def remove_data(
+        self,
+        groups: Sequence[str] = (),
+        datasets: Mapping[str, Sequence[Data]] | None = None,
+    ) -> None:
+        """Delete whole data groups and single data sets as one undoable edit.
+
+        ``groups`` are removed with all their data. ``datasets`` maps a group
+        name to data sets (matched by identity) removed from that group only, so
+        deleting e.g. the calcium traces of a group leaves its other data and
+        the project's input arrays untouched.
+        """
+        groups = [name for name in dict.fromkeys(groups) if name in self.experiments]
+        removals = {
+            name: [id(datum) for datum in data]
+            for name, data in (datasets or {}).items()
+            if name in self.experiments and name not in groups and data
+        }
+        if not groups and not removals:
             return
-        with self.edit_experiments(names, "Delete data groups"):
-            for name in names:
+        label = "Delete data groups" if groups else "Delete data sets"
+        with self.edit_experiments([*groups, *removals], label):
+            for name in groups:
                 del self.experiments[name]
+            for name, ids in removals.items():
+                experiment = self.experiments[name]
+                experiment.data = [d for d in experiment.data if id(d) not in ids]
             self.update_limits()
+            self.mark_dirty()
+
+    def validate_data_name(self, name: str) -> str:
+        """Return ``name`` stripped, or raise ``ValueError`` if it cannot be used
+        as a data group or data set name (it is shown as ``group :: data``)."""
+        problem = data_name_problem(name)
+        if problem:
+            raise ValueError(problem)
+        return name.strip()
+
+    def rename_experiment(self, name: str, new_name: str) -> None:
+        """Rename a data group (keeping its place in the list) as one undoable edit."""
+        new_name = self.validate_data_name(new_name)
+        if new_name == name:
+            return
+        if name not in self.experiments:
+            raise KeyError(f"Data group '{name}' does not exist")
+        problem = group_name_problem(new_name, self.experiments)
+        if problem:
+            raise ValueError(problem)
+        with self.edit_experiments([name, new_name], "Rename data group"):
+            experiment = self.experiments[name]
+            experiment.name = new_name
+            self.experiments = {
+                (new_name if key == name else key): value
+                for key, value in self.experiments.items()
+            }
+            self.mark_dirty()
+
+    def set_experiment_description(self, name: str, description: str) -> None:
+        """Change a data group's free-text description as one undoable edit."""
+        experiment = self.experiments[name]
+        if experiment.description == description:
+            return
+        with self.edit_experiments([name], "Edit data group description"):
+            experiment.description = description
+            self.mark_dirty()
+
+    def rename_experiment_data(self, name: str, datum: Data, new_name: str) -> None:
+        """Rename one data set of a data group as one undoable edit."""
+        new_name = self.validate_data_name(new_name)
+        if new_name == datum.name:
+            return
+        experiment = self.experiments[name]
+        if not any(d is datum for d in experiment.data):
+            raise KeyError(f"Data set '{datum.name}' is not in data group '{name}'")
+        if any(
+            d is not datum and d.name == new_name and type(d) is type(datum)
+            for d in experiment.data
+        ):
+            raise ValueError(
+                f"Data group '{name}' already has a data set named '{new_name}'."
+            )
+        with self.edit_experiments([name], "Rename data set"):
+            datum.name = new_name
             self.mark_dirty()
 
     @property
@@ -440,6 +671,46 @@ class Project:
             return video["index"]
         return self.scanimage_recording(video.get("run_id"))
 
+    def imaging_acquisition(self, run_id: str) -> dict | None:
+        """The record of ScanImage run ``run_id`` (a copy), or None."""
+        record = self._imaging_acquisition(run_id)
+        return None if record is None else dict(record)
+
+    def _imaging_acquisition(self, run_id: str) -> dict | None:
+        return next(
+            (
+                record
+                for record in self.imaging_acquisitions
+                if record.get("run_id") == run_id
+            ),
+            None,
+        )
+
+    def add_imaging_acquisition(self, record: dict) -> None:
+        """Record a ScanImage acquisition (keyed by its ``run_id``)."""
+        self.imaging_acquisitions.append(record)
+        self.mark_dirty()
+
+    def update_imaging_acquisition(
+        self, run_id: str, changes: dict, remove: tuple[str, ...] = ()
+    ) -> bool:
+        """Set ``changes`` on, and drop the ``remove`` keys from, the record of
+        ``run_id``; marks the project dirty if that changed anything. Returns
+        False when there is no such record (e.g. the project was replaced)."""
+        record = self._imaging_acquisition(run_id)
+        if record is None:
+            return False
+        changed = any(
+            record.get(key, object()) != value for key, value in changes.items()
+        )
+        changed |= any(key in record for key in remove)
+        record.update(changes)
+        for key in remove:
+            record.pop(key, None)
+        if changed:
+            self.mark_dirty()
+        return True
+
     def scanimage_recording(self, run_id: str | None) -> dict | None:
         if run_id is None:
             return None
@@ -461,12 +732,13 @@ class Project:
         channels: int = 1,
         shown_channel: int = 1,
     ) -> dict:
-        """Add a video and select it; returns the new entry."""
+        """Add a video and select it; returns the new entry.
+
+        Not recorded in the undo history by itself; to add a video together
+        with its imported data as one undoable step, pass a
+        :class:`CalciumVideoSpec` to :meth:`add_experiments`."""
         base = name or (pathlib.Path(paths[0]).stem if paths else "Imaging")
-        names = {video["name"] for video in self.calcium_videos}
-        unique, suffix = base, 2
-        while unique in names:
-            unique, suffix = f"{base} ({suffix})", suffix + 1
+        unique = unique_name(base, (video["name"] for video in self.calcium_videos))
         video: dict = {
             "id": uuid.uuid4().hex,
             "name": unique,
@@ -482,6 +754,17 @@ class Project:
         self.selected_calcium_video_id = video["id"]
         self.mark_dirty()
         return video
+
+    def _add_calcium_video_specs(self, specs: Sequence[CalciumVideoSpec]) -> None:
+        for spec in specs:
+            self.add_calcium_video(
+                list(spec.paths),
+                spec.fps,
+                name=spec.name,
+                run_id=spec.run_id,
+                channels=spec.channels,
+                shown_channel=spec.shown_channel,
+            )
 
     def relocate_calcium_video(
         self, video_id: str | None, chosen: pathlib.Path
@@ -570,16 +853,27 @@ class Project:
         options: SaveLoadOptions,
         report: Callable[[int], None] | None = None,
     ) -> None:
+        self.apply_import(self.read_import(filepath, options, report))
+
+    def read_import(
+        self,
+        filepath: str | pathlib.Path,
+        options: SaveLoadOptions,
+        report: Callable[[int], None] | None = None,
+    ) -> ImportedComponents:
+        """Read the chosen parts of another project file without changing this one.
+
+        Safe to run on a worker thread; pass the result to :meth:`apply_import`
+        on the GUI thread, since that clears the undo history.
+        """
         filepath = pathlib.Path(filepath)
         self.logger.info(
             f"Importing components from '{filepath}' into existing project"
         )
+        components = ImportedComponents()
         with zipfile.ZipFile(filepath, "r", zipfile.ZIP_DEFLATED) as zf:
-            # Replacing model/components is a new baseline, not a data command.
-            self.history.clear()
             if options.include_model:
                 self.logger.info("  - importing b2_model")
-                self.b2_model = B2Model()
                 b2_model_data = load_from_zip("b2_model", zf)
                 if (
                     options.include_simulation_data
@@ -589,15 +883,36 @@ class Project:
                     b2_stored_state = pickle.loads(zf.read("b2_stored_state.pkl"))
                 else:
                     b2_stored_state = {}
-                self.b2_model = B2Model.from_dict(
+                components.b2_model = B2Model.from_dict(
                     b2_model_data, b2_stored_state, report
                 )
             if options.include_experimental_data:
                 self.logger.info("  - importing experimental data")
-                self.experiments = load_from_zip("experimental_data", zf)
+                components.experiments = load_from_zip("experimental_data", zf)
+                # The data's Cellpose ids refer to the Cellpose data saved with it
+                # (see __init__ for the two archive names).
+                components.cellpose_data = (
+                    load_from_zip("cellpose_data_v2", zf)
+                    or load_from_zip("cellpose_data", zf)
+                ).get("cellpose_import")
             if options.include_stim_arrays:
-                self.logger.info("  - importing stim arrays")
-                self.stim_arrays = load_from_zip("stim_arrays", zf)
+                self.logger.info("  - importing input arrays")
+                components.stim_arrays = load_from_zip("stim_arrays", zf)
+        return components
+
+    def apply_import(self, components: ImportedComponents) -> None:
+        """Replace this project's parts with those from :meth:`read_import`."""
+        # Replacing model/components is a new baseline, not a data command.
+        self.history.clear()
+        if components.b2_model is not None:
+            self.b2_model = components.b2_model
+        if components.experiments is not None:
+            self.experiments = components.experiments
+            # Data saved without Cellpose data has no ids to match; keep ours.
+            if components.cellpose_data is not None:
+                self.set_cellpose_data(components.cellpose_data)
+        if components.stim_arrays is not None:
+            self.stim_arrays = components.stim_arrays
         self.update_limits()
         self.mark_dirty()
 
@@ -696,7 +1011,7 @@ class Project:
     def get_full_resolution_trace(self, name: str) -> TraceData | None:
         """Like ``get_data(name, TraceData)``, but a simulated trace is not
         downsampled to the plotting RAM limit (for exporting it)."""
-        if name.split(" :: ", 1)[0] == "Simulation":
+        if split_data_name(name)[0] == SIMULATION_GROUP:
             return self._clip_trace_to_timeline(
                 self.b2_model.get_simulation_trace_data(name)
             )
@@ -704,8 +1019,8 @@ class Project:
 
     def data_duration_seconds(self, name: str) -> float:
         """Duration of the data group (or simulation) holding the data ``name``."""
-        group = name.split(" :: ", 1)[0]
-        if group == "Simulation":
+        group = split_data_name(name)[0]
+        if group == SIMULATION_GROUP:
             return float(self.b2_model.get_sim_time_secs())
         experiment = self.experiments.get(group)
         return float(experiment.duration) if experiment is not None else 0.0
@@ -972,6 +1287,7 @@ class Project:
         duration_seconds: float,
         new_data: Sequence[TraceData | SpikeData | SynapseData],
         time_offset_seconds: float,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
     ):
         """
         Append new experimental data to an existing experiment
@@ -986,6 +1302,8 @@ class Project:
             List of data objects to append to the experiment
         time_offset_seconds : float
             Time in seconds at which to insert the new data.
+        calcium_videos : Sequence[CalciumVideoSpec]
+            Movies to add (and select) in the same undoable edit
         """
         if experiment_name not in self.experiments:
             self.logger.warning(
@@ -995,7 +1313,12 @@ class Project:
         self.logger.info(
             f"Appending experimental data to experiment '{experiment_name}'"
         )
-        with self.edit_experiments([experiment_name], "Append experimental data"):
+        with self.edit_experiments(
+            [experiment_name],
+            "Append experimental data",
+            calcium_videos=bool(calcium_videos),
+        ):
+            self._add_calcium_video_specs(calcium_videos)
             existing_experiment = self.experiments[experiment_name]
             if time_offset_seconds is None:
                 time_offset_seconds = existing_experiment.duration
@@ -1030,6 +1353,16 @@ class Project:
             )
             self.update_limits()
             self.mark_dirty()
+
+    def set_cellpose_data(self, cellpose_data: CellposeImportResult | None) -> None:
+        """Replace (or with ``None`` remove) the project's Cellpose data."""
+        self.cellpose_data = cellpose_data
+        self.update_limits()
+        self.mark_dirty()
+
+    def cellpose_neuron_count(self) -> int:
+        """Neuron/stimulus-index-space count implied by the Cellpose data."""
+        return _cellpose_neuron_count(self.cellpose_data)
 
     def remap_cellpose_indices(self) -> list[str]:
         """
@@ -1077,32 +1410,56 @@ class Project:
     def add_experiment(
         self,
         experiment: Experiment,
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
     ):
         """
-        Add a new experiment to the model
+        Add a new experiment to the model as one undoable edit
 
         Parameters
         ----------
         experiment : Experiment
             Experiment object to add
+        calcium_videos : Sequence[CalciumVideoSpec]
+            Movies to add (and select) in the same undoable edit
 
         Raises
         ------
         ValueError
             If an experiment with the same name already exists
         """
-        self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        if experiment.name in self.experiments:
-            self.logger.warning(
-                f"Add requested but experiment '{experiment.name}' already exists"
-            )
-            raise ValueError(f"Experiment '{experiment.name}' already exists")
-        self.logger.info(f"Adding experimental data for experiment '{experiment.name}'")
-        with self.edit_experiments([experiment.name], "Add data group"):
-            for t in [0.0, experiment.duration]:
-                if t not in experiment.timepoints:
-                    experiment.timepoints.append(t)
-            self.experiments[experiment.name] = experiment
+        self.add_experiments([experiment], calcium_videos, label="Add data group")
+
+    def add_experiments(
+        self,
+        experiments: Sequence[Experiment],
+        calcium_videos: Sequence[CalciumVideoSpec] = (),
+        label: str = "Add data groups",
+    ) -> None:
+        """Add several data groups, and their calcium videos, as one undoable
+        edit (e.g. a batch import): undo removes them all, movies included.
+
+        Raises ``ValueError`` (adding nothing) if a name is already used, by an
+        existing group or twice among ``experiments``.
+        """
+        names = [experiment.name for experiment in experiments]
+        for name in names:
+            if name in self.experiments or names.count(name) > 1:
+                self.logger.warning(
+                    f"Add requested but experiment '{name}' already exists"
+                )
+                raise ValueError(f"Experiment '{name}' already exists")
+        if not experiments and not calcium_videos:
+            return
+        with self.edit_experiments(names, label, calcium_videos=bool(calcium_videos)):
+            for experiment in experiments:
+                self.logger.info(
+                    f"Adding experimental data for experiment '{experiment.name}'"
+                )
+                for t in [0.0, experiment.duration]:
+                    if t not in experiment.timepoints:
+                        experiment.timepoints.append(t)
+                self.experiments[experiment.name] = experiment
+            self._add_calcium_video_specs(calcium_videos)
             self.update_limits()
             self.mark_dirty()
 
@@ -1231,7 +1588,8 @@ class Project:
             n_timestamps = stim_array.values.shape[0]
             array_time_secs = stim_array.dt * n_timestamps
             padding_required_secs = total_time_seconds - array_time_secs
-            if padding_required_secs > 0:
+            # Ignore float error in n * dt, or padding twice adds a sample.
+            if padding_required_secs / stim_array.dt > 1e-6:
                 n_pad = (
                     max(
                         0,
@@ -1239,7 +1597,13 @@ class Project:
                         - n_timestamps,
                     )
                     if only_stim_name is not None
-                    else math.ceil(padding_required_secs / stim_array.dt)
+                    # Ceil within float tolerance: 0.2 s - 0.125 s is a hair
+                    # over 75 ms and must not round up to 76 samples.
+                    else max(
+                        0,
+                        seconds_to_samples_ceil(total_time_seconds, stim_array.dt)
+                        - n_timestamps,
+                    )
                 )
                 self.logger.info(
                     f"Adding {padding_required_secs}s / {n_pad} timestamps of padding to {name}: {stim_array.values.shape}"
@@ -1442,28 +1806,11 @@ class Project:
             or not self.cellpose_data.stimulus_to_cellpose_mapping
         ):
             raise ValueError(
-                "No Cellpose stimulus mapping to trim to - import Cellpose "
+                "No Cellpose input mapping to trim to - import Cellpose "
                 "data with a mapping first."
             )
         kept_stim_ids = sorted(self.cellpose_data.stimulus_to_cellpose_mapping.keys())
         self._trim_to_neuron_ids(kept_stim_ids)
-        self.update_limits()
-        self.mark_dirty()
-
-    def trim_stim_arrays(self, total_time_seconds: float):
-        """
-        Trim all StimArrays in the project to a length of total_time_seconds
-        """
-        for name, stim_array in self.stim_arrays.items():
-            n_timestamps = stim_array.values.shape[0]
-            new_n_timestamps = seconds_to_samples_nearest(
-                total_time_seconds, stim_array.dt
-            )
-            if new_n_timestamps < n_timestamps:
-                self.logger.info(
-                    f"Reducing {name} number of timestamps: {n_timestamps} -> {new_n_timestamps}"
-                )
-                self.stim_arrays[name].values = stim_array.values[:new_n_timestamps, :]
         self.update_limits()
         self.mark_dirty()
 
@@ -1502,10 +1849,17 @@ class Project:
             return 1.0
         return max(candidates)
 
+    def _stim_array_lengths(self) -> dict[str, int]:
+        return {
+            name: int(stim_array.values.shape[0])
+            for name, stim_array in self.stim_arrays.items()
+        }
+
     def tile_stim_arrays_to_length(self, target_seconds: float) -> None:
         """Extend every stim array via tiling so each covers `target_seconds`."""
         if target_seconds < 0:
             raise ValueError(f"target_seconds must be >= 0, got {target_seconds}")
+        lengths_before = self._stim_array_lengths()
         for stim_array in self.stim_arrays.values():
             current_n = int(stim_array.values.shape[0])
             if current_n == 0:
@@ -1516,6 +1870,9 @@ class Project:
             full_tiles = (n_target + current_n - 1) // current_n
             tiled = np.tile(stim_array.values, (full_tiles, 1))
             stim_array.values = tiled[:n_target]
+        if self._stim_array_lengths() != lengths_before:
+            # Not undoable; earlier length-changing commands would go stale.
+            self.history.clear()
         self.update_limits()
         self.mark_dirty()
 
@@ -1527,9 +1884,8 @@ class Project:
             new_n_timestamps = seconds_to_samples_nearest(
                 total_time_seconds, stim_array.dt
             )
-            if (
-                new_n_timestamps < stim_array.values.shape[0]
-                and np.sum(stim_array.values[new_n_timestamps:, :]) > 0
+            if new_n_timestamps < stim_array.values.shape[0] and np.any(
+                stim_array.values[new_n_timestamps:, :] != 0
             ):
                 return True
         return False
@@ -1571,16 +1927,34 @@ class Project:
             self.external_simulator = None
             self.external_simulate_function = runpy.run_path(path)["simulate"]
 
-    def load_external_simulator(self) -> None:
-        """Compatibility wrapper for loading external simulation entry points.
-
-        This delegates to `load_NN`, which remains the canonical implementation.
-        """
-        self.load_NN()
-
     def external_simulate_params_flat(self) -> dict[str, object]:
         """Flatten `external_simulate_params` to `{name: value}` for the call site."""
         return {k: v["value"] for k, v in self.external_simulate_params.items()}
+
+    def prepare_simulation(
+        self, time_seconds: float, stim_array_padding_seconds: float = 0.0
+    ) -> None:
+        """Size the stim arrays for a run of ``time_seconds``.
+
+        :meth:`run_simulation` does this too, but it may clear the undo history,
+        whose listeners update widgets: call it on the GUI thread before running
+        the simulation on a worker, where it then changes nothing.
+        """
+        lengths_before = self._stim_array_lengths()
+        self.pad_stim_arrays(
+            self.b2_model.get_sim_time_secs()
+            + time_seconds
+            + stim_array_padding_seconds
+        )
+        if self._stim_array_lengths() != lengths_before:
+            # Padding outside the history would make undoing an earlier
+            # length change (Trim/Resize/Pad) slice the wrong rows.
+            self.history.clear()
+        # Stim arrays index the neuron axis (e.g. ``stimulus(t, i)``), so they
+        # must be at least as wide as the model's neuron count. Widen with
+        # trailing zero columns (= no stimulation) so increasing the neuron
+        # count in the model editor doesn't crash with an out-of-bounds index.
+        self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
 
     def run_simulation(
         self,
@@ -1588,18 +1962,19 @@ class Project:
         report: Callable | None = None,
         stim_array_padding_seconds: float = 0.0,
     ) -> None:
-        self.pad_stim_arrays(
-            self.b2_model.get_sim_time_secs()
-            + time_seconds
-            + stim_array_padding_seconds
-        )
-        # Stim arrays index the neuron axis (e.g. ``stimulus(t, i)``), so they
-        # must be at least as wide as the model's neuron count. Widen with
-        # trailing zero columns (= no stimulation) so increasing the neuron
-        # count in the model editor doesn't crash with an out-of-bounds index.
-        self.pad_stim_arrays_to_neuron_count(self.b2_model.get_defined_neuron_count())
+        self.prepare_simulation(time_seconds, stim_array_padding_seconds)
         self.b2_model.run_simulation(time_seconds, self.stim_arrays, report)
         self.update_limits()
+        self.mark_dirty()
+
+    def store_checkpoint(self, checkpoint: str) -> None:
+        """Store the simulation state as a named checkpoint (saved with the project)."""
+        self.b2_model.store(checkpoint)
+        self.mark_dirty()
+
+    def restore_checkpoint(self, checkpoint: str) -> None:
+        """Restore the simulation state of a named checkpoint."""
+        self.b2_model.restore(checkpoint)
         self.mark_dirty()
 
     def request_cancel_simulation(self) -> None:
@@ -1627,6 +2002,37 @@ class Project:
             options for what to include in the saved project
         """
 
+        filepath = pathlib.Path(filepath)
+        change_count = self._change_count
+        # Serialise into a temporary file next to the target and only replace
+        # the target once everything succeeded, so a serialisation error can
+        # never truncate an existing project file.
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{filepath.name}.", suffix=".tmp", dir=filepath.parent
+        )
+        os.close(fd)
+        tmp_path = pathlib.Path(tmp_name)
+        try:
+            self._write_project_zip(tmp_path, options)
+            if filepath.exists():
+                shutil.copymode(filepath, tmp_path)
+            else:
+                # mkstemp creates 0600 files; use the usual umask-based mode.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(tmp_path, 0o666 & ~umask)
+            os.replace(tmp_path, filepath)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
+        self.filepath = filepath
+        # The GUI stays usable while a worker saves; keep edits made meanwhile.
+        if self._change_count == change_count:
+            self.dirty = False
+
+    def _write_project_zip(
+        self, filepath: pathlib.Path, options: SaveLoadOptions
+    ) -> None:
         with zipfile.ZipFile(filepath, "w", zipfile.ZIP_DEFLATED) as zf:
             metadata: dict = {"schema_version": 2}
             if self.external_simulate_path is not None:
@@ -1655,7 +2061,16 @@ class Project:
                 )
             if self.device_folders:
                 metadata["device_folders"] = self.device_folders
-            zf.writestr("project_metadata.json", json.dumps(metadata))
+            if self.import_file_lists:
+                metadata["import_file_lists"] = self.import_file_lists
+            if self.syscon2_export_template_text is not None:
+                metadata["syscon2_export_template_text"] = (
+                    self.syscon2_export_template_text
+                )
+            zf.writestr(
+                "project_metadata.json",
+                json.dumps(metadata, default=_metadata_json_default),
+            )
             include_simulation_data = (
                 options.include_simulation_data and self.b2_model.has_simulation_data()
             )
@@ -1668,10 +2083,17 @@ class Project:
             if include_simulation_data:
                 # store the current simulation data state to a temporary checkpoint to be able to restore it on load
                 self.b2_model.network.store(save_store_name)
-                zf.writestr(
-                    "b2_stored_state.pkl",
-                    pickle.dumps(self.b2_model.network._stored_state, protocol=4),
-                )
+                stored_state = self.b2_model.network._stored_state
+                try:
+                    zf.writestr(
+                        "b2_stored_state.pkl",
+                        pickle.dumps(stored_state, protocol=4),
+                    )
+                finally:
+                    # The save checkpoint only belongs in the file; keeping it
+                    # in the live network would let a later copy (e.g. the
+                    # model editor) restore this stale state.
+                    stored_state.pop(save_store_name, None)
             elif options.include_simulation_data:
                 self.logger.info("Skipping simulation data save: no simulation data")
             # Todo: We could consider another option for cellpose data. I originally leaned towards that, but after merging  #388 and #390 this cellpose data may be in experimental data anyway, and seems inextricably related to it.
@@ -1681,8 +2103,6 @@ class Project:
                     append_to_zip(
                         {"cellpose_import": self.cellpose_data}, "cellpose_data_v2", zf
                     )
-        self.filepath = pathlib.Path(filepath)
-        self.dirty = False
 
 
 def _place_block_spikes(

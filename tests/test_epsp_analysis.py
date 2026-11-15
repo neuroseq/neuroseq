@@ -122,3 +122,17 @@ def test_explicit_input_units_override_unlabelled_trace(qtbot) -> None:
     units.setCurrentText("V")
     offsets = widget.subplot.collections[0].get_offsets()
     np.testing.assert_allclose(offsets[:, 1], [5.0, 8.0], atol=0.2)
+
+
+def test_epsp_plugin_labels_neurons_by_id_not_row(qtbot) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    plugin = next(p for p in discover_analysis_plugins() if p.id == "epsp_amplitudes")
+    # Rows hold neurons 7 and 3; the selection covers both.
+    data = TraceData(
+        "Vm", np.stack([_trace(), _trace()]), np.array([7, 3]), "mV", 0.0001
+    )
+    widget.set_data(data, plugin, slice(3, 8), None)
+
+    labels = [c.get_label() for c in widget.subplot.collections]
+    assert labels == ["Neuron 3", "Neuron 7"]

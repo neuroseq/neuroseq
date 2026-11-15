@@ -28,6 +28,7 @@ from neuroseq.importers.importer_cellpose import SquareAOI
 from neuroseq.importers.importer_cellpose import clone_aoi_config
 from neuroseq.utils import neuron_indices_to_colors
 from neuroseq.visualization.fpl_widget import FullScreenFPLWidget
+from neuroseq.visualization_support.footprint_colors import footprint_legend
 
 
 class CameraState(TypedDict):
@@ -93,33 +94,6 @@ class _AOIDragState:
     part: str
     anchor_world: tuple[float, float]
     original_config: AreasOfInterestConfig
-
-
-def compute_segmentation_legend(
-    segmentation: np.ndarray,
-) -> list[tuple[int, tuple[int, int, int]]]:
-    """Assign each segmented cell a colour keyed by its raw Cellpose id."""
-    unique_ids = np.unique(segmentation)
-    neuron_ids = [cell_id for cell_id in unique_ids if cell_id >= 0]
-    if not neuron_ids:
-        return []
-
-    # Keyed directly by the raw id (not shifted to start at 0), so a given
-    # id always gets the same colour regardless of which other ids happen
-    # to be visible - matching trace_widget's neuron_indices_to_colors(
-    # data.indices) convention exactly (#548). Shifting by the currently
-    # smallest visible id made colours diverge between the Spatial
-    # Footprints overlay and the trace viewer for any dataset whose lowest
-    # id isn't 0, and could even change the same cell's colour across
-    # re-renders as the visible id set changed.
-    id_colors = neuron_indices_to_colors(np.array(neuron_ids))
-    return [
-        (
-            int(cell_id),
-            (int(c[0] * 255), int(c[1] * 255), int(c[2] * 255)),
-        )
-        for cell_id, c in zip(neuron_ids, id_colors, strict=False)
-    ]
 
 
 def _pixel_at(world_x: float, world_y: float) -> tuple[int, int]:
@@ -635,8 +609,10 @@ class OverlayView(FullScreenFPLWidget):
             int(cell_id): (rgb_val[0] / 255.0, rgb_val[1] / 255.0, rgb_val[2] / 255.0)
             for cell_id, rgb_val in (legend_data or [])
         }
-        # Keyed by the raw id, not shifted to start at 0 - see
-        # compute_segmentation_legend's docstring/comment (#548).
+        # Fallback for cells without a legend entry: keyed by the raw id, not
+        # shifted to start at 0 (#548). Callers that know the Cellpose
+        # mapping pass footprint_legend(segmentation, cellpose_data) so cells
+        # take their neurons' trace colours (#649).
         id_colors = neuron_indices_to_colors(neuron_ids)
 
         for idx, neuron_id in enumerate(neuron_ids):
@@ -1645,7 +1621,7 @@ class CellOverlayWidget(QtWidgets.QGroupBox):
     def _compute_segementation_colors(
         self, segmentation: np.ndarray
     ) -> list[tuple[int, tuple[int, int, int]]]:
-        return compute_segmentation_legend(segmentation)
+        return footprint_legend(segmentation)
 
     def closeEvent(self, event):
         # explicitly close all fastplotlib figures to avoid renderer trying to access them after they have been destroyed

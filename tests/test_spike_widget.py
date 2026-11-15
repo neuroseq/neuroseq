@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 from pytestqt.qtbot import QtBot
@@ -225,3 +227,87 @@ def test_spike_widget_x_lock_allows_independent_and_linked_scrolling(
         default_after_lock["position"][0],
         abs=5.0,
     )
+
+
+def test_spike_widget_hiding_neurons_compacts_spike_rows(qtbot: QtBot) -> None:
+    widget = SpikeWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    widget.set_data(
+        SpikeData(
+            name="s",
+            spike_indices=np.array([0, 1, 2, 2]),
+            spike_times=np.array([0.001, 0.002, 0.003, 0.004]),
+        )
+    )
+
+    widget.set_neurons_greyed([0], [])
+
+    assert widget.graphic is not None
+    points = np.asarray(widget.graphic.data[:])
+    # Neuron 0's spike is gone; neurons 1 and 2 move up to rows 0 and 1,
+    # where the y tick labels now say "1" and "2".
+    np.testing.assert_allclose(points[:, 0], [2.0, 3.0, 4.0])
+    np.testing.assert_allclose(points[:, 1], [0.0, 1.0, 1.0])
+    assert widget._visible_neuron_ids == [1, 2]
+
+    widget.set_neurons_greyed([1, 2], [])
+    assert widget.graphic is not None
+    assert not widget.graphic.visible
+
+    widget.set_neurons_greyed([], [0, 1, 2])
+    points = np.asarray(widget.graphic.data[:])
+    np.testing.assert_allclose(points[:, 1], [0.0, 1.0, 2.0, 2.0])
+    assert widget.graphic.visible
+
+
+def test_spike_widget_keeps_hidden_neurons_across_set_data(qtbot: QtBot) -> None:
+    widget = SpikeWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    data = SpikeData(
+        name="s", spike_indices=np.array([0, 1]), spike_times=np.array([0.001, 0.002])
+    )
+    widget.set_data(data)
+    widget.set_neurons_greyed([0], [])
+
+    widget.set_data(data)
+
+    assert widget.is_neuron_greyed(0)
+    assert widget.graphic is not None
+    np.testing.assert_allclose(np.asarray(widget.graphic.data[:])[:, 1], [0.0])
+
+
+def test_empty_spike_widget_drag_selects_without_error(qtbot: QtBot) -> None:
+    widget = SpikeWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    widget.set_data(None)
+    positions = iter([np.array([1.0, 1.0, 0.0]), np.array([5.0, 2.0, 0.0])])
+    widget.subplot.map_screen_to_world = lambda ev: next(positions)
+    event = SimpleNamespace(button=1, x=0.0, y=0.0)
+
+    widget.pointer_down(event)
+    widget.pointer_move(event)  # previously ZeroDivisionError (dt_ms == 0)
+
+    assert widget.selected_time_slice == slice(1, 5)
+
+
+def test_spike_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    widget = SpikeWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    widget.set_data(
+        SpikeData(
+            name="s",
+            spike_indices=np.array([0, 1, 2]),
+            spike_times=np.array([0.001, 0.002, 0.003]),
+        )
+    )
+    widget.set_neuron_greyed(1, True)
+
+    dialog = widget.preview_spikes()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(y, 0) for y in (0.0, 1.0, 2.0)] == ["0", "2", ""]
+    dialog.close()

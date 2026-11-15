@@ -4,6 +4,7 @@ import brian2.numpy_ as np
 import pytest
 from pytestqt.qtbot import QtBot
 
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisType
 from neuroseq.visualization.custom_analysis_widget import CustomAnalysisWidget
@@ -552,3 +553,108 @@ def test_custom_analysis_widget_trace_pearson_correlation_short_selection(
         and "need at least one neuron and two time samples" in child.get_text().lower()
     ]
     assert len(text_children) > 0
+
+
+@pytest.mark.parametrize(
+    ("neurons", "expected_ids", "expected_values"),
+    [
+        (slice(0, 1), [0], [[2.0, 2.0]]),
+        (slice(5, 6), [5], [[3.0, 3.0]]),
+        (None, [0, 1, 5], [[2.0, 2.0], [1.0, 1.0], [3.0, 3.0]]),
+        ([5, 1], [5, 1], [[3.0, 3.0], [1.0, 1.0]]),
+    ],
+)
+def test_custom_analysis_widget_selects_trace_rows_by_neuron_id(
+    qtbot: QtBot, neurons, expected_ids, expected_values
+) -> None:
+    """TraceData rows follow ``indices``, not the neuron ids themselves."""
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    data = TraceData(
+        "t",
+        np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]]),
+        np.array([1, 0, 5]),
+        "a.u.",
+        0.001,
+    )
+
+    widget.set_data(data, CustomAnalysisType.Histogram, neurons, None)
+
+    assert widget.neuron_ids == expected_ids
+    np.testing.assert_allclose(widget.traces, expected_values)
+
+
+def _plugin(plugin_id: str):
+    from neuroseq.analysis_plugins import discover_analysis_plugins
+
+    return next(p for p in discover_analysis_plugins() if p.id == plugin_id)
+
+
+def _layout_widgets(widget: CustomAnalysisWidget) -> list:
+    layout = widget.layout()
+    return [layout.itemAt(i).widget() for i in range(layout.count())]
+
+
+def test_custom_analysis_widget_drops_colorbar_and_twin_axes_on_reuse(
+    qtbot: QtBot,
+) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    rng = np.random.default_rng(0)
+    data = TraceData(
+        "t", rng.random((4, 50)).astype(np.float32), np.arange(4), "mV", 0.001
+    )
+    for _ in range(3):
+        widget.set_data(data, CustomAnalysisType.PearsonCorrelation, None, None)
+        # The plot axes plus its single colorbar.
+        assert len(widget.getFigure().axes) == 2
+    widget.set_data(data, CustomAnalysisType.Histogram, None, None)
+    assert widget.getFigure().axes == [widget.subplot]
+
+    widget.subplot.twinx()  # e.g. left behind by a plugin's message path
+    widget.clear_data()
+    assert widget.getFigure().axes == [widget.subplot]
+
+
+def test_custom_analysis_widget_removes_plugin_controls_on_reuse(
+    qtbot: QtBot,
+) -> None:
+    widget = CustomAnalysisWidget()
+    qtbot.addWidget(widget)
+    traces = TraceData(
+        "t",
+        (np.random.default_rng(0).random((3, 500)) * 0.01 - 0.07).astype(np.float32),
+        np.arange(3),
+        "V",
+        0.0001,
+    )
+    spikes = SpikeData(
+        name="s",
+        spike_indices=np.array([0, 1, 2]),
+        spike_times=np.array([0.01, 0.02, 0.03]),
+    )
+    widget.set_data(traces, _plugin("epsp_amplitudes"), None, None)
+    epsp_bar = widget._epsp_amplitude_controls
+    assert epsp_bar in _layout_widgets(widget)
+
+    widget.set_data(spikes, _plugin("advanced_mean_activity"), None, None)
+    bars = [
+        w
+        for w in _layout_widgets(widget)
+        if w.objectName() == CustomAnalysisWidget.PLUGIN_CONTROLS_OBJECT_NAME
+    ]
+    assert len(bars) == 1
+    assert epsp_bar not in _layout_widgets(widget)
+
+    widget.set_data(spikes, CustomAnalysisType.Histogram, None, None)
+    assert not any(
+        w.objectName() == CustomAnalysisWidget.PLUGIN_CONTROLS_OBJECT_NAME
+        for w in _layout_widgets(widget)
+    )
+
+    widget.set_data(traces, _plugin("replay_mse"), None, None)
+    widget.clear_data()
+    assert not any(
+        w.objectName() == CustomAnalysisWidget.PLUGIN_CONTROLS_OBJECT_NAME
+        for w in _layout_widgets(widget)
+    )

@@ -230,3 +230,31 @@ def test_window_backend_weight_readout_without_qt():
         assert actual_dt == expected_dt
         assert actual_percent == pytest.approx(expected_percent)
     assert finished == ["STDP window sweep finished; measured 2/2 points."]
+
+
+def test_window_backend_repeats_the_resolution_warning_on_each_sweep():
+    """The Δt snapping warning belongs to a sweep: like rheobase and STDP
+    tuning, a new sweep must log it again rather than stay silent."""
+    backend = StdpWindowBackend(Host())
+    backend.resolution_warning_logged = True
+    config = StdpWindowRunConfig(
+        dt_min_ms=-10.0,
+        dt_max_ms=10.0,
+        dt_points=2,
+        include_zero=False,
+        pairings_per_point=1,
+        readout=StdpWindowDialog.WEIGHT_READOUT,
+        sweep_mode=StdpWindowDialog.RESET_MODE,
+        presynaptic_id=0,
+        postsynaptic_id=1,
+        amplitude=5.0,
+        pulse_ms=5.0,
+        recovery_ms=150.0,
+        response_ms=50.0,
+        stim_dt=0.001,
+        n_neurons=2,
+    )
+
+    backend.begin_sweep(config, [-10.0, 10.0], weight_baseline=1.0)
+
+    assert not backend.resolution_warning_logged

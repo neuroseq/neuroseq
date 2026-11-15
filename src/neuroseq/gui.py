@@ -7,13 +7,13 @@ from typing import Any
 
 import psutil
 import pynvml
-import qtawesome as qta
 from qtpy import QtCore
 from qtpy import QtGui
 from qtpy import QtWidgets
 from qtpy.QtCore import QTimer
 from qtpy.QtWidgets import QLabel
 
+from neuroseq import console_art
 from neuroseq.example_projects import getting_started_project
 from neuroseq.gui_settings import GuiSettings
 from neuroseq.project import Project
@@ -135,7 +135,7 @@ class Gui(QtWidgets.QMainWindow):
         self.status_bar = QtWidgets.QStatusBar(self)
         self.setStatusBar(self.status_bar)
         self.status_bar.addPermanentWidget(ResourceMonitorLabel())
-        self.setWindowIcon(qta.icon("fa6s.brain"))
+        self.setWindowIcon(QtGui.QIcon(str(console_art.app_icon_path())))
         self._add_workspace(filename)
         self.showMaximized()
 

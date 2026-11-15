@@ -56,9 +56,17 @@ def welcome_banner() -> list[str]:
 
 
 def brain_image_path() -> Path:
-    """Path to the bundled pixel-art brain shown under the console's welcome
-    banner."""
+    """Path to the bundled pixel-art row shown under the console's welcome
+    banner: a brain of binary digits, a biological brain and a brain of
+    circuits, side by side."""
     resource = resources.files("neuroseq.resources").joinpath("console_brain.png")
+    return Path(str(resource))
+
+
+def app_icon_path() -> Path:
+    """Path to the bundled application icon: the half biological, half
+    digital pixel-art brain."""
+    resource = resources.files("neuroseq.resources").joinpath("app_icon.png")
     return Path(str(resource))
 
 

@@ -56,6 +56,16 @@ def _without_secrets(values: dict) -> dict:
     }
 
 
+def _read_config_file() -> dict:
+    config_file = pathlib.Path(user_config_dir("neuroseq", "ssciwr")) / "config.json"
+    try:
+        with open(config_file, encoding="utf-8") as f:
+            config = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
 @dataclass
 class GuiSettings:
     max_ram_synapse_plot_matrix: int = 256
@@ -69,10 +79,16 @@ class GuiSettings:
     llm_openai_base_url: str = ""
     llm_codex_executable: str = ""
     llm_claude_executable: str = ""
+    #: Per provider: True keeps experimental data from the LLM assistant.
+    #: Missing providers use ``llm_project_data_private``'s default.
+    llm_private_project_data: dict = field(default_factory=dict)
     fiji_executable_path: str = ""
     scanimage_python_path: str = ""
     scanimage_recording_directory: str = ""
     syscon_export_directory: str = ""
+    #: Folder of the file picked last in any project's data import dialogs;
+    #: the start folder for a project that has none of its own (#646).
+    import_directory: str = ""
     #: "Grab FOV for segmentation" applies Fiji's Auto brightness before Cellpose.
     fov_auto_brightness: bool = True
     #: BrainScaleS-2 tab settings (``bss2_protocol.Bss2Settings.to_dict()``).
@@ -87,6 +103,7 @@ class GuiSettings:
         self.__dict__["fiji_executable_path"] = _autodetect_fiji()
         self.__dict__["recent_projects"] = []
         self.__dict__["bss2_settings"] = {}
+        self.__dict__["llm_private_project_data"] = {}
         self.load_config_settings()
         b2.prefs.codegen.target = self.brian2_backend
 
@@ -97,40 +114,63 @@ class GuiSettings:
         updated = [normalized] + [p for p in self.recent_projects if p != normalized]
         self.recent_projects = updated[:MAX_RECENT_PROJECTS]
 
+    def llm_project_data_private(self, provider: str) -> bool:
+        """Whether the assistant hides experimental data from ``provider``.
+        Defaults to hidden for every provider except local Ollama."""
+        return bool(self.llm_private_project_data.get(provider, provider != "ollama"))
+
+    def set_llm_project_data_private(self, provider: str, private: bool) -> None:
+        stored = _read_config_file().get("llm_private_project_data")
+        current = stored if isinstance(stored, dict) else {}
+        self.llm_private_project_data = {
+            **self.llm_private_project_data,
+            **{k: v for k, v in current.items() if isinstance(v, bool)},
+            provider: bool(private),
+        }
+
     def __setattr__(self, prop, val):
         super().__setattr__(prop, val)
-        # save changes to the config file
-        self.save_config_settings()
+        # Write only this key: other GuiSettings instances (e.g. a settings
+        # dialog) may have changed other keys since this one was loaded.
+        self.save_config_settings(only=prop)
 
-    def save_config_settings(self) -> None:
+    def _config_values(self) -> dict:
+        return {
+            "brian2_backend": self.brian2_backend,
+            "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
+            "max_ram_trace_plot_matrix": self.max_ram_trace_plot_matrix,
+            "stim_padding_secs": self.stim_padding_secs,
+            "theme": self.theme,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "llm_ollama_base_url": self.llm_ollama_base_url,
+            "llm_openai_base_url": self.llm_openai_base_url,
+            "llm_codex_executable": self.llm_codex_executable,
+            "llm_claude_executable": self.llm_claude_executable,
+            "llm_private_project_data": self.llm_private_project_data,
+            "fiji_executable_path": self.fiji_executable_path,
+            "scanimage_python_path": self.scanimage_python_path,
+            "scanimage_recording_directory": self.scanimage_recording_directory,
+            "syscon_export_directory": self.syscon_export_directory,
+            "import_directory": self.import_directory,
+            "fov_auto_brightness": self.fov_auto_brightness,
+            "bss2_settings": _without_secrets(self.bss2_settings),
+            "recent_projects": self.recent_projects,
+        }
+
+    def save_config_settings(self, only: str | None = None) -> None:
+        """Write the settings; with ``only``, merge just that key into the file."""
+        values = self._config_values()
+        if only is not None:
+            if only not in values:
+                return
+            values = {**_read_config_file(), only: values[only]}
         try:
             config_dir = pathlib.Path(user_config_dir("neuroseq", "ssciwr"))
             config_dir.mkdir(parents=True, exist_ok=True)
             config_file = config_dir / "config.json"
             with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "brian2_backend": self.brian2_backend,
-                        "max_ram_synapse_plot_matrix": self.max_ram_synapse_plot_matrix,
-                        "max_ram_trace_plot_matrix": self.max_ram_trace_plot_matrix,
-                        "stim_padding_secs": self.stim_padding_secs,
-                        "theme": self.theme,
-                        "llm_provider": self.llm_provider,
-                        "llm_model": self.llm_model,
-                        "llm_ollama_base_url": self.llm_ollama_base_url,
-                        "llm_openai_base_url": self.llm_openai_base_url,
-                        "llm_codex_executable": self.llm_codex_executable,
-                        "llm_claude_executable": self.llm_claude_executable,
-                        "fiji_executable_path": self.fiji_executable_path,
-                        "scanimage_python_path": self.scanimage_python_path,
-                        "scanimage_recording_directory": self.scanimage_recording_directory,
-                        "syscon_export_directory": self.syscon_export_directory,
-                        "fov_auto_brightness": self.fov_auto_brightness,
-                        "bss2_settings": _without_secrets(self.bss2_settings),
-                        "recent_projects": self.recent_projects,
-                    },
-                    f,
-                )
+                json.dump(values, f)
             self.logger.info(f"Saved config settings to {config_file}")
         except Exception as e:
             self.logger.warning(f"Could not save config file: {e}")
@@ -177,6 +217,7 @@ class GuiSettings:
                 "scanimage_recording_directory", ""
             )
             syscon_export_directory = config.get("syscon_export_directory", "")
+            import_directory = config.get("import_directory", "")
             fov_auto_brightness = config.get("fov_auto_brightness", True)
             recent_projects = config.get("recent_projects", [])
             bss2_settings = config.get("bss2_settings", {})
@@ -219,11 +260,11 @@ class GuiSettings:
             try:
                 self.__dict__["stim_padding_secs"] = max(0, int(stim_padding_secs))
                 self.logger.info(
-                    f"Loaded stimulus padding from config file {config_file}: {stim_padding_secs}"
+                    f"Loaded input padding from config file {config_file}: {stim_padding_secs}"
                 )
             except ValueError:
                 self.logger.warning(
-                    f"Invalid stimulus padding in config file {config_file}: {stim_padding_secs}. Restoring default of 5s"
+                    f"Invalid input padding in config file {config_file}: {stim_padding_secs}. Restoring default of 0 s"
                 )
                 self.__dict__["stim_padding_secs"] = 0
             if theme in theme_module.THEMES:
@@ -266,6 +307,12 @@ class GuiSettings:
                 str(llm_ollama_base_url).rstrip("/") or "http://localhost:11434"
             )
             self.__dict__["llm_openai_base_url"] = str(llm_openai_base_url).rstrip("/")
+            private_data = config.get("llm_private_project_data", {})
+            self.__dict__["llm_private_project_data"] = (
+                {str(k): v for k, v in private_data.items() if isinstance(v, bool)}
+                if isinstance(private_data, dict)
+                else {}
+            )
             if fiji_executable_path is None or not str(fiji_executable_path).strip():
                 self.__dict__["fiji_executable_path"] = _autodetect_fiji()
             else:
@@ -277,6 +324,7 @@ class GuiSettings:
             self.__dict__["syscon_export_directory"] = str(
                 syscon_export_directory or ""
             )
+            self.__dict__["import_directory"] = str(import_directory or "")
             self.__dict__["fov_auto_brightness"] = fov_auto_brightness is True
             self.__dict__["bss2_settings"] = (
                 _without_secrets(bss2_settings)

@@ -44,6 +44,8 @@ class ScanImageControls(QtWidgets.QWidget):
         self.connection = connection
         # Only the controls whose workspace started a run arm and act on its
         # first-frame timeout; every workspace sees the shared connection.
+        # The owner may also exempt runs with their own deadline (routine
+        # blocks waiting for SysCon2's trigger).
         self._owns_run = owns_run or (lambda run_id: run_id is not None)
         # Remembered across sessions in NeuroSeq's config file, like the Fiji path.
         self.settings = settings

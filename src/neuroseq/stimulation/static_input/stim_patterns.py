@@ -6,6 +6,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from neuroseq.stimulation.stim import DrawStimType
+from neuroseq.stimulation.stim_timing import milliseconds_to_samples_nearest
 
 # Beethoven "Für Elise" opening phrase as used in Kriener et al., 2024 (Fig. 2).
 # Each entry is a pitch index (int) or a tuple of two simultaneous pitch indices
@@ -56,8 +57,15 @@ def _validate_common(
         raise ValueError("repeats must be at least 1")
     if dt_seconds <= 0.0:
         raise ValueError("dt_seconds must be positive")
-    pulse_n = int(round(pulse_ms / 1000.0 / dt_seconds))
-    ipi_n = int(round(ipi_ms / 1000.0 / dt_seconds))
+    pulse_n = milliseconds_to_samples_nearest(pulse_ms, dt_seconds)
+    ipi_n = milliseconds_to_samples_nearest(ipi_ms, dt_seconds)
+    if pulse_n < 1:
+        # An all-zero block would overwrite existing stimuli with nothing.
+        raise ValueError(
+            f"Pulse duration {pulse_ms:g} ms is shorter than one sample of the "
+            f"input array (dt {dt_seconds * 1000.0:g} ms); use at least "
+            f"{dt_seconds * 1000.0:g} ms."
+        )
     return pulse_n, ipi_n
 
 
@@ -265,7 +273,16 @@ def generate_per_neuron(
     value2: float,
     repeats: int,
     dt_seconds: float,
+    end_pulse_ms: float | None = None,
 ) -> np.ndarray:
+    """``repeats`` pulses on the given neurons, all of them together.
+
+    The pulse magnitudes follow ``profile`` from ``value1`` to ``value2``.
+    With ``end_pulse_ms`` the pulse duration also steps linearly, from
+    ``pulse_ms`` for the first pulse to ``end_pulse_ms`` for the last (#653);
+    each duration is rounded to whole samples and the inter-pulse interval
+    stays the same.
+    """
     pulse_n, ipi_n = _validate_common(
         n_neurons=n_neurons,
         pulse_ms=pulse_ms,
@@ -273,14 +290,33 @@ def generate_per_neuron(
         repeats=repeats,
         dt_seconds=dt_seconds,
     )
+    if end_pulse_ms is None:
+        pulse_lengths = np.full(repeats, pulse_n, dtype=int)
+    else:
+        if not end_pulse_ms > 0.0:
+            raise ValueError("The last pulse duration must be positive.")
+        if milliseconds_to_samples_nearest(end_pulse_ms, dt_seconds) < 1:
+            raise ValueError(
+                f"Last pulse duration {end_pulse_ms:g} ms is shorter than one "
+                f"sample of the input array (dt {dt_seconds * 1000.0:g} ms); use "
+                f"at least {dt_seconds * 1000.0:g} ms."
+            )
+        pulse_lengths = np.array(
+            [
+                max(1, milliseconds_to_samples_nearest(duration_ms, dt_seconds))
+                for duration_ms in np.linspace(pulse_ms, end_pulse_ms, repeats)
+            ],
+            dtype=int,
+        )
     indices = _normalize_neuron_indices(neuron_index, n_neurons)
     magnitudes = _per_pulse_magnitudes(profile, value1, value2, repeats)
-    total_n = repeats * (pulse_n + ipi_n)
+    total_n = int(pulse_lengths.sum()) + repeats * ipi_n
     values = np.zeros((total_n, n_neurons), dtype=float)
-    for repeat_index, magnitude in enumerate(magnitudes):
-        t0 = repeat_index * (pulse_n + ipi_n)
+    t0 = 0
+    for magnitude, length in zip(magnitudes, pulse_lengths, strict=True):
         for idx in indices:
-            values[t0 : t0 + pulse_n, idx] = magnitude
+            values[t0 : t0 + length, idx] = magnitude
+        t0 += int(length) + ipi_n
     return values
 
 

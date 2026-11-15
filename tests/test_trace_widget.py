@@ -347,6 +347,49 @@ def test_trace_widget_context_menu_offers_normalization(qtbot: QtBot) -> None:
     assert trace_widget._trace_norm_dialog.isVisible()
 
 
+def _compare_action(trace_widget: TraceWidget) -> QtWidgets.QAction:
+    trace_widget._rebuild_custom_analysis_menu()
+    return next(
+        action
+        for action in trace_widget.context_menu.actions()
+        if action.text() == "Compare traces…"
+    )
+
+
+def test_trace_widget_context_menu_offers_compare_traces(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    assert not _compare_action(trace_widget).isEnabled()
+
+    data = make_trace_data(n_neurons=6)
+    trace_widget.set_data(data)
+    received: list[tuple[object, object]] = []
+    trace_widget.compare_traces_requested.connect(
+        lambda d, ids: received.append((d, ids))
+    )
+
+    # Nothing selected or hovered: no neuron preselected.
+    action = _compare_action(trace_widget)
+    assert action.isEnabled()
+    action.trigger()
+    assert received[-1] == (data, [])
+
+    # The hovered neuron (captured when the menu opens) is preselected.
+    trace_widget._last_hovered_neuron_id = 4
+    action = _compare_action(trace_widget)
+    trace_widget._last_hovered_neuron_id = None
+    action.trigger()
+    assert received[-1] == (data, [4])
+
+    # A selected neuron range wins over the hovered neuron.
+    trace_widget._last_hovered_neuron_id = 4
+    trace_widget.select_neurons(slice(1, 3))
+    _compare_action(trace_widget).trigger()
+    assert received[-1] == (data, [1, 2])
+
+
 @pytest.mark.parametrize("widget_cls", [TraceWidget, SpikeWidget])
 def test_timeseries_context_menu_offers_detach_actions(
     qtbot: QtBot, widget_cls
@@ -813,8 +856,8 @@ def test_trace_widget_y_tick_formatter_blanks_rows_beyond_visible_count(
 @pytest.mark.parametrize(
     "units,sample,expected",
     [
-        ("1", 1000.0, "1e+03 1"),
-        ("a.u.", 1000.0, "1e+03 a.u."),
+        ("1", 1000.0, "1000 1"),
+        ("a.u.", 1234.5, "1234.5 a.u."),
         ("mV", -0.065, "-65 mV"),
         ("", -0.065, "-65 mV"),
     ],
@@ -830,7 +873,7 @@ def test_trace_widget_hover_value_units(
     qtbot.addWidget(widget)
     captured: dict[str, str] = {}
     monkeypatch.setattr(
-        widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+        widget.text, "set_pos", lambda pos, text, *_: captured.__setitem__("t", text)
     )
     monkeypatch.setattr(
         widget.subplot,
@@ -870,7 +913,9 @@ def test_trace_widget_hover_shows_real_neuron_id_when_only_one_visible(
 
     captured: dict[str, str] = {}
     monkeypatch.setattr(
-        trace_widget.text, "set_pos", lambda pos, text: captured.__setitem__("t", text)
+        trace_widget.text,
+        "set_pos",
+        lambda pos, text, *_: captured.__setitem__("t", text),
     )
     monkeypatch.setattr(
         trace_widget.subplot,
@@ -1486,7 +1531,7 @@ def test_region_of_interest_select_slice_label_uses_override_range(
 
     roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0, label_neuron_range=(5, 8))
 
-    assert captured == ["Neurons 5-7\n10ms-20ms"]
+    assert captured == ["Neurons 5-7\n10.0 ms - 20.0 ms"]
 
 
 def test_region_of_interest_select_slice_label_falls_back_to_slice_bounds(
@@ -1498,7 +1543,20 @@ def test_region_of_interest_select_slice_label_falls_back_to_slice_bounds(
 
     roi.select_slice(slice(1, 3), slice(10, 20), dt_ms=1.0)
 
-    assert captured == ["Neurons 1-2\n10ms-20ms"]
+    assert captured == ["Neurons 1-2\n10.0 ms - 20.0 ms"]
+
+
+def test_region_of_interest_select_slice_label_follows_visible_span(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#661: a selection in a long recording reads in seconds."""
+    roi = RegionOfInterest(fill_color=(0.5, 0.5, 0.5, 0.2))
+    captured: list[str] = []
+    monkeypatch.setattr(roi.text, "set_text", captured.append)
+
+    roi.select_slice(slice(0, 1), slice(1234, 5678), dt_ms=10.0, span_ms=300_000.0)
+
+    assert captured == ["Neuron 0\n12 s - 57 s"]
 
 
 def test_trace_widget_select_neurons_translates_display_rows_when_greyed(
@@ -1962,3 +2020,318 @@ def test_closed_trace_widget_releases_its_figure(qtbot: QtBot, make_trace_data) 
     gc.collect()
     assert widget_ref() is None
     assert figure_ref() is None
+
+
+@pytest.mark.parametrize(
+    ("indices", "expected"),
+    [
+        # A single trace whose neuron id is not 0 (previously IndexError).
+        ([5], "Neuron 5\n1 a.u."),
+        # Rows in non-id order: row 0 holds neuron 1, row 1 neuron 0.
+        ([1, 0], "Neuron 0\n2 a.u."),
+    ],
+)
+def test_trace_widget_hover_reads_the_row_of_the_hovered_neuron_id(
+    qtbot: QtBot,
+    monkeypatch: pytest.MonkeyPatch,
+    indices: list[int],
+    expected: str,
+) -> None:
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        widget.text, "set_pos", lambda pos, text, *_: captured.__setitem__("t", text)
+    )
+    monkeypatch.setattr(
+        widget.subplot, "map_screen_to_world", lambda ev: np.array([3.0, 0.0, 0.0])
+    )
+    traces = np.stack([np.full(10, 1.0), np.full(10, 2.0)])[: len(indices)]
+    widget.set_data(TraceData("t", traces, np.array(indices), "a.u.", 0.001))
+
+    widget.pointer_move(SimpleNamespace(x=0.0))
+
+    assert captured["t"] == expected
+
+
+@pytest.mark.parametrize("offset_by_median", [False, True])
+@pytest.mark.parametrize("clip", [False, True])
+def test_trace_norm_dialog_checkboxes_reflect_widget_settings(
+    qtbot: QtBot, offset_by_median: bool, clip: bool
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.offset_by_median = offset_by_median
+    trace_widget.clip = clip
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+
+    assert dialog.chk_offset.isChecked() == offset_by_median
+    assert dialog.chk_clip.isChecked() == clip
+
+    dialog.chk_offset.setChecked(False)
+    dialog.chk_clip.setChecked(False)
+    dialog.reset_defaults()
+
+    assert dialog.chk_offset.isChecked()
+    assert dialog.chk_clip.isChecked()
+
+
+def test_stim_overlay_follows_auto_extended_rows(qtbot: QtBot) -> None:
+    """Under auto-extend the onset marks sit at the grown row centers, so the
+    overlay must too; replot_traces() must also rebuild the overlay when the
+    row layout changes."""
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.set_stim_overlay_data(_stim_array(n_neurons=5))
+    trace_widget.set_stim_overlay_enabled(True)
+
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+
+    centers = trace_widget._row_centers
+    half_heights = trace_widget._row_half_heights
+    rows = trace_widget._stim_overlay_row_graphics
+    assert len(rows) == 5
+    for graphic, center, half in zip(rows, centers, half_heights, strict=True):
+        assert graphic.offset[1] == pytest.approx(center)
+        assert graphic.world_object.world.scale[1] == pytest.approx(2 * half)
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx(centers))
+
+    trace_widget.auto_extend_vertical_space = False
+    trace_widget.replot_traces()
+    assert trace_widget._stim_overlay_row_graphics == []
+    assert trace_widget._stim_overlay_graphic is not None
+    marks = trace_widget._stim_onset_graphic
+    assert marks is not None
+    assert (
+        marks.data.value[0::3, 1] + trace_widget.STIM_ONSET_HALF_HEIGHT
+    ).tolist() == (pytest.approx([0.0, 1.0, 2.0, 3.0, 4.0]))
+
+
+def test_trace_preview_labels_rows_with_neuron_ids(qtbot: QtBot) -> None:
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+
+    controller = ConstrainedPanZoomController()
+    controller.set_limits(1.0, 5)
+    widget = TraceWidget(controller)
+    qtbot.addWidget(widget)
+    data = _make_scaled_trace_data(5)
+    data.indices = np.array([10, 11, 12, 13, 14], dtype=np.uint32)
+    widget.set_data(data)
+    widget.set_neuron_greyed(11, True)
+
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(y, 0) for y in (0.0, 1.0, 3.0)] == ["10", "12", "14"]
+    assert formatter(4.0, 0) == ""
+    dialog.close()
+
+    widget.trace_norm_percent = 500
+    widget.auto_extend_vertical_space = True
+    widget.replot_traces()
+    centers = widget._row_centers
+    dialog = widget.preview_traces()
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    ax = dialog.findChild(FigureCanvasQTAgg).figure.axes[0]
+    ax.set_ylim(-0.5, widget._row_boundaries[-1])
+    formatter = ax.yaxis.get_major_formatter()
+    assert [formatter(c, 0) for c in centers] == ["10", "12", "13", "14"]
+    ticks = ax.yaxis.get_major_locator()()
+    assert set(ticks) <= set(centers)
+    assert ticks
+    dialog.close()
+
+
+def test_auto_extend_vertical_space_survives_set_limits(qtbot: QtBot) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_limits(1.0, 5)
+    trace_widget.set_data(_make_scaled_trace_data(5))
+    trace_widget.trace_norm_percent = 500
+    trace_widget.auto_extend_vertical_space = True
+    trace_widget.replot_traces()
+    total_height = sum(2 * h for h in trace_widget._row_half_heights)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # e.g. the project's limits being refreshed after an unrelated edit
+    trace_widget.set_limits(1.0, 6)
+    assert controller.max_height == pytest.approx(total_height)
+
+    # the refreshed neuron count, not the one from before, comes back
+    trace_widget.set_data(None)
+    assert controller.max_height == pytest.approx(6.0)
+
+
+def test_trace_norm_dialog_enter_in_normalization_box_keeps_settings(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """#660: Enter in the Normalization box clicked the auto-default "Reset
+    to defaults" button, resetting normalization and re-enabling clipping."""
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+    with qtbot.waitExposed(dialog, timeout=WAIT_TIMEOUT_MS):
+        dialog.show()
+
+    dialog.chk_clip.click()
+    assert trace_widget.clip is False
+    dialog.spin_norm.setFocus()
+    dialog.spin_norm.lineEdit().selectAll()
+    qtbot.keyClicks(dialog.spin_norm, "300")
+    qtbot.keyClick(dialog.spin_norm, QtCore.Qt.Key.Key_Return)
+
+    assert trace_widget.trace_norm_percent == 300
+    assert trace_widget.clip is False
+    assert dialog.chk_clip.isChecked() is False
+    assert dialog.slider_norm.value() == 300
+    assert dialog.btn_reset_defaults.isDefault() is False
+
+
+def test_trace_norm_dialog_shows_applied_settings_when_reopened(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    trace_widget.trace_norm_dialog()
+    dialog = trace_widget._trace_norm_dialog
+    assert dialog is not None
+    qtbot.addWidget(dialog)
+    dialog.close()
+
+    trace_widget.clip = False
+    trace_widget.trace_norm_percent = 250
+    trace_widget.trace_norm_dialog()
+
+    assert dialog.chk_clip.isChecked() is False
+    assert dialog.clip is False
+    assert dialog.spin_norm.value() == 250
+    assert dialog.label_norm.text() == "Normalization: 250%"
+
+
+def test_trace_norm_dialog_reset_defaults_applies_all_at_once(
+    qtbot: QtBot, make_trace_data, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trace_widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data())
+    dialog = TraceNormDialog(trace_widget)
+    qtbot.addWidget(dialog)
+    dialog.update_norm_input(400)
+    dialog.chk_clip.click()
+    dialog.chk_offset.click()
+    applied: list[tuple[int, bool, bool]] = []
+    replot = trace_widget.replot_traces
+
+    def record_replot() -> None:
+        applied.append(
+            (
+                trace_widget.trace_norm_percent,
+                trace_widget.clip,
+                trace_widget.offset_by_median,
+            )
+        )
+        replot()
+
+    monkeypatch.setattr(trace_widget, "replot_traces", record_replot)
+
+    dialog.btn_reset_defaults.click()
+
+    assert applied == [(100, True, True)]
+    assert dialog.chk_clip.isChecked() and dialog.chk_offset.isChecked()
+    assert dialog.spin_norm.value() == 100 == dialog.slider_norm.value()
+
+
+def test_trace_widget_hover_reads_nearest_sample_and_its_time(
+    qtbot: QtBot, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#576: zoomed in, the pointer resting just left of a sample's vertex
+    reported the previous sample's value (floor instead of nearest)."""
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    captured: dict[str, str] = {}
+
+    def capture(pos, text: str, time_text: str) -> None:
+        captured["text"] = text
+        captured["time"] = time_text
+
+    monkeypatch.setattr(widget.text, "set_pos", capture)
+    world = {"x": 0.0}
+    monkeypatch.setattr(
+        widget.subplot,
+        "map_screen_to_world",
+        lambda ev: np.array([world["x"], 0.0, 0.0]),
+    )
+    monkeypatch.setattr(widget, "visible_time_span_ms", lambda: 1000.0)
+    # 30 Hz calcium trace (dt = 33.3 ms) with a transient peak at sample 3.
+    traces = np.array([[100.0, 101.0, 150.0, 1234.5, 140.0]], dtype=np.float32)
+    widget.set_data(TraceData("ca", traces, np.array([0]), "a.u.", 1 / 30))
+
+    world["x"] = 3 * 1000 / 30 - 10.0  # just left of the peak vertex
+    widget.pointer_move(SimpleNamespace(x=0.0))
+    assert captured["text"] == "Neuron 0\n1234.5 a.u."
+    assert captured["time"] == "100 ms"
+
+    world["x"] = 1000 / 30 + 5.0  # just right of sample 1
+    widget.pointer_move(SimpleNamespace(x=0.0))
+    assert captured["text"] == "Neuron 0\n101 a.u."
+    assert captured["time"] == "33 ms"
+
+
+def test_trace_widget_time_readouts_follow_visible_span(
+    qtbot: QtBot, make_trace_data
+) -> None:
+    """#661: x tick labels and hover times adapt unit/decimals to the zoom."""
+    widget = TraceWidget(ConstrainedPanZoomController())
+    qtbot.addWidget(widget)
+    widget.set_data(make_trace_data(n_neurons=2, n_timestamps=100))
+
+    tick_format = widget.subplot.axes.x.tick_format
+    assert tick_format(120_000.0, 0.0, 900_000.0) == "120 s"
+    assert tick_format(1500.0, 1000.0, 3500.0) == "1.5 s"
+    assert tick_format(1016.6, 1000.0, 1050.0) == "1016.6 ms"
+    # Without a camera the whole recording is the visible span.
+    widget.controller = None
+    assert widget.visible_time_span_ms() == pytest.approx(100 * widget.dt_ms)
+
+
+def test_stim_overlay_data_is_only_stored_while_the_overlay_is_off(
+    qtbot: QtBot, make_trace_data, monkeypatch
+) -> None:
+    controller = ConstrainedPanZoomController()
+    trace_widget = TraceWidget(controller)
+    qtbot.addWidget(trace_widget)
+    trace_widget.set_data(make_trace_data(n_neurons=3, n_timestamps=10))
+    rebuilds: list[int] = []
+    original = trace_widget._rebuild_stim_overlay
+
+    def _counted() -> None:
+        rebuilds.append(1)
+        original()
+
+    monkeypatch.setattr(trace_widget, "_rebuild_stim_overlay", _counted)
+    stim = _stim_array()
+
+    trace_widget.set_stim_overlay_data(stim)
+    assert rebuilds == []
+    assert trace_widget._stim_overlay_array is stim
+    trace_widget.set_stim_overlay_enabled(True)
+    trace_widget.set_stim_overlay_data(stim)
+    assert len(rebuilds) == 2
+    assert trace_widget._stim_overlay_graphic is not None

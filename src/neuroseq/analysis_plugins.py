@@ -132,12 +132,47 @@ def _plugin_files() -> list[tuple[Path, str]]:
     return files
 
 
+_PluginFilesKey = tuple[tuple[str, str, int | None, int | None], ...]
+
+#: Last discovery result, keyed on the plugin files and their mtimes/sizes.
+_discovery_cache: tuple[_PluginFilesKey, list[AnalysisPlugin]] | None = None
+
+
+def _plugin_files_key(files: list[tuple[Path, str]]) -> _PluginFilesKey:
+    key: list[tuple[str, str, int | None, int | None]] = []
+    for path, namespace in files:
+        try:
+            stat = path.stat()
+        except OSError:
+            key.append((str(path), namespace, None, None))
+        else:
+            key.append((str(path), namespace, stat.st_mtime_ns, stat.st_size))
+    return tuple(key)
+
+
 def discover_analysis_plugins() -> list[AnalysisPlugin]:
+    """Load every analysis plugin.
+
+    Plugin files are only re-executed when the set of files or one of their
+    modification times/sizes changed since the last call (the trace context
+    menu calls this every time it opens).
+    """
+    global _discovery_cache
+    files = _plugin_files()
+    key = _plugin_files_key(files)
+    if _discovery_cache is not None and _discovery_cache[0] == key:
+        return list(_discovery_cache[1])
+    plugins = _discover_analysis_plugins(files)
+    _discovery_cache = (key, plugins)
+    return list(plugins)
+
+
+def _discover_analysis_plugins(files: list[tuple[Path, str]]) -> list[AnalysisPlugin]:
     logger = logging.getLogger(__name__)
     plugins: list[AnalysisPlugin] = []
     builtin_ids: set[str] = set()
 
-    for plugin_file, namespace in _plugin_files():
+    for plugin_file, namespace in files:
         is_user = namespace != "neuroseq.analysis_plugin"
         module = _load_plugin_module(plugin_file, namespace)
         if module is None:

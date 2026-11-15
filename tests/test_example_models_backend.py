@@ -393,7 +393,7 @@ def test_sinus_offset_helper_branches_and_validation() -> None:
         sim.simulate({}, 0.1, params={"dt_ms": 0.0})
     with pytest.raises(ValueError, match="simulation_time too short"):
         sim.simulate({}, 0.0001, params={"dt_ms": 1.0})
-    with pytest.raises(ValueError, match="Stim dt must be > 0"):
+    with pytest.raises(ValueError, match="Input dt must be > 0"):
         sim.simulate(
             {"offset": {"array": np.zeros((2, 1), dtype=np.float32), "dt": 0.0}},
             0.01,

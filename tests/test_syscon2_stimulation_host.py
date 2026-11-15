@@ -381,6 +381,26 @@ def test_recording_failure_fails_the_block_and_stops_the_sequence(
     assert client.calls[-1] == ("stop",)
 
 
+def test_failed_block_never_starts_its_queued_run(
+    stim: StimArray, tmp_path, qtbot, mocker
+) -> None:
+    """A run task still queued on the SysCon2 worker (e.g. mid re-upload) when the
+    recording fails must not start the sequence after the block was declared
+    failed: that would drive the laser with nothing recording."""
+    client = _FakeClient(["target\\probe_001.seq"], ["Idle"])
+    host, submitted, acquisition, _owner = _armed_block(
+        stim, tmp_path, qtbot, mocker, client
+    )
+    _name, run_task = submitted[-1]
+    calls_before = list(client.calls)
+
+    with qtbot.waitSignal(host.block_failed, timeout=WAIT_TIMEOUT_MS):
+        acquisition.block_recording_failed.emit("run1", "first-frame timeout")
+    run_task(client)
+
+    assert client.calls == calls_before
+
+
 def test_recording_unavailable_refuses_the_block(
     stim: StimArray, tmp_path, qtbot, mocker
 ) -> None:

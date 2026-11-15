@@ -278,6 +278,7 @@ def test_armed_block_that_never_finishes_fails_at_its_deadline(
     _ready_for_blocks(s)
     # Block 0.1 s + tail 2 s: a margin of -2 s leaves a 0.1 s deadline.
     monkeypatch.setattr(controller_module, "BLOCK_DEADLINE_MARGIN_S", -2.0)
+    monkeypatch.setattr(controller_module, "RUN_START_ALLOWANCE_S", 0.0)
     run_id = s.controller.arm_block(_block(0.1))
     s.connection.run_id = run_id
     with qtbot.waitSignal(
@@ -292,6 +293,76 @@ def test_armed_block_that_never_finishes_fails_at_its_deadline(
     # The aborted recording arriving afterwards does not fail the block again.
     with qtbot.assertNotEmitted(s.controller.block_recording_failed):
         s.controller.scanimage_status({"run": {"id": run_id, "state": "aborted"}})
+
+
+def test_tab_first_frame_timeout_leaves_block_recordings_alone(setup):
+    """A block recording has its own deadline, which allows for a second upload
+    before SysCon2 sends the trigger; the tab's shorter first-frame timeout must
+    not abort it first. A recording started from the tab still times out."""
+    s = setup
+    _ready_for_blocks(s)
+    run_id = s.controller.arm_block(_block())
+    s.connection.run_id = run_id
+    try:
+        s.connection.status_changed.emit(
+            {
+                "acq_state": "grab",
+                "run": {"id": run_id, "state": "waiting_for_first_frame"},
+            }
+        )
+        assert s.controller.controls._waiting_since is None
+        s.controller.controls._waiting_since = -1e9
+        s.controller.controls._check_first_frame_timeout()
+        assert all(call.args[0] != "abort" for call in s.command.call_args_list)
+
+        s.controller.abort_block(run_id)
+        s.connection.run_id = None
+        s.command.reset_mock()
+        assert s.controller.start_scanimage_recording(
+            {
+                "run_id": "manual",
+                "name": "Run",
+                "directory": str(s.folder),
+                "stem": "2026-10-22",
+                "counter": 1,
+                "frames": 4,
+            }
+        )
+        s.connection.run_id = "manual"
+        s.connection.status_changed.emit(
+            {
+                "acq_state": "grab",
+                "run": {"id": "manual", "state": "waiting_for_first_frame"},
+            }
+        )
+        assert s.controller.controls._waiting_since is not None
+        s.controller.controls._waiting_since = -1e9
+        s.controller.controls._check_first_frame_timeout()
+        s.command.assert_called_with("abort")
+    finally:
+        s.connection.run_id = None
+
+
+def test_block_deadline_allows_for_a_second_upload(setup):
+    """The recording is armed before SysCon2 runs the block, and that run may
+    upload the sequence again first: a slow upload must not hit the TTL deadline."""
+    from neuroseq.device_control.syscon2_stimulation_host import UPLOAD_TIMEOUT_S
+
+    s = setup
+    _ready_for_blocks(s)
+    recording = _block(0.1)
+    run_id = s.controller.arm_block(recording)
+    s.controller.scanimage_status(
+        {"run": {"id": run_id, "state": "waiting_for_first_frame"}}
+    )
+    interval_s = s.controller._deadlines[run_id].interval() / 1000.0
+    assert interval_s >= (
+        recording.duration_s
+        + recording.tail_s
+        + controller_module.BLOCK_DEADLINE_MARGIN_S
+        + UPLOAD_TIMEOUT_S
+    )
+    s.controller.abort_block(run_id)
 
 
 def test_aborted_block_stops_its_deadline(setup):

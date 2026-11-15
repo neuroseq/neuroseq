@@ -14,7 +14,11 @@ from qtpy import QtWidgets
 from qtpy.compat import getopenfilename
 
 from neuroseq.data import Experiment
+from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
+from neuroseq.importers.import_folders import ImportFolders
+from neuroseq.importers.import_folders import remember_folder
+from neuroseq.importers.import_folders import start_directory
 from neuroseq.importers.importer_patch_clamp_data import NEUROSEQ_IGOR_TARGET_DT_SECONDS
 from neuroseq.importers.importer_patch_clamp_data import PATCH_CLAMP_FILE_FILTER
 from neuroseq.importers.importer_patch_clamp_data import IgorWave
@@ -48,6 +52,9 @@ if TYPE_CHECKING:
     from neuroseq.importers.importer_patch_clamp_data import PreparedIgorWave
     from neuroseq.project import Project
 
+# Name of the spike dataset the trace dialog's optional detection fills.
+PATCH_CLAMP_SPIKES_NAME = "Patch Clamp Spikes"
+
 
 class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
     """Import patch-clamp output recordings into project experiments."""
@@ -56,8 +63,11 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         self,
         project: Project,
         parent: QtWidgets.QWidget | None = None,
+        *,
+        import_folders: ImportFolders | None = None,
     ) -> None:
         super().__init__(parent)
+        self._import_folders = import_folders
         self.logger = logging.getLogger(__name__)
         self.project = project
         self.loaded_wave: IgorWave | None = None
@@ -454,10 +464,11 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         filename, _ = getopenfilename(
             self,
             "Select patch-clamp output",
-            "",
+            start_directory(self._import_folders),
             PATCH_CLAMP_FILE_FILTER,
         )
         if filename:
+            remember_folder(self._import_folders, filename)
             self._load_file(filename)
 
     def load_file(self, filename: str) -> None:
@@ -835,10 +846,16 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
         *,
         experiment_name: str,
         neuron_id: int,
+        imported_samples: int | None = None,
     ) -> int:
+        """Detect spikes on the imported part of ``prepared_wave`` only.
+
+        ``imported_samples`` is how much of the wave reached the trace; a wave
+        truncated to an existing trace must not yield spikes past its end.
+        """
         dt = float(prepared_wave.target_dt)
         spike_data = detect_spikes_voltage_trace(
-            prepared_wave.values,
+            prepared_wave.values[:imported_samples],
             neuron_id=neuron_id,
             dt=dt,
             detection_method="peak",
@@ -850,8 +867,38 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
             ),
             peak_width=seconds_to_peak_samples(PATCH_CLAMP_PEAK_WIDTH_SECONDS, dt),
         )
-        spike_data.name = "Patch Clamp Spikes"
-        self.project.add_data_to_experiment(experiment_name, spike_data)
+        spike_data.name = PATCH_CLAMP_SPIKES_NAME
+        experiment = self.project.experiments[experiment_name]
+        existing = next(
+            (
+                datum
+                for datum in experiment.data
+                if isinstance(datum, SpikeData)
+                and datum.name == PATCH_CLAMP_SPIKES_NAME
+            ),
+            None,
+        )
+        if existing is None:
+            self.project.add_data_to_experiment(experiment_name, spike_data)
+        else:
+            # Only the first dataset of a name is reachable, so merge into it:
+            # this neuron's earlier detection is replaced, other neurons kept.
+            with self.project.edit_experiments(
+                [experiment_name], "Detect patch-clamp spikes"
+            ):
+                keep = existing.spike_indices != np.uint32(neuron_id)
+                indices = np.concatenate(
+                    [existing.spike_indices[keep], spike_data.spike_indices]
+                ).astype(np.uint32)
+                times = np.concatenate(
+                    [existing.spike_times[keep], spike_data.spike_times]
+                ).astype(np.float32)
+                order = np.argsort(times, kind="stable")
+                existing.spike_indices = indices[order]
+                existing.spike_times = times[order]
+                existing.raw_cellpose_ids = None
+                self.project.update_limits()
+                self.project.mark_dirty()
         return int(len(spike_data.spike_times))
 
     def _promote_cancel_to_close(self) -> None:
@@ -908,6 +955,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                         f"{prepared_wave.samples_per_sweep} samples, concatenated on import."
                     )
                 spike_neuron_id = neuron_id
+                spike_samples = None
             else:
                 experiment_name = self.existing_experiment_combo.currentText()
                 trace_name = self.existing_trace_combo.currentText()
@@ -968,6 +1016,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                         f"{report.samples_per_sweep} samples, concatenated on import."
                     )
                 spike_neuron_id = int(self.existing_neuron_id_spin.value())
+                spike_samples = report.imported_samples
 
             spikes_detected: int | None = None
             if self.spike_detect_checkbox.isChecked():
@@ -975,6 +1024,7 @@ class PatchClampDataOutputImportDialog(QtWidgets.QDialog):
                     prepared_wave,
                     experiment_name=self.selected_experiment_name,
                     neuron_id=spike_neuron_id,
+                    imported_samples=spike_samples,
                 )
 
             is_pxp_session = bool(self.loaded_pxp_waves)

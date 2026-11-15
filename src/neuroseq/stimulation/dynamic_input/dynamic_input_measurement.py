@@ -6,8 +6,8 @@ import brian2.numpy_ as np
 
 from neuroseq.data import SpikeData
 from neuroseq.data import TraceData
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import _to_mv
-from neuroseq.resources.analysis_plugins.epsp_amplitudes import detect_epsps
+from neuroseq.epsp_detection import detect_epsps
+from neuroseq.epsp_detection import to_mv
 from neuroseq.stimulation.dynamic_input.rheobase import count_spikes
 
 
@@ -35,7 +35,7 @@ def _trace_row_mv(trace: TraceData, neuron_id: int) -> tuple[np.ndarray, float]:
         if finite.size and float(np.percentile(finite, 95)) < 2.0:
             values = values * 1000.0
         return values, 1000.0 * trace.dt
-    return _to_mv(values, trace.units), 1000.0 * trace.dt
+    return to_mv(values, trace.units), 1000.0 * trace.dt
 
 
 def measure_spike_count(
